@@ -576,6 +576,12 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
         )
 
         expect(output).toContain('Zod Mini local note')
+        const scoreMatches = [...output.matchAll(/\[Score: (\d+\.\d{2})\]/g)]
+        expect(scoreMatches.length).toBeGreaterThanOrEqual(2)
+        const topScore = Number(scoreMatches[0]?.[1] ?? 0)
+        const secondScore = Number(scoreMatches[1]?.[1] ?? 0)
+        expect(topScore).toBeGreaterThanOrEqual(75)
+        expect(topScore).toBeGreaterThan(secondScore)
         expect(output).toContain('Source: user (primary)')
       } finally {
         await new Promise<void>((resolve, reject) =>

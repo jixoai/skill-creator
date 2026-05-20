@@ -67,6 +67,7 @@ export class EnhancedFormatter implements SearchFormatter {
       enhancedResult.metadata = {
         ...result.metadata,
         displayRank: qualityResult.index + 1,
+        displayScore: Number((qualityResult.displayScore * 100).toFixed(2)),
         sourceRank: qualityResult.index === 0 ? 'primary' : 'secondary',
         displayTier: qualityResult.displayTier,
         maxScore: qualitySummary.maxScore,

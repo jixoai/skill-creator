@@ -7,6 +7,7 @@ export interface SearchResultQuality {
   index: number
   backendId: SearchBackendId | 'unknown'
   calibratedScore: number
+  displayScore: number
   relativeScore: number
   titleCoverage: number
   contentCoverage: number
@@ -66,12 +67,20 @@ export function analyzeSearchQuality(
     const queryCoverage = Math.max(titleCoverage, contentCoverage)
     const exactTitleMatch = normalizedQuery.length > 0 && titleText.includes(normalizedQuery)
     const exactPhraseMatch = normalizedQuery.length > 0 && contentText.includes(normalizedQuery)
+    const displayScore = calculateDisplayScore({
+      calibratedScore,
+      relativeScore,
+      queryCoverage,
+      exactTitleMatch,
+      exactPhraseMatch,
+    })
 
     return {
       result,
       index,
       backendId,
       calibratedScore,
+      displayScore,
       relativeScore,
       titleCoverage,
       contentCoverage,
@@ -142,6 +151,23 @@ function recommendDisplayTier(input: {
   }
 
   return 'metadata-only'
+}
+
+function calculateDisplayScore(input: {
+  calibratedScore: number
+  relativeScore: number
+  queryCoverage: number
+  exactTitleMatch: boolean
+  exactPhraseMatch: boolean
+}): number {
+  const exactBonus =
+    input.exactTitleMatch ? 0.05 :
+    input.exactPhraseMatch ? 0.025 :
+    0
+
+  return clamp(
+    input.calibratedScore * 0.5 + input.relativeScore * 0.25 + input.queryCoverage * 0.2 + exactBonus
+  )
 }
 
 function resolveBackendId(result: SearchResult): SearchBackendId | 'unknown' {

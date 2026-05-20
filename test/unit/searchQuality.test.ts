@@ -55,6 +55,8 @@ describe('search quality analysis', () => {
     const summary = analyzeSearchQuality(results, 'type safety')
 
     expect(summary.overallScore).toBeGreaterThan(0.7)
+    expect(summary.results[0]?.displayScore).toBeGreaterThan(summary.results[1]?.displayScore ?? 0)
+    expect(summary.results[1]?.displayScore).toBeGreaterThan(summary.results[3]?.displayScore ?? 0)
     expect(summary.results[0]?.displayTier).toBe('full')
     expect(summary.results[1]?.displayTier).toBe('preview')
     expect(summary.results[2]?.displayTier).toBe('preview')
@@ -78,6 +80,7 @@ describe('search quality analysis', () => {
     const summary = analyzeSearchQuality(results, 'query client')
 
     expect(summary.overallScore).toBeLessThan(0.3)
+    expect(summary.results[0]?.displayScore).toBeLessThan(0.3)
     expect(summary.reason).toBe('Weak full-text confidence')
   })
 })

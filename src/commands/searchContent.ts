@@ -80,8 +80,13 @@ export async function searchContent(args: string[]): Promise<void> {
     const result = formattedResult.result
     const sourceRank = result.metadata.sourceRank
     const sourceLabel = typeof sourceRank === 'string' ? sourceRank : 'match'
+    const displayScore = result.metadata.displayScore
+    const scoreLabel =
+      typeof displayScore === 'number' && Number.isFinite(displayScore) ?
+        displayScore.toFixed(2)
+      : result.score.toFixed(2)
 
-    console.log(`\n${i + 1}. [Score: ${result.score.toFixed(2)}] ${result.title}`)
+    console.log(`\n${i + 1}. [Score: ${scoreLabel}] ${result.title}`)
     console.log(`   Source: ${result.source} (${sourceLabel})`)
     console.log(`   File: ${result.relativePath || result.file_path}`)
 

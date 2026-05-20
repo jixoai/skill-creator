@@ -11,6 +11,7 @@ import type {
   SearchFormatter,
 } from './types.js'
 import { relative } from 'node:path'
+import { analyzeSearchQuality } from '../core/searchQuality.js'
 
 /**
  * List formatter - simple, clean display with basic preview
@@ -26,8 +27,10 @@ export class ListFormatter implements SearchFormatter {
 
   format(results: SearchResult[], options: FormattingOptions): FormattedResult[] {
     const maxPreviewLength = options.maxPreviewLength || 200
+    const qualitySummary = analyzeSearchQuality(results, options.query)
 
     return results.map((result, index) => {
+      const qualityResult = qualitySummary.results[index]
       const formattableResult = result as FormattableSearchResult
       const relativePath = this.getRelativePath(formattableResult, options.skillPath)
 
@@ -45,6 +48,12 @@ export class ListFormatter implements SearchFormatter {
 
       // Create preview
       const preview = this.createPreview(previewContent, maxPreviewLength)
+      formattableResult.metadata = {
+        ...formattableResult.metadata,
+        displayRank: index + 1,
+        displayScore: Number(((qualityResult?.displayScore ?? 0) * 100).toFixed(2)),
+        sourceRank: index === 0 ? 'primary' : 'secondary',
+      }
 
       return {
         result: formattableResult,
