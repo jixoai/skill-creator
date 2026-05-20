@@ -47,10 +47,14 @@ describe('EnhancedFormatter', () => {
     expect(formatted[0]?.contentType).toBe('full-content')
     expect(formatted[0]?.content).toContain('<content lines="4">')
     expect(formatted[0]?.content).not.toContain('<!-- Score:')
+    expect(formatted[0]?.result.metadata.displayRank).toBe(1)
+    expect(formatted[0]?.result.metadata.sourceRank).toBe('primary')
 
     expect(formatted[1]?.contentType).toBe('preview')
     expect(formatted[1]?.content).toContain('<limit-content lines-indexs="1,3,4">')
     expect(formatted[1]?.content).not.toContain('<!-- Score:')
+    expect(formatted[1]?.result.metadata.displayRank).toBe(2)
+    expect(formatted[1]?.result.metadata.sourceRank).toBe('secondary')
 
     expect(formatted[2]?.contentType).toBe('metadata-only')
     expect(formatted[2]?.content).toBe('Content: (No preview - metadata only)')

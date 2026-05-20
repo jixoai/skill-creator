@@ -78,9 +78,11 @@ export async function searchContent(args: string[]): Promise<void> {
   for (let i = 0; i < formattedResults.length; i++) {
     const formattedResult = formattedResults[i]
     const result = formattedResult.result
+    const sourceRank = result.metadata.sourceRank
+    const sourceLabel = typeof sourceRank === 'string' ? sourceRank : 'match'
 
     console.log(`\n${i + 1}. [Score: ${result.score.toFixed(2)}] ${result.title}`)
-    console.log(`   Source: ${result.source} (${String(result.metadata.priority || 'unknown')})`)
+    console.log(`   Source: ${result.source} (${sourceLabel})`)
     console.log(`   File: ${result.relativePath || result.file_path}`)
 
     // Display formatted content based on content type

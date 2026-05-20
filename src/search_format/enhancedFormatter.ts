@@ -66,6 +66,8 @@ export class EnhancedFormatter implements SearchFormatter {
       // 添加质量元数据
       enhancedResult.metadata = {
         ...result.metadata,
+        displayRank: qualityResult.index + 1,
+        sourceRank: qualityResult.index === 0 ? 'primary' : 'secondary',
         displayTier: qualityResult.displayTier,
         maxScore: qualitySummary.maxScore,
         averageScore: qualitySummary.averageScore,

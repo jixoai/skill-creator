@@ -576,7 +576,7 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
         )
 
         expect(output).toContain('Zod Mini local note')
-        expect(output).toContain('Source: user')
+        expect(output).toContain('Source: user (primary)')
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve()))

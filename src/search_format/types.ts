@@ -20,6 +20,8 @@ export interface FormattableSearchResult extends SearchResult {
   /** Display tier information */
   metadata: SearchResult['metadata'] & {
     displayTier?: 'full' | 'preview' | 'metadata-only'
+    displayRank?: number
+    sourceRank?: 'primary' | 'secondary'
     maxScore?: number
     averageScore?: number
     qualityScore?: number
