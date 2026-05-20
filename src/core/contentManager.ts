@@ -152,17 +152,16 @@ export class ContentManager {
 
         if (mergeTarget) {
           const filePath = this.resolveSearchResultFilePath(mergeTarget.file_path)
-          const { readFileSync } = await import('node:fs')
           const existingContent = readFileSync(filePath, 'utf-8')
 
           if (options.forceAppend) {
-            const newContent = `${existingContent}\n\n---\n\n# ${options.title}\n\n${options.content}`
+            const newContent = this.appendKnowledgeUpdate(existingContent, options.title, options.content)
             writeFileSync(filePath, newContent)
             result.added = true
             result.filePath = filePath
             result.message = `Appended content to existing knowledge note: ${filePath.split('/').pop()}`
           } else {
-            writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
+            writeFileSync(filePath, this.renderKnowledgeNote(options.title, options.content))
             result.added = true
             result.filePath = filePath
             result.message = `Replaced existing knowledge note: ${filePath.split('/').pop()}`
@@ -249,7 +248,7 @@ export class ContentManager {
               options.content
             )
           } else if (options.autoUpdate && this.isContentEnhanced(existingEntry, options.content)) {
-            writeFileSync(existingUserFile, `# ${options.title}\n\n${options.content}`)
+            writeFileSync(existingUserFile, this.renderKnowledgeNote(options.title, options.content))
             result.updated = true
             result.filePath = existingUserFile
             result.message = `Updated existing content: ${existingUserFile.split('/').pop()}`
@@ -860,6 +859,67 @@ export class ContentManager {
     return join(this.userDir, `${safeTitle}.md`)
   }
 
+  private renderKnowledgeNote(title: string, content: string): string {
+    const body = this.stripMatchingLeadingHeading(content, title)
+    return `# ${title}\n\n${body}`
+  }
+
+  private appendKnowledgeUpdate(existingContent: string, title: string, content: string): string {
+    const trimmedExisting = existingContent.trimEnd()
+    const updateSectionHeading = '## Knowledge updates'
+    const nextUpdateIndex = this.getNextKnowledgeUpdateIndex(trimmedExisting)
+    const updateBody = this.stripMatchingLeadingHeading(content, title)
+    const updateEntry = `### Update ${nextUpdateIndex}: ${title}\n\n${updateBody}`
+
+    if (trimmedExisting.includes(updateSectionHeading)) {
+      return `${trimmedExisting}\n\n${updateEntry}\n`
+    }
+
+    return `${trimmedExisting}\n\n${updateSectionHeading}\n\n${updateEntry}\n`
+  }
+
+  private getNextKnowledgeUpdateIndex(content: string): number {
+    const matches = [...content.matchAll(/^### Update (\d+): /gm)]
+    const maxIndex = matches.reduce((currentMax, match) => {
+      const nextValue = Number(match[1])
+      return Number.isFinite(nextValue) ? Math.max(currentMax, nextValue) : currentMax
+    }, 0)
+
+    return maxIndex + 1
+  }
+
+  private stripMatchingLeadingHeading(content: string, expectedTitle: string): string {
+    const trimmed = content.trim()
+    if (!trimmed) {
+      return ''
+    }
+
+    const lines = trimmed.split('\n')
+    const firstContentIndex = lines.findIndex((line) => line.trim().length > 0)
+    if (firstContentIndex < 0) {
+      return trimmed
+    }
+
+    const firstLine = lines[firstContentIndex]?.trim() ?? ''
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(firstLine)
+    if (!headingMatch) {
+      return trimmed
+    }
+
+    const headingTitle = this.normalizeContentForComparison(headingMatch[2] ?? '')
+    const normalizedExpectedTitle = this.normalizeContentForComparison(expectedTitle)
+    if (headingTitle !== normalizedExpectedTitle) {
+      return trimmed
+    }
+
+    const remainingLines = lines.slice(firstContentIndex + 1)
+    while (remainingLines[0]?.trim() === '') {
+      remainingLines.shift()
+    }
+
+    return remainingLines.join('\n').trim() || trimmed
+  }
+
   private writeUserContentFile(
     options: {
       title: string
@@ -873,7 +933,7 @@ export class ContentManager {
     const expectedFilePath = this.getExpectedUserFilePath(options.title)
 
     if (behavior.overwriteExisting && existsSync(expectedFilePath)) {
-      writeFileSync(expectedFilePath, `# ${options.title}\n\n${options.content}`)
+      writeFileSync(expectedFilePath, this.renderKnowledgeNote(options.title, options.content))
       return {
         filePath: expectedFilePath,
         message: `Overwrote existing content: ${expectedFilePath.split('/').pop()}`,
@@ -881,7 +941,7 @@ export class ContentManager {
     }
 
     const filePath = this.createUniqueFilePath(options.title, this.userDir)
-    writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
+    writeFileSync(filePath, this.renderKnowledgeNote(options.title, options.content))
     return {
       filePath,
       message: `Created new content: ${filePath.split('/').pop()}`,

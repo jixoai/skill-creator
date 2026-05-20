@@ -56,7 +56,7 @@ skill-creator --help
    - **Storage Location Confirmation**:
      - Current project (`--scope current`): `./.claude/skills/`
      - User directory (`--scope user`): `~/.claude/skills`
-     - **Default selection**: `{{DEFAULT_SCOPE}}`
+     - **Default selection**: `current` when `./.claude/agents/skill-creator.md` already exists in the current project, otherwise `user`
      - **Note**: You need to use the `AskUserQuestion` tool to ask the user about the storage location. If the result is empty, it means Claude Code is in bypass-permissions mode. In this case, you can directly use the default storage location.
 
    - **Skill Naming Confirmation** (if no `--name` parameter provided):

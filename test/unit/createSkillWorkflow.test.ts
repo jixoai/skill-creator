@@ -3,6 +3,9 @@ import {
   prepareCreateSkillWorkflow,
   SKILL_CREATION_CANCELLED_MESSAGE,
 } from '../../src/utils/createSkillWorkflow.js'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { createTempDir, cleanupTempDir } from '../test-utils.js'
 
 describe('createSkillWorkflow', () => {
   it('builds non-interactive create options with normalized scope and package hints', async () => {
@@ -93,5 +96,42 @@ describe('createSkillWorkflow', () => {
         }
       )
     ).rejects.toThrow(SKILL_CREATION_CANCELLED_MESSAGE)
+  })
+
+  it('defaults the interactive scope to current when the project already has a skill-creator agent', async () => {
+    const capturedQuestions: unknown[] = []
+    const cwd = createTempDir('workflow-default-scope-')
+
+    try {
+      mkdirSync(join(cwd, '.claude', 'agents'), { recursive: true })
+      writeFileSync(join(cwd, '.claude', 'agents', 'skill-creator.md'), '# installed')
+
+      await prepareCreateSkillWorkflow(
+        'demo-skill@1',
+        {
+          interactive: true,
+        },
+        {
+          cwd,
+          prompt: {
+            prompt: async (questions) => {
+              capturedQuestions.push(...(questions as unknown[]))
+              return {
+                scope: 'current',
+                packageNameConfirmed: true,
+                customDescription: '',
+                confirmFinal: false,
+              }
+            },
+            Separator: class Separator {},
+          },
+        }
+      ).catch(() => undefined)
+
+      const scopeQuestion = capturedQuestions[0] as { default?: string } | undefined
+      expect(scopeQuestion?.default).toBe('current')
+    } finally {
+      cleanupTempDir(cwd)
+    }
   })
 })

@@ -1,5 +1,5 @@
 import path, { join } from 'node:path'
-import { readdirSync, existsSync, readFileSync } from 'node:fs'
+import { readdirSync, existsSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { PackageUtils } from './package.js'
 
@@ -90,7 +90,7 @@ export function resolveSkillDirectoryFromOptions(
   const pwd = commandOptions.pwd || globalOptions.pwd
 
   if (pwd) {
-    return pwd
+    return resolveCanonicalPath(pwd)
   }
 
   if (!commandOptions.package) {
@@ -108,8 +108,16 @@ export function resolveSkillDirectoryFromOptions(
     searchBases.map((base) => findSkillDirectoryByName(base, commandOptions.package as string)).find(Boolean)
 
   if (skillDir) {
-    return skillDir
+    return resolveCanonicalPath(skillDir)
   }
 
   throw new Error('Could not find skill directory. Please provide --pwd or a valid --package.')
+}
+
+function resolveCanonicalPath(targetPath: string): string {
+  try {
+    return realpathSync.native(targetPath)
+  } catch {
+    return path.resolve(targetPath)
+  }
 }

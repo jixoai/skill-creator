@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createTempDir, cleanupTempDir } from '../test-utils.js'
 import {
@@ -55,7 +55,7 @@ describe('skillIdentity', () => {
         tempDir
       )
 
-      expect(resolved).toBe(exactSkillDir)
+      expect(resolved).toBe(realpathSync.native(exactSkillDir))
     } finally {
       cleanupTempDir(tempDir)
     }
@@ -64,5 +64,25 @@ describe('skillIdentity', () => {
   it('infers version hints from skill directory names', () => {
     expect(inferVersionHintFromSkillDirectory('/tmp/demo-skill@1.2.3')).toBe('1.2.3')
     expect(inferVersionHintFromSkillDirectory('/tmp/demo-skill')).toBeUndefined()
+  })
+
+  it('canonicalizes explicit --pwd paths before command dispatch', () => {
+    const tempDir = createTempDir('skill-identity-test-')
+
+    try {
+      const skillDir = join(tempDir, '.claude', 'skills', 'demo-skill')
+      mkdirSync(skillDir, { recursive: true })
+
+      const resolved = resolveSkillDirectoryFromOptions(
+        {
+          pwd: skillDir,
+        },
+        {}
+      )
+
+      expect(resolved).toBe(realpathSync.native(skillDir))
+    } finally {
+      cleanupTempDir(tempDir)
+    }
   })
 })

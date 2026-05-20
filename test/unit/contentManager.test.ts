@@ -394,6 +394,13 @@ describe('ContentManager', () => {
       expect(result1.filePath).toBe(result2.filePath)
       expect(result1.filePath).toContain('append_test')
       expect(result2.message).toContain('Appended content to existing knowledge note')
+
+      const fileContent = readFileSync(result2.filePath!, 'utf-8')
+      expect(fileContent).toContain('# Append Test')
+      expect(fileContent).toContain('First document')
+      expect(fileContent).toContain('## Knowledge updates')
+      expect(fileContent).toContain('### Update 1: Append Test')
+      expect(fileContent).toContain('Second document')
     })
 
     it('should let force target the closest existing user knowledge note even when the new title differs', async () => {
@@ -428,6 +435,31 @@ describe('ContentManager', () => {
       expect(result.added).toBe(true)
       expect(result.filePath).toBe(initial.filePath)
       expect(result.message).toContain('Appended content to existing knowledge note')
+
+      const fileContent = readFileSync(result.filePath!, 'utf-8')
+      expect(fileContent).toContain('## Knowledge updates')
+      expect(fileContent).toContain('### Update 1: Zod Mini appendix')
+      expect(fileContent).toContain('Additional user-specific guidance for stringbool coercion.')
+    })
+
+    it('should strip duplicated leading headings when storing knowledge notes and updates', async () => {
+      const initial = await contentManager.addUserContent({
+        title: 'Heading Note',
+        content: '# Heading Note\n\nBase heading content.',
+      })
+
+      const result = await contentManager.addUserContent({
+        title: 'Heading Update',
+        content: '# Heading Update\n\nExtra update content.',
+        forceAppend: true,
+      })
+
+      expect(result.filePath).toBe(initial.filePath)
+
+      const fileContent = readFileSync(result.filePath!, 'utf-8')
+      expect(fileContent).toContain('# Heading Note\n\nBase heading content.')
+      expect(fileContent).toContain('### Update 1: Heading Update\n\nExtra update content.')
+      expect(fileContent).not.toContain('# Heading Update\n\n# Heading Update')
     })
 
     it('should invalidate persisted fulltext artifacts after adding content so the next auto search rebuilds fresh state', async () => {

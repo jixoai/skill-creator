@@ -576,6 +576,51 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
       expect(searchOutput).toContain('Zod Mini replacement')
     }, 30_000)
 
+    it('should append knowledge updates into a stable section when --force-append targets an existing user note', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'force-append-merge-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "force-append-merge-skill" --description "Force append merge skill" force-append-merge-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Zod Mini local note" --content "Prefer zod mini in bundle-sensitive applications and document stringbool coercion conventions in the user layer."`,
+        { encoding: 'utf-8' }
+      )
+
+      const output = execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Zod Mini appendix" --content "Add a stricter local rule for stringbool coercion in zod mini workflows." --force-append`,
+        { encoding: 'utf-8' }
+      )
+
+      expect(output).toContain('Appended content to existing knowledge note')
+      expect(output).toContain('Source: user (primary)')
+
+      const userFile = join(skillDir, 'assets', 'references', 'user', 'zod_mini_local_note.md')
+      const fileContent = readFileSync(userFile, 'utf-8')
+      expect(fileContent).toContain('# Zod Mini local note')
+      expect(fileContent).toContain('## Knowledge updates')
+      expect(fileContent).toContain('### Update 1: Zod Mini appendix')
+      expect(fileContent).toContain(
+        'Add a stricter local rule for stringbool coercion in zod mini workflows.'
+      )
+      expect(fileContent).not.toContain('\n---\n')
+
+      const searchOutput = execSync(
+        `${cliCmd} search-skill --pwd "${skillDir}" "stricter local rule for stringbool coercion"`,
+        {
+          encoding: 'utf-8',
+        }
+      )
+      expect(searchOutput).toContain('Zod Mini local note')
+      expect(searchOutput).toContain('Knowledge updates')
+    }, 30_000)
+
     it('should persist user notes even when similar context7 content already exists', async () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', 'zod-user-priority@4')
@@ -762,6 +807,7 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(content).toContain('name: skill-creator')
       expect(content).toContain('skill-creator --help')
       expect(content).toContain('skill-creator resolve-context7 <package-name>')
+      expect(content).not.toContain('{{DEFAULT_SCOPE}}')
       expect(content).not.toContain('mcp__context7__resolve-library-id')
       expect(content).not.toContain('node dist/cli.mjs search')
 
