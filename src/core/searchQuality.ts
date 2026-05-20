@@ -171,7 +171,7 @@ function calculateDisplayScore(input: {
 }
 
 function resolveBackendId(result: SearchResult): SearchBackendId | 'unknown' {
-  const metadata = result.metadata
+  const metadata = result.metadata ?? {}
   const backendId = metadata['backendId']
 
   if (
@@ -180,6 +180,10 @@ function resolveBackendId(result: SearchResult): SearchBackendId | 'unknown' {
     backendId === 'sqlite-vec'
   ) {
     return backendId
+  }
+
+  if (backendId === 'direct-user-match') {
+    return 'unknown'
   }
 
   return result.score > 1 ? 'minisearch' : 'unknown'

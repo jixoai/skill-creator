@@ -220,6 +220,8 @@ describe('ContentManager', () => {
       expect(result.similarFound).toBeGreaterThan(0)
       expect(result.similarContent).toBeDefined()
       expect(result.similarContent!.length).toBeGreaterThan(0)
+      expect(result.similarContent?.[0]?.score).toBeGreaterThan(0)
+      expect(result.similarContent?.[0]?.sourceRank).toBe('primary')
     })
 
     it('should update existing content with autoUpdate', async () => {
@@ -284,6 +286,8 @@ describe('ContentManager', () => {
       expect(result.message).toContain('Created new content')
       expect(existsSync(result.filePath!)).toBe(true)
       expect(result.similarFound).toBeGreaterThan(0)
+      expect(result.similarContent?.[0]?.score).toBeGreaterThan(0)
+      expect(result.similarContent?.[0]?.sourceRank).toBe('primary')
 
       const content = readFileSync(result.filePath!, 'utf-8')
       expect(content).toContain('stringbool coercion')

@@ -78,8 +78,9 @@ export async function addContent(args: string[]): Promise<void> {
   if (result.similarContent && result.similarContent.length > 0) {
     console.log('\nSimilar content found:')
     result.similarContent.forEach((similar, i) => {
+      const sourceLabel = similar.sourceRank ?? 'match'
       console.log(`\n${i + 1}. [${similar.score.toFixed(2)}] ${similar.title}`)
-      console.log(`   Source: ${similar.source}`)
+      console.log(`   Source: ${similar.source} (${sourceLabel})`)
       console.log(`   Preview: ${similar.preview}`)
     })
   }

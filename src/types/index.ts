@@ -60,6 +60,7 @@ export interface AddContentResult {
   similarContent?: Array<{
     title: string
     score: number
+    sourceRank?: 'primary' | 'secondary'
     source: string
     preview: string
   }>

@@ -15,12 +15,14 @@ import {
 import { createHash } from 'node:crypto'
 import MarkdownIt from 'markdown-it'
 import type {
+  SearchResult,
   ContentStats,
   ContentItem,
   UpdateContext7Result,
   AddContentResult,
 } from '../types/index.js'
 import { normalizeSearchableText } from './referenceSearchUtils.js'
+import { analyzeSearchQuality } from './searchQuality.js'
 
 export interface ContentManagerOptions {
   searchEngine: {
@@ -137,15 +139,22 @@ export class ContentManager {
       // Search for similar content
       await this.prepareSearchEngine()
       const similar = await this.findSimilarContent(options.content)
+      const mergedSimilar = this.mergeSimilarResults(
+        similar,
+        this.findDirectUserMatches(options.content)
+      )
 
-      if (similar.length > 0 && !options.force) {
-        const bestMatch = similar[0]
+      if (mergedSimilar.length > 0 && !options.force) {
+        const bestMatch = mergedSimilar[0]
 
         if (bestMatch.source === 'user') {
           // Update user file
           const filePath = this.resolveSearchResultFilePath(bestMatch.file_path)
 
-          if (options.autoUpdate && this.isContentEnhanced(bestMatch, options.content)) {
+          if (this.isContentDuplicate(bestMatch, options.content)) {
+            result.skipped = true
+            result.message = 'Existing content is comprehensive enough'
+          } else if (options.autoUpdate && this.isContentEnhanced(bestMatch, options.content)) {
             writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
 
             result.updated = true
@@ -172,8 +181,8 @@ export class ContentManager {
             await this.invalidateSearchIndex()
           }
         }
-        result.similarContent = this.summarizeSimilarContent(similar)
-        result.similarFound = similar.length
+        result.similarContent = this.summarizeSimilarContent(mergedSimilar, options.content)
+        result.similarFound = mergedSimilar.length
       } else if (!result.added && !result.updated && !result.skipped) {
         const existingUserFile = this.getExpectedUserFilePath(options.title)
 
@@ -592,6 +601,83 @@ export class ContentManager {
     return this.clamp01(result.score)
   }
 
+  private mergeSimilarResults(primary: SearchResult[], secondary: SearchResult[]): SearchResult[] {
+    const merged = new Map<string, SearchResult>()
+
+    for (const result of [...primary, ...secondary]) {
+      const existing = merged.get(result.id)
+      if (!existing) {
+        merged.set(result.id, result)
+        continue
+      }
+
+      const existingScore = this.getSimilarityScore(existing)
+      const nextScore = this.getSimilarityScore(result)
+      if (nextScore > existingScore) {
+        merged.set(result.id, result)
+      }
+    }
+
+    return Array.from(merged.values()).sort(
+      (left, right) =>
+        this.getSourcePriority(right.source) - this.getSourcePriority(left.source) ||
+        this.getSimilarityScore(right) - this.getSimilarityScore(left) ||
+        right.score - left.score
+    )
+  }
+
+  private findDirectUserMatches(content: string): SearchResult[] {
+    if (!existsSync(this.userDir)) {
+      return []
+    }
+
+    const normalizedQuery = this.normalizeContentForComparison(content)
+    const queryTokens = new Set(normalizedQuery.split(/\s+/).filter(Boolean))
+
+    return readdirSync(this.userDir)
+      .filter((file) => file.endsWith('.md'))
+      .map((file) => {
+        const filePath = join(this.userDir, file)
+        const rawContent = readFileSync(filePath, 'utf-8')
+        const title = rawContent.split('\n')[0]?.replace(/^#+\s*/, '').trim() || file.replace(/\.md$/, '')
+        const normalizedExisting = this.normalizeContentForComparison(rawContent)
+        const existingTokens = new Set(normalizedExisting.split(/\s+/).filter(Boolean))
+        const overlap = this.calculateTokenOverlap(queryTokens, existingTokens)
+        const duplicateScore =
+          this.isContentDuplicate({ content: rawContent }, content) ? 1 :
+          normalizedExisting.includes(normalizedQuery) || normalizedQuery.includes(normalizedExisting) ? 0.9
+          : overlap
+
+        return {
+          id: `user/${file}`,
+          title,
+          content: rawContent,
+          source: 'user' as const,
+          file_path: filePath,
+          score: duplicateScore,
+          metadata: {
+            backendId: 'direct-user-match',
+          },
+        }
+      })
+      .filter((result) => result.score >= 0.7)
+  }
+
+  private calculateTokenOverlap(left: Set<string>, right: Set<string>): number {
+    if (left.size === 0 || right.size === 0) {
+      return 0
+    }
+
+    let intersection = 0
+    for (const token of left) {
+      if (right.has(token)) {
+        intersection += 1
+      }
+    }
+
+    return intersection / Math.max(left.size, right.size)
+  }
+
   private getSourcePriority(source: string): number {
     return source === 'user' ? 1 : 0
   }
@@ -603,12 +689,19 @@ export class ContentManager {
     return value
   }
 
-  private summarizeSimilarContent(similar: any[]): NonNullable<AddContentResult['similarContent']> {
-    return similar.slice(0, 3).map((s) => ({
-      title: s.title,
-      score: typeof s.similarity === 'number' ? s.similarity : s.score,
-      source: s.source,
-      preview: s.content.slice(0, 200) + '...',
+  private summarizeSimilarContent(
+    similar: SearchResult[],
+    query: string
+  ): NonNullable<AddContentResult['similarContent']> {
+    const topResults = similar.slice(0, 3)
+    const qualitySummary = analyzeSearchQuality(topResults, query)
+
+    return qualitySummary.results.map((qualityResult) => ({
+      title: qualityResult.result.title,
+      score: Number((qualityResult.displayScore * 100).toFixed(2)),
+      source: qualityResult.result.source,
+      sourceRank: qualityResult.index === 0 ? 'primary' : 'secondary',
+      preview: qualityResult.result.content.slice(0, 200) + '...',
     }))
   }
 

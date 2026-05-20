@@ -479,6 +479,39 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
       expect(output).not.toContain('Enhanced分层判断')
     }, 30_000)
 
+    it('should show calibrated similar-content output when add-skill detects an existing user note', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'similar-output-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "similar-output-skill" --description "Similar output test skill" similar-output-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Zod Mini local note" --content "Zod mini should stay aligned with stringbool coercion conventions in user workflows."`,
+        { encoding: 'utf-8' }
+      )
+
+      let output = ''
+      try {
+        output = execSync(
+          `${cliCmd} add-skill --pwd "${skillDir}" --title "Zod Mini local note v2" --content "Zod mini should stay aligned with stringbool coercion conventions in user workflows."`,
+          { encoding: 'utf-8', stdio: 'pipe' }
+        )
+      } catch (error) {
+        output = String((error as { stdout?: string }).stdout ?? '')
+      }
+
+      expect(output).toContain('Existing content is comprehensive enough')
+      expect(output).toContain('Similar content found:')
+      expect(output).toMatch(/1\. \[\d+\.\d{2}\] Zod Mini local note/)
+      expect(output).toContain('Source: user (primary)')
+    }, 30_000)
+
     it('should persist user notes even when similar context7 content already exists', async () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', 'zod-user-priority@4')
