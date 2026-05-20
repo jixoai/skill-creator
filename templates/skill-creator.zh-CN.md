@@ -68,6 +68,7 @@ skill-creator --help
    - 确认后执行命令
    - 接下来，需要AI将使用 skills/skill-creator 的技能（注意，我们是skill-creator-subagents，不要混淆）。去初步生成 `skill_dir_fullpath` 文件夹内的文件。包括最重要的SKILL.md
      - 这里的内容依据是，是通过 主页、仓库地址，或者AI自己去通过搜索，得来。
+     - 生成的 `SKILL.md` 还会记录来源 package 身份，这样后续 `download-context7 --pwd ...` 可以自动推断 package
      - 我们在 SKILL.md 中，主要包含两部分的内容：
      1. 介绍对于这个包基础信息：包括它的设计哲学和理念、解决什么问题、如何安装等基础信息。
      2. 介绍配套的工具如何在这个 `skill_dir_fullpath` 文件夹内使用：来搜索技能信息、更新技能、扩展技能信息
@@ -98,6 +99,10 @@ skill-creator --help
    - 如果你不需要手动检查排序候选，也可以直接走一步式命令：
      ```bash
      skill-creator --pwd "{skill_dir_fullpath}" download-context7 --package <package-name> [--package-version <version>]
+     ```
+   - 如果这个 skill 是从 package 创建出来的，并且仍然保留生成时的 package 元数据，那么还可以直接走最短路径：
+     ```bash
+     skill-creator --pwd "{skill_dir_fullpath}" download-context7
      ```
 
 5. **测试搜索**

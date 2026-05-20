@@ -103,6 +103,10 @@ skill-creator resolve-context7 @tanstack/react-query
 # Download documentation directly from the package name
 skill-creator download-context7 --package @tanstack/react-query --package-version 5.0.0
 
+# If the skill was created from a package, the package metadata is stored in SKILL.md
+# so the same download can usually be triggered with only the skill path
+skill-creator download-context7 --pwd ~/.claude/skills/@tanstack__react-query@5
+
 # Or download with an explicit resolved Context7 id
 skill-creator download-context7 --package @tanstack/react-query /tanstack/react-query
 
@@ -185,6 +189,9 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 5. **Download Documentation**: Get Context7 docs with automatic indexing
 
    ```bash
+   # Simplest path when the skill already stores package metadata
+   skill-creator download-context7 --pwd ~/.claude/skills/zustand@5
+
    # One-step path: resolve and download from the package name
    skill-creator download-context7 --package zustand --package-version 5.0.0
 

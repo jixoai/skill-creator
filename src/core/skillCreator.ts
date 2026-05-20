@@ -105,10 +105,25 @@ export class SkillCreator {
             options.skillDescription ??
             `Specialized ${options.skillName} expert assistant providing comprehensive technical support`
         )
+        .with('package_name', () => options.sourcePackageName ?? options.skillName)
+        .with(
+          'package_version_hint',
+          () => options.sourcePackageVersionHint ?? this.inferVersionHint(options.skillDirname)
+        )
         .with('skill_path', () => skillDir)
         .otherwise(() => _)
     })
 
     writeFileSync(join(skillDir, 'SKILL.md'), templateContent)
+  }
+
+  private inferVersionHint(skillDirname: string): string {
+    const versionSeparator = skillDirname.lastIndexOf('@')
+
+    if (versionSeparator <= 0 || versionSeparator === skillDirname.length - 1) {
+      return ''
+    }
+
+    return skillDirname.slice(versionSeparator + 1)
   }
 }

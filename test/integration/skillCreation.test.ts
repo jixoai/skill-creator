@@ -166,6 +166,7 @@ Mutations should invalidate related queries and keep optimistic updates bounded 
         const skillMd = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8')
         expect(skillMd).toContain(`<context7-skills id="/demo/pkg"`)
         expect(skillMd).toContain(`assets/references/context7/${encodedProjectId}`)
+        expect(skillMd).toContain('<skill-package name="downloaded-skill" version="">')
 
         expect(existsSync(join(skillDir, 'assets', 'search', 'minisearch-index.json'))).toBe(true)
         expect(existsSync(join(skillDir, 'assets', 'search', 'index-state.json'))).toBe(true)
@@ -283,6 +284,90 @@ Use fake timers to control asynchronous test timing deterministically.`)
         const context7Dir = join(skillDir, 'assets', 'references', 'context7', encodedProjectId)
         expect(existsSync(context7Dir)).toBe(true)
         expect(readdirSync(context7Dir).some((file) => file.endsWith('.md'))).toBe(true)
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        )
+      }
+    }, 30_000)
+
+    it('should resolve context7 automatically from skill metadata when only --pwd is provided', async () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'metadata-download-skill@1')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "@demo/pkg" --description "Metadata download skill" metadata-download-skill@1`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      const server = createServer((request, response) => {
+        if (request.url?.startsWith('/api/v2/libs/search')) {
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          response.end(
+            JSON.stringify({
+              results: [
+                {
+                  id: '/demo/pkg',
+                  title: 'Demo Package',
+                  description: 'Repository docs',
+                  totalSnippets: 42,
+                  trustScore: 8.5,
+                  benchmarkScore: 87,
+                  versions: ['v1.0.0'],
+                },
+              ],
+            })
+          )
+          return
+        }
+
+        if (request.url?.startsWith('/demo/pkg/llms.txt')) {
+          response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end(`# Demo Package
+
+Detailed overview content that is long enough to be preserved by the slicer and later indexed.
+
+## Metadata Resolution
+
+The package metadata stored in the skill allows automatic Context7 resolution.`)
+          return
+        }
+
+        response.writeHead(404)
+        response.end('not found')
+      })
+
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+      const address = server.address()
+      if (address == null || typeof address === 'string') {
+        server.close()
+        throw new Error('Failed to start test server')
+      }
+
+      try {
+        const { stdout: output } = await execFileAsync(
+          'node',
+          [`${process.cwd()}/dist/cli.mjs`, 'download-context7', '--pwd', skillDir],
+          {
+            encoding: 'utf-8',
+            env: {
+              ...process.env,
+              SKILL_CREATOR_CONTEXT7_SEARCH_BASE_URL: `http://127.0.0.1:${address.port}/api/v2/libs/search`,
+              SKILL_CREATOR_CONTEXT7_BASE_URL: `http://127.0.0.1:${address.port}`,
+            },
+          }
+        )
+
+        expect(output).toContain('Package: @demo/pkg')
+        expect(output).toContain('Version hint: 1')
+        expect(output).toContain('Resolved Context7 ID: /demo/pkg')
+
+        const encodedProjectId = encodeURIComponent('/demo/pkg')
+        const context7Dir = join(skillDir, 'assets', 'references', 'context7', encodedProjectId)
+        expect(existsSync(context7Dir)).toBe(true)
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve()))

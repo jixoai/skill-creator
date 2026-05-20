@@ -32,6 +32,8 @@ export interface CreateSkillOptions {
   skillDirname: string
   skillName: string
   skillDescription?: string
+  sourcePackageName?: string
+  sourcePackageVersionHint?: string
   force?: boolean
 }
 

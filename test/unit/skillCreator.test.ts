@@ -148,6 +148,7 @@ describe('SkillCreator', () => {
       expect(content).toContain('# test-template') // Check H1 title
       expect(content).toContain('Test template skill for documentation')
       expect(content).toContain('skill-creator add-skill --pwd') // Check CLI commands section
+      expect(content).toContain('<skill-package name="test-template" version="1.0.0">')
       expect(content).toContain('<user-skills baseDir="assets/references/user">') // Check user skills tag with baseDir
       expect(content).toContain('## Context7 Documentation') // Check context7 section
       expect(content).toContain(result.skillPath) // {{SKILL_PATH}} should be replaced
@@ -166,6 +167,23 @@ describe('SkillCreator', () => {
       expect(contentWithoutDesc).toContain(
         'Specialized no-desc expert assistant providing comprehensive technical support'
       )
+      expect(contentWithoutDesc).toContain('<skill-package name="no-desc" version="1.0.0">')
+    })
+
+    it('should preserve source package identity separately from the skill name', async () => {
+      const options = {
+        baseDir: tempDir,
+        skillDirname: 'tanstack-router@1.2.3',
+        skillName: 'router-skill',
+        sourcePackageName: '@tanstack/router',
+        sourcePackageVersionHint: '1',
+      }
+
+      const result = await skillCreator.createSkill(options)
+      const content = readFileSync(join(result.skillPath!, 'SKILL.md'), 'utf-8')
+
+      expect(content).toContain('# router-skill')
+      expect(content).toContain('<skill-package name="@tanstack/router" version="1">')
     })
 
     it('should not create config.json file (as this is handled separately)', async () => {

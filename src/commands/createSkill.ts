@@ -31,10 +31,10 @@ export async function createSkillForPackage(createOptions: CreateSkillOptions): 
     )
     console.log(`2. Search skill: skill-creator search-skill --pwd "${result.skillPath}" "query"`)
     console.log(
-      `3. Resolve Context7 id: skill-creator resolve-context7 <package-name> [--package-version <version>]`
+      `3. Download docs: skill-creator download-context7 --pwd "${result.skillPath}"`
     )
     console.log(
-      `4. Download docs: skill-creator download-context7 --pwd "${result.skillPath}" <context7_library_id>`
+      `4. Resolve Context7 id explicitly when needed: skill-creator resolve-context7 <package-name> [--package-version <version>]`
     )
     return result.skillPath!
   } else {

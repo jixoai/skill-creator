@@ -8,7 +8,7 @@ import gradient from 'gradient-string'
 import { PackageUtils } from './utils/package.js'
 import path, { join } from 'node:path'
 import { homedir } from 'node:os'
-import { readdirSync, existsSync } from 'node:fs'
+import { readdirSync, existsSync, readFileSync } from 'node:fs'
 import { createSkillForPackage } from './commands/createSkill.js'
 
 const program = new Command()
@@ -29,6 +29,31 @@ function inferVersionHintFromSkillDirectory(skillDir: string): string | undefine
   }
 
   return skillDirName.slice(versionSeparator + 1)
+}
+
+function inferPackageMetadataFromSkill(skillDir: string): {
+  packageName?: string
+  versionHint?: string
+} {
+  const skillMdPath = join(skillDir, 'SKILL.md')
+  if (!existsSync(skillMdPath)) {
+    return {}
+  }
+
+  const skillMdContent = readFileSync(skillMdPath, 'utf-8')
+  const packageTagMatch = skillMdContent.match(
+    /<skill-package\s+name="([^"]*)"\s+version="([^"]*)">\s*<\/skill-package>/
+  )
+
+  if (!packageTagMatch) {
+    return {}
+  }
+
+  const [, packageName, versionHint] = packageTagMatch
+  return {
+    packageName: packageName || undefined,
+    versionHint: versionHint || undefined,
+  }
 }
 
 // Helper function to resolve skill directory from global or command options
@@ -213,6 +238,8 @@ program
         skillDirname: skillDirName,
         skillName: finalSkillName,
         skillDescription: description,
+        sourcePackageName: name ?? finalSkillName,
+        sourcePackageVersionHint: inferVersionHintFromSkillDirectory(skillDirName),
         force: force,
       })
       console.log(`Skill created successfully at: ${skillPath}`)
@@ -390,26 +417,34 @@ program
       let resolvedProjectId = projectId as string | undefined
 
       if (!resolvedProjectId) {
-        if (!options.package) {
-          console.error('❌ Please provide either a Context7 project ID or --package <name>')
+        const inferredMetadata = inferPackageMetadataFromSkill(skillDir)
+        const packageName = options.package || inferredMetadata.packageName
+        const versionHint =
+          options.packageVersion ||
+          inferredMetadata.versionHint ||
+          inferVersionHintFromSkillDirectory(skillDir)
+
+        if (!packageName) {
+          console.error(
+            '❌ Please provide either a Context7 project ID, --package <name>, or a skill created with package metadata'
+          )
           process.exit(1)
         }
 
-        const versionHint = options.packageVersion || inferVersionHintFromSkillDirectory(skillDir)
         const { Context7Utils } = await import('./utils/context7.js')
 
         console.log(gradient('cyan', 'magenta')('\n🧭 Resolving Context7 library...'))
-        console.log(`Package: ${options.package}`)
+        console.log(`Package: ${packageName}`)
         if (versionHint) {
           console.log(`Version hint: ${versionHint}`)
         }
 
-        const resolved = await Context7Utils.resolveLibrary(options.package, {
+        const resolved = await Context7Utils.resolveLibrary(packageName, {
           version: versionHint,
         })
 
         if (!resolved) {
-          console.error(`❌ No Context7 library found for package "${options.package}".`)
+          console.error(`❌ No Context7 library found for package "${packageName}".`)
           process.exit(1)
         }
 

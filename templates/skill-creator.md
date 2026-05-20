@@ -65,6 +65,7 @@ skill-creator --help
    - Execute command after confirmation
    - Next, use the skills/skill-creator skill (note: we are skill-creator-subagents, don't confuse) to initially generate files in the `skill_dir_fullpath` folder, including the most important SKILL.md
      - Content is based on homepage, repository URL, or AI's own research
+     - The generated `SKILL.md` also stores the source package identity so later `download-context7 --pwd ...` calls can infer the package automatically
      - SKILL.md contains two main parts:
      1. Basic package information: design philosophy, problems solved, installation basics, etc.
      2. How to use配套 tools in this `skill_dir_fullpath` folder: search skill info, update skill, extend skill info
@@ -95,6 +96,10 @@ skill-creator --help
    - If you do not need to inspect the ranked candidates manually, you may use the one-step path instead:
      ```bash
      skill-creator --pwd={skill_dir_fullpath} download-context7 --package <package-name> [--package-version <version>]
+     ```
+   - If the skill was created from a package and still has its generated package metadata, you may use the shortest path:
+     ```bash
+     skill-creator --pwd={skill_dir_fullpath} download-context7
      ```
 
 5. **Test Search**
