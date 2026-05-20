@@ -88,7 +88,7 @@ export async function createSearchEngine(
     skillPath: process.cwd(),
     format: useFormatting ? 'enhanced' : undefined,
     adapterOptions: {
-      qualityThreshold: 0.3,
+      qualityThreshold: 0.55,
     },
     formatting: {
       maxPreviewLength: 200,

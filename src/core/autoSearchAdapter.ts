@@ -13,12 +13,18 @@ import type {
 } from './searchAdapter.js'
 import { FuzzySearchAdapter } from './fuzzySearchAdapter.js'
 import { MiniSearchAdapter } from './miniSearchAdapter.js'
+import { analyzeSearchQuality } from './searchQuality.js'
 
 export interface AutoSearchOptions {
   /** Skill directory */
   skillDir: string
   /** Quality threshold for switching engines */
   qualityThreshold?: number
+}
+
+export interface AutoSearchDependencies {
+  fulltextAdapter?: SearchEngine
+  fuzzyAdapter?: SearchEngine
 }
 
 /**
@@ -30,12 +36,14 @@ export class AutoSearchAdapter implements SearchEngine {
   private miniSearchAdapter: MiniSearchAdapter
   private options: AutoSearchOptions
 
-  constructor(options: AutoSearchOptions) {
+  constructor(options: AutoSearchOptions, dependencies: AutoSearchDependencies = {}) {
     this.options = options
-    this.fuzzyAdapter = new FuzzySearchAdapter()
-    this.miniSearchAdapter = new MiniSearchAdapter({
-      skillDir: this.options.skillDir,
-    })
+    this.fuzzyAdapter = (dependencies.fuzzyAdapter as FuzzySearchAdapter | undefined) ?? new FuzzySearchAdapter()
+    this.miniSearchAdapter =
+      (dependencies.fulltextAdapter as MiniSearchAdapter | undefined) ??
+      new MiniSearchAdapter({
+        skillDir: this.options.skillDir,
+      })
   }
 
   async buildIndex(referencesDir: string): Promise<void> {
@@ -45,7 +53,7 @@ export class AutoSearchAdapter implements SearchEngine {
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
     const { topK = 5, where } = options
-    const qualityThreshold = this.options.qualityThreshold || 0.3
+    const qualityThreshold = this.options.qualityThreshold || 0.55
 
     const fulltextResults = await this.miniSearchAdapter.search(query, { topK, where })
 
@@ -65,44 +73,8 @@ export class AutoSearchAdapter implements SearchEngine {
     results: SearchResult[],
     query: string
   ): { score: number; reason: string } {
-    if (results.length === 0) {
-      return { score: 0, reason: 'No results found' }
-    }
-
-    // Quick win: check for exact matches
-    const topResult = results[0]
-    const queryLower = query.toLowerCase()
-
-    if (topResult.title.toLowerCase().includes(queryLower)) {
-      return { score: 1.0, reason: 'Exact title match found' }
-    }
-
-    // Check score distribution
-    const scores = results.map((r) => r.score)
-    const maxScore = Math.max(...scores)
-    const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length
-
-    // High score threshold
-    if (maxScore >= 0.8) {
-      return { score: maxScore, reason: 'High quality matches found' }
-    }
-
-    // Multiple decent results
-    if (results.length >= 3 && avgScore >= 0.5) {
-      return { score: avgScore, reason: 'Multiple decent quality results' }
-    }
-
-    // Low quality indicators
-    if (maxScore < 0.3) {
-      return { score: maxScore, reason: 'Low quality matches only' }
-    }
-
-    if (results.length < 2) {
-      return { score: maxScore * 0.8, reason: 'Too few results' }
-    }
-
-    // Default: return average score
-    return { score: avgScore, reason: 'Average quality results' }
+    const summary = analyzeSearchQuality(results, query)
+    return { score: summary.overallScore, reason: summary.reason }
   }
 
   isBuilt(): boolean {

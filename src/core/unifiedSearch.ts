@@ -115,6 +115,7 @@ export class UnifiedSearchEngine {
 
     const formattingOptions: FormattingOptions = {
       skillPath: this.options.skillPath || process.cwd(),
+      query,
       maxPreviewLength: this.options.formatting?.maxPreviewLength || 200,
       showFullContentThreshold: this.options.formatting?.showFullContentThreshold || 0.15,
       minScoreForPreview: this.options.formatting?.minScoreForPreview || 0.1,

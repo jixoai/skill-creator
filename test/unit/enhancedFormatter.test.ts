@@ -13,7 +13,7 @@ describe('EnhancedFormatter', () => {
         source: 'user',
         file_path: '/tmp/skill/assets/references/user/top.md',
         score: 9,
-        metadata: {},
+        metadata: { backendId: 'minisearch' },
       },
       {
         id: '2',
@@ -22,21 +22,22 @@ describe('EnhancedFormatter', () => {
         source: 'context7',
         file_path: '/tmp/skill/assets/references/context7/middle.md',
         score: 5,
-        metadata: {},
+        metadata: { backendId: 'minisearch' },
       },
       {
         id: '3',
-        title: 'Low Match',
-        content: '# Low Match\n\nMetadata only is enough.',
+        title: 'Archive Notes',
+        content: '# Archive Notes\n\nCompletely unrelated release notes.',
         source: 'context7',
         file_path: '/tmp/skill/assets/references/context7/low.md',
         score: 1,
-        metadata: {},
+        metadata: { backendId: 'minisearch' },
       },
     ]
 
     const formatted = formatter.format(results, {
       skillPath: '/tmp/skill',
+      query: 'middle match',
       maxPreviewLength: 200,
       showLineNumbers: true,
     })

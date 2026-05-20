@@ -2,10 +2,50 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { normalizeSearchMode } from '../../src/commands/shared.js'
+import { AutoSearchAdapter } from '../../src/core/autoSearchAdapter.js'
 import { MiniSearchAdapter } from '../../src/core/miniSearchAdapter.js'
 import { buildSearchEngine } from '../../src/core/searchEngineFactory.js'
+import type { SearchBackendInfo, SearchEngine, SearchIndexState, SearchOptions, SearchResult } from '../../src/core/searchAdapter.js'
 import { SqliteVectorSearchAdapter } from '../../src/core/sqliteVectorSearchAdapter.js'
 import { createTempDir, cleanupTempDir } from '../test-utils.js'
+
+class FakeSearchEngine implements SearchEngine {
+  private readonly backendInfo: SearchBackendInfo
+  private readonly results: SearchResult[]
+
+  constructor(backendInfo: SearchBackendInfo, results: SearchResult[]) {
+    this.backendInfo = backendInfo
+    this.results = results
+  }
+
+  async buildIndex(): Promise<void> {}
+
+  async search(_query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
+    const limit = options.topK ?? this.results.length
+    return this.results.slice(0, limit)
+  }
+
+  getBackendInfo(): SearchBackendInfo {
+    return this.backendInfo
+  }
+
+  isBuilt(): boolean {
+    return true
+  }
+
+  async getStats(): Promise<{ totalDocuments: number }> {
+    return { totalDocuments: this.results.length }
+  }
+
+  async getIndexState(): Promise<SearchIndexState> {
+    return {
+      backendId: this.backendInfo.backendId,
+      documentCount: this.results.length,
+    }
+  }
+
+  clearIndex(): void {}
+}
 
 describe('search runtime contract', () => {
   it('normalizes chroma mode to vector at the CLI boundary', () => {
@@ -92,5 +132,105 @@ describe('search runtime contract', () => {
     expect(existsSync(join(assetsDir, 'search', 'vector-index-state.json'))).toBe(true)
 
     cleanupTempDir(tempDir)
+  })
+
+  it('keeps strong fulltext results on the auto path', async () => {
+    const auto = new AutoSearchAdapter(
+      { skillDir: '/tmp/skill', qualityThreshold: 0.55 },
+      {
+        fulltextAdapter: new FakeSearchEngine(
+          {
+            backendId: 'minisearch',
+            mode: 'fulltext',
+            supportsPersistence: true,
+            supportsEmbeddings: false,
+          },
+          [
+            {
+              id: 'fulltext-1',
+              title: 'Query Client Guide',
+              content: '# Query Client Guide\n\nQuery client caching and invalidation rules.',
+              source: 'user',
+              file_path: '/tmp/query-client-guide.md',
+              score: 8.4,
+              metadata: { backendId: 'minisearch' },
+            },
+          ]
+        ),
+        fuzzyAdapter: new FakeSearchEngine(
+          {
+            backendId: 'ufuzzy',
+            mode: 'fuzzy',
+            supportsPersistence: false,
+            supportsEmbeddings: false,
+          },
+          [
+            {
+              id: 'fuzzy-1',
+              title: 'Fallback',
+              content: '# Fallback\n\nFallback result.',
+              source: 'context7',
+              file_path: '/tmp/fallback.md',
+              score: 1,
+              metadata: { backendId: 'ufuzzy' },
+            },
+          ]
+        ),
+      }
+    )
+
+    const results = await auto.search('query client')
+
+    expect(results[0]?.id).toBe('fulltext-1')
+  })
+
+  it('falls back to fuzzy when fulltext confidence is weak', async () => {
+    const auto = new AutoSearchAdapter(
+      { skillDir: '/tmp/skill', qualityThreshold: 0.55 },
+      {
+        fulltextAdapter: new FakeSearchEngine(
+          {
+            backendId: 'minisearch',
+            mode: 'fulltext',
+            supportsPersistence: true,
+            supportsEmbeddings: false,
+          },
+          [
+            {
+              id: 'fulltext-weak',
+              title: 'Release Notes',
+              content: '# Release Notes\n\nPackaging updates and changelog only.',
+              source: 'user',
+              file_path: '/tmp/release-notes.md',
+              score: 0.2,
+              metadata: { backendId: 'minisearch' },
+            },
+          ]
+        ),
+        fuzzyAdapter: new FakeSearchEngine(
+          {
+            backendId: 'ufuzzy',
+            mode: 'fuzzy',
+            supportsPersistence: false,
+            supportsEmbeddings: false,
+          },
+          [
+            {
+              id: 'fuzzy-strong',
+              title: 'Query Client',
+              content: '# Query Client\n\nCache invalidation guidance.',
+              source: 'context7',
+              file_path: '/tmp/query-client.md',
+              score: 1,
+              metadata: { backendId: 'ufuzzy' },
+            },
+          ]
+        ),
+      }
+    )
+
+    const results = await auto.search('query client')
+
+    expect(results[0]?.id).toBe('fuzzy-strong')
   })
 })

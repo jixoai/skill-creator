@@ -65,6 +65,7 @@ export async function searchContent(args: string[]): Promise<void> {
   // Prepare formatting options
   const formattingOptions: FormattingOptions = {
     skillPath: process.cwd(),
+    query: options.query,
     showFullContentThreshold: 0.8,
     minScoreForPreview: 0.3,
     maxPreviewLength: 200,

@@ -22,6 +22,9 @@ export interface FormattableSearchResult extends SearchResult {
     displayTier?: 'full' | 'preview' | 'metadata-only'
     maxScore?: number
     averageScore?: number
+    qualityScore?: number
+    relativeScore?: number
+    queryCoverage?: number
     matchRanges?: number[][]
   }
 }
@@ -32,6 +35,8 @@ export interface FormattableSearchResult extends SearchResult {
 export interface FormattingOptions {
   /** Skill path for relative path calculation */
   skillPath: string
+  /** Original query text for quality evaluation */
+  query?: string
   /** Threshold for showing full content */
   showFullContentThreshold?: number
   /** Minimum score for showing preview */

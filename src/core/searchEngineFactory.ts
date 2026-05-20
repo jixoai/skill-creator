@@ -44,7 +44,7 @@ export async function buildSearchEngine(options: SearchEngineOptions = {}): Prom
 
       return new AutoSearchAdapter({
         skillDir,
-        qualityThreshold: adapterOptions.qualityThreshold ?? 0.3,
+        qualityThreshold: adapterOptions.qualityThreshold ?? 0.55,
       })
 
     case 'fulltext':
