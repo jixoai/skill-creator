@@ -144,6 +144,41 @@ export class ContentManager {
         this.findDirectUserMatches(options.content)
       )
 
+      if (options.force || options.forceAppend) {
+        const mergeTarget =
+          mergedSimilar.find((result) => result.source === 'user') ??
+          this.findBestUserMergeTarget(options.title, options.content) ??
+          this.findUserFileByTitle(options.title)
+
+        if (mergeTarget) {
+          const filePath = this.resolveSearchResultFilePath(mergeTarget.file_path)
+          const { readFileSync } = await import('node:fs')
+          const existingContent = readFileSync(filePath, 'utf-8')
+
+          if (options.forceAppend) {
+            const newContent = `${existingContent}\n\n---\n\n# ${options.title}\n\n${options.content}`
+            writeFileSync(filePath, newContent)
+            result.added = true
+            result.filePath = filePath
+            result.message = `Appended content to existing knowledge note: ${filePath.split('/').pop()}`
+          } else {
+            writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
+            result.added = true
+            result.filePath = filePath
+            result.message = `Replaced existing knowledge note: ${filePath.split('/').pop()}`
+          }
+
+          result.similarContent = this.summarizeSimilarContent(
+            [mergeTarget, ...mergedSimilar.filter((candidate) => candidate.id !== mergeTarget.id)],
+            options.content
+          )
+          result.similarFound = result.similarContent.length
+
+          await this.invalidateSearchIndex()
+          return result
+        }
+      }
+
       if (mergedSimilar.length > 0 && !options.force) {
         const bestMatch = mergedSimilar[0]
 
@@ -229,20 +264,11 @@ export class ContentManager {
             }
           }
         } else {
-          if (existsSync(existingUserFile) && options.forceAppend) {
-            const { readFileSync } = await import('node:fs')
-            const existingContent = readFileSync(existingUserFile, 'utf-8')
-            const newContent = `${existingContent}\n\n---\n\n# ${options.title}\n\n${options.content}`
-            writeFileSync(existingUserFile, newContent)
-            result.message = `Appended content to existing file: ${existingUserFile.split('/').pop()}`
-            result.filePath = existingUserFile
-          } else {
-            const created = this.writeUserContentFile(options, {
-              overwriteExisting: existsSync(existingUserFile) && Boolean(options.force),
-            })
-            result.message = created.message
-            result.filePath = created.filePath
-          }
+          const created = this.writeUserContentFile(options, {
+            overwriteExisting: existsSync(existingUserFile) && Boolean(options.force),
+          })
+          result.message = created.message
+          result.filePath = created.filePath
 
           result.added = true
 
@@ -693,6 +719,87 @@ export class ContentManager {
         }
       })
       .filter((result) => result.score >= 0.7)
+  }
+
+  private findUserFileByTitle(title: string): SearchResult | undefined {
+    const expectedPath = this.getExpectedUserFilePath(title)
+    if (!existsSync(expectedPath)) {
+      return undefined
+    }
+
+    const content = readFileSync(expectedPath, 'utf-8')
+    return {
+      id: `user/${expectedPath.split('/').pop() ?? 'existing.md'}`,
+      title,
+      content,
+      source: 'user',
+      file_path: expectedPath,
+      score: 1,
+      metadata: {
+        backendId: 'direct-user-match',
+      },
+    }
+  }
+
+  private findBestUserMergeTarget(title: string, content: string): SearchResult | undefined {
+    if (!existsSync(this.userDir)) {
+      return undefined
+    }
+
+    const normalizedTitle = this.normalizeContentForComparison(title)
+    const titleTokens = new Set(normalizedTitle.split(/\s+/).filter(Boolean))
+    const normalizedContent = this.normalizeContentForComparison(content)
+    const contentTokens = new Set(normalizedContent.split(/\s+/).filter(Boolean))
+
+    const candidates = readdirSync(this.userDir)
+      .filter((file) => file.endsWith('.md'))
+      .map((file) => {
+        const filePath = join(this.userDir, file)
+        const rawContent = readFileSync(filePath, 'utf-8')
+        const existingTitle =
+          rawContent.split('\n')[0]?.replace(/^#+\s*/, '').trim() || file.replace(/\.md$/, '')
+        const normalizedExistingTitle = this.normalizeContentForComparison(existingTitle)
+        const normalizedExistingContent = this.normalizeContentForComparison(rawContent)
+
+        const titleOverlap = this.calculateTokenOverlap(
+          titleTokens,
+          new Set(normalizedExistingTitle.split(/\s+/).filter(Boolean))
+        )
+        const contentOverlap = this.calculateTokenOverlap(
+          contentTokens,
+          new Set(normalizedExistingContent.split(/\s+/).filter(Boolean))
+        )
+        const duplicateScore =
+          this.isContentDuplicate({ content: rawContent }, content) ? 1 :
+          normalizedExistingContent.includes(normalizedContent) ||
+            normalizedContent.includes(normalizedExistingContent) ?
+            0.9
+          : 0
+        const exactTitleScore = normalizedExistingTitle === normalizedTitle ? 1 : 0
+        const mergeScore = Math.max(
+          duplicateScore,
+          exactTitleScore,
+          titleOverlap * 0.45 + contentOverlap * 0.55
+        )
+
+        return {
+          result: {
+            id: `user/${file}`,
+            title: existingTitle,
+            content: rawContent,
+            source: 'user' as const,
+            file_path: filePath,
+            score: mergeScore,
+            metadata: {
+              backendId: 'direct-user-match',
+            },
+          } satisfies SearchResult,
+          mergeScore,
+        }
+      })
+      .sort((left, right) => right.mergeScore - left.mergeScore)
+
+    return candidates[0] != null && candidates[0].mergeScore >= 0.2 ? candidates[0].result : undefined
   }
 
   private calculateTokenOverlap(left: Set<string>, right: Set<string>): number {

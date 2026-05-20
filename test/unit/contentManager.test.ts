@@ -376,7 +376,7 @@ describe('ContentManager', () => {
 
       expect(result1.filePath).toBe(result2.filePath)
       expect(result1.filePath).toContain('force_test')
-      expect(result2.message).toContain('Overwrote existing content')
+      expect(result2.message).toContain('Replaced existing knowledge note')
     })
 
     it('should force append to existing file', async () => {
@@ -393,7 +393,41 @@ describe('ContentManager', () => {
 
       expect(result1.filePath).toBe(result2.filePath)
       expect(result1.filePath).toContain('append_test')
-      expect(result2.message).toContain('Appended content to existing file')
+      expect(result2.message).toContain('Appended content to existing knowledge note')
+    })
+
+    it('should let force target the closest existing user knowledge note even when the new title differs', async () => {
+      const initial = await contentManager.addUserContent({
+        title: 'Zod Mini local note',
+        content: 'Zod mini should stay aligned with stringbool coercion conventions in user workflows.',
+      })
+
+      const result = await contentManager.addUserContent({
+        title: 'Zod Mini replacement',
+        content: 'Zod mini guidance has been replaced with a more opinionated knowledge note.',
+        force: true,
+      })
+
+      expect(result.added).toBe(true)
+      expect(result.filePath).toBe(initial.filePath)
+      expect(result.message).toContain('Replaced existing knowledge note')
+    })
+
+    it('should let force-append target the closest existing user knowledge note even when the new title differs', async () => {
+      const initial = await contentManager.addUserContent({
+        title: 'Zod Mini append note',
+        content: 'Base note for zod mini workflows.',
+      })
+
+      const result = await contentManager.addUserContent({
+        title: 'Zod Mini appendix',
+        content: 'Additional user-specific guidance for stringbool coercion.',
+        forceAppend: true,
+      })
+
+      expect(result.added).toBe(true)
+      expect(result.filePath).toBe(initial.filePath)
+      expect(result.message).toContain('Appended content to existing knowledge note')
     })
 
     it('should invalidate persisted fulltext artifacts after adding content so the next auto search rebuilds fresh state', async () => {

@@ -545,6 +545,37 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
       expect(output).toContain('Source: user (primary)')
     }, 30_000)
 
+    it('should let --force replace the closest existing user note even when the incoming title differs', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'force-merge-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "force-merge-skill" --description "Force merge skill" force-merge-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Zod Mini local note" --content "Zod mini should stay aligned with stringbool coercion conventions in user workflows."`,
+        { encoding: 'utf-8' }
+      )
+
+      const output = execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Zod Mini replacement" --content "Zod mini guidance has been replaced with a more opinionated knowledge note." --force`,
+        { encoding: 'utf-8' }
+      )
+
+      expect(output).toContain('Replaced existing knowledge note')
+      expect(output).toContain('Source: user (primary)')
+
+      const searchOutput = execSync(`${cliCmd} search-skill --pwd "${skillDir}" "opinionated knowledge note"`, {
+        encoding: 'utf-8',
+      })
+      expect(searchOutput).toContain('Zod Mini replacement')
+    }, 30_000)
+
     it('should persist user notes even when similar context7 content already exists', async () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', 'zod-user-priority@4')
