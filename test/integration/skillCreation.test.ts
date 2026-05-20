@@ -512,6 +512,39 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
       expect(output).toContain('Source: user (primary)')
     }, 30_000)
 
+    it('should treat same-title duplicate content as a knowledge duplicate instead of a raw file conflict', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'same-title-duplicate-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "same-title-duplicate-skill" --description "Same title duplicate skill" same-title-duplicate-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Duplicate Title" --content "This content should be recognized as an existing knowledge note."`,
+        { encoding: 'utf-8' }
+      )
+
+      let output = ''
+      try {
+        output = execSync(
+          `${cliCmd} add-skill --pwd "${skillDir}" --title "Duplicate Title" --content "This content should be recognized as an existing knowledge note."`,
+          { encoding: 'utf-8', stdio: 'pipe' }
+        )
+      } catch (error) {
+        output = String((error as { stdout?: string }).stdout ?? '')
+      }
+
+      expect(output).toContain('Existing content is comprehensive enough')
+      expect(output).toContain('Similar content found:')
+      expect(output).not.toContain('File already exists:')
+      expect(output).toContain('Source: user (primary)')
+    }, 30_000)
+
     it('should persist user notes even when similar context7 content already exists', async () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', 'zod-user-priority@4')

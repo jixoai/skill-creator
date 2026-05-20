@@ -309,6 +309,42 @@ describe('ContentManager', () => {
       expect(result.filePath).toContain('react_guide')
     })
 
+    it('should treat same-title duplicate content as a knowledge duplicate before file conflict', async () => {
+      await contentManager.addUserContent({
+        title: 'Duplicate Title',
+        content: 'This content should be recognized as an existing knowledge note.',
+      })
+
+      const result = await contentManager.addUserContent({
+        title: 'Duplicate Title',
+        content: 'This content should be recognized as an existing knowledge note.',
+      })
+
+      expect(result.skipped).toBe(true)
+      expect(result.message).toContain('Existing content is comprehensive enough')
+      expect(result.existingFile).toBeUndefined()
+      expect(result.similarContent?.[0]?.sourceRank).toBe('primary')
+    })
+
+    it('should auto-update same-title content when the new knowledge is materially richer', async () => {
+      const initial = await contentManager.addUserContent({
+        title: 'Upgrade Title',
+        content: '# Upgrade Title\nReact is a UI library.',
+      })
+
+      const result = await contentManager.addUserContent({
+        title: 'Upgrade Title',
+        content:
+          '# Upgrade Title\n\nReact is a UI library for building user interfaces with composable components, predictable data flow, and integration patterns for larger applications.',
+        autoUpdate: true,
+      })
+
+      expect(result.updated).toBe(true)
+      expect(result.filePath).toBe(initial.filePath)
+      expect(result.message).toContain('Updated existing content')
+      expect(result.existingFile).toBeUndefined()
+    })
+
     it('should create unique file names', async () => {
       const result1 = await contentManager.addUserContent({
         title: 'Same Title',

@@ -187,14 +187,46 @@ export class ContentManager {
         const existingUserFile = this.getExpectedUserFilePath(options.title)
 
         if (existsSync(existingUserFile) && !options.force && !options.forceAppend) {
-          // File exists and no force flag - show error and file content
           const { readFileSync } = await import('node:fs')
           const existingContent = readFileSync(existingUserFile, 'utf-8')
-
-          result.message = `File already exists: ${existingUserFile.split('/').pop()}. Use --force to overwrite or --force-append to append.`
-          result.existingFile = {
-            path: existingUserFile,
+          const existingEntry = {
             content: existingContent,
+            file_path: existingUserFile,
+          }
+
+          if (this.isContentDuplicate(existingEntry, options.content)) {
+            result.skipped = true
+            result.message = 'Existing content is comprehensive enough'
+            result.similarContent = this.summarizeSimilarContent(
+              [
+                {
+                  id: `user/${existingUserFile.split('/').pop() ?? 'existing.md'}`,
+                  title: options.title,
+                  content: existingContent,
+                  source: 'user',
+                  file_path: existingUserFile,
+                  score: 1,
+                  metadata: {
+                    backendId: 'direct-user-match',
+                  },
+                },
+              ],
+              options.content
+            )
+          } else if (options.autoUpdate && this.isContentEnhanced(existingEntry, options.content)) {
+            writeFileSync(existingUserFile, `# ${options.title}\n\n${options.content}`)
+            result.updated = true
+            result.filePath = existingUserFile
+            result.message = `Updated existing content: ${existingUserFile.split('/').pop()}`
+
+            await this.invalidateSearchIndex()
+          } else {
+            // File exists and no force flag - show error and file content
+            result.message = `File already exists: ${existingUserFile.split('/').pop()}. Use --force to overwrite or --force-append to append.`
+            result.existingFile = {
+              path: existingUserFile,
+              content: existingContent,
+            }
           }
         } else {
           if (existsSync(existingUserFile) && options.forceAppend) {
