@@ -154,6 +154,9 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 - `--skip-indexing`: Skip automatic local index building
 - `--interactive`: Enable interactive prompts
 
+When `--package <name>` is used to find an existing skill, the CLI first checks the
+`<skill-package ...>` metadata stored in `SKILL.md`. Directory-name matching is only a fallback.
+
 ## Workflow
 
 ### Complete Skill Creation Workflow

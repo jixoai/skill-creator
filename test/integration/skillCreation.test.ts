@@ -403,6 +403,49 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
       expect(output).toContain('Query Client')
     }, 30_000)
 
+    it('should prefer skill-package metadata over directory-name matching for --package resolution', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const exactSkillDir = join(tempDir, '.claude', 'skills', 'custom-react-query-skill@5')
+      const misleadingSkillDir = join(tempDir, '.claude', 'skills', 'tanstack__react-query@5')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "@tanstack/react-query" --description "Exact package skill" custom-react-query-skill@5`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "tanstack__react-query" --description "Misleading directory skill" tanstack__react-query@5`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${exactSkillDir}" --title "Exact Match" --content "This content belongs to the package metadata match."`,
+        { encoding: 'utf-8' }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${misleadingSkillDir}" --title "Misleading Match" --content "This content only matches by directory name."`,
+        { encoding: 'utf-8' }
+      )
+
+      const output = execSync(
+        `${cliCmd} search-skill --package @tanstack/react-query "package metadata match"`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      expect(output).toContain('Exact Match')
+      expect(output).not.toContain('Misleading Match')
+    }, 30_000)
+
     it('should show enhanced preview line indexes without formatter debug comments', () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', 'preview-skill')

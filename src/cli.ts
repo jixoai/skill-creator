@@ -56,6 +56,23 @@ function inferPackageMetadataFromSkill(skillDir: string): {
   }
 }
 
+function findSkillDirectoryByPackageMetadata(base: string, packageName: string): string | undefined {
+  if (!existsSync(base)) return undefined
+
+  const dirs = readdirSync(base, { withFileTypes: true })
+    .filter((dirent) => dirent.isDirectory())
+    .map((dirent) => join(base, dirent.name))
+
+  for (const dir of dirs) {
+    const metadata = inferPackageMetadataFromSkill(dir)
+    if (metadata.packageName === packageName) {
+      return dir
+    }
+  }
+
+  return undefined
+}
+
 // Helper function to resolve skill directory from global or command options
 async function resolveSkillDirectory(commandOptions: {
   pwd?: string
@@ -70,7 +87,7 @@ async function resolveSkillDirectory(commandOptions: {
 
   if (commandOptions.package) {
     const normalizedPackageName = PackageUtils.normalizePackageName(commandOptions.package)
-    const findDir = (base: string) => {
+    const findDirByName = (base: string) => {
       if (!existsSync(base)) return undefined
       const dirs = readdirSync(base, { withFileTypes: true })
         .filter((dirent) => dirent.isDirectory())
@@ -79,9 +96,15 @@ async function resolveSkillDirectory(commandOptions: {
       return dirs.length > 0 ? join(base, dirs[0]) : undefined
     }
 
+    const searchBases = [join(process.cwd(), '.claude', 'skills'), join(homedir(), '.claude', 'skills')]
+    const metadataMatchedSkillDir =
+      searchBases
+        .map((base) => findSkillDirectoryByPackageMetadata(base, commandOptions.package as string))
+        .find(Boolean) ?? undefined
+
     const skillDir =
-      findDir(join(process.cwd(), '.claude', 'skills')) ||
-      findDir(join(homedir(), '.claude', 'skills'))
+      metadataMatchedSkillDir ||
+      searchBases.map((base) => findDirByName(base)).find(Boolean)
 
     if (skillDir) {
       return skillDir
