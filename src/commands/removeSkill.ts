@@ -42,7 +42,7 @@ export async function removeSkill(args: string[]): Promise<void> {
   if (source === 'user') {
     filePath = join(referencesDir, 'user', fileName)
   } else if (source === 'context7' && projectId) {
-    filePath = join(referencesDir, 'context7', projectId, fileName)
+    filePath = join(referencesDir, 'context7', encodeURIComponent(projectId), fileName)
   } else {
     console.error('❌ Invalid configuration')
     process.exit(1)
@@ -72,11 +72,17 @@ export async function removeSkill(args: string[]): Promise<void> {
         console.log(`📝 Updated SKILL.md`)
       } else if (source === 'context7' && projectId) {
         // Update context7-skills tag
-        const projectDir = join(referencesDir, 'context7', projectId)
+        const projectDir = join(referencesDir, 'context7', encodeURIComponent(projectId))
         const files = readdirSync(projectDir).filter((f) => f.endsWith('.md'))
         const fileList = files.map((f) => `- ${f}`).join('\n')
 
-        updateSkillMdFile(skillMdPath, 'context7-skills', fileList, projectId)
+        updateSkillMdFile(
+          skillMdPath,
+          'context7-skills',
+          fileList,
+          projectId,
+          `assets/references/context7/${encodeURIComponent(projectId)}`
+        )
         console.log(`📝 Updated SKILL.md`)
       }
     }

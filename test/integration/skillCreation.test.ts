@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { rmSync, existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
+import { execFile, execSync } from 'node:child_process'
+import { createServer } from 'node:http'
+import { promisify } from 'node:util'
 import { createTempDir, cleanupTempDir } from '../test-utils.js'
+
+const execFileAsync = promisify(execFile)
 
 // NOTE: These tests assume `npm run build` has been run and `dist/cli.mjs` is up to date.
 describe('Skill Creation Integration Tests', () => {
@@ -17,9 +21,7 @@ describe('Skill Creation Integration Tests', () => {
   })
 
   describe('Full Skill Creation Workflow', () => {
-    it(
-      'should create and use a complete skill following the new CLI structure',
-      () => {
+    it('should create and use a complete skill following the new CLI structure', () => {
         const packageName = 'zod' // Using a real, simple package
         const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
 
@@ -80,7 +82,7 @@ describe('Skill Creation Integration Tests', () => {
           'SKILL.md',
           'assets/references/context7/.gitkeep',
           'assets/references/user/.gitkeep',
-          'assets/chroma_db/.gitkeep',
+          'assets/search/.gitkeep',
           'assets/logs/.gitkeep',
         ]
 
@@ -94,9 +96,114 @@ describe('Skill Creation Integration Tests', () => {
 
         // scripts folder should not exist
         expect(existsSync(join(skillDir, 'scripts'))).toBe(false)
-      },
-      { timeout: 30_000 }
-    )
+      }, 30_000)
+
+    it('should download context7 docs, slice them, and persist search artifacts', async () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'downloaded-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "downloaded-skill" --description "Download test skill" downloaded-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      const server = createServer((request, response) => {
+        if (request.url?.startsWith('/demo/pkg/llms.txt')) {
+          response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end(`# Demo Package
+
+Detailed overview content that is long enough to be preserved by the slicer and later indexed.
+
+## Query Client
+
+The query client coordinates caching, invalidation, and background refresh behavior for remote data.
+
+## Mutations
+
+Mutations should invalidate related queries and keep optimistic updates bounded to a clear owner.`)
+          return
+        }
+
+        response.writeHead(404)
+        response.end('not found')
+      })
+
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+      const address = server.address()
+      if (address == null || typeof address === 'string') {
+        server.close()
+        throw new Error('Failed to start test server')
+      }
+
+      try {
+        await execFileAsync(
+          'node',
+          [`${process.cwd()}/dist/cli.mjs`, 'download-context7', '--pwd', skillDir, '/demo/pkg'],
+          {
+            env: {
+              ...process.env,
+              SKILL_CREATOR_CONTEXT7_BASE_URL: `http://127.0.0.1:${address.port}`,
+            },
+          }
+        )
+
+        const encodedProjectId = encodeURIComponent('/demo/pkg')
+        const context7Dir = join(skillDir, 'assets', 'references', 'context7', encodedProjectId)
+        expect(existsSync(context7Dir)).toBe(true)
+        expect(readdirSync(context7Dir).some((file) => file.endsWith('.md'))).toBe(true)
+
+        const skillMd = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8')
+        expect(skillMd).toContain(`<context7-skills id="/demo/pkg"`)
+        expect(skillMd).toContain(`assets/references/context7/${encodedProjectId}`)
+
+        expect(existsSync(join(skillDir, 'assets', 'search', 'minisearch-index.json'))).toBe(true)
+        expect(existsSync(join(skillDir, 'assets', 'search', 'index-state.json'))).toBe(true)
+
+        const searchOutput = execSync(
+          `${cliCmd} search-skill --pwd "${skillDir}" --mode fulltext "query client"`,
+          {
+            encoding: 'utf-8',
+          }
+        )
+        expect(searchOutput).toContain('query client coordinates caching')
+        expect(searchOutput).toContain(`assets/references/context7/${encodedProjectId}/`)
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        )
+      }
+    }, 30_000)
+
+    it('should resolve scoped package skills through --package', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', '@tanstack__react-query@5')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "@tanstack/react-query" --description "React Query skill" @tanstack__react-query@5`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Query Client" --content "The query client owns cache invalidation and request deduplication."`,
+        { encoding: 'utf-8' }
+      )
+
+      const output = execSync(
+        `${cliCmd} search-skill --package @tanstack/react-query "cache invalidation"`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      expect(output).toContain('Query Client')
+    }, 30_000)
   })
 
   describe('Error Cases', () => {

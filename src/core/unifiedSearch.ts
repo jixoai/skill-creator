@@ -5,7 +5,13 @@
  */
 
 import { join } from 'node:path'
-import type { SearchResult, SearchOptions } from './searchAdapter.js'
+import type {
+  SearchResult,
+  SearchOptions,
+  SearchMode,
+  SearchBackendInfo,
+  SearchIndexState,
+} from './searchAdapter.js'
 import type { SearchFormatter, FormattingOptions, FormattedResult } from '../search_format/types.js'
 import { createFormatter } from '../search_format/index.js'
 import type { SearchEngineOptions } from './searchEngineFactory.js'
@@ -134,13 +140,24 @@ export class UnifiedSearchEngine {
     return this.searchEngine?.getStats() || { totalDocuments: 0 }
   }
 
+  async getBackendInfo(): Promise<SearchBackendInfo | null> {
+    await this.ensureInitialized()
+    return this.searchEngine?.getBackendInfo() || null
+  }
+
+  async getIndexState(): Promise<SearchIndexState | null> {
+    await this.ensureInitialized()
+    if (!this.searchEngine?.getIndexState) return null
+    return this.searchEngine.getIndexState()
+  }
+
   /**
    * Clear search index
    */
   async clearIndex(): Promise<void> {
     await this.ensureInitialized()
     if (this.searchEngine && 'clearIndex' in this.searchEngine) {
-      this.searchEngine.clearIndex()
+      await this.searchEngine.clearIndex()
     }
   }
 

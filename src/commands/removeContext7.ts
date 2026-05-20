@@ -48,7 +48,7 @@ export async function removeContext7(args: string[]): Promise<void> {
     }
 
     // Rebuild index
-    console.log(`\n🔧 Rebuilding ChromaDB index...`)
+    console.log(`\n🔧 Rebuilding search index...`)
     try {
       await searchEngine.initialize()
       await searchEngine.buildIndex(join(process.cwd(), 'assets', 'references'))

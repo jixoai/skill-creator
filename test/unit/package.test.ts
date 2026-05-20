@@ -46,18 +46,6 @@ describe('PackageUtils', () => {
     })
   })
 
-  describe('normalizePackageName', () => {
-    it('should normalize scoped packages', () => {
-      const normalized = PackageUtils.normalizePackageName('@tanstack/router')
-      expect(normalized).toBe('tanstack/router')
-    })
-
-    it('should return regular packages unchanged', () => {
-      const normalized = PackageUtils.normalizePackageName('react')
-      expect(normalized).toBe('react')
-    })
-  })
-
   describe('validatePackageName', () => {
     it('should validate correct package names', () => {
       expect(PackageUtils.validatePackageName('react')).toBe(true)
@@ -67,6 +55,18 @@ describe('PackageUtils', () => {
     it('should reject invalid package names', () => {
       expect(PackageUtils.validatePackageName('')).toBe(false)
       expect(PackageUtils.validatePackageName('invalid name')).toBe(false)
+    })
+  })
+
+  describe('normalizePackageName', () => {
+    it('should normalize scoped package names for skill directory lookup', () => {
+      expect(PackageUtils.normalizePackageName('@tanstack/react-query')).toBe(
+        'tanstack__react-query'
+      )
+    })
+
+    it('should preserve unscoped package names in lowercase', () => {
+      expect(PackageUtils.normalizePackageName('Vitest')).toBe('vitest')
     })
   })
 

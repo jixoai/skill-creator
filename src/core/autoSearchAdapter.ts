@@ -4,19 +4,19 @@
  * and search quality evaluation
  */
 
-import type { SearchEngine, SearchResult, SearchOptions } from './searchAdapter.js'
+import type {
+  SearchEngine,
+  SearchResult,
+  SearchOptions,
+  SearchBackendInfo,
+  SearchIndexState,
+} from './searchAdapter.js'
 import { FuzzySearchAdapter } from './fuzzySearchAdapter.js'
-import { ChromaSearchAdapter } from './chromaSearchAdapter.js'
+import { MiniSearchAdapter } from './miniSearchAdapter.js'
 
 export interface AutoSearchOptions {
-  /** Skill directory for ChromaDB */
+  /** Skill directory */
   skillDir: string
-  /** ChromaDB collection name */
-  collectionName: string
-  /** Enable ChromaDB fallback on failure */
-  enableChromaFallback?: boolean
-  /** ChromaDB startup timeout in milliseconds */
-  chromaStartupTimeout?: number
   /** Quality threshold for switching engines */
   qualityThreshold?: number
 }
@@ -27,70 +27,35 @@ export interface AutoSearchOptions {
  */
 export class AutoSearchAdapter implements SearchEngine {
   private fuzzyAdapter: FuzzySearchAdapter
-  private chromaAdapter: ChromaSearchAdapter | null = null
+  private miniSearchAdapter: MiniSearchAdapter
   private options: AutoSearchOptions
 
   constructor(options: AutoSearchOptions) {
     this.options = options
     this.fuzzyAdapter = new FuzzySearchAdapter()
-
-    // ChromaDB adapter created on-demand for better performance
-  }
-
-  private async getChromaAdapter(): Promise<ChromaSearchAdapter> {
-    if (!this.chromaAdapter) {
-      this.chromaAdapter = new ChromaSearchAdapter({
-        skillDir: this.options.skillDir,
-        collectionName: this.options.collectionName,
-        startupTimeout: this.options.chromaStartupTimeout || 15000,
-        enableFallback: this.options.enableChromaFallback || true,
-      })
-    }
-    return this.chromaAdapter
+    this.miniSearchAdapter = new MiniSearchAdapter({
+      skillDir: this.options.skillDir,
+    })
   }
 
   async buildIndex(referencesDir: string): Promise<void> {
-    // Always build fuzzy index (fast and reliable)
+    await this.miniSearchAdapter.buildIndex(referencesDir)
     await this.fuzzyAdapter.buildIndex(referencesDir)
-
-    // Build ChromaDB index only if needed (on-demand)
-    // This prevents unnecessary ChromaDB startup for simple searches
   }
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
     const { topK = 5, where } = options
     const qualityThreshold = this.options.qualityThreshold || 0.3
 
-    console.log('🤖 Auto Mode: Starting with Fuzzy search...')
+    const fulltextResults = await this.miniSearchAdapter.search(query, { topK, where })
 
-    // Always start with fuzzy search (fast, reliable, no external dependencies)
-    const fuzzyResults = await this.fuzzyAdapter.search(query, { topK, where })
+    const quality = this.evaluateSearchQuality(fulltextResults, query)
 
-    // Evaluate search quality
-    const quality = this.evaluateSearchQuality(fuzzyResults, query)
-    console.log(`📊 Fuzzy search quality: ${quality.score.toFixed(2)} (${quality.reason})`)
-
-    // If fuzzy search quality is good, return results
     if (quality.score >= qualityThreshold) {
-      console.log('✅ Fuzzy search quality satisfactory, returning results')
-      return fuzzyResults
+      return fulltextResults
     }
 
-    // Try ChromaDB for better semantic understanding
-    console.log('🔄 Fuzzy search quality below threshold, trying ChromaDB...')
-
-    try {
-      const chromaAdapter = await this.getChromaAdapter()
-      const chromaResults = await chromaAdapter.search(query, { topK, where })
-      console.log(`✅ ChromaDB search completed, found ${chromaResults.length} results`)
-      return chromaResults
-    } catch (error) {
-      console.log(
-        `❌ ChromaDB search failed, returning fuzzy results:`,
-        error instanceof Error ? error.message : String(error)
-      )
-      return fuzzyResults
-    }
+    return this.fuzzyAdapter.search(query, { topK, where })
   }
 
   /**
@@ -141,11 +106,34 @@ export class AutoSearchAdapter implements SearchEngine {
   }
 
   isBuilt(): boolean {
-    return this.fuzzyAdapter.isBuilt()
+    return this.miniSearchAdapter.isBuilt() || this.fuzzyAdapter.isBuilt()
   }
 
   async getStats(): Promise<{ totalDocuments: number }> {
-    return this.fuzzyAdapter.getStats()
+    const [fulltextStats, fuzzyStats] = await Promise.all([
+      this.miniSearchAdapter.getStats(),
+      this.fuzzyAdapter.getStats(),
+    ])
+    return {
+      totalDocuments: Math.max(fulltextStats.totalDocuments, fuzzyStats.totalDocuments),
+    }
+  }
+
+  getBackendInfo(): SearchBackendInfo {
+    return {
+      backendId: 'minisearch',
+      mode: 'auto',
+      supportsPersistence: true,
+      supportsEmbeddings: false,
+    }
+  }
+
+  async getIndexState(): Promise<SearchIndexState> {
+    return (
+      (await this.miniSearchAdapter.getIndexState()) ?? {
+        backendId: 'minisearch',
+      }
+    )
   }
 
   async searchByPriority(query: string, topK: number = 5): Promise<SearchResult[]> {
@@ -154,8 +142,6 @@ export class AutoSearchAdapter implements SearchEngine {
 
   clearIndex(): void {
     this.fuzzyAdapter.clearIndex()
-    if (this.chromaAdapter) {
-      this.chromaAdapter.clearIndex()
-    }
+    this.miniSearchAdapter.clearIndex()
   }
 }

@@ -130,10 +130,11 @@ export class PackageUtils {
    * Normalize package name (remove @ prefix)
    */
   static normalizePackageName(packageName: string): string {
-    if (packageName.startsWith('@')) {
-      return packageName.slice(1)
-    }
     return packageName
+      .replace(/^@/, '')
+      .replace(/\//g, '__')
+      .replace(/[^a-z0-9@._-]/gi, '')
+      .toLowerCase()
   }
 
   /**

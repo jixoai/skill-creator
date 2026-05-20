@@ -38,7 +38,7 @@ describe('SkillCreator', () => {
       expect(existsSync(join(result.skillPath!, 'assets', 'references'))).toBe(true)
       expect(existsSync(join(result.skillPath!, 'assets', 'references', 'context7'))).toBe(true)
       expect(existsSync(join(result.skillPath!, 'assets', 'references', 'user'))).toBe(true)
-      expect(existsSync(join(result.skillPath!, 'assets', 'chroma_db'))).toBe(true)
+      expect(existsSync(join(result.skillPath!, 'assets', 'search'))).toBe(true)
       expect(existsSync(join(result.skillPath!, 'assets', 'logs'))).toBe(true)
 
       // Should not create config.json or package.json
@@ -117,7 +117,7 @@ describe('SkillCreator', () => {
       const expectedDirs = [
         'assets/references/context7',
         'assets/references/user',
-        'assets/chroma_db',
+        'assets/search',
         'assets/logs',
       ]
 

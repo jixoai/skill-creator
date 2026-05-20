@@ -5,7 +5,13 @@
  */
 
 import uFuzzy from '@leeoniya/ufuzzy'
-import type { SearchEngine, SearchResult, SearchOptions } from './searchAdapter'
+import type {
+  SearchEngine,
+  SearchResult,
+  SearchOptions,
+  SearchBackendInfo,
+  SearchIndexState,
+} from './searchAdapter'
 import { glob } from 'glob'
 import { readFileSync } from 'node:fs'
 import { join, basename } from 'node:path'
@@ -35,12 +41,9 @@ export class FuzzySearchAdapter implements SearchEngine {
   }
 
   async buildIndex(referencesDir: string): Promise<void> {
-    console.log('🔨 Building fuzzy search index with uFuzzy...')
-
     const files = await glob('**/*.md', { cwd: referencesDir })
 
     if (files.length === 0) {
-      console.log('No documentation files found to index')
       return
     }
 
@@ -74,14 +77,12 @@ export class FuzzySearchAdapter implements SearchEngine {
       }
     }
 
-    console.log(`✅ Fuzzy search index built with ${this.documents.length} documents`)
   }
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
     const { topK = 5, where } = options
 
     if (this.documents.length === 0) {
-      console.warn('Search index not built. Call buildIndex() first.')
       return []
     }
 
@@ -217,6 +218,23 @@ export class FuzzySearchAdapter implements SearchEngine {
 
   async getStats(): Promise<{ totalDocuments: number }> {
     return { totalDocuments: this.documents.length }
+  }
+
+  getBackendInfo(): SearchBackendInfo {
+    return {
+      backendId: 'ufuzzy',
+      mode: 'fuzzy',
+      supportsPersistence: false,
+      supportsEmbeddings: false,
+    }
+  }
+
+  async getIndexState(): Promise<SearchIndexState> {
+    return {
+      backendId: 'ufuzzy',
+      documentCount: this.documents.length,
+      builtAt: this.documents.length > 0 ? new Date().toISOString() : undefined,
+    }
   }
 
   async searchByPriority(query: string, topK: number = 5): Promise<SearchResult[]> {

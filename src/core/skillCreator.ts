@@ -70,7 +70,7 @@ export class SkillCreator {
     const dirs = [
       'assets/references/context7', // Base directory for all context7 projects
       'assets/references/user', // User-created content
-      'assets/chroma_db', // ChromaDB data
+      'assets/search', // Backend-neutral search runtime data
       'assets/logs', // Logs
     ]
 

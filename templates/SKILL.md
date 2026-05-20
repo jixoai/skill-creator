@@ -16,13 +16,13 @@ description: |
 skill-creator add-skill --pwd "{{SKILL_PATH}}" [--title "Title" --content "Content"]|[--file=*.md]
 
 # Search documentation
-skill-creator search-skill --pwd "{{SKILL_PATH}}" "query" [--mode=auto|chroma|fuzzy]
+skill-creator search-skill --pwd "{{SKILL_PATH}}" "query" [--mode=auto|fulltext|fuzzy|vector]
 
 # Download Context7 docs
 skill-creator download-context7 --pwd "{{SKILL_PATH}}" <context7_library_id>
 
 # Update Context7 docs
-skill-creator download-context7 --pwd "{{SKILL_PATH}}" --force [<context7_library_id>]
+skill-creator download-context7 --pwd "{{SKILL_PATH}}" --force <context7_library_id>
 
 # List all Context7 projects
 skill-creator list-context7 --pwd "{{SKILL_PATH}}"

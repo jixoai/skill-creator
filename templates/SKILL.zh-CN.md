@@ -13,7 +13,7 @@ description: |
 
 ### 核心特性
 
-- **智能搜索**: 基于ChromaDB的语义搜索，快速定位相关信息
+- **智能搜索**: 默认基于本地轻量全文检索，支持显式向量检索模式
 - **动态内容管理**: 支持添加自定义知识点，智能去重和更新
 - **Context7集成**: 自动获取和切片最新官方文档
 - **优先级管理**: 用户生成内容优先于官方文档
@@ -53,27 +53,38 @@ skill-creator search-skill --pwd="{{SKILL_PATH}}" "搜索关键词"
 # 自动模式（默认）- 智能选择搜索策略
 skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=auto "搜索关键词"
 
-# ChromaDB模式 - 语义化搜索，理解上下文含义
-skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=chroma "搜索关键词"
+# Fulltext模式 - 默认全文检索，适合 API、标题、最佳实践检索
+skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=fulltext "搜索关键词"
 
 # Fuzzy模式 - 关键字搜索，字符串模糊匹配
 skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=fuzzy "搜索关键词"
+
+# Vector模式 - 显式向量检索，适合语义查询
+skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=vector "搜索关键词"
 ```
 
 #### 搜索模式详解
 
 **🤖 Auto 模式（自动模式，默认）**
 
-- **工作原理**: 首先使用 Fuzzy 搜索进行快速匹配，如果没有找到满意结果，自动切换到 ChromaDB 进行语义搜索
+- **工作原理**: 先执行默认全文检索；若结果为空或质量不足，再回退到 fuzzy 检索
 - **适用场景**:
   - 不确定使用哪种搜索方式时
   - 希望获得最佳搜索平衡时
   - 日常快速查询需求
 - **优势**: 智能切换，兼顾速度和准确性，用户体验最佳
 
-**🧠 ChromaDB 模式（语义搜索）**
+**📚 Fulltext 模式（默认全文检索）**
 
-- **工作原理**: 基于向量数据库和语义模型，理解查询意图和上下文含义，进行概念匹配
+- **工作原理**: 基于本地持久化索引进行字段加权、前缀与轻量模糊匹配
+- **适用场景**:
+  - API 名称、配置项、标题、最佳实践定位
+  - 大多数日常文档检索
+- **优势**: 无需外部服务，索引构建与查询都更轻量
+
+**🧠 Vector 模式（显式语义搜索）**
+
+- **工作原理**: 基于 SQLite vector 和本地 embedding 理解查询意图与上下文
 - **适用场景**:
   - 概念性查询（"如何处理状态管理"）
   - 功能性搜索（"数据验证的方法"）
@@ -113,14 +124,14 @@ skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=fuzzy "useQuery"
 skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=fuzzy "baseURL配置"
 ```
 
-**概念和最佳实践查询**（推荐 ChromaDB 模式）:
+**概念和最佳实践查询**（推荐 Vector 模式）:
 
 ```bash
 # 概念性问题
-skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=chroma "如何优化React组件性能"
+skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=vector "如何优化React组件性能"
 
 # 最佳实践
-skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=chroma "状态管理最佳实践"
+skill-creator search-skill --pwd="{{SKILL_PATH}}" --mode=vector "状态管理最佳实践"
 ```
 
 **日常查询**（使用 Auto 模式）:
@@ -189,9 +200,8 @@ skill-creator list-skills --pwd="{{SKILL_PATH}}"
 │   └── references/
 │       ├── context7/          # 官方文档切片
 │       └── user/              # 用户自定义知识点
-├── config.json                # 技能配置
-├── SKILL.md                   # 本文件
-└── package.json               # 依赖管理
+│   └── search/                # 本地搜索索引与状态
+└── SKILL.md                   # 本文件
 ```
 
 ## 内容优先级

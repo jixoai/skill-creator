@@ -3,6 +3,7 @@
  */
 
 import { join } from 'node:path'
+import type { SearchMode } from '../core/searchAdapter.js'
 
 /**
  * Parse command line arguments
@@ -72,7 +73,7 @@ export function parseArgs(
  */
 export async function createSearchEngine(
   options: {
-    searchMode?: 'chroma' | 'fuzzy' | 'auto'
+    searchMode?: SearchMode
     useFormatting?: boolean
   } = {}
 ) {
@@ -87,8 +88,6 @@ export async function createSearchEngine(
     skillPath: process.cwd(),
     format: useFormatting ? 'enhanced' : undefined,
     adapterOptions: {
-      enableChromaFallback: true,
-      chromaStartupTimeout: 15000,
       qualityThreshold: 0.3,
     },
     formatting: {
@@ -98,4 +97,14 @@ export async function createSearchEngine(
       showLineNumbers: true,
     },
   })
+}
+
+export function normalizeSearchMode(mode: string): Exclude<SearchMode, 'chroma'> {
+  if (mode === 'chroma') return 'vector'
+  if (mode === 'auto' || mode === 'fulltext' || mode === 'fuzzy' || mode === 'vector') {
+    return mode
+  }
+
+  console.error('❌ Invalid search mode. Use: auto, fulltext, fuzzy, or vector')
+  process.exit(1)
 }

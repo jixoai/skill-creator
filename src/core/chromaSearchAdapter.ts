@@ -5,7 +5,13 @@
 
 import { ChromaClient } from 'chromadb'
 import { DefaultEmbeddingFunction } from '@chroma-core/default-embed'
-import type { SearchEngine, SearchResult, SearchOptions } from './searchAdapter.js'
+import type {
+  SearchBackendInfo,
+  SearchEngine,
+  SearchIndexState,
+  SearchOptions,
+  SearchResult,
+} from './searchAdapter.js'
 import { FuzzySearchAdapter } from './fuzzySearchAdapter.js'
 import { ChromaServerManager } from './chromaServerManager.js'
 
@@ -542,6 +548,15 @@ export class ChromaSearchAdapter implements SearchEngine {
     return this.isIndexBuilt
   }
 
+  getBackendInfo(): SearchBackendInfo {
+    return {
+      backendId: 'chroma',
+      mode: 'vector',
+      supportsPersistence: true,
+      supportsEmbeddings: true,
+    }
+  }
+
   async getStats(): Promise<{ totalDocuments: number }> {
     try {
       // 准备ChromaDB环境
@@ -565,6 +580,15 @@ export class ChromaSearchAdapter implements SearchEngine {
     } catch (error) {
       console.log(`⚠️ 无法获取 ChromaDB 统计信息:`, error)
       return { totalDocuments: 0 }
+    }
+  }
+
+  async getIndexState(): Promise<SearchIndexState> {
+    const stats = await this.getStats()
+    return {
+      backendId: 'chroma',
+      documentCount: stats.totalDocuments,
+      builtAt: this.isIndexBuilt ? new Date().toISOString() : undefined,
     }
   }
 

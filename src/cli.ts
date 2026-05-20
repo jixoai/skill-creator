@@ -33,12 +33,13 @@ async function resolveSkillDirectory(commandOptions: {
   }
 
   if (commandOptions.package) {
+    const normalizedPackageName = PackageUtils.normalizePackageName(commandOptions.package)
     const findDir = (base: string) => {
       if (!existsSync(base)) return undefined
       const dirs = readdirSync(base, { withFileTypes: true })
         .filter((dirent) => dirent.isDirectory())
         .map((dirent) => dirent.name)
-        .filter((name) => name.includes(commandOptions.package!.replace(/[^a-z0-9]/gi, '')))
+        .filter((name) => name.toLowerCase().includes(normalizedPackageName))
       return dirs.length > 0 ? join(base, dirs[0]) : undefined
     }
 
@@ -163,9 +164,8 @@ program
       }
 
       if (scope == null) {
-        scope = existsSync(join(process.cwd(), '.claude/agents/skill-creator.md'))
-          ? 'current'
-          : 'user'
+        console.error('Error: --scope is required. Use --scope current or --scope user.')
+        process.exit(1)
       }
       if (scope === 'user') {
         scope = path.join(homedir(), '.claude/skills')
@@ -308,7 +308,7 @@ program
   .argument('<query>', 'Search query')
   .option('--pwd <path>', 'Path to the skill directory')
   .option('--package <name>', 'Package name to find skill directory for')
-  .option('--mode <mode>', 'Search mode: auto, fuzzy, or chroma', 'auto')
+  .option('--mode <mode>', 'Search mode: auto, fulltext, fuzzy, or vector', 'auto')
   .option('--list', 'Show simplified list view (basic info only)', false)
   .action(async (query, options) => {
     try {
@@ -345,7 +345,7 @@ program
   .option('--pwd <path>', 'Path to the skill directory')
   .option('--package <name>', 'Package name to find skill directory for')
   .option('-f, --force', 'Force update even if up to date')
-  .option('--skip-chroma-indexing', 'Skip automatic ChromaDB index building after download')
+  .option('--skip-indexing', 'Skip automatic local index building after download')
   .action(async (projectId, options) => {
     try {
       const skillDir = await resolveSkillDirectory(options)
@@ -363,7 +363,7 @@ program
         const args = []
 
         if (options.force) args.push('--force')
-        if (options['skip-chroma-indexing']) args.push('--skip-chroma-indexing')
+        if (options['skipIndexing']) args.push('--skip-indexing')
         args.push('--project-id', projectId)
 
         await runScript('download-context7', args)

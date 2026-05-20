@@ -10,7 +10,7 @@ export interface SearchResult {
   source: 'user' | 'context7'
   file_path: string
   score: number
-  metadata: any
+  metadata: Record<string, unknown>
 }
 
 export interface SearchOptions {
@@ -19,7 +19,30 @@ export interface SearchOptions {
   fuzzyThreshold?: number
 }
 
+export type SearchMode = 'auto' | 'fulltext' | 'fuzzy' | 'vector' | 'chroma'
+
+export type SearchBackendId = 'minisearch' | 'ufuzzy' | 'sqlite-vec' | 'chroma'
+
+export interface SearchBackendInfo {
+  backendId: SearchBackendId
+  mode: Exclude<SearchMode, 'chroma'>
+  supportsPersistence: boolean
+  supportsEmbeddings: boolean
+}
+
+export interface SearchIndexState {
+  backendId: SearchBackendId
+  referencesHash?: string
+  builtAt?: string
+  documentCount?: number
+ }
+
 export interface SearchEngine {
+  /**
+   * Initialize backend resources if needed
+   */
+  initialize?(): Promise<void>
+
   /**
    * Build search index from files
    */
@@ -31,6 +54,11 @@ export interface SearchEngine {
   search(query: string, options?: SearchOptions): Promise<SearchResult[]>
 
   /**
+   * Return backend identity/capabilities
+   */
+  getBackendInfo(): SearchBackendInfo
+
+  /**
    * Check if the search index is built and ready
    */
   isBuilt(): boolean
@@ -38,12 +66,17 @@ export interface SearchEngine {
   /**
    * Get search engine statistics
    */
-  getStats(): any
+  getStats(): Promise<{ totalDocuments: number }>
+
+  /**
+   * Read index state metadata
+   */
+  getIndexState?(): Promise<SearchIndexState>
 
   /**
    * Clear the search index
    */
-  clearIndex(): void
+  clearIndex(): void | Promise<void>
 }
 
 /**

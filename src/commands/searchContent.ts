@@ -3,7 +3,7 @@
  */
 
 import { join } from 'node:path'
-import { parseArgs, createSearchEngine } from './shared.js'
+import { parseArgs, createSearchEngine, normalizeSearchMode } from './shared.js'
 import { createFormatter } from '../search_format/index.js'
 import type { FormattingOptions } from '../search_format/types.js'
 
@@ -17,15 +17,22 @@ export async function searchContent(args: string[]): Promise<void> {
     { name: 'list', type: 'boolean', default: false },
   ])
 
-  // Validate search mode
-  if (!['auto', 'fuzzy', 'chroma'].includes(options.mode)) {
-    console.error('❌ Invalid search mode. Use: auto, fuzzy, or chroma')
-    process.exit(1)
+  const normalizedMode = normalizeSearchMode(options.mode)
+
+  if (normalizedMode === 'vector') {
+    const { SqliteVectorSearchAdapter } = await import('../core/sqliteVectorSearchAdapter.js')
+    const runtimeSupported = await SqliteVectorSearchAdapter.isRuntimeSupported()
+    if (!runtimeSupported) {
+      console.error(
+        '❌ Vector mode is unavailable in this runtime. It requires node:sqlite support and sqlite-vec.'
+      )
+      process.exit(1)
+    }
   }
 
   // Create search engine
   const searchEngine = await createSearchEngine({
-    searchMode: options.mode as 'auto' | 'fuzzy' | 'chroma',
+    searchMode: normalizedMode,
     useFormatting: false, // We'll handle formatting manually for now
   })
 
@@ -77,7 +84,7 @@ export async function searchContent(args: string[]): Promise<void> {
     const result = formattedResult.result
 
     console.log(`\n${i + 1}. [Score: ${result.score.toFixed(2)}] ${result.title}`)
-    console.log(`   Source: ${result.source} (${result.metadata.priority || 'unknown'})`)
+    console.log(`   Source: ${result.source} (${String(result.metadata.priority || 'unknown')})`)
     console.log(`   File: ${result.relativePath || result.file_path}`)
 
     // Display formatted content based on content type

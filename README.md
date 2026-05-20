@@ -11,7 +11,7 @@ A powerful composite tool for creating and managing Claude Code skills. It serve
 
 - 🚀 **Automated Skill Creation**: Generate skills with proper folder naming (`package@version` format)
 - 📚 **Context7 Integration**: Download and slice documentation from Context7 with automatic project ID detection
-- 🔍 **Intelligent Search**: ChromaDB-powered semantic search with automatic indexing
+- 🔍 **Intelligent Search**: Lightweight local full-text search with optional explicit vector mode
 - 💾 **Dynamic Content Management**: Add custom knowledge with deduplication
 
 ### CLI & Subagent
@@ -140,7 +140,7 @@ skill-creator get-info @tanstack/react-query
 skill-creator create-cc-skill --scope user --name "@tanstack/react-query" --description "React Query for data fetching" @tanstack/react-query@5
 
 # Create skill with interactive prompts
-skill-creator create-cc-skill --interactive --description "React Query for data fetching" @tanstack/react-query@5
+skill-creator create-cc-skill --scope user --interactive --description "React Query for data fetching" @tanstack/react-query@5
 
 # Download documentation (automatically builds search index)
 skill-creator download-context7 --package @tanstack/react-query /tanstack/react-query
@@ -184,7 +184,7 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 - `--package <name>`: Use package name to find skill directory
 - `--description <description>`: Custom description for the skill
 - `--force`: Force overwrite existing files
-- `--skip-chroma-indexing`: Skip automatic ChromaDB index building
+- `--skip-indexing`: Skip automatic local index building
 - `--interactive`: Enable interactive prompts
 
 ## Workflow
@@ -207,7 +207,7 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 
    ```bash
    # With custom package name (recommended)
-   skill-creator create-cc-skill --scope current --name zustand --description "Zustand state management"
+   skill-creator create-cc-skill --scope current --name zustand --description "Zustand state management" zustand@5
 
    # With interactive prompts
    skill-creator create-cc-skill --scope current --interactive zustand
@@ -236,10 +236,10 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 .claude/skills/
 └── package@version/
     ├── assets/
-    │   └── references/
+    │   ├── references/
     │       ├── context7/     # Auto-sliced Context7 docs
     │       └── user/         # Custom knowledge files
-    ├── config.json          # Skill configuration
+    │   └── search/          # Local search indexes and state
     └── SKILL.md             # Skill documentation
 ```
 
@@ -291,24 +291,18 @@ skill-creator get-info @upstash/context7
 skill-creator download-context7 --help
 ```
 
-## Configuration
+## Search Modes
 
-Skills are configured via `config.json` in the skill directory:
-
-```json
-{
-  "context7LibraryId": "/org/project",
-  "searchEngine": {
-    "type": "chroma",
-    "chromaPath": "./chroma"
-  }
-}
-```
+- `auto`: default path, tries full-text first and falls back to fuzzy when quality is weak
+- `fulltext`: explicit MiniSearch-backed local index
+- `fuzzy`: explicit `uFuzzy` fallback for path/term-style matching
+- `vector`: explicit SQLite vector search path when the local runtime supports it
+- `chroma`: legacy CLI alias to `vector`, intentionally undocumented in generated artifacts
 
 ## Architecture
 
 - **TypeScript + ESM**: Modern JavaScript with full type safety
-- **ChromaDB Integration**: Vector search for intelligent document retrieval
+- **Search Runtime**: MiniSearch-backed local full-text indexing by default, with explicit vector mode available when runtime support exists
 - **Context7 API**: Automated documentation downloading and slicing
 - **CLI-first Design**: Professional command-line interface
 - **Modular Architecture**: Clean separation of concerns

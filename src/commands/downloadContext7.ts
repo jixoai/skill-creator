@@ -1,5 +1,5 @@
 /**
- * Download Context7 documentation command with automatic ChromaDB indexing
+ * Download Context7 documentation command with automatic local index refresh
  */
 
 import { join } from 'node:path'
@@ -21,7 +21,7 @@ export async function downloadContext7(args: string[]): Promise<void> {
   const options = parseArgs(args, [
     { name: 'force', type: 'boolean' },
     { name: 'project-id', type: 'string' },
-    { name: 'skip-chroma-indexing', type: 'boolean' },
+    { name: 'skip-indexing', type: 'boolean' },
   ])
 
   const projectId = options['project-id']
@@ -45,37 +45,41 @@ export async function downloadContext7(args: string[]): Promise<void> {
       const files = contentManager.getContext7ProjectFiles(projectId)
       const fileList = files.map((f) => `- ${f}`).join('\n')
 
-      updateSkillMdFile(skillMdPath, 'context7-skills', fileList, projectId)
+      updateSkillMdFile(
+        skillMdPath,
+        'context7-skills',
+        fileList,
+        projectId,
+        `assets/references/context7/${encodeURIComponent(projectId)}`
+      )
       console.log(`📝 Updated SKILL.md with ${files.length} files`)
     }
 
-    // Auto-build ChromaDB index unless skipped
-    if (!options['skip-chroma-indexing']) {
-      console.log(`\n🔧 Building ChromaDB index...`)
+    // Auto-build the active local index unless skipped
+    if (!options['skip-indexing']) {
+      console.log(`\n🔧 Building search index...`)
 
       try {
         await searchEngine.initialize()
         await searchEngine.buildIndex(join(process.cwd(), 'assets', 'references'))
 
         const stats = await searchEngine.getStats()
-        console.log(`✅ ChromaDB index built successfully!`)
+        console.log(`✅ Search index built successfully!`)
         console.log(`📊 Indexed ${stats.totalDocuments || 0} documents`)
-
-        // Check if ChromaDB was used by checking the search engine type
-        const engineType = (searchEngine as any).searchEngine?.constructor?.name
-        if (engineType?.includes('Chroma') || engineType?.includes('chroma')) {
-          console.log(`🎯 ChromaDB search is now ready for enhanced queries`)
+        const backendInfo = await searchEngine.getBackendInfo()
+        if (backendInfo) {
+          console.log(`🎯 Active backend: ${backendInfo.backendId} (${backendInfo.mode})`)
         }
       } catch (error) {
         console.log(
-          `⚠️ ChromaDB indexing failed: ${error instanceof Error ? error.message : String(error)}`
+          `⚠️ Search indexing failed: ${error instanceof Error ? error.message : String(error)}`
         )
         console.log(
-          `💡 You can still use fuzzy search, or retry with --skip-chroma-indexing to skip this step`
+          `💡 You can still use search-skill with another mode, or retry with --skip-indexing to skip this step`
         )
       }
     } else {
-      console.log(`\n⏭️ Skipping ChromaDB indexing (as requested)`)
+      console.log(`\n⏭️ Skipping search indexing (as requested)`)
       console.log(`💡 To build index later, run: skill-creator build-index`)
     }
   } catch (error) {

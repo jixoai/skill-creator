@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ContentManager } from '../../src/core/contentManager.js'
-import { SimpleSearchEngine } from '../../src/core/simpleSearch.js'
 import { createTempDir, cleanupTempDir } from '../test-utils.js'
 
 // Mock search engine for testing
@@ -411,6 +410,39 @@ The API includes many powerful features for developers including authentication,
 
       expect(result.updated).toBe(true)
       expect(result.message).toContain('Updated')
+    })
+
+    it('should store, list, and remove slash-separated context7 project ids safely', async () => {
+      const testContent = `# React Query
+
+This documentation is long enough to produce indexed slices for the encoded project id path.
+
+## Query Keys
+
+Query keys should be deterministic, serializable, and scoped by resource identity.`
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(testContent),
+      })
+
+      const projectId = '/tanstack/react-query'
+      const result = await contentManager.updateFromContext7(projectId, false)
+
+      expect(result.updated).toBe(true)
+      expect(
+        existsSync(join(referencesDir, 'context7', encodeURIComponent(projectId)))
+      ).toBe(true)
+
+      const projects = contentManager.listContext7Projects()
+      expect(projects).toHaveLength(1)
+      expect(projects[0]?.projectId).toBe(projectId)
+
+      const removal = contentManager.removeContext7Project(projectId)
+      expect(removal.success).toBe(true)
+      expect(
+        existsSync(join(referencesDir, 'context7', encodeURIComponent(projectId)))
+      ).toBe(false)
     })
   })
 

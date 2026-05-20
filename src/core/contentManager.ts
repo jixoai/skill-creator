@@ -26,6 +26,7 @@ export interface ContentManagerOptions {
     search(query: string, topK?: number, where?: any): Promise<any[]>
   }
   referencesDir: string
+  fetchImpl?: typeof fetch
 }
 
 export class ContentManager {
@@ -45,7 +46,15 @@ export class ContentManager {
    * Get the directory path for a specific context7 project
    */
   private getContext7ProjectDir(projectId: string): string {
-    return join(this.context7BaseDir, projectId)
+    return join(this.context7BaseDir, this.encodeContext7ProjectId(projectId))
+  }
+
+  private encodeContext7ProjectId(projectId: string): string {
+    return encodeURIComponent(projectId)
+  }
+
+  private decodeContext7ProjectId(encodedProjectId: string): string {
+    return decodeURIComponent(encodedProjectId)
   }
 
   async updateFromContext7(
@@ -241,8 +250,8 @@ export class ContentManager {
         .filter((dirent) => dirent.isDirectory())
         .map((dirent) => dirent.name)
 
-      for (const projectId of projects) {
-        const projectDir = this.getContext7ProjectDir(projectId)
+      for (const encodedProjectId of projects) {
+        const projectDir = join(this.context7BaseDir, encodedProjectId)
         if (existsSync(projectDir)) {
           stats.context7Files += readdirSync(projectDir).filter((f) => f.endsWith('.md')).length
         }
@@ -296,8 +305,9 @@ export class ContentManager {
           .filter((dirent) => dirent.isDirectory())
           .map((dirent) => dirent.name)
 
-        for (const projectId of projects) {
-          const projectDir = this.getContext7ProjectDir(projectId)
+        for (const encodedProjectId of projects) {
+          const projectId = this.decodeContext7ProjectId(encodedProjectId)
+          const projectDir = join(this.context7BaseDir, encodedProjectId)
           if (existsSync(projectDir)) {
             const files = readdirSync(projectDir)
             for (const file of files) {
@@ -335,9 +345,14 @@ export class ContentManager {
   }
 
   private async downloadContext7Doc(libraryId: string): Promise<string> {
-    const url = `https://context7.com${libraryId}/llms.txt?tokens=100000000&topic=*`
+    const baseUrl = (process.env.SKILL_CREATOR_CONTEXT7_BASE_URL ?? 'https://context7.com').replace(
+      /\/$/,
+      ''
+    )
+    const url = `${baseUrl}${libraryId}/llms.txt?tokens=100000000&topic=*`
 
-    const response = await fetch(url)
+    const fetchImpl = this.options.fetchImpl ?? fetch
+    const response = await fetchImpl(url)
     if (!response.ok) {
       throw new Error(`Failed to download: ${response.statusText}`)
     }
@@ -542,7 +557,7 @@ export class ContentManager {
 
   private getHashFilePath(projectId: string): string {
     // Sanitize project ID for use in filename (replace slashes with underscores)
-    const safeProjectId = projectId.replace(/\//g, '_')
+    const safeProjectId = this.encodeContext7ProjectId(projectId)
     return join(this.options.referencesDir, '..', `.context7_hash_${safeProjectId}`)
   }
 
@@ -586,8 +601,9 @@ export class ContentManager {
       .filter((dirent) => dirent.isDirectory())
       .map((dirent) => dirent.name)
 
-    for (const projectId of projectDirs) {
-      const projectDir = this.getContext7ProjectDir(projectId)
+    for (const encodedProjectId of projectDirs) {
+      const projectId = this.decodeContext7ProjectId(encodedProjectId)
+      const projectDir = join(this.context7BaseDir, encodedProjectId)
       if (existsSync(projectDir)) {
         const files = readdirSync(projectDir).filter((f) => f.endsWith('.md'))
         projects.push({
