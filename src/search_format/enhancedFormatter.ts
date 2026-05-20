@@ -147,10 +147,6 @@ export class EnhancedFormatter implements SearchFormatter {
 
     const averageScore = scores.reduce((sum, score) => sum + score, 0) / scores.length
 
-    console.log(
-      `📊 质量指标计算: maxScore=${maxScore.toFixed(3)}, modifiedAverageScore=${modifiedAverageScore.toFixed(3)}, averageScore=${averageScore.toFixed(3)}`
-    )
-
     return {
       maxScore,
       averageScore,
@@ -178,25 +174,18 @@ export class EnhancedFormatter implements SearchFormatter {
       let fullContent: string | undefined
       let preview: string | undefined
 
-      console.log(
-        `🔍 Enhanced分层判断: Score=${score.toFixed(3)}, maxScore=${maxScore.toFixed(3)}, modifiedAverageScore=${modifiedAverageScore.toFixed(3)}`
-      )
-
       // 最高优先级：maxScore 必然显示完整内容
       if (score === maxScore) {
         // Tier 1: 最高分 - 显示完整内容
         displayTier = 'full'
         fullContent = this.wrapContent(result.content, 'content')
-        console.log(`✅ score == maxScore，分配到完整内容模式`)
       } else if (score >= modifiedAverageScore) {
         // Tier 2: 中等分数 - 显示带行号的预览
         displayTier = 'preview'
         preview = this.createEnhancedPreview(result.content)
-        console.log(`✅ score >= modifiedAverageScore，分配到预览模式`)
       } else {
         // Tier 3: 低分数 - 仅显示元数据
         displayTier = 'metadata-only'
-        console.log(`⚠️ score < modifiedAverageScore，分配到元数据模式`)
       }
 
       // 设置相对路径
@@ -221,33 +210,20 @@ export class EnhancedFormatter implements SearchFormatter {
    * Format content based on display tier
    */
   private formatByTier(result: FormattableSearchResult, options: FormattingOptions): string {
-    const score = result.score
     const tier = result.metadata.displayTier
-    const contentLength = result.content?.length || 0
-
-    // 添加调试信息显示分数和层级
-    const debugInfo = `<!-- Score: ${score.toFixed(3)}, Tier: ${tier}, ContentLength: ${contentLength} -->`
-
-    console.log(
-      `🔍 Enhanced格式化: Score=${score.toFixed(3)}, Tier=${tier}, ContentLength=${contentLength}`
-    )
 
     switch (tier) {
       case 'full':
-        console.log(`📝 使用完整内容模式，内容长度: ${result.fullContent?.length || 0}`)
-        return `${debugInfo}\n${result.fullContent || ''}`
+        return result.fullContent || ''
 
       case 'preview':
-        console.log(`👁️ 使用预览模式，预览长度: ${result.preview?.length || 0}`)
-        return `${debugInfo}\n${result.preview || ''}`
+        return result.preview || ''
 
       case 'metadata-only':
-        console.log(`📋 使用元数据模式`)
-        return `${debugInfo}\nContent: (No preview - metadata only)`
+        return 'Content: (No preview - metadata only)'
 
       default:
-        console.log(`⚠️ 未知层级，使用默认模式`)
-        return `${debugInfo}\n${result.content.substring(0, 200).replace(/\n/g, ' ')}...`
+        return `${result.content.substring(0, 200).replace(/\n/g, ' ')}...`
     }
   }
 

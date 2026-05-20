@@ -204,6 +204,39 @@ Mutations should invalidate related queries and keep optimistic updates bounded 
 
       expect(output).toContain('Query Client')
     }, 30_000)
+
+    it('should show enhanced preview line indexes without formatter debug comments', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'preview-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "preview-skill" --description "Preview test skill" preview-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Preview Result" --content "# Preview Result\n\nLine two context.\nLine three signal."`,
+        { encoding: 'utf-8' }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Metadata Result" --content "This content should rank lower for the query."`,
+        { encoding: 'utf-8' }
+      )
+
+      const output = execSync(`${cliCmd} search-skill --pwd "${skillDir}" "preview result"`, {
+        encoding: 'utf-8',
+      })
+
+      expect(output).toContain('Preview Result')
+      expect(output).toContain('Preview:')
+      expect(output).toContain('Lines: 1,2,3')
+      expect(output).not.toContain('<!-- Score:')
+      expect(output).not.toContain('Enhanced分层判断')
+    }, 30_000)
   })
 
   describe('Error Cases', () => {

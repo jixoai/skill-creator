@@ -50,11 +50,6 @@ export async function searchContent(args: string[]): Promise<void> {
   // Perform search
   const results = await searchEngine.search(options.query, topK || 5, whereFilter)
 
-  // Display results
-  console.log(`\n🔍 Searching in skill...`)
-  console.log(`Skill Path: ${process.cwd()}`)
-  console.log(`Query: ${options.query}`)
-
   console.log(`\nSearch Results for: '${options.query}'`)
   console.log('='.repeat(50))
 
@@ -107,6 +102,7 @@ export async function searchContent(args: string[]): Promise<void> {
           )
           if (limitContentMatch) {
             const [, lineIndexes, content] = limitContentMatch
+            console.log(`   Lines: ${lineIndexes}`)
             console.log(`   ${content}`)
           } else {
             console.log(`   ${formattedResult.content}`)
