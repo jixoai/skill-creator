@@ -197,6 +197,99 @@ Mutations should invalidate related queries and keep optimistic updates bounded 
       expect(resolved.bestMatch.matchKind).toBe('package-path')
     }, 30_000)
 
+    it('should resolve context7 automatically when download-context7 is called with --package only', async () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'auto-download-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "auto-download-skill" --description "Auto download test skill" auto-download-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      const server = createServer((request, response) => {
+        if (request.url?.startsWith('/api/v2/libs/search')) {
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          response.end(
+            JSON.stringify({
+              results: [
+                {
+                  id: '/demo/pkg',
+                  title: 'Demo Package',
+                  description: 'Repository docs',
+                  totalSnippets: 42,
+                  trustScore: 8.5,
+                  benchmarkScore: 87,
+                  versions: ['v1.0.0'],
+                },
+              ],
+            })
+          )
+          return
+        }
+
+        if (request.url?.startsWith('/demo/pkg/llms.txt')) {
+          response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end(`# Demo Package
+
+Detailed overview content that is long enough to be preserved by the slicer and later indexed.
+
+## Fake Timers
+
+Use fake timers to control asynchronous test timing deterministically.`)
+          return
+        }
+
+        response.writeHead(404)
+        response.end('not found')
+      })
+
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+      const address = server.address()
+      if (address == null || typeof address === 'string') {
+        server.close()
+        throw new Error('Failed to start test server')
+      }
+
+      try {
+        const { stdout: output } = await execFileAsync(
+          'node',
+          [
+            `${process.cwd()}/dist/cli.mjs`,
+            'download-context7',
+            '--pwd',
+            skillDir,
+            '--package',
+            'demo-pkg',
+            '--package-version',
+            '1.0.0',
+          ],
+          {
+            encoding: 'utf-8',
+            env: {
+              ...process.env,
+              SKILL_CREATOR_CONTEXT7_SEARCH_BASE_URL: `http://127.0.0.1:${address.port}/api/v2/libs/search`,
+              SKILL_CREATOR_CONTEXT7_BASE_URL: `http://127.0.0.1:${address.port}`,
+            },
+          }
+        )
+
+        expect(output).toContain('Resolved Context7 ID: /demo/pkg')
+        expect(output).toContain('Documentation downloaded and sliced')
+
+        const encodedProjectId = encodeURIComponent('/demo/pkg')
+        const context7Dir = join(skillDir, 'assets', 'references', 'context7', encodedProjectId)
+        expect(existsSync(context7Dir)).toBe(true)
+        expect(readdirSync(context7Dir).some((file) => file.endsWith('.md'))).toBe(true)
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        )
+      }
+    }, 30_000)
+
     it('should resolve scoped package skills through --package', () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', '@tanstack__react-query@5')

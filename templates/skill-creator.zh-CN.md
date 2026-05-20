@@ -95,6 +95,10 @@ skill-creator --help
      ```
      > 这里 `download-context7` 命令会下载 llms.txt，并将它切分成很多个知识点文件
      > 默认还会立即更新 `SKILL.md` 并构建本地搜索索引，除非显式跳过索引。
+   - 如果你不需要手动检查排序候选，也可以直接走一步式命令：
+     ```bash
+     skill-creator --pwd "{skill_dir_fullpath}" download-context7 --package <package-name> [--package-version <version>]
+     ```
 
 5. **测试搜索**
 

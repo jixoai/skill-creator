@@ -92,6 +92,10 @@ skill-creator --help
      ```
      > Here the `download-context7` command downloads llms.txt and slices it into many knowledge point files
      > It also updates `SKILL.md` and builds the local search index immediately unless indexing is explicitly skipped.
+   - If you do not need to inspect the ranked candidates manually, you may use the one-step path instead:
+     ```bash
+     skill-creator --pwd={skill_dir_fullpath} download-context7 --package <package-name> [--package-version <version>]
+     ```
 
 5. **Test Search**
 

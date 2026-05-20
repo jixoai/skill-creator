@@ -100,7 +100,10 @@ skill-creator create-cc-skill --scope user --interactive --description "React Qu
 # Resolve the best Context7 project id
 skill-creator resolve-context7 @tanstack/react-query
 
-# Download documentation (automatically builds search index)
+# Download documentation directly from the package name
+skill-creator download-context7 --package @tanstack/react-query --package-version 5.0.0
+
+# Or download with an explicit resolved Context7 id
 skill-creator download-context7 --package @tanstack/react-query /tanstack/react-query
 
 # Search your skill knowledge base
@@ -129,7 +132,7 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 
 | Command                          | Description                               |
 | -------------------------------- | ----------------------------------------- |
-| `download-context7 <project_id>` | Download and slice Context7 documentation |
+| `download-context7 [project_id]` | Download and slice Context7 documentation |
 | `search-skill <query>`           | Search in skill knowledge base            |
 | `add-skill`                      | Add custom knowledge to skill             |
 
@@ -141,6 +144,7 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 - `--name <name>`: Package name for the skill (recommended)
 - `--pwd <path>`: Working directory for skill operations
 - `--package <name>`: Use package name to find skill directory
+- `--package-version <version>`: Version hint for Context7 library resolution
 - `--description <description>`: Custom description for the skill
 - `--force`: Force overwrite existing files
 - `--skip-indexing`: Skip automatic local index building
@@ -181,6 +185,10 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 5. **Download Documentation**: Get Context7 docs with automatic indexing
 
    ```bash
+   # One-step path: resolve and download from the package name
+   skill-creator download-context7 --package zustand --package-version 5.0.0
+
+   # Two-step path: supply the explicit Context7 project id
    skill-creator download-context7 --package zustand /zustand
    ```
 

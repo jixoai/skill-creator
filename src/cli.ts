@@ -20,6 +20,17 @@ interface GlobalOptions {
 
 let globalOptions: GlobalOptions = {}
 
+function inferVersionHintFromSkillDirectory(skillDir: string): string | undefined {
+  const skillDirName = path.basename(skillDir)
+  const versionSeparator = skillDirName.lastIndexOf('@')
+
+  if (versionSeparator <= 0 || versionSeparator === skillDirName.length - 1) {
+    return undefined
+  }
+
+  return skillDirName.slice(versionSeparator + 1)
+}
+
 // Helper function to resolve skill directory from global or command options
 async function resolveSkillDirectory(commandOptions: {
   pwd?: string
@@ -364,18 +375,52 @@ program
 // Add download-context7 command
 program
   .command('download-context7')
-  .argument('<project_id>', 'Context7 library ID')
+  .argument('[project_id]', 'Context7 library ID')
   .option('--pwd <path>', 'Path to the skill directory')
   .option('--package <name>', 'Package name to find skill directory for')
+  .option(
+    '--package-version <version>',
+    'Version hint used when resolving a Context7 library from --package'
+  )
   .option('-f, --force', 'Force update even if up to date')
   .option('--skip-indexing', 'Skip automatic local index building after download')
   .action(async (projectId, options) => {
     try {
       const skillDir = await resolveSkillDirectory(options)
+      let resolvedProjectId = projectId as string | undefined
+
+      if (!resolvedProjectId) {
+        if (!options.package) {
+          console.error('❌ Please provide either a Context7 project ID or --package <name>')
+          process.exit(1)
+        }
+
+        const versionHint = options.packageVersion || inferVersionHintFromSkillDirectory(skillDir)
+        const { Context7Utils } = await import('./utils/context7.js')
+
+        console.log(gradient('cyan', 'magenta')('\n🧭 Resolving Context7 library...'))
+        console.log(`Package: ${options.package}`)
+        if (versionHint) {
+          console.log(`Version hint: ${versionHint}`)
+        }
+
+        const resolved = await Context7Utils.resolveLibrary(options.package, {
+          version: versionHint,
+        })
+
+        if (!resolved) {
+          console.error(`❌ No Context7 library found for package "${options.package}".`)
+          process.exit(1)
+        }
+
+        resolvedProjectId = resolved.bestMatch.id
+        console.log(`Resolved Context7 ID: ${resolvedProjectId}`)
+        console.log(`Resolution query: ${resolved.query}`)
+      }
 
       console.log(gradient('cyan', 'magenta')('\n📥 Downloading Context7 documentation...'))
       console.log(`Skill Path: ${skillDir}`)
-      console.log(`Context7 ID: ${projectId}`)
+      console.log(`Context7 ID: ${resolvedProjectId}`)
 
       const { chdir } = await import('node:process')
       const originalCwd = process.cwd()
@@ -387,7 +432,7 @@ program
 
         if (options.force) args.push('--force')
         if (options['skipIndexing']) args.push('--skip-indexing')
-        args.push('--project-id', projectId)
+        args.push('--project-id', resolvedProjectId)
 
         await runScript('download-context7', args)
       } finally {
