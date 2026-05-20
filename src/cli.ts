@@ -8,8 +8,13 @@ import gradient from 'gradient-string'
 import { PackageUtils } from './utils/package.js'
 import path, { join } from 'node:path'
 import { homedir } from 'node:os'
-import { readdirSync, existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { createSkillForPackage } from './commands/createSkill.js'
+import {
+  inferPackageMetadataFromSkill,
+  inferVersionHintFromSkillDirectory,
+  resolveSkillDirectoryFromOptions,
+} from './utils/skillIdentity.js'
 
 const program = new Command()
 
@@ -19,100 +24,6 @@ interface GlobalOptions {
 }
 
 let globalOptions: GlobalOptions = {}
-
-function inferVersionHintFromSkillDirectory(skillDir: string): string | undefined {
-  const skillDirName = path.basename(skillDir)
-  const versionSeparator = skillDirName.lastIndexOf('@')
-
-  if (versionSeparator <= 0 || versionSeparator === skillDirName.length - 1) {
-    return undefined
-  }
-
-  return skillDirName.slice(versionSeparator + 1)
-}
-
-function inferPackageMetadataFromSkill(skillDir: string): {
-  packageName?: string
-  versionHint?: string
-} {
-  const skillMdPath = join(skillDir, 'SKILL.md')
-  if (!existsSync(skillMdPath)) {
-    return {}
-  }
-
-  const skillMdContent = readFileSync(skillMdPath, 'utf-8')
-  const packageTagMatch = skillMdContent.match(
-    /<skill-package\s+name="([^"]*)"\s+version="([^"]*)">\s*<\/skill-package>/
-  )
-
-  if (!packageTagMatch) {
-    return {}
-  }
-
-  const [, packageName, versionHint] = packageTagMatch
-  return {
-    packageName: packageName || undefined,
-    versionHint: versionHint || undefined,
-  }
-}
-
-function findSkillDirectoryByPackageMetadata(base: string, packageName: string): string | undefined {
-  if (!existsSync(base)) return undefined
-
-  const dirs = readdirSync(base, { withFileTypes: true })
-    .filter((dirent) => dirent.isDirectory())
-    .map((dirent) => join(base, dirent.name))
-
-  for (const dir of dirs) {
-    const metadata = inferPackageMetadataFromSkill(dir)
-    if (metadata.packageName === packageName) {
-      return dir
-    }
-  }
-
-  return undefined
-}
-
-// Helper function to resolve skill directory from global or command options
-async function resolveSkillDirectory(commandOptions: {
-  pwd?: string
-  package?: string
-}): Promise<string> {
-  // Use command options first, then global options
-  const pwd = commandOptions.pwd || globalOptions.pwd
-
-  if (pwd) {
-    return pwd
-  }
-
-  if (commandOptions.package) {
-    const normalizedPackageName = PackageUtils.normalizePackageName(commandOptions.package)
-    const findDirByName = (base: string) => {
-      if (!existsSync(base)) return undefined
-      const dirs = readdirSync(base, { withFileTypes: true })
-        .filter((dirent) => dirent.isDirectory())
-        .map((dirent) => dirent.name)
-        .filter((name) => name.toLowerCase().includes(normalizedPackageName))
-      return dirs.length > 0 ? join(base, dirs[0]) : undefined
-    }
-
-    const searchBases = [join(process.cwd(), '.claude', 'skills'), join(homedir(), '.claude', 'skills')]
-    const metadataMatchedSkillDir =
-      searchBases
-        .map((base) => findSkillDirectoryByPackageMetadata(base, commandOptions.package as string))
-        .find(Boolean) ?? undefined
-
-    const skillDir =
-      metadataMatchedSkillDir ||
-      searchBases.map((base) => findDirByName(base)).find(Boolean)
-
-    if (skillDir) {
-      return skillDir
-    }
-  }
-
-  throw new Error('Could not find skill directory. Please provide --pwd or a valid --package.')
-}
 
 program
   .name('skill-creator')
@@ -396,7 +307,7 @@ program
   .option('--list', 'Show simplified list view (basic info only)', false)
   .action(async (query, options) => {
     try {
-      const skillDir = await resolveSkillDirectory(options)
+      const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
 
       console.log(gradient('cyan', 'magenta')('\n🔍 Searching in skill...'))
       console.log(`Skill Path: ${skillDir}`)
@@ -436,7 +347,7 @@ program
   .option('--skip-indexing', 'Skip automatic local index building after download')
   .action(async (projectId, options) => {
     try {
-      const skillDir = await resolveSkillDirectory(options)
+      const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
       let resolvedProjectId = projectId as string | undefined
 
       if (!resolvedProjectId) {
@@ -521,7 +432,7 @@ program
     }
 
     try {
-      const skillDir = await resolveSkillDirectory(options)
+      const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
 
       console.log(gradient('cyan', 'magenta')('\n📝 Adding content to skill...'))
       console.log(`Skill Path: ${skillDir}`)
@@ -560,7 +471,7 @@ program
   .option('--package <name>', 'Package name to find skill directory for')
   .action(async (options) => {
     try {
-      const skillDir = await resolveSkillDirectory(options)
+      const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
 
       console.log(gradient('cyan', 'magenta')('\n📚 Skill Content'))
       console.log(`Skill Path: ${skillDir}`)
@@ -607,7 +518,7 @@ program
         process.exit(1)
       }
 
-      const skillDir = await resolveSkillDirectory(options)
+      const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
 
       console.log(gradient('cyan', 'magenta')('\n🗑️  Remove Skill File'))
       console.log(`Skill Path: ${skillDir}`)
@@ -640,7 +551,7 @@ program
   .option('--package <name>', 'Package name to find skill directory for')
   .action(async (options) => {
     try {
-      const skillDir = await resolveSkillDirectory(options)
+      const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
 
       console.log(gradient('cyan', 'magenta')('\n📦 Context7 Projects'))
       console.log(`Skill Path: ${skillDir}`)
@@ -670,7 +581,7 @@ program
   .option('--package <name>', 'Package name to find skill directory for')
   .action(async (projectId, options) => {
     try {
-      const skillDir = await resolveSkillDirectory(options)
+      const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
 
       console.log(gradient('cyan', 'magenta')('\n🗑️  Remove Context7 Project'))
       console.log(`Skill Path: ${skillDir}`)
