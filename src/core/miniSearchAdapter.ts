@@ -124,6 +124,8 @@ export class MiniSearchAdapter implements SearchEngine {
         titleCoverage: item.titleCoverage,
         contentCoverage: item.contentCoverage,
         termDensity: item.termDensity,
+        phraseCoverage: item.phraseCoverage,
+        proximityScore: item.proximityScore,
       },
     }))
   }
@@ -270,9 +272,12 @@ export class MiniSearchAdapter implements SearchEngine {
       titleCoverage: number
       contentCoverage: number
       termDensity: number
+      phraseCoverage: number
+      proximityScore: number
     }
   > {
     const queryTokens = this.normalizeQueryTokens(query)
+    const queryPhrases = this.extractQueryPhrases(query, queryTokens)
 
     return results
       .map((result) => {
@@ -281,13 +286,17 @@ export class MiniSearchAdapter implements SearchEngine {
         const titleCoverage = this.calculateCoverage(result.title, queryTokens)
         const contentCoverage = this.calculateCoverage(content, queryTokens)
         const termDensity = this.calculateTermDensity(content, queryTokens)
+        const phraseCoverage = this.calculatePhraseCoverage(content, result.title, queryPhrases)
+        const proximityScore = this.calculateProximityScore(content, queryTokens)
         const calibratedScore = this.calibrateRawScore(result.score)
 
         const rerankScore =
-          calibratedScore * 0.25 +
-          titleCoverage * 0.35 +
-          contentCoverage * 0.2 +
-          Math.min(termDensity / 2, 1) * 0.2
+          calibratedScore * 0.18 +
+          titleCoverage * 0.18 +
+          contentCoverage * 0.12 +
+          Math.min(termDensity * 1.5, 1) * 0.08 +
+          phraseCoverage * 0.29 +
+          proximityScore * 0.15
 
         return {
           ...result,
@@ -295,6 +304,8 @@ export class MiniSearchAdapter implements SearchEngine {
           titleCoverage,
           contentCoverage,
           termDensity,
+          phraseCoverage,
+          proximityScore,
         }
       })
       .sort((left, right) => {
@@ -339,14 +350,116 @@ export class MiniSearchAdapter implements SearchEngine {
 
     let matches = 0
     for (const token of queryTokens) {
-      for (const word of words) {
-        if (word === token || word === token.slice(0, -1) || token === word.slice(0, -1)) {
-          matches += 1
-        }
+      if (
+        words.some(
+          (word) => word === token || word === token.slice(0, -1) || token === word.slice(0, -1)
+        )
+      ) {
+        matches += 1
       }
     }
 
     return matches / Math.sqrt(words.length)
+  }
+
+  private extractQueryPhrases(query: string, queryTokens: string[]): string[] {
+    const normalizedQuery = query.toLowerCase()
+    const explicitPhrases = (normalizedQuery.match(/[a-z0-9_/-]+/g) ?? []).filter((phrase) =>
+      /[/_-]/.test(phrase)
+    )
+    const tokenPairs =
+      queryTokens.length >= 2
+        ? queryTokens.slice(0, -1).map((token, index) => [
+            `${token} ${queryTokens[index + 1]}`,
+            `${token}/${queryTokens[index + 1]}`,
+            `${token}_${queryTokens[index + 1]}`,
+            `${token}-${queryTokens[index + 1]}`,
+            `${token}${queryTokens[index + 1]}`,
+          ])
+        : []
+    const multiWordPhrase = queryTokens.length >= 2 ? [queryTokens.join(' ')] : []
+
+    return Array.from(
+      new Set(
+        [...explicitPhrases, ...multiWordPhrase, ...tokenPairs.flat()].filter(
+          (phrase) => phrase.length >= 6 && !QUERY_STOPWORDS.has(phrase)
+        )
+      )
+    )
+  }
+
+  private calculatePhraseCoverage(content: string, title: string, phrases: string[]): number {
+    if (phrases.length === 0) {
+      return 0
+    }
+
+    const titleText = title.toLowerCase()
+    const contentText = content.toLowerCase()
+    let bestMatch = 0
+    for (const phrase of phrases) {
+      if (titleText.includes(phrase)) {
+        bestMatch = Math.max(bestMatch, 1)
+        continue
+      }
+      if (contentText.includes(phrase)) {
+        bestMatch = Math.max(bestMatch, 0.9)
+      }
+    }
+
+    return bestMatch
+  }
+
+  private calculateProximityScore(content: string, queryTokens: string[]): number {
+    if (queryTokens.length < 2) {
+      return 0
+    }
+
+    const text = content.toLowerCase()
+    if (text.length === 0) {
+      return 0
+    }
+
+    const positions = queryTokens
+      .map((token) => this.findSubstringPositions(text, token))
+      .filter((hits) => hits.length > 0)
+
+    if (positions.length < 2) {
+      return 0
+    }
+
+    let bestSpan = Number.POSITIVE_INFINITY
+    for (let i = 0; i < positions.length - 1; i++) {
+      for (const start of positions[i]) {
+        for (const end of positions[i + 1]) {
+          const span = Math.abs(end - start)
+          if (span < bestSpan) {
+            bestSpan = span
+          }
+        }
+      }
+    }
+
+    if (!Number.isFinite(bestSpan)) {
+      return 0
+    }
+
+    return 1 / (1 + bestSpan / 24)
+  }
+
+  private findSubstringPositions(text: string, token: string): number[] {
+    const positions: number[] = []
+    let startIndex = 0
+
+    while (startIndex < text.length) {
+      const matchIndex = text.indexOf(token, startIndex)
+      if (matchIndex === -1) {
+        break
+      }
+      positions.push(matchIndex)
+      startIndex = matchIndex + 1
+    }
+
+    return positions
   }
 
   private calibrateRawScore(score: number): number {

@@ -164,6 +164,60 @@ describe('search runtime contract', () => {
     cleanupTempDir(tempDir)
   })
 
+  it('boosts phrase and proximity matches for protocol-style queries', async () => {
+    const tempDir = createTempDir('search-runtime-phrase-')
+    const assetsDir = join(tempDir, 'assets')
+    const referencesDir = join(assetsDir, 'references')
+    const userDir = join(referencesDir, 'user')
+    const officialDir = join(referencesDir, 'context7', 'protocol')
+    mkdirSync(userDir, { recursive: true })
+    mkdirSync(officialDir, { recursive: true })
+
+    writeFileSync(
+      join(userDir, 'architecture.md'),
+      '# ACP Architecture Overview\n\nPermission request workflow. Delete operations require user approval. Logs may be removed after approval.\n'
+    )
+    writeFileSync(
+      join(officialDir, 'tool-calls.md'),
+      '# Tool Calls Protocol\n\nAgents can invoke session/request_permission before executing sensitive operations.\nDelete old logs requires a delete tool call with permission request.\n'
+    )
+
+    const adapter = new MiniSearchAdapter({ skillDir: assetsDir })
+    await adapter.buildIndex(referencesDir)
+    const results = await adapter.search('permission request delete logs', { topK: 2 })
+
+    expect(results[0]?.title).toBe('Tool Calls Protocol')
+    expect(results[1]?.title).toBe('ACP Architecture Overview')
+
+    cleanupTempDir(tempDir)
+  })
+
+  it('prefers compound stream response matches over broad guide text', async () => {
+    const tempDir = createTempDir('search-runtime-stream-response-')
+    const assetsDir = join(tempDir, 'assets')
+    const referencesDir = join(assetsDir, 'references')
+    const userDir = join(referencesDir, 'user')
+    mkdirSync(userDir, { recursive: true })
+
+    writeFileSync(
+      join(userDir, 'developer-guide.md'),
+      '# ACP 开发者指南：开发新的 Agent\n\nThis guide discusses stream handling and general response shaping for custom agents.\n'
+    )
+    writeFileSync(
+      join(userDir, 'tools-streaming.md'),
+      '# 工具系统和流式响应\n\nexport class StreamResponse implements StreamHandler {\n  start() {}\n  write() {}\n  end() {}\n}\n'
+    )
+
+    const adapter = new MiniSearchAdapter({ skillDir: assetsDir })
+    await adapter.buildIndex(referencesDir)
+    const results = await adapter.search('stream response', { topK: 2 })
+
+    expect(results[0]?.title).toBe('工具系统和流式响应')
+    expect(results[1]?.title).toBe('ACP 开发者指南：开发新的 Agent')
+
+    cleanupTempDir(tempDir)
+  })
+
   it('keeps strong fulltext results on the auto path', async () => {
     const auto = new AutoSearchAdapter(
       { skillDir: '/tmp/skill', qualityThreshold: 0.55 },
