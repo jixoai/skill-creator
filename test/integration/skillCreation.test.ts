@@ -478,6 +478,111 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
       expect(output).not.toContain('<!-- Score:')
       expect(output).not.toContain('Enhanced分层判断')
     }, 30_000)
+
+    it('should persist user notes even when similar context7 content already exists', async () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'zod-user-priority@4')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "zod" --description "Zod user priority skill" zod-user-priority@4`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      const server = createServer((request, response) => {
+        if (request.url?.startsWith('/api/v2/libs/search')) {
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          response.end(
+            JSON.stringify({
+              results: [
+                {
+                  id: '/colinhacks/zod',
+                  title: 'Zod',
+                  description: 'Repository docs',
+                  totalSnippets: 42,
+                  trustScore: 9.6,
+                  benchmarkScore: 89,
+                  versions: ['v4.0.1'],
+                },
+              ],
+            })
+          )
+          return
+        }
+
+        if (request.url?.startsWith('/colinhacks/zod/llms.txt')) {
+          response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end(`# Zod
+
+## Zod Mini
+
+Zod Mini provides a lightweight API surface for bundle-sensitive applications and schema-heavy projects.
+
+## Coercion
+
+Use stringbool when you need to coerce textual boolean values into booleans.`)
+          return
+        }
+
+        response.writeHead(404)
+        response.end('not found')
+      })
+
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+      const address = server.address()
+      if (address == null || typeof address === 'string') {
+        server.close()
+        throw new Error('Failed to start test server')
+      }
+
+      try {
+        await execFileAsync(
+          'node',
+          [
+            `${process.cwd()}/dist/cli.mjs`,
+            'download-context7',
+            '--pwd',
+            skillDir,
+            '--package',
+            'zod',
+            '--package-version',
+            '4.4.3',
+          ],
+          {
+            encoding: 'utf-8',
+            env: {
+              ...process.env,
+              SKILL_CREATOR_CONTEXT7_SEARCH_BASE_URL: `http://127.0.0.1:${address.port}/api/v2/libs/search`,
+              SKILL_CREATOR_CONTEXT7_BASE_URL: `http://127.0.0.1:${address.port}`,
+            },
+          }
+        )
+
+        execSync(
+          `${cliCmd} add-skill --pwd "${skillDir}" --title "Zod Mini local note" --content "Prefer zod mini in bundle-sensitive applications and document stringbool coercion conventions in the user layer."`,
+          { encoding: 'utf-8' }
+        )
+
+        const userDir = join(skillDir, 'assets', 'references', 'user')
+        expect(readdirSync(userDir).some((file) => file.endsWith('.md'))).toBe(true)
+
+        const output = execSync(
+          `${cliCmd} search-skill --pwd "${skillDir}" "stringbool coercion conventions"`,
+          {
+            encoding: 'utf-8',
+          }
+        )
+
+        expect(output).toContain('Zod Mini local note')
+        expect(output).toContain('Source: user')
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        )
+      }
+    }, 30_000)
   })
 
   describe('Error Cases', () => {

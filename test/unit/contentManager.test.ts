@@ -253,6 +253,42 @@ describe('ContentManager', () => {
       expect(result.message).toContain('Updated existing content')
     })
 
+    it('should create a user note when similar content only exists in context7', async () => {
+      await mockSearchEngine.addDocuments([
+        {
+          id: 'context7/zod-mini.md',
+          title: 'Parse object schema with Zod Mini',
+          content:
+            'Zod Mini can parse object schemas and provides a lightweight API surface for bundle-sensitive applications.',
+          source: 'context7',
+          filename: 'zod-mini.md',
+          metadata: {
+            backendId: 'minisearch',
+            rerankScore: 0.81,
+          },
+          score: 4.2,
+        },
+      ])
+
+      const result = await contentManager.addUserContent({
+        title: 'Zod Mini local note',
+        content:
+          'Zod Mini is useful for bundle-sensitive applications and should be paired with local project conventions for stringbool coercion.',
+        autoUpdate: true,
+      })
+
+      expect(result.added).toBe(true)
+      expect(result.updated).toBe(false)
+      expect(result.skipped).toBe(false)
+      expect(result.filePath).toContain('zod_mini_local_note')
+      expect(result.message).toContain('Created new content')
+      expect(existsSync(result.filePath!)).toBe(true)
+      expect(result.similarFound).toBeGreaterThan(0)
+
+      const content = readFileSync(result.filePath!, 'utf-8')
+      expect(content).toContain('stringbool coercion')
+    })
+
     it('should force add content even when similar exists', async () => {
       await contentManager.addUserContent({
         title: 'React Guide',

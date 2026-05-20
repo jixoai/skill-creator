@@ -2,7 +2,7 @@
  * Content management with Context7 integration
  */
 
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import {
   existsSync,
   mkdirSync,
@@ -20,6 +20,7 @@ import type {
   UpdateContext7Result,
   AddContentResult,
 } from '../types/index.js'
+import { normalizeSearchableText } from './referenceSearchUtils.js'
 
 export interface ContentManagerOptions {
   searchEngine: {
@@ -140,11 +141,11 @@ export class ContentManager {
       if (similar.length > 0 && !options.force) {
         const bestMatch = similar[0]
 
-        if (options.autoUpdate && bestMatch.source === 'user') {
+        if (bestMatch.source === 'user') {
           // Update user file
-          const filePath = join(this.options.referencesDir, bestMatch.file_path)
+          const filePath = this.resolveSearchResultFilePath(bestMatch.file_path)
 
-          if (this.isContentEnhanced(bestMatch, options.content)) {
+          if (options.autoUpdate && this.isContentEnhanced(bestMatch, options.content)) {
             writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
 
             result.updated = true
@@ -158,70 +159,51 @@ export class ContentManager {
             result.message = 'Existing content is comprehensive enough'
           }
         } else {
-          // Similar content found but not updating
-          result.message = `Found ${similar.length} similar documents`
-          result.similarContent = similar.slice(0, 3).map((s) => ({
-            title: s.title,
-            score: s.score,
-            source: s.source,
-            preview: s.content.slice(0, 200) + '...',
-          }))
-          result.similarFound = similar.length
+          if (this.isContentDuplicate(bestMatch, options.content)) {
+            result.skipped = true
+            result.message = 'Existing context7 content is comprehensive enough'
+          } else {
+            const created = this.writeUserContentFile(options)
+            result.added = true
+            result.filePath = created.filePath
+            result.message = created.message
+
+            // Trigger index update
+            await this.invalidateSearchIndex()
+          }
         }
+        result.similarContent = this.summarizeSimilarContent(similar)
+        result.similarFound = similar.length
       } else if (!result.added && !result.updated && !result.skipped) {
-        // Create new file only if no similar content was found
-        mkdirSync(this.userDir, { recursive: true })
+        const existingUserFile = this.getExpectedUserFilePath(options.title)
 
-        // Check if file with same title already exists
-        const safeTitle =
-          options.title
-            .toLowerCase()
-            .replace(/[^\w\s-]/g, '')
-            .replace(/[-\s]+/g, '_')
-            .replace(/^_+|_+$/g, '')
-            .slice(0, 50) || 'content'
-        const expectedFilePath = join(this.userDir, `${safeTitle}.md`)
-
-        if (existsSync(expectedFilePath) && !options.force && !options.forceAppend) {
+        if (existsSync(existingUserFile) && !options.force && !options.forceAppend) {
           // File exists and no force flag - show error and file content
           const { readFileSync } = await import('node:fs')
-          const existingContent = readFileSync(expectedFilePath, 'utf-8')
+          const existingContent = readFileSync(existingUserFile, 'utf-8')
 
-          result.message = `File already exists: ${safeTitle}.md. Use --force to overwrite or --force-append to append.`
+          result.message = `File already exists: ${existingUserFile.split('/').pop()}. Use --force to overwrite or --force-append to append.`
           result.existingFile = {
-            path: expectedFilePath,
+            path: existingUserFile,
             content: existingContent,
           }
         } else {
-          // Either file doesn't exist or force flag is set
-          let filePath: string
-          let fileName: string
-
-          if (existsSync(expectedFilePath) && options.force) {
-            // Force overwrite: directly replace the existing file
-            filePath = expectedFilePath
-            fileName = safeTitle + '.md'
-            writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
-            result.message = `Overwrote existing content: ${fileName}`
-          } else if (existsSync(expectedFilePath) && options.forceAppend) {
-            // Force append: add content to the end of existing file
-            filePath = expectedFilePath
-            fileName = safeTitle + '.md'
+          if (existsSync(existingUserFile) && options.forceAppend) {
             const { readFileSync } = await import('node:fs')
-            const existingContent = readFileSync(filePath, 'utf-8')
+            const existingContent = readFileSync(existingUserFile, 'utf-8')
             const newContent = `${existingContent}\n\n---\n\n# ${options.title}\n\n${options.content}`
-            writeFileSync(filePath, newContent)
-            result.message = `Appended content to existing file: ${fileName}`
+            writeFileSync(existingUserFile, newContent)
+            result.message = `Appended content to existing file: ${existingUserFile.split('/').pop()}`
+            result.filePath = existingUserFile
           } else {
-            // Create new file
-            filePath = this.createUniqueFilePath(options.title, this.userDir)
-            fileName = filePath.split('/').pop() || safeTitle + '.md'
-            writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
-            result.message = `Created new content: ${fileName}`
+            const created = this.writeUserContentFile(options, {
+              overwriteExisting: existsSync(existingUserFile) && Boolean(options.force),
+            })
+            result.message = created.message
+            result.filePath = created.filePath
           }
 
           result.added = true
-          result.filePath = filePath
 
           // Trigger index update
           await this.invalidateSearchIndex()
@@ -546,17 +528,132 @@ export class ContentManager {
 
   private async findSimilarContent(
     content: string,
-    threshold: number = 0.85,
+    threshold: number = 0.7,
     maxResults: number = 10
   ): Promise<any[]> {
     const results = await this.options.searchEngine.search(content, maxResults)
-    return results.filter((r: any) => r.score >= threshold)
+    return results
+      .map((result: any) => ({
+        ...result,
+        similarity: this.getSimilarityScore(result),
+      }))
+      .filter((result: any) => result.similarity >= threshold)
+      .sort(
+        (left: any, right: any) =>
+          this.getSourcePriority(right.source) - this.getSourcePriority(left.source) ||
+          right.similarity - left.similarity ||
+          right.score - left.score
+      )
   }
 
   private isContentEnhanced(existing: any, newContent: string): boolean {
     const existingWords = existing.content.split(/\s+/).length
     const newWords = newContent.split(/\s+/).length
     return newWords > existingWords * 1.3
+  }
+
+  private isContentDuplicate(existing: any, newContent: string): boolean {
+    const normalizedExisting = this.normalizeContentForComparison(existing.content)
+    const normalizedNew = this.normalizeContentForComparison(newContent)
+
+    if (normalizedExisting === normalizedNew) {
+      return true
+    }
+
+    const shorterLength = Math.min(normalizedExisting.length, normalizedNew.length)
+    if (shorterLength === 0) {
+      return false
+    }
+
+    return (
+      (normalizedExisting.includes(normalizedNew) || normalizedNew.includes(normalizedExisting)) &&
+      shorterLength / Math.max(normalizedExisting.length, normalizedNew.length) >= 0.85
+    )
+  }
+
+  private normalizeContentForComparison(content: string): string {
+    return normalizeSearchableText(content)
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  private getSimilarityScore(result: { score: number; metadata?: Record<string, unknown> }): number {
+    const rerankScore = result.metadata?.['rerankScore']
+    if (typeof rerankScore === 'number' && Number.isFinite(rerankScore)) {
+      return this.clamp01(rerankScore)
+    }
+
+    const backendId = result.metadata?.['backendId']
+    if (backendId === 'minisearch' || result.score > 1) {
+      return this.clamp01(result.score / (result.score + 3))
+    }
+
+    return this.clamp01(result.score)
+  }
+
+  private getSourcePriority(source: string): number {
+    return source === 'user' ? 1 : 0
+  }
+
+  private clamp01(value: number): number {
+    if (!Number.isFinite(value)) return 0
+    if (value < 0) return 0
+    if (value > 1) return 1
+    return value
+  }
+
+  private summarizeSimilarContent(similar: any[]): NonNullable<AddContentResult['similarContent']> {
+    return similar.slice(0, 3).map((s) => ({
+      title: s.title,
+      score: typeof s.similarity === 'number' ? s.similarity : s.score,
+      source: s.source,
+      preview: s.content.slice(0, 200) + '...',
+    }))
+  }
+
+  private resolveSearchResultFilePath(filePath: string): string {
+    return isAbsolute(filePath) ? filePath : join(this.options.referencesDir, filePath)
+  }
+
+  private getExpectedUserFilePath(title: string): string {
+    mkdirSync(this.userDir, { recursive: true })
+    const safeTitle =
+      title
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, '')
+        .replace(/[-\s]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 50) || 'content'
+    return join(this.userDir, `${safeTitle}.md`)
+  }
+
+  private writeUserContentFile(
+    options: {
+      title: string
+      content: string
+    },
+    behavior: {
+      overwriteExisting?: boolean
+    } = {}
+  ): { filePath: string; message: string } {
+    mkdirSync(this.userDir, { recursive: true })
+    const expectedFilePath = this.getExpectedUserFilePath(options.title)
+
+    if (behavior.overwriteExisting && existsSync(expectedFilePath)) {
+      writeFileSync(expectedFilePath, `# ${options.title}\n\n${options.content}`)
+      return {
+        filePath: expectedFilePath,
+        message: `Overwrote existing content: ${expectedFilePath.split('/').pop()}`,
+      }
+    }
+
+    const filePath = this.createUniqueFilePath(options.title, this.userDir)
+    writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
+    return {
+      filePath,
+      message: `Created new content: ${filePath.split('/').pop()}`,
+    }
   }
 
   private getHashFilePath(projectId: string): string {
