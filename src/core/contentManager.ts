@@ -23,6 +23,9 @@ import type {
 
 export interface ContentManagerOptions {
   searchEngine: {
+    initialize?(): Promise<void>
+    buildIndex?(referencesDir: string): Promise<void>
+    clearIndex?(): Promise<void> | void
     search(query: string, topK?: number, where?: any): Promise<any[]>
   }
   referencesDir: string
@@ -103,7 +106,7 @@ export class ContentManager {
       this.saveContentHash(content, libraryId)
 
       // Trigger reindex
-      this.triggerReindex()
+      await this.invalidateSearchIndex()
 
       result.updated = true
       result.message = `Updated ${savedFiles.length} documentation slices for project ${libraryId}`
@@ -131,6 +134,7 @@ export class ContentManager {
 
     try {
       // Search for similar content
+      await this.prepareSearchEngine()
       const similar = await this.findSimilarContent(options.content)
 
       if (similar.length > 0 && !options.force) {
@@ -148,7 +152,7 @@ export class ContentManager {
             result.message = `Updated existing content: ${bestMatch.file_path}`
 
             // Trigger index update
-            this.triggerReindex()
+            await this.invalidateSearchIndex()
           } else {
             result.skipped = true
             result.message = 'Existing content is comprehensive enough'
@@ -220,7 +224,7 @@ export class ContentManager {
           result.filePath = filePath
 
           // Trigger index update
-          this.triggerReindex()
+          await this.invalidateSearchIndex()
         }
       }
     } catch (error) {
@@ -580,10 +584,30 @@ export class ContentManager {
     return currentHash !== storedHash
   }
 
-  private async triggerReindex(): Promise<void> {
-    const hashFile = join(this.options.referencesDir, '..', '.last_index_hash')
-    if (existsSync(hashFile)) {
-      rmSync(hashFile)
+  private async prepareSearchEngine(): Promise<void> {
+    if (typeof this.options.searchEngine.initialize === 'function') {
+      await this.options.searchEngine.initialize()
+    }
+    if (typeof this.options.searchEngine.buildIndex === 'function') {
+      await this.options.searchEngine.buildIndex(this.options.referencesDir)
+    }
+  }
+
+  private async invalidateSearchIndex(): Promise<void> {
+    if (typeof this.options.searchEngine.clearIndex === 'function') {
+      await this.options.searchEngine.clearIndex()
+    }
+
+    const searchDir = join(this.options.referencesDir, '..', 'search')
+    const searchArtifacts = [
+      'index-state.json',
+      'minisearch-index.json',
+      'vector-index-state.json',
+      'vector-index.db',
+    ]
+
+    for (const artifact of searchArtifacts) {
+      rmSync(join(searchDir, artifact), { force: true })
     }
   }
 
@@ -654,7 +678,7 @@ export class ContentManager {
       }
 
       // Trigger reindex
-      this.triggerReindex()
+      void this.invalidateSearchIndex()
 
       return {
         success: true,

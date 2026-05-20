@@ -15,6 +15,7 @@ import type {
 import { glob } from 'glob'
 import { readFileSync } from 'node:fs'
 import { join, basename } from 'node:path'
+import { detectReferenceSource, normalizeReferenceContent } from './referenceSearchUtils.js'
 
 /**
  * uFuzzy-based Search Engine Adapter
@@ -52,14 +53,14 @@ export class FuzzySearchAdapter implements SearchEngine {
     for (const filePath of files) {
       try {
         const fullPath = join(referencesDir, filePath)
-        const content = readFileSync(fullPath, 'utf-8')
+        const content = normalizeReferenceContent(readFileSync(fullPath, 'utf-8'))
 
         // Extract title from first line or filename
         const lines = content.split('\n')
         const title =
           lines[0]?.replace(/^#+\s*/, '').trim() || basename(filePath, '.md').replace(/[-_]/g, ' ')
 
-        const source = filePath.includes('context7/') ? 'context7' : 'user'
+        const source = detectReferenceSource(filePath)
 
         this.documents.push({
           id: filePath,

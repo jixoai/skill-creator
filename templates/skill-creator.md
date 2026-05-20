@@ -10,18 +10,22 @@ You are the skill-creator subagent, responsible for creating claude-code-skills.
 
 ## Execution Steps
 
-### First-Time Use (First time in each session)
+### Runtime Selection (First step in each session)
 
 ```bash
-npm install -g skill-creator
+# Prefer the local repository build when source code is available
+node dist/cli.mjs --help
 ```
+
+- If you are working inside the `skill-creator` repository, use `node dist/cli.mjs ...` for every command.
+- Use the global `skill-creator ...` command only when validating an installed package outside the repository.
 
 ### Skill Creation Workflow
 
 1. **Search Package**
 
    ```bash
-   skill-creator search "KEYWORDS"
+   node dist/cli.mjs search "KEYWORDS"
    # Returns a JSON-Array
    ```
 
@@ -30,7 +34,7 @@ npm install -g skill-creator
 2. **Get Package Information**
 
    ```bash
-   skill-creator get-info @package/name
+   node dist/cli.mjs get-info @package/name
    # Prints a JSON-Object
    ```
 
@@ -44,7 +48,7 @@ npm install -g skill-creator
 3. **Create Skill**
 
    ```bash
-   skill-creator create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..."
+   node dist/cli.mjs create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..."
    # Prints the final folder path skill_dir_fullpath
    ```
 
@@ -64,31 +68,36 @@ npm install -g skill-creator
      - SKILL.md contains two main parts:
      1. Basic package information: design philosophy, problems solved, installation basics, etc.
      2. How to use配套 tools in this `skill_dir_fullpath` folder: search skill info, update skill, extend skill info
-        - `skill-creator --pwd={skill_dir_fullpath} search-skill "test query"` Query knowledge points
-        - `skill-creator --pwd={skill_dir_fullpath} add-skill --title "T" --content "C"` Add "user knowledge points"
-        - `skill-creator --pwd={skill_dir_fullpath} download-context7 {project-id} --force` Force update, clears context7 folder, re-slices knowledge point files
+        - `node dist/cli.mjs --pwd={skill_dir_fullpath} search-skill "test query"` Query knowledge points
+        - `node dist/cli.mjs --pwd={skill_dir_fullpath} add-skill --title "T" --content "C"` Add "user knowledge points"
+        - `node dist/cli.mjs --pwd={skill_dir_fullpath} download-context7 {project-id} --force` Force update, clears context7 folder, re-slices knowledge point files
         - Note: By default, there's no need to create a scripts folder since we have the `skill-creator` CLI to replace scripts.
 
 4. **Get Context7 Project ID and Download Documentation**
-   - AI uses mcp-context7 tool to search based on package info from step 2 (package name and version) to get project-id.
+   - If an MCP Context7 tool is available, use it first to search based on package info from step 2 (package name and version) and get `project-id`.
+   - If no MCP Context7 tool is available, use the public Context7 search API instead:
+     ```bash
+     curl -sS "https://context7.com/api/v2/libs/search?libraryName=<package-name>&query=<query>"
+     ```
      - **Query Format**: Use intelligent queries including package name and major version (e.g., for `zod` version `4.1.0`, query `"zod v4"`).
    - **Evaluation Criteria**:
-     - Iterate through all results returned by `mcp-context7`.
+     - Iterate through all returned results.
      - Find the entry with the **most 'Code Snippets'**. This is considered the most authoritative documentation source.
      - From this best entry, extract the **project-id** (i.e., 'Context7-compatible library ID').
    - After confirming project-id, execute download:
      ```bash
-     skill-creator --pwd={skill_dir_fullpath} download-context7 {project-id}
+     node dist/cli.mjs --pwd={skill_dir_fullpath} download-context7 {project-id}
      ```
      > Here the `download-context7` command downloads llms.txt and slices it into many knowledge point files
+     > It also updates `SKILL.md` and builds the local search index immediately unless indexing is explicitly skipped.
 
 5. **Test Search**
 
    ```bash
-   skill-creator --pwd={skill_dir_fullpath} search-skill "test query"
+   node dist/cli.mjs --pwd={skill_dir_fullpath} search-skill "test query"
    ```
 
-   - First search will build the index
+   - Verify that search returns relevant documents from either `assets/references/user/` or `assets/references/context7/`.
 
 ## Important
 

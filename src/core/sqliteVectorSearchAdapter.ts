@@ -1,5 +1,4 @@
 import { glob } from 'glob'
-import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -10,6 +9,12 @@ import type {
   SearchOptions,
   SearchResult,
 } from './searchAdapter.js'
+import {
+  SEARCH_RULESET_VERSIONS,
+  createSearchRulesetHash,
+  detectReferenceSource,
+  normalizeSearchableText,
+} from './referenceSearchUtils.js'
 
 export interface EmbeddingFunction {
   generate(input: string[]): Promise<number[][]>
@@ -19,6 +24,8 @@ interface VectorDocumentRecord {
   id: string
   title: string
   content: string
+  searchable_title: string
+  searchable_content: string
   source: 'user' | 'context7'
   file_path: string
 }
@@ -27,6 +34,8 @@ export interface SqliteVectorSearchAdapterOptions {
   skillDir: string
   embeddingDimensions?: number
   embeddingFunction?: EmbeddingFunction
+  candidateMultiplier?: number
+  minCandidateLimit?: number
 }
 
 export class SqliteVectorSearchAdapter implements SearchEngine {
@@ -71,7 +80,7 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
     )
 
     const embeddings = await (await this.ensureEmbedder()).generate(
-      documents.map((doc) => `${doc.title}\n${doc.content}`)
+      documents.map((doc) => `${doc.searchable_title}\n${doc.searchable_content}`)
     )
 
     for (let i = 0; i < documents.length; i++) {
@@ -85,6 +94,7 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
       referencesHash,
       builtAt: new Date().toISOString(),
       documentCount: documents.length,
+      rulesetVersion: SEARCH_RULESET_VERSIONS.sqliteVec,
     }
 
     this.persistIndexState()
@@ -95,6 +105,10 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
     if (!this.db) return []
 
     const { topK = 5, where } = options
+    const candidateLimit = Math.max(
+      topK * (this.options.candidateMultiplier ?? 6),
+      this.options.minCandidateLimit ?? 24
+    )
     const [embedding] = await (await this.ensureEmbedder()).generate([query])
     const rows = this.db
       .prepare(
@@ -115,8 +129,8 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
       )
       .all(
         ...(where?.source
-          ? [JSON.stringify(embedding), where.source, topK]
-          : [JSON.stringify(embedding), topK])
+          ? [JSON.stringify(embedding), where.source, candidateLimit]
+          : [JSON.stringify(embedding), candidateLimit])
       ) as Array<{
       id: string
       title: string
@@ -126,7 +140,9 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
       distance: number
     }>
 
-    return rows.map((row) => ({
+    const reranked = this.rerankRows(rows, query).slice(0, topK)
+
+    return reranked.map((row) => ({
       id: row.id,
       title: row.title,
       content: row.content,
@@ -136,6 +152,12 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
       metadata: {
         backendId: 'sqlite-vec',
         distance: row.distance,
+        rerankScore: row.rerankScore,
+        titleCoverage: row.titleCoverage,
+        contentCoverage: row.contentCoverage,
+        pathCoverage: row.pathCoverage,
+        phraseCoverage: row.phraseCoverage,
+        proximityScore: row.proximityScore,
       },
     }))
   }
@@ -217,6 +239,12 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
     if (!existsSync(stateFile)) return
     try {
       this.indexState = JSON.parse(readFileSync(stateFile, 'utf-8')) as SearchIndexState
+      if (
+        (this.indexState as SearchIndexState & { rulesetVersion?: string }).rulesetVersion !==
+        SEARCH_RULESET_VERSIONS.sqliteVec
+      ) {
+        this.indexState = null
+      }
     } catch {
       this.indexState = null
     }
@@ -231,27 +259,33 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
     const files = await glob('**/*.md', { cwd: referencesDir })
     return files.map((relativePath) => {
       const fullPath = join(referencesDir, relativePath)
-      const content = readFileSync(fullPath, 'utf-8')
+      const rawContent = readFileSync(fullPath, 'utf-8')
+      const normalizedContent = this.normalizeDocumentContent(rawContent)
       const title =
-        content.split('\n')[0]?.replace(/^#+\s*/, '').trim() ||
+        rawContent.split('\n')[0]?.replace(/^#+\s*/, '').trim() ||
         basename(relativePath, '.md').replace(/[-_]/g, ' ')
       return {
         id: relativePath,
         title,
-        content,
-        source: relativePath.includes('context7/') ? 'context7' : 'user',
+        content: rawContent,
+        searchable_title: normalizeSearchableText(title),
+        searchable_content: normalizedContent,
+        source: detectReferenceSource(relativePath),
         file_path: fullPath,
       }
     })
   }
 
   private calculateReferencesHash(documents: VectorDocumentRecord[]): string {
-    const hash = createHash('sha256')
-    for (const document of documents) {
-      hash.update(document.id)
-      hash.update(document.content)
-    }
-    return hash.digest('hex')
+    return createSearchRulesetHash(
+      documents.flatMap((document) => [
+        document.id,
+        document.title,
+        document.content,
+        document.source,
+        SEARCH_RULESET_VERSIONS.sqliteVec,
+      ])
+    )
   }
 
   private async loadRuntimeDependencies(): Promise<{
@@ -294,5 +328,226 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
       wasm: true,
     })
     return this.embedder
+  }
+
+  private rerankRows(
+    rows: Array<{
+      id: string
+      title: string
+      content: string
+      searchable_title?: string
+      searchable_content?: string
+      source: 'user' | 'context7'
+      file_path: string
+      distance: number
+    }>,
+    query: string
+  ): Array<
+    {
+      id: string
+      title: string
+      content: string
+      searchable_title?: string
+      searchable_content?: string
+      source: 'user' | 'context7'
+      file_path: string
+      distance: number
+    } & {
+      rerankScore: number
+      titleCoverage: number
+      contentCoverage: number
+      pathCoverage: number
+      phraseCoverage: number
+      proximityScore: number
+    }
+  > {
+    const queryTokens = this.normalizeQueryTokens(query)
+    const queryPhrases = this.extractQueryPhrases(queryTokens)
+
+    return rows
+      .map((row) => {
+        const searchableTitle = row.searchable_title ?? normalizeSearchableText(row.title)
+        const searchableContent = row.searchable_content ?? this.normalizeDocumentContent(row.content)
+        const titleCoverage = this.calculateCoverage(searchableTitle, queryTokens)
+        const contentCoverage = this.calculateCoverage(searchableContent, queryTokens)
+        const pathCoverage = this.calculatePathCoverage(row.id, queryTokens)
+        const phraseCoverage = this.calculatePhraseCoverage(searchableTitle, searchableContent, queryPhrases)
+        const proximityScore = this.calculateProximityScore(searchableContent, queryTokens)
+        const semanticScore = 1 - row.distance
+
+        const rerankScore =
+          semanticScore * 0.45 +
+          titleCoverage * 0.12 +
+          contentCoverage * 0.12 +
+          pathCoverage * 0.18 +
+          phraseCoverage * 0.08 +
+          proximityScore * 0.05
+
+        return {
+          ...row,
+          rerankScore,
+          titleCoverage,
+          contentCoverage,
+          pathCoverage,
+          phraseCoverage,
+          proximityScore,
+        }
+      })
+      .sort((left, right) => {
+        if (right.rerankScore !== left.rerankScore) {
+          return right.rerankScore - left.rerankScore
+        }
+        return left.distance - right.distance
+      })
+  }
+
+  private normalizeQueryTokens(query: string): string[] {
+    const stopwords = new Set(['a', 'an', 'and', 'for', 'how', 'in', 'of', 'on', 'or', 'the', 'to', 'with'])
+    return (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((token) => !stopwords.has(token))
+  }
+
+  private extractQueryPhrases(queryTokens: string[]): string[] {
+    if (queryTokens.length < 2) {
+      return []
+    }
+
+    return queryTokens
+      .slice(0, -1)
+      .map((token, index) => `${token} ${queryTokens[index + 1]}`)
+      .filter((phrase) => phrase.length >= 8)
+  }
+
+  private calculateCoverage(text: string, queryTokens: string[]): number {
+    if (queryTokens.length === 0) {
+      return 0
+    }
+
+    const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+    if (words.length === 0) {
+      return 0
+    }
+
+    let matched = 0
+    for (const token of queryTokens) {
+      matched += Math.max(...words.map((word) => this.scoreTokenMatch(word, token)), 0)
+    }
+
+    return matched / queryTokens.length
+  }
+
+  private calculatePathCoverage(path: string, queryTokens: string[]): number {
+    if (queryTokens.length === 0) {
+      return 0
+    }
+
+    const pathTokens = path
+      .toLowerCase()
+      .replace(/\.md$/g, '')
+      .split(/[^a-z0-9]+/g)
+      .filter(Boolean)
+
+    let matched = 0
+    for (const token of queryTokens) {
+      matched += Math.max(...pathTokens.map((pathToken) => this.scoreTokenMatch(pathToken, token)), 0)
+    }
+
+    return matched / queryTokens.length
+  }
+
+  private calculatePhraseCoverage(title: string, content: string, phrases: string[]): number {
+    if (phrases.length === 0) {
+      return 0
+    }
+
+    const titleText = title.toLowerCase()
+    const contentText = content.toLowerCase()
+    let matched = 0
+    for (const phrase of phrases) {
+      if (titleText.includes(phrase)) {
+        matched += 1
+        continue
+      }
+      if (contentText.includes(phrase)) {
+        matched += 0.8
+      }
+    }
+
+    return Math.min(matched / phrases.length, 1)
+  }
+
+  private calculateProximityScore(content: string, queryTokens: string[]): number {
+    if (queryTokens.length < 2) {
+      return 0
+    }
+
+    const text = content.toLowerCase()
+    const positions = queryTokens
+      .map((token) => this.findSubstringPositions(text, token))
+      .filter((hits) => hits.length > 0)
+
+    if (positions.length < 2) {
+      return 0
+    }
+
+    let bestSpan = Number.POSITIVE_INFINITY
+    for (let i = 0; i < positions.length - 1; i++) {
+      for (const start of positions[i]) {
+        for (const end of positions[i + 1]) {
+          const span = Math.abs(end - start)
+          if (span < bestSpan) {
+            bestSpan = span
+          }
+        }
+      }
+    }
+
+    if (!Number.isFinite(bestSpan)) {
+      return 0
+    }
+
+    return 1 / (1 + bestSpan / 24)
+  }
+
+  private findSubstringPositions(text: string, token: string): number[] {
+    const positions: number[] = []
+    let startIndex = 0
+
+    while (startIndex < text.length) {
+      const matchIndex = text.indexOf(token, startIndex)
+      if (matchIndex === -1) {
+        break
+      }
+      positions.push(matchIndex)
+      startIndex = matchIndex + 1
+    }
+
+    return positions
+  }
+
+  private tokensLooselyMatch(left: string, right: string): boolean {
+    return this.scoreTokenMatch(left, right) > 0
+  }
+
+  private scoreTokenMatch(left: string, right: string): number {
+    if (left === right) {
+      return 1
+    }
+
+    if (left === right.slice(0, -1) || right === left.slice(0, -1)) {
+      return 0.8
+    }
+
+    if (left.length >= 5 && right.length >= 5) {
+      const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left]
+      if (longer.startsWith(shorter) && longer.length - shorter.length <= 3) {
+        return 0.65
+      }
+    }
+
+    return 0
+  }
+
+  private normalizeDocumentContent(content: string): string {
+    return normalizeSearchableText(content)
   }
 }

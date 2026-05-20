@@ -297,7 +297,6 @@ skill-creator download-context7 --help
 - `fulltext`: explicit MiniSearch-backed local index
 - `fuzzy`: explicit `uFuzzy` fallback for path/term-style matching
 - `vector`: explicit SQLite vector search path when the local runtime supports it
-- `chroma`: legacy CLI alias to `vector`, intentionally undocumented in generated artifacts
 
 ## Architecture
 

@@ -9,7 +9,6 @@ export type {
   SearchBackendInfo,
   SearchIndexState,
 } from './core/searchAdapter.js'
-export { ChromaSearchAdapter } from './core/chromaSearchAdapter.js'
 export { FuzzySearchAdapter } from './core/fuzzySearchAdapter.js'
 export { MiniSearchAdapter } from './core/miniSearchAdapter.js'
 export { SqliteVectorSearchAdapter } from './core/sqliteVectorSearchAdapter.js'

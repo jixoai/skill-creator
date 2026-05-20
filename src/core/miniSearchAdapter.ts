@@ -1,6 +1,5 @@
 import MiniSearch from 'minisearch'
 import { glob } from 'glob'
-import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type {
@@ -10,6 +9,12 @@ import type {
   SearchOptions,
   SearchResult,
 } from './searchAdapter.js'
+import {
+  SEARCH_RULESET_VERSIONS,
+  createSearchRulesetHash,
+  detectReferenceSource,
+  normalizeReferenceContent,
+} from './referenceSearchUtils.js'
 
 interface MiniSearchDocument {
   id: string
@@ -84,6 +89,7 @@ export class MiniSearchAdapter implements SearchEngine {
       referencesHash,
       builtAt: new Date().toISOString(),
       documentCount: docs.length,
+      rulesetVersion: SEARCH_RULESET_VERSIONS.minisearch,
     }
 
     this.persistIndex()
@@ -123,6 +129,7 @@ export class MiniSearchAdapter implements SearchEngine {
         rerankScore: item.rerankScore,
         titleCoverage: item.titleCoverage,
         contentCoverage: item.contentCoverage,
+        pathCoverage: item.pathCoverage,
         termDensity: item.termDensity,
         phraseCoverage: item.phraseCoverage,
         proximityScore: item.proximityScore,
@@ -212,6 +219,14 @@ export class MiniSearchAdapter implements SearchEngine {
         },
       })
       this.indexState = JSON.parse(readFileSync(stateFile, 'utf-8')) as SearchIndexState
+      if (
+        (this.indexState as SearchIndexState & { rulesetVersion?: string }).rulesetVersion !==
+        SEARCH_RULESET_VERSIONS.minisearch
+      ) {
+        this.index = this.createIndex()
+        this.documents = []
+        this.indexState = null
+      }
     } catch {
       this.index = this.createIndex()
       this.documents = []
@@ -240,7 +255,7 @@ export class MiniSearchAdapter implements SearchEngine {
     const files = await glob('**/*.md', { cwd: referencesDir })
     return files.map((relativePath) => {
       const fullPath = join(referencesDir, relativePath)
-      const content = readFileSync(fullPath, 'utf-8')
+      const content = normalizeReferenceContent(readFileSync(fullPath, 'utf-8'))
       const title =
         content.split('\n')[0]?.replace(/^#+\s*/, '').trim() ||
         basename(relativePath, '.md').replace(/[-_]/g, ' ')
@@ -248,19 +263,22 @@ export class MiniSearchAdapter implements SearchEngine {
         id: relativePath,
         title,
         content,
-        source: relativePath.includes('context7/') ? 'context7' : 'user',
+        source: detectReferenceSource(relativePath),
         file_path: fullPath,
       }
     })
   }
 
   private calculateReferencesHash(documents: MiniSearchDocument[]): string {
-    const hash = createHash('sha256')
-    for (const document of documents) {
-      hash.update(document.id)
-      hash.update(document.content)
-    }
-    return hash.digest('hex')
+    return createSearchRulesetHash(
+      documents.flatMap((document) => [
+        document.id,
+        document.title,
+        document.content,
+        document.source,
+        SEARCH_RULESET_VERSIONS.minisearch,
+      ])
+    )
   }
 
   private rerankResults(
@@ -271,6 +289,7 @@ export class MiniSearchAdapter implements SearchEngine {
       rerankScore: number
       titleCoverage: number
       contentCoverage: number
+      pathCoverage: number
       termDensity: number
       phraseCoverage: number
       proximityScore: number
@@ -283,6 +302,7 @@ export class MiniSearchAdapter implements SearchEngine {
       .map((result) => {
         const document = this.documents.find((doc) => doc.id === String(result.id))
         const content = document?.content ?? ''
+        const pathCoverage = this.calculatePathCoverage(document?.id ?? '', queryTokens)
         const titleCoverage = this.calculateCoverage(result.title, queryTokens)
         const contentCoverage = this.calculateCoverage(content, queryTokens)
         const termDensity = this.calculateTermDensity(content, queryTokens)
@@ -291,18 +311,20 @@ export class MiniSearchAdapter implements SearchEngine {
         const calibratedScore = this.calibrateRawScore(result.score)
 
         const rerankScore =
-          calibratedScore * 0.18 +
+          calibratedScore * 0.17 +
           titleCoverage * 0.18 +
-          contentCoverage * 0.12 +
+          contentCoverage * 0.1 +
+          pathCoverage * 0.17 +
           Math.min(termDensity * 1.5, 1) * 0.08 +
-          phraseCoverage * 0.29 +
-          proximityScore * 0.15
+          phraseCoverage * 0.18 +
+          proximityScore * 0.12
 
         return {
           ...result,
           rerankScore,
           titleCoverage,
           contentCoverage,
+          pathCoverage,
           termDensity,
           phraseCoverage,
           proximityScore,
@@ -327,10 +349,39 @@ export class MiniSearchAdapter implements SearchEngine {
       return 0
     }
 
-    const normalizedText = text.toLowerCase()
+    const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+    if (words.length === 0) {
+      return 0
+    }
+
     let matched = 0
     for (const token of queryTokens) {
-      if (normalizedText.includes(token)) {
+      if (words.some((word) => this.tokensLooselyMatch(word, token))) {
+        matched += 1
+      }
+    }
+
+    return matched / queryTokens.length
+  }
+
+  private calculatePathCoverage(path: string, queryTokens: string[]): number {
+    if (queryTokens.length === 0) {
+      return 0
+    }
+
+    const pathTokens = path
+      .toLowerCase()
+      .replace(/\.md$/g, '')
+      .split(/[^a-z0-9]+/g)
+      .filter(Boolean)
+
+    if (pathTokens.length === 0) {
+      return 0
+    }
+
+    let matched = 0
+    for (const token of queryTokens) {
+      if (pathTokens.some((pathToken) => this.tokensLooselyMatch(pathToken, token))) {
         matched += 1
       }
     }
@@ -350,11 +401,7 @@ export class MiniSearchAdapter implements SearchEngine {
 
     let matches = 0
     for (const token of queryTokens) {
-      if (
-        words.some(
-          (word) => word === token || word === token.slice(0, -1) || token === word.slice(0, -1)
-        )
-      ) {
+      if (words.some((word) => this.tokensLooselyMatch(word, token))) {
         matches += 1
       }
     }
@@ -382,7 +429,10 @@ export class MiniSearchAdapter implements SearchEngine {
     return Array.from(
       new Set(
         [...explicitPhrases, ...multiWordPhrase, ...tokenPairs.flat()].filter(
-          (phrase) => phrase.length >= 6 && !QUERY_STOPWORDS.has(phrase)
+          (phrase) =>
+            phrase.length >= 8 &&
+            !QUERY_STOPWORDS.has(phrase) &&
+            phrase.split(/[\s/_-]+/).filter(Boolean).length >= 2
         )
       )
     )
@@ -395,18 +445,18 @@ export class MiniSearchAdapter implements SearchEngine {
 
     const titleText = title.toLowerCase()
     const contentText = content.toLowerCase()
-    let bestMatch = 0
+    let matched = 0
     for (const phrase of phrases) {
       if (titleText.includes(phrase)) {
-        bestMatch = Math.max(bestMatch, 1)
+        matched += 1
         continue
       }
       if (contentText.includes(phrase)) {
-        bestMatch = Math.max(bestMatch, 0.9)
+        matched += 0.8
       }
     }
 
-    return bestMatch
+    return Math.min(matched / phrases.length, 1)
   }
 
   private calculateProximityScore(content: string, queryTokens: string[]): number {
@@ -468,5 +518,20 @@ export class MiniSearchAdapter implements SearchEngine {
     }
 
     return score / (score + 3)
+  }
+
+  private tokensLooselyMatch(left: string, right: string): boolean {
+    if (left === right) {
+      return true
+    }
+
+    if (left.length >= 5 && right.length >= 5) {
+      const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left]
+      if (longer.startsWith(shorter) && longer.length - shorter.length <= 3) {
+        return true
+      }
+    }
+
+    return left === right.slice(0, -1) || right === left.slice(0, -1)
   }
 }

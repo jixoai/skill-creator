@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ContentManager } from '../../src/core/contentManager.js'
+import { buildSearchEngine } from '../../src/core/searchEngineFactory.js'
 import { createTempDir, cleanupTempDir } from '../test-utils.js'
 
 // Mock search engine for testing
@@ -317,6 +318,49 @@ describe('ContentManager', () => {
       expect(result1.filePath).toBe(result2.filePath)
       expect(result1.filePath).toContain('append_test')
       expect(result2.message).toContain('Appended content to existing file')
+    })
+
+    it('should invalidate persisted fulltext artifacts after adding content so the next auto search rebuilds fresh state', async () => {
+      const skillDir = join(tempDir, 'skill')
+      const assetsDir = join(skillDir, 'assets')
+      const referencesDirForSkill = join(assetsDir, 'references')
+      mkdirSync(join(referencesDirForSkill, 'user'), { recursive: true })
+      mkdirSync(join(assetsDir, 'search'), { recursive: true })
+
+      const searchEngine = await buildSearchEngine({
+        mode: 'auto',
+        skillDir: assetsDir,
+        referencesDir: referencesDirForSkill,
+        config: {},
+      })
+      await searchEngine.initialize?.()
+      await searchEngine.buildIndex(referencesDirForSkill)
+
+      const seededStatePath = join(assetsDir, 'search', 'index-state.json')
+      expect(existsSync(seededStatePath)).toBe(true)
+      const seededState = JSON.parse(readFileSync(seededStatePath, 'utf-8')) as {
+        documentCount?: number
+      }
+      expect(seededState.documentCount).toBe(0)
+
+      const realContentManager = new ContentManager({
+        searchEngine,
+        referencesDir: referencesDirForSkill,
+      })
+
+      const addResult = await realContentManager.addUserContent({
+        title: 'Fake timers',
+        content:
+          'Vitest provides vi.useFakeTimers and vi.advanceTimersByTime for time-dependent tests.',
+      })
+
+      expect(addResult.added).toBe(true)
+      expect(existsSync(seededStatePath)).toBe(false)
+
+      await searchEngine.initialize?.()
+      await searchEngine.buildIndex(referencesDirForSkill)
+      const results = await searchEngine.search('fake timers', 5)
+      expect(results[0]?.title).toBe('Fake timers')
     })
   })
 

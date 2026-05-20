@@ -21,7 +21,7 @@ export interface SearchOptions {
 
 export type SearchMode = 'auto' | 'fulltext' | 'fuzzy' | 'vector' | 'chroma'
 
-export type SearchBackendId = 'minisearch' | 'ufuzzy' | 'sqlite-vec' | 'chroma'
+export type SearchBackendId = 'minisearch' | 'ufuzzy' | 'sqlite-vec'
 
 export interface SearchBackendInfo {
   backendId: SearchBackendId
@@ -35,7 +35,8 @@ export interface SearchIndexState {
   referencesHash?: string
   builtAt?: string
   documentCount?: number
- }
+  rulesetVersion?: string
+}
 
 export interface SearchEngine {
   /**

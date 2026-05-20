@@ -67,6 +67,18 @@ describe('search runtime contract', () => {
     expect(backend.backendId).toBe('minisearch')
   })
 
+  it('resolves chroma mode to the vector backend inside the engine factory', async () => {
+    const engine = await buildSearchEngine({
+      mode: 'chroma',
+      skillDir: '/tmp/skill',
+      config: {},
+    })
+
+    const backend = engine.getBackendInfo()
+    expect(backend.mode).toBe('vector')
+    expect(backend.backendId).toBe('sqlite-vec')
+  })
+
   it('persists fulltext index artifacts under assets/search', async () => {
     const tempDir = createTempDir('search-runtime-fulltext-')
     const assetsDir = join(tempDir, 'assets')
@@ -130,6 +142,117 @@ describe('search runtime contract', () => {
     expect(results[0]?.title).toBe('Router Notes')
     expect(existsSync(join(assetsDir, 'search', 'vector-index.db'))).toBe(true)
     expect(existsSync(join(assetsDir, 'search', 'vector-index-state.json'))).toBe(true)
+
+    cleanupTempDir(tempDir)
+  })
+
+  it('keeps vector recall stable when topK is small and reranks path-specific matches above broader docs', async () => {
+    const tempDir = createTempDir('search-runtime-vector-recall-')
+    const assetsDir = join(tempDir, 'assets')
+    const referencesDir = join(assetsDir, 'references')
+    const officialOverviewDir = join(referencesDir, 'official', 'overview')
+    const officialProtocolDir = join(referencesDir, 'official', 'protocol')
+    const userDir = join(referencesDir, 'user')
+    mkdirSync(officialOverviewDir, { recursive: true })
+    mkdirSync(officialProtocolDir, { recursive: true })
+    mkdirSync(userDir, { recursive: true })
+
+    writeFileSync(
+      join(userDir, 'acp-multi-agent-collaboration.md'),
+      '# ACP 多 Agent 协作模式\n\nMulti agent collaboration patterns for orchestrating specialist agents.\n'
+    )
+    writeFileSync(
+      join(officialOverviewDir, 'agents.md'),
+      '# ACP-Compatible Agents\n\nAgents collaborate through shared protocols and agent planning.\n'
+    )
+    writeFileSync(
+      join(officialOverviewDir, 'introduction.md'),
+      '# Agent Client Protocol Introduction\n\nThe protocol supports agents, clients, and collaboration patterns.\n'
+    )
+    writeFileSync(
+      join(officialProtocolDir, 'agent-plan.md'),
+      '# Agent Plan Protocol\n\nAgent planning coordinates multiple tool and agent steps.\n'
+    )
+
+    const embeddingMap = new Map<string, number[]>([
+      ['ACP 多 Agent 协作模式\n# ACP 多 Agent 协作模式\n\nMulti agent collaboration patterns for orchestrating specialist agents.\n', [0.2, 0.1, 0.2, 0]],
+      ['ACP-Compatible Agents\n# ACP-Compatible Agents\n\nAgents collaborate through shared protocols and agent planning.\n', [0.9, 0.8, 0.7, 0]],
+      ['Agent Client Protocol Introduction\n# Agent Client Protocol Introduction\n\nThe protocol supports agents, clients, and collaboration patterns.\n', [0.85, 0.75, 0.7, 0]],
+      ['Agent Plan Protocol\n# Agent Plan Protocol\n\nAgent planning coordinates multiple tool and agent steps.\n', [0.8, 0.7, 0.6, 0]],
+      ['multi agent collaboration', [1, 1, 1, 0]],
+    ])
+
+    const adapter = new SqliteVectorSearchAdapter({
+      skillDir: assetsDir,
+      embeddingDimensions: 4,
+      embeddingFunction: {
+        async generate(input: string[]) {
+          return input.map((text) => {
+            const vector = embeddingMap.get(text)
+            if (!vector) {
+              throw new Error(`Missing test embedding for: ${text}`)
+            }
+            return vector
+          })
+        },
+      },
+    })
+
+    await adapter.buildIndex(referencesDir)
+    const results = await adapter.search('multi agent collaboration', { topK: 3 })
+
+    expect(results[0]?.id).toBe('user/acp-multi-agent-collaboration.md')
+    expect(results[0]?.source).toBe('user')
+    expect(results[1]?.source).toBe('context7')
+
+    cleanupTempDir(tempDir)
+  })
+
+  it('normalizes camelCase code identifiers for vector reranking and preserves official source classification', async () => {
+    const tempDir = createTempDir('search-runtime-vector-camel-')
+    const assetsDir = join(tempDir, 'assets')
+    const referencesDir = join(assetsDir, 'references')
+    const officialDir = join(referencesDir, 'official', 'protocol')
+    const userDir = join(referencesDir, 'user', 'implementation')
+    mkdirSync(officialDir, { recursive: true })
+    mkdirSync(userDir, { recursive: true })
+
+    writeFileSync(
+      join(officialDir, 'prompt-turn.md'),
+      '# Prompt Turn Protocol\n\nAgents stream text responses via session update notifications during a prompt turn.\n'
+    )
+    writeFileSync(
+      join(userDir, '03-tools-streaming.md'),
+      '# 工具系统和流式响应\n\nUse the StreamResponse class to emit stream response events.\n'
+    )
+
+    const embeddingMap = new Map<string, number[]>([
+      ['Prompt Turn Protocol\n# Prompt Turn Protocol\n\nAgents stream text responses via session update notifications during a prompt turn.\n', [0.92, 0.9, 0.9, 0]],
+      ['工具系统和流式响应\n# 工具系统和流式响应\n\nUse the Stream Response class to emit stream response events.\n', [0.3, 0.25, 0.2, 0]],
+      ['stream response', [1, 1, 1, 0]],
+    ])
+
+    const adapter = new SqliteVectorSearchAdapter({
+      skillDir: assetsDir,
+      embeddingDimensions: 4,
+      embeddingFunction: {
+        async generate(input: string[]) {
+          return input.map((text) => {
+            const vector = embeddingMap.get(text)
+            if (!vector) {
+              throw new Error(`Missing test embedding for: ${text}`)
+            }
+            return vector
+          })
+        },
+      },
+    })
+
+    await adapter.buildIndex(referencesDir)
+    const results = await adapter.search('stream response', { topK: 2 })
+
+    expect(results[0]?.id).toBe('user/implementation/03-tools-streaming.md')
+    expect(results[1]?.source).toBe('context7')
 
     cleanupTempDir(tempDir)
   })
@@ -205,7 +328,7 @@ describe('search runtime contract', () => {
     )
     writeFileSync(
       join(userDir, 'tools-streaming.md'),
-      '# 工具系统和流式响应\n\nexport class StreamResponse implements StreamHandler {\n  start() {}\n  write() {}\n  end() {}\n}\n'
+      '# 工具系统和流式响应\n\nThis guide explains stream response handling with the StreamResponse class.\n\nexport class StreamResponse implements StreamHandler {\n  start() {}\n  write() {}\n  end() {}\n}\n'
     )
 
     const adapter = new MiniSearchAdapter({ skillDir: assetsDir })
@@ -214,6 +337,64 @@ describe('search runtime contract', () => {
 
     expect(results[0]?.title).toBe('工具系统和流式响应')
     expect(results[1]?.title).toBe('ACP 开发者指南：开发新的 Agent')
+
+    cleanupTempDir(tempDir)
+  })
+
+  it('uses localized path slugs for type safety queries without relying on linked paths', async () => {
+    const tempDir = createTempDir('search-runtime-type-safety-')
+    const assetsDir = join(tempDir, 'assets')
+    const referencesDir = join(assetsDir, 'references')
+    const userDir = join(referencesDir, 'user')
+    const bestPracticesDir = join(userDir, 'best-practices')
+    mkdirSync(userDir, { recursive: true })
+    mkdirSync(bestPracticesDir, { recursive: true })
+
+    writeFileSync(
+      join(userDir, 'project-setup.md'),
+      '# TypeScript 项目设置和类型定义\n\n遵循 type-safe is runtime-safe 原则，配置严格模式并导出类型定义。\n'
+    )
+    writeFileSync(
+      join(bestPracticesDir, '01-type-safety.md'),
+      '# 类型安全设计\n\nType safety should be designed first, then enforced through schemas and narrowing.\n'
+    )
+    writeFileSync(
+      join(userDir, 'tools-streaming.md'),
+      '# 工具系统和流式响应\n\n继续阅读： [类型安全设计](../best-practices/01-type-safety.md)\n'
+    )
+
+    const adapter = new MiniSearchAdapter({ skillDir: assetsDir })
+    await adapter.buildIndex(referencesDir)
+    const results = await adapter.search('type safety', { topK: 3 })
+
+    expect(results[0]?.title).toBe('类型安全设计')
+    expect(results.some((result) => result.title === '工具系统和流式响应')).toBe(false)
+
+    cleanupTempDir(tempDir)
+  })
+
+  it('prefers direct tool calls coverage over incidental tool results mentions', async () => {
+    const tempDir = createTempDir('search-runtime-tool-results-')
+    const assetsDir = join(tempDir, 'assets')
+    const referencesDir = join(assetsDir, 'references')
+    const officialDir = join(referencesDir, 'context7', 'protocol')
+    mkdirSync(officialDir, { recursive: true })
+
+    writeFileSync(
+      join(officialDir, 'prompt-turn.md'),
+      '# Prompt Turn Protocol\n\nStreaming updates continue during the turn. Tool results are sent back to the language model for continued processing.\n'
+    )
+    writeFileSync(
+      join(officialDir, 'tool-calls.md'),
+      '# Tool Calls Protocol\n\nThis document describes how agents communicate tool call execution results. Agents report tool invocations via session/update notifications.\n'
+    )
+
+    const adapter = new MiniSearchAdapter({ skillDir: assetsDir })
+    await adapter.buildIndex(referencesDir)
+    const results = await adapter.search('how to stream tool results', { topK: 2 })
+
+    expect(results[0]?.title).toBe('Tool Calls Protocol')
+    expect(results[1]?.title).toBe('Prompt Turn Protocol')
 
     cleanupTempDir(tempDir)
   })

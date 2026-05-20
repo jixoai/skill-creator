@@ -1,7 +1,10 @@
 .claude/
 dist
 node_modules
-demo/
+demo/*
+!demo/search-tech-eval/
+!demo/search-tech-eval/**
+demo/.tmp/
 coverage/
 .DS_Store
 .chat/

@@ -280,6 +280,7 @@ program
       author: packageInfo.author || '',
       maintainers: packageInfo.maintainers || [],
       homepage: packageInfo.homepage || '',
+      repo: packageInfo.repository?.url || '',
       repository: {
         url: packageInfo.repository?.url || '',
         type: packageInfo.repository?.type || '',

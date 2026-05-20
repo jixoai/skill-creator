@@ -151,8 +151,7 @@ function resolveBackendId(result: SearchResult): SearchBackendId | 'unknown' {
   if (
     backendId === 'minisearch' ||
     backendId === 'ufuzzy' ||
-    backendId === 'sqlite-vec' ||
-    backendId === 'chroma'
+    backendId === 'sqlite-vec'
   ) {
     return backendId
   }

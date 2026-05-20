@@ -23,10 +23,6 @@ export interface SearchEngineOptions {
   adapterOptions?: {
     /** Auto search quality threshold */
     qualityThreshold?: number
-    /** ChromaDB fallback is legacy-only and only applies to chroma mode */
-    enableChromaFallback?: boolean
-    /** ChromaDB startup timeout is legacy-only and only applies to chroma mode */
-    chromaStartupTimeout?: number
   }
 }
 
@@ -35,8 +31,9 @@ export interface SearchEngineOptions {
  */
 export async function buildSearchEngine(options: SearchEngineOptions = {}): Promise<SearchEngine> {
   const { mode = 'auto', skillDir = '', referencesDir = '', config, adapterOptions = {} } = options
+  const resolvedMode = mode === 'chroma' ? 'vector' : mode
 
-  switch (mode) {
+  switch (resolvedMode) {
     case 'auto':
       if (!config) {
         throw new Error('Config is required for auto mode')
@@ -60,19 +57,7 @@ export async function buildSearchEngine(options: SearchEngineOptions = {}): Prom
         skillDir,
       })
 
-    case 'chroma':
-      if (!config) {
-        throw new Error('Config is required for chroma mode')
-      }
-
-      return new (await import('./chromaSearchAdapter.js')).ChromaSearchAdapter({
-        skillDir,
-        collectionName: `skills`,
-        startupTimeout: adapterOptions.chromaStartupTimeout ?? 15000,
-        enableFallback: adapterOptions.enableChromaFallback ?? true,
-      })
-
     default:
-      throw new Error(`Invalid search mode: ${mode}. Use 'auto', 'fulltext', 'fuzzy', 'vector', or 'chroma'.`)
+      throw new Error(`Invalid search mode: ${mode}. Use 'auto', 'fulltext', 'fuzzy', or 'vector'.`)
   }
 }

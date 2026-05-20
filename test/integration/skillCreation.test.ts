@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest'
 import { rmSync, existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFile, execSync } from 'node:child_process'
@@ -8,9 +8,16 @@ import { createTempDir, cleanupTempDir } from '../test-utils.js'
 
 const execFileAsync = promisify(execFile)
 
-// NOTE: These tests assume `npm run build` has been run and `dist/cli.mjs` is up to date.
 describe('Skill Creation Integration Tests', () => {
   let tempDir: string
+
+  beforeAll(() => {
+    execSync('pnpm build', {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    })
+  }, 60_000)
 
   beforeEach(() => {
     tempDir = createTempDir('integration-test-')
@@ -38,6 +45,7 @@ describe('Skill Creation Integration Tests', () => {
         expect(packageInfo.name).toBe(packageName)
         expect(packageInfo.skill_dir_name).toBeDefined()
         expect(packageInfo.version).toBeDefined()
+        expect(packageInfo.repo).toBeDefined()
 
         const { skill_dir_name, version } = packageInfo
         const description = 'Zod is a TypeScript-first schema declaration and validation library.' // Mock description as it can be null
