@@ -52,9 +52,9 @@ export class Context7Utils {
     const query = this.createSearchQuery(packageName, version)
     const response = await this.searchLibraries(packageName, query, options)
     const candidates = response.results
-      .slice(0, options.limit ?? 10)
       .map((candidate) => this.annotateCandidate(candidate, packageName, version))
       .sort((left, right) => right.selectionScore - left.selectionScore)
+      .slice(0, options.limit ?? 10)
 
     const bestMatch = candidates[0]
     if (!bestMatch) return null
@@ -81,6 +81,7 @@ export class Context7Utils {
   ): Promise<z.infer<typeof Context7SearchResponseSchema>> {
     const fetchImpl = options.fetchImpl ?? fetch
     const attempts = this.getLibrarySearchNames(packageName)
+    const mergedResults = new Map<string, Context7SearchCandidate>()
 
     for (const libraryName of attempts) {
       const url = new URL(
@@ -95,12 +96,18 @@ export class Context7Utils {
       }
 
       const payload = Context7SearchResponseSchema.parse(await response.json())
-      if (payload.results.length > 0) {
-        return payload
+      for (const candidate of payload.results) {
+        const existing = mergedResults.get(candidate.id)
+        if (!existing || this.getCandidateMergeScore(candidate) > this.getCandidateMergeScore(existing)) {
+          mergedResults.set(candidate.id, candidate)
+        }
       }
     }
 
-    return { results: [], searchFilterApplied: false }
+    return {
+      results: Array.from(mergedResults.values()),
+      searchFilterApplied: false,
+    }
   }
 
   private static getLibrarySearchNames(packageName: string): string[] {
@@ -182,5 +189,13 @@ export class Context7Utils {
         normalizedVersion.startsWith(`${formattedVersion}.`)
       )
     })
+  }
+
+  private static getCandidateMergeScore(candidate: Context7SearchCandidate): number {
+    return (
+      candidate.totalSnippets * 1_000 +
+      Math.round(candidate.trustScore * 100) * 10 +
+      Math.round(candidate.benchmarkScore)
+    )
   }
 }

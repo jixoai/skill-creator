@@ -24,7 +24,6 @@ export default defineConfig({
   // External dependencies - keep these as runtime dependencies
   external: [
     // Heavyweight libraries that must remain external
-    'chromadb',
     '@chroma-core/default-embed',
     // Node.js built-in modules
     /^node:.*/,

@@ -132,5 +132,68 @@ describe('PackageUtils', () => {
       expect(resolved?.bestMatch.versionMatched).toBe(true)
       expect(resolved?.candidates[1]?.id).toBe('/websites/zod_dev')
     })
+
+    it('should merge candidates across search attempts before ranking and truncation', async () => {
+      let callCount = 0
+      const fetchMock = async (input: string | URL | Request) => {
+        const url = input instanceof URL ? input : new URL(String(input))
+        callCount += 1
+
+        if (url.searchParams.get('libraryName') === '@scope/pkg') {
+          return new Response(
+            JSON.stringify({
+              results: [
+                {
+                  id: '/websites/pkg_docs',
+                  title: 'Pkg website',
+                  description: 'Mirror docs',
+                  totalSnippets: 5000,
+                  trustScore: 9.9,
+                  benchmarkScore: 80,
+                  versions: [],
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }
+          )
+        }
+
+        return new Response(
+          JSON.stringify({
+            results: [
+              {
+                id: '/scope/pkg',
+                title: 'Pkg repo',
+                description: 'Repository docs',
+                totalSnippets: 200,
+                trustScore: 8.5,
+                benchmarkScore: 88,
+                versions: ['v2.1.0'],
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      }
+
+      const resolved = await Context7Utils.resolveLibrary('@scope/pkg', {
+        version: '2.3.0',
+        limit: 1,
+        fetchImpl: fetchMock as typeof fetch,
+      })
+
+      expect(callCount).toBe(2)
+      expect(resolved).not.toBeNull()
+      expect(resolved?.bestMatch.id).toBe('/scope/pkg')
+      expect(resolved?.bestMatch.matchKind).toBe('package-path')
+      expect(resolved?.bestMatch.versionMatched).toBe(true)
+      expect(resolved?.candidates).toHaveLength(1)
+    })
   })
 })

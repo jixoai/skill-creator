@@ -31,68 +31,23 @@ npm install -g skill-creator
 
 ### Verify Installation
 
-After installation, you can verify that the MCP servers are working:
+After installation, verify that the CLI is available:
 
 ```bash
-# Check if Context7 MCP is accessible
 skill-creator --help
-
-# The help should show all commands if MCP servers are properly configured
 ```
 
-### Prerequisites
+If the help output renders, the local skill workflow is available.
 
-Before installing skill-creator, make sure you have the required MCP (Model Context Protocol) servers installed for full functionality:
+### Runtime Prerequisites
 
-<details>
-<summary>Context7 MCP - For downloading and managing documentation</summary>
+`skill-creator` does not require Claude Code MCP servers for its core CLI workflow.
 
-```bash
-# Install from npm
-npm install -g @upstash/context7-mcp
+It uses:
+- npm registry HTTP APIs for `search` and `get-info`
+- Context7 HTTP APIs for `resolve-context7` and `download-context7`
 
-# Or follow installation guide: https://github.com/upstash/context7?tab=readme-ov-file
-
-```
-
-</details>
-
-<details>
-<summary>Chrome DevTools MCP - For browser automation and web scraping</summary>
-
-```bash
-# Install from npm
-npm install -g @chromedevtools/chrome-devtools-mcp
-
-# Or follow installation guide: https://github.com/ChromeDevTools/chrome-devtools-mcp?tab=readme-ov-file
-
-```
-
-</details>
-
-<details>
-<summary>MCP Server Configuration</summary>
-
-After installing the MCP servers, you need to configure them in your Claude Code settings. Add the following to your Claude Code configuration:
-
-```json
-{
-  "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp", "--api-key", "YOUR_CONTEXT7_API_KEY"]
-    },
-    "chrome-devtools": {
-      "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest"]
-    }
-  }
-}
-```
-
-> **Note**: The MCP servers are required for full functionality. Without them, some features like Context7 documentation downloading and web-based research may not work properly.
-
-</details>
+You only need normal outbound network access when using those commands.
 
 ## Quick Start
 
@@ -255,15 +210,6 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 
 ## Development
 
-### Prerequisites
-
-Make sure you have the MCP servers installed and configured before development:
-
-```bash
-# Verify MCP servers are available
-npm list -g @upstash/context7-mcp @chromedevtools/chrome-devtools-mcp
-```
-
 ### Development Setup
 
 ```bash
@@ -282,22 +228,16 @@ npm test
 # Run tests with coverage
 npm run test:coverage
 
-# Lint code
-npm run lint
-
 # Type check
-npm run type-check
+pnpm ts
 ```
 
-### Testing MCP Integration
+### Testing Context7 Integration
 
-To test MCP server integration during development:
+To test the built-in Context7 workflow during development:
 
 ```bash
-# Test Context7 integration
-skill-creator get-info @upstash/context7
-
-# Test Chrome DevTools integration
+skill-creator resolve-context7 vitest --package-version 4.1.7
 skill-creator download-context7 --help
 ```
 
