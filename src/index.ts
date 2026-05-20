@@ -16,6 +16,7 @@ export { UnifiedSearchEngine } from './core/unifiedSearch.js'
 export { ContentManager } from './core/contentManager.js'
 export { Config } from './utils/config.js'
 export { PackageUtils } from './utils/package.js'
+export { Context7Utils } from './utils/context7.js'
 export type {
   SkillConfig,
   SearchResult,
@@ -27,4 +28,5 @@ export type {
   AddContentResult,
   PackageVersion,
   Context7Library,
+  Context7ResolvedLibrary,
 } from './types/index.js'

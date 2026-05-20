@@ -10,7 +10,7 @@ A powerful composite tool for creating and managing Claude Code skills. It serve
 ### Core Capabilities
 
 - 🚀 **Automated Skill Creation**: Generate skills with proper folder naming (`package@version` format)
-- 📚 **Context7 Integration**: Download and slice documentation from Context7 with automatic project ID detection
+- 📚 **Context7 Integration**: Resolve the best Context7 project ID, then download and slice documentation automatically
 - 🔍 **Intelligent Search**: Lightweight local full-text search with optional explicit vector mode
 - 💾 **Dynamic Content Management**: Add custom knowledge with deduplication
 
@@ -142,6 +142,9 @@ skill-creator create-cc-skill --scope user --name "@tanstack/react-query" --desc
 # Create skill with interactive prompts
 skill-creator create-cc-skill --scope user --interactive --description "React Query for data fetching" @tanstack/react-query@5
 
+# Resolve the best Context7 project id
+skill-creator resolve-context7 @tanstack/react-query
+
 # Download documentation (automatically builds search index)
 skill-creator download-context7 --package @tanstack/react-query /tanstack/react-query
 
@@ -164,6 +167,7 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 | ------------------------ | -------------------------------- |
 | `search <keywords>`      | Search npm packages              |
 | `get-info <package>`     | Get detailed package information |
+| `resolve-context7 <package>` | Resolve the best Context7 library id |
 | `create-cc-skill <name>` | Create a new skill directory     |
 
 ### Content Management
@@ -213,19 +217,25 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
    skill-creator create-cc-skill --scope current --interactive zustand
    ```
 
-4. **Download Documentation**: Get Context7 docs with automatic indexing
+4. **Resolve Context7 Project ID**: Pick the strongest Context7 source for the package
+
+   ```bash
+   skill-creator resolve-context7 zustand --package-version 5.0.0
+   ```
+
+5. **Download Documentation**: Get Context7 docs with automatic indexing
 
    ```bash
    skill-creator download-context7 --package zustand /zustand
    ```
 
-5. **Add Custom Knowledge**: Enhance with your own content
+6. **Add Custom Knowledge**: Enhance with your own content
 
    ```bash
    skill-creator add-skill --package zustand --title "Best Practices" --content "Your custom notes"
    ```
 
-6. **Search Knowledge Base**: Query your skill
+7. **Search Knowledge Base**: Query your skill
    ```bash
    skill-creator search-skill --package zustand "typescript patterns"
    ```

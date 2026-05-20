@@ -80,3 +80,33 @@ export interface Context7Library {
   trust_score: number
   versions?: string[]
 }
+
+export interface Context7ResolvedLibrary {
+  packageName: string
+  version?: string
+  query: string
+  bestMatch: {
+    id: string
+    title: string
+    description: string
+    totalSnippets: number
+    trustScore: number
+    benchmarkScore: number
+    versions: string[]
+    matchKind: 'package-path' | 'package-slug' | 'website' | 'other'
+    versionMatched: boolean
+    selectionScore: number
+  }
+  candidates: Array<{
+    id: string
+    title: string
+    description: string
+    totalSnippets: number
+    trustScore: number
+    benchmarkScore: number
+    versions: string[]
+    matchKind: 'package-path' | 'package-slug' | 'website' | 'other'
+    versionMatched: boolean
+    selectionScore: number
+  }>
+}

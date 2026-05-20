@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { PackageUtils } from '../../src/utils/package.js'
+import { Context7Utils } from '../../src/utils/context7.js'
 
 describe('PackageUtils', () => {
   describe('createSkillFolderName', () => {
@@ -84,6 +85,52 @@ describe('PackageUtils', () => {
     it('should return null for an unknown package', async () => {
       const info = await PackageUtils.getPackageInfo('non-existent-package-12345abc')
       expect(info).toBeNull()
+    })
+  })
+
+  describe('resolveContext7Library', () => {
+    it('should prefer package-path matches with version alignment over website mirrors', async () => {
+      const fetchMock = async () =>
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                id: '/websites/zod_dev',
+                title: 'Zod',
+                description: 'Website mirror',
+                totalSnippets: 10283,
+                trustScore: 9.9,
+                benchmarkScore: 85.07,
+                versions: [],
+              },
+              {
+                id: '/colinhacks/zod',
+                title: 'Zod',
+                description: 'Repository docs',
+                totalSnippets: 682,
+                trustScore: 9.6,
+                benchmarkScore: 89.2,
+                versions: ['v3.24.2', 'v4.0.1'],
+              },
+            ],
+            searchFilterApplied: false,
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+
+      const resolved = await Context7Utils.resolveLibrary('zod', {
+        version: '4.1.7',
+        fetchImpl: fetchMock as typeof fetch,
+      })
+
+      expect(resolved).not.toBeNull()
+      expect(resolved?.bestMatch.id).toBe('/colinhacks/zod')
+      expect(resolved?.bestMatch.matchKind).toBe('package-path')
+      expect(resolved?.bestMatch.versionMatched).toBe(true)
+      expect(resolved?.candidates[1]?.id).toBe('/websites/zod_dev')
     })
   })
 })

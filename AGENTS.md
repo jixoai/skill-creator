@@ -67,7 +67,7 @@
       **注意**:
    - `--scope` 是必须参数，必须指定存储位置（current表示当前项目，user表示用户目录）
    - `--name` 是推荐参数，指定包名，避免从目录名猜测
-   4. **获取文档 ID**: AI 调用 `mcp-context7` 工具来搜索并根据 `skill-creator.md` 中定义的“评判标准”（Code Snippets 数量最多）来确定唯一的 `project-id`。
+   4. **获取文档 ID**: AI 调用 `cli resolve-context7 <package_name> [--package-version <version>]` 来搜索并根据 `skill-creator.md` 中定义的评判标准确定唯一的 `project-id`。命令输出中的 `bestMatch.id` 就是下一步要使用的 `project-id`。
    5. **下载文档**: 使用 `cli download-context7 --pwd <skill_path> <project_id>` 命令来下载文档。`<skill_path>` 是上一步创建技能时返回的完整路径。文档将被自动切分并存放到 `{skill_path}/assets/references/context7/` 目录下。
    6. **添加用户知识**: subagent 可以通过 `cli add-skill --pwd <skill_path> --title "标题" --content "内容"` 来动态添加用户自定义的知识点。
    7. **搜索知识**: subagent 可以使用 `cli search-skill --pwd <skill_path> "查询关键词"` 来在技能的知识库中进行搜索。

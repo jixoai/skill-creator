@@ -303,6 +303,28 @@ program
     console.log(JSON.stringify(result, null, 2))
   })
 
+program
+  .command('resolve-context7')
+  .description('Resolve the best Context7 library id for an npm package')
+  .argument('<package_name>', 'The npm package name to resolve against Context7')
+  .option('--package-version <version>', 'Explicit package version to use in the Context7 query')
+  .option('-l, --limit <limit>', 'Number of candidates to keep in the response', '5')
+  .action(async (packageName: string, options) => {
+    const { Context7Utils } = await import('./utils/context7.js')
+
+    const resolved = await Context7Utils.resolveLibrary(packageName, {
+      version: options.packageVersion,
+      limit: parseInt(options.limit, 10),
+    })
+
+    if (!resolved) {
+      console.error(`❌ No Context7 library found for package "${packageName}".`)
+      process.exit(1)
+    }
+
+    console.log(JSON.stringify(resolved, null, 2))
+  })
+
 // Add search-skill command
 program
   .command('search-skill')

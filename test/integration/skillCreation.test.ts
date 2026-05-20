@@ -185,6 +185,18 @@ Mutations should invalidate related queries and keep optimistic updates bounded 
       }
     }, 30_000)
 
+    it('should resolve the best context7 project id for a package', async () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const output = execSync(`${cliCmd} resolve-context7 vitest --package-version 4.1.7`, {
+        encoding: 'utf-8',
+      })
+
+      const resolved = JSON.parse(output)
+      expect(resolved.packageName).toBe('vitest')
+      expect(resolved.bestMatch.id).toBe('/vitest-dev/vitest')
+      expect(resolved.bestMatch.matchKind).toBe('package-path')
+    }, 30_000)
+
     it('should resolve scoped package skills through --package', () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', '@tanstack__react-query@5')
@@ -319,6 +331,10 @@ Mutations should invalidate related queries and keep optimistic updates bounded 
       const content = readFileSync(skillCreatorFile, 'utf-8')
       expect(content).toContain('---')
       expect(content).toContain('name: skill-creator')
+      expect(content).toContain('skill-creator --help')
+      expect(content).toContain('skill-creator resolve-context7 <package-name>')
+      expect(content).not.toContain('mcp__context7__resolve-library-id')
+      expect(content).not.toContain('node dist/cli.mjs search')
 
       // Restore original HOME
       process.env.HOME = originalEnv
