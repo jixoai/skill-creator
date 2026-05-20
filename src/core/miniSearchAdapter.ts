@@ -19,6 +19,32 @@ interface MiniSearchDocument {
   file_path: string
 }
 
+interface MiniSearchHit {
+  id: string | number
+  title: string
+  source: 'user' | 'context7'
+  file_path: string
+  score: number
+  match: Record<string, string[]>
+  terms?: string[]
+  queryTerms?: string[]
+}
+
+const QUERY_STOPWORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'for',
+  'how',
+  'in',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+  'with',
+])
+
 export interface MiniSearchAdapterOptions {
   skillDir: string
 }
@@ -77,18 +103,27 @@ export class MiniSearchAdapter implements SearchEngine {
         if (!where?.source) return true
         return result.source === where.source
       },
-    })
+    }) as MiniSearchHit[]
 
-    return rawResults.slice(0, topK).map((item) => ({
+    const rerankedResults = this.rerankResults(rawResults, query).slice(0, topK)
+
+    return rerankedResults.map((item) => ({
       id: String(item.id),
       title: String(item.title),
       content: this.documents.find((doc) => doc.id === String(item.id))?.content || '',
-      source: item.source as 'user' | 'context7',
+      source: item.source,
       file_path: String(item.file_path),
       score: Number(item.score),
       metadata: {
         match: item.match,
+        queryTerms: item.queryTerms,
+        matchedTerms: item.terms,
         backendId: 'minisearch',
+        rawScore: item.score,
+        rerankScore: item.rerankScore,
+        titleCoverage: item.titleCoverage,
+        contentCoverage: item.contentCoverage,
+        termDensity: item.termDensity,
       },
     }))
   }
@@ -224,5 +259,101 @@ export class MiniSearchAdapter implements SearchEngine {
       hash.update(document.content)
     }
     return hash.digest('hex')
+  }
+
+  private rerankResults(
+    results: MiniSearchHit[],
+    query: string
+  ): Array<
+    MiniSearchHit & {
+      rerankScore: number
+      titleCoverage: number
+      contentCoverage: number
+      termDensity: number
+    }
+  > {
+    const queryTokens = this.normalizeQueryTokens(query)
+
+    return results
+      .map((result) => {
+        const document = this.documents.find((doc) => doc.id === String(result.id))
+        const content = document?.content ?? ''
+        const titleCoverage = this.calculateCoverage(result.title, queryTokens)
+        const contentCoverage = this.calculateCoverage(content, queryTokens)
+        const termDensity = this.calculateTermDensity(content, queryTokens)
+        const calibratedScore = this.calibrateRawScore(result.score)
+
+        const rerankScore =
+          calibratedScore * 0.25 +
+          titleCoverage * 0.35 +
+          contentCoverage * 0.2 +
+          Math.min(termDensity / 2, 1) * 0.2
+
+        return {
+          ...result,
+          rerankScore,
+          titleCoverage,
+          contentCoverage,
+          termDensity,
+        }
+      })
+      .sort((left, right) => {
+        if (right.rerankScore !== left.rerankScore) {
+          return right.rerankScore - left.rerankScore
+        }
+
+        return right.score - left.score
+      })
+  }
+
+  private normalizeQueryTokens(query: string): string[] {
+    const normalized = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+    return normalized.filter((token) => !QUERY_STOPWORDS.has(token))
+  }
+
+  private calculateCoverage(text: string, queryTokens: string[]): number {
+    if (queryTokens.length === 0) {
+      return 0
+    }
+
+    const normalizedText = text.toLowerCase()
+    let matched = 0
+    for (const token of queryTokens) {
+      if (normalizedText.includes(token)) {
+        matched += 1
+      }
+    }
+
+    return matched / queryTokens.length
+  }
+
+  private calculateTermDensity(content: string, queryTokens: string[]): number {
+    if (queryTokens.length === 0) {
+      return 0
+    }
+
+    const words = content.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+    if (words.length === 0) {
+      return 0
+    }
+
+    let matches = 0
+    for (const token of queryTokens) {
+      for (const word of words) {
+        if (word === token || word === token.slice(0, -1) || token === word.slice(0, -1)) {
+          matches += 1
+        }
+      }
+    }
+
+    return matches / Math.sqrt(words.length)
+  }
+
+  private calibrateRawScore(score: number): number {
+    if (score <= 0) {
+      return 0
+    }
+
+    return score / (score + 3)
   }
 }

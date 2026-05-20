@@ -134,6 +134,36 @@ describe('search runtime contract', () => {
     cleanupTempDir(tempDir)
   })
 
+  it('reranks fulltext results to prefer better query coverage over raw lexical score spikes', async () => {
+    const tempDir = createTempDir('search-runtime-rerank-')
+    const assetsDir = join(tempDir, 'assets')
+    const referencesDir = join(assetsDir, 'references')
+    const userDir = join(referencesDir, 'user')
+    const officialDir = join(referencesDir, 'context7', 'protocol')
+    mkdirSync(userDir, { recursive: true })
+    mkdirSync(officialDir, { recursive: true })
+
+    writeFileSync(
+      join(userDir, 'developer-guide.md'),
+      `# ACP 开发者指南：开发新的 Agent\n\nTool tool tool tools results result toolcall toolinput toolresponse.\n`.repeat(
+        20
+      )
+    )
+    writeFileSync(
+      join(officialDir, 'tool-calls.md'),
+      '# Tool Calls Protocol\n\nThis document describes how agents communicate tool call execution results.\n'
+    )
+
+    const adapter = new MiniSearchAdapter({ skillDir: assetsDir })
+    await adapter.buildIndex(referencesDir)
+    const results = await adapter.search('how to stream tool results', { topK: 2 })
+
+    expect(results[0]?.title).toBe('Tool Calls Protocol')
+    expect(results[1]?.title).toBe('ACP 开发者指南：开发新的 Agent')
+
+    cleanupTempDir(tempDir)
+  })
+
   it('keeps strong fulltext results on the auto path', async () => {
     const auto = new AutoSearchAdapter(
       { skillDir: '/tmp/skill', qualityThreshold: 0.55 },
