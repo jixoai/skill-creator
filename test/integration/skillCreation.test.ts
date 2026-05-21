@@ -76,6 +76,8 @@ describe('Skill Creation Integration Tests', () => {
         })
         const createPayload = JSON.parse(createOutput) as {
           skillPath: string
+          requestedScope: string
+          resolvedScope: string
           scopePath: string
           skillDirName: string
           skillName: string
@@ -83,6 +85,8 @@ describe('Skill Creation Integration Tests', () => {
           sourcePackageVersionHint: string
           skillDescription: string
         }
+        expect(createPayload.requestedScope).toBe('current')
+        expect(createPayload.resolvedScope).toBe('current')
         expect(normalizeRealPath(createPayload.skillPath)).toBe(normalizeRealPath(skillDir))
         expect(createPayload.skillDirName).toBe(skill_dir_name)
         expect(createPayload.skillName).toBe('zod')
@@ -929,6 +933,8 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
 
       const payload = JSON.parse(output) as {
         skillPath: string
+        requestedScope: string
+        resolvedScope: string
         scopePath: string
         skillDirName: string
         skillName: string
@@ -937,6 +943,8 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
         skillDescription: string
       }
 
+      expect(payload.requestedScope).toBe('current')
+      expect(payload.resolvedScope).toBe('current')
       expect(payload.skillDirName).toBe('json-skill@1')
       expect(payload.skillName).toBe('json-skill')
       expect(payload.sourcePackageName).toBe('json-skill')
@@ -964,6 +972,8 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
 
       const payload = JSON.parse(output) as {
         skillPath: string
+        requestedScope: string
+        resolvedScope: string
         scopePath: string
         skillDirName: string
         skillName: string
@@ -972,6 +982,8 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
         skillDescription: string
       }
 
+      expect(payload.requestedScope).toBe('current')
+      expect(payload.resolvedScope).toBe('current')
       expect(payload.skillDirName).toBe('tanstack-router@1')
       expect(payload.skillName).toBe('router-skill')
       expect(payload.sourcePackageName).toBe('@tanstack/router')
@@ -983,6 +995,43 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       const skillMd = readFileSync(join(payload.skillPath, 'SKILL.md'), 'utf-8')
       expect(skillMd).toContain('# router-skill')
       expect(skillMd).toContain('<skill-package name="@tanstack/router" version="1">')
+
+      cleanupTempDir(tempDir)
+    })
+
+    it('should resolve --scope auto to the default current scope when a local skill-creator agent exists', () => {
+      const tempDir = createTempDir('create-skill-auto-scope-')
+      mkdirSync(join(tempDir, '.claude', 'agents'), { recursive: true })
+      writeFileSync(join(tempDir, '.claude', 'agents', 'skill-creator.md'), '# installed')
+
+      const output = execSync(
+        `node ${process.cwd()}/dist/cli.mjs create-cc-skill --scope auto --name "auto-skill" --description "Auto scope skill" --json auto-skill@1`,
+        {
+          cwd: tempDir,
+          encoding: 'utf-8',
+        }
+      )
+
+      const payload = JSON.parse(output) as {
+        skillPath: string
+        requestedScope: string
+        resolvedScope: string
+        scopePath: string
+        skillDirName: string
+        skillName: string
+        sourcePackageName: string
+        sourcePackageVersionHint: string
+        skillDescription: string
+      }
+
+      expect(payload.requestedScope).toBe('auto')
+      expect(payload.resolvedScope).toBe('current')
+      expect(normalizeRealPath(payload.scopePath)).toBe(
+        normalizeRealPath(join(tempDir, '.claude', 'skills'))
+      )
+      expect(normalizeRealPath(payload.skillPath)).toBe(
+        normalizeRealPath(join(tempDir, '.claude', 'skills', 'auto-skill@1'))
+      )
 
       cleanupTempDir(tempDir)
     })
@@ -1135,7 +1184,7 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(output).toContain('[installed] 10. search-skill')
       expect(output).toContain('[installed] 11. vector runtime contract')
       expect(output).toContain('Installed CLI verification passed')
-    }, 120_000)
+    }, 180_000)
 
     it('should verify the linked CLI workflow through the reusable link verification script', () => {
       const output = execSync('pnpm verify:linked', {

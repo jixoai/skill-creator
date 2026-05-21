@@ -23,6 +23,8 @@ export interface CreateSkillPrompt {
 export interface PreparedCreateSkillWorkflow {
   createOptions: CreateSkillOptions
   summary: {
+    requestedScope: string
+    resolvedScope: 'current' | 'user' | 'custom'
     scopePath: string
     skillDirName: string
     skillName: string
@@ -126,10 +128,8 @@ export async function prepareCreateSkillWorkflow(
     throw new Error('Error: --scope is required. Use --scope current or --scope user.')
   }
 
-  const scopePath =
-    scope === 'user' ? path.join(homedir(), '.claude/skills') :
-    scope === 'current' ? path.join(cwd, '.claude/skills') :
-    scope
+  const resolvedScopeSelection = resolveScopeSelection(scope, cwd)
+  const { requestedScope, resolvedScope, scopePath } = resolvedScopeSelection
 
   if (interactive) {
     console.log('\nFinal Configuration:')
@@ -166,6 +166,8 @@ export async function prepareCreateSkillWorkflow(
       force,
     },
     summary: {
+      requestedScope,
+      resolvedScope,
       scopePath,
       skillDirName,
       skillName: finalSkillName,
@@ -173,5 +175,42 @@ export async function prepareCreateSkillWorkflow(
       sourcePackageVersionHint,
       skillDescription: description,
     },
+  }
+}
+
+export function resolveScopeSelection(
+  scope: string,
+  cwd: string,
+  requestedScope: string = scope
+): {
+  requestedScope: string
+  resolvedScope: 'current' | 'user' | 'custom'
+  scopePath: string
+} {
+  if (scope === 'auto') {
+    const hasProjectAgent = existsSync(join(cwd, '.claude/agents/skill-creator.md'))
+    return resolveScopeSelection(hasProjectAgent ? 'current' : 'user', cwd, requestedScope)
+  }
+
+  if (scope === 'user') {
+    return {
+      requestedScope,
+      resolvedScope: 'user',
+      scopePath: path.join(homedir(), '.claude/skills'),
+    }
+  }
+
+  if (scope === 'current') {
+    return {
+      requestedScope,
+      resolvedScope: 'current',
+      scopePath: path.join(cwd, '.claude/skills'),
+    }
+  }
+
+  return {
+    requestedScope,
+    resolvedScope: 'custom',
+    scopePath: scope,
   }
 }

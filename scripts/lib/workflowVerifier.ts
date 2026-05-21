@@ -228,6 +228,8 @@ Use stringbool coercion carefully and document the project-specific rule in user
     )
     const createPayload = JSON.parse(createOutput) as {
       skillPath: string
+      requestedScope: string
+      resolvedScope: string
       scopePath: string
       skillDirName: string
       skillName: string
@@ -239,6 +241,8 @@ Use stringbool coercion carefully and document the project-specific rule in user
       normalizeRealPath(createPayload.skillPath) === normalizeRealPath(skillDir),
       'create-cc-skill did not return the created skill path'
     )
+    assert(createPayload.requestedScope === 'current', 'create-cc-skill did not return the requested scope')
+    assert(createPayload.resolvedScope === 'current', 'create-cc-skill did not return the resolved scope')
     assert(createPayload.skillDirName === 'workflow-skill@1', 'create-cc-skill did not return the skill directory name')
     assert(createPayload.skillName === 'demo-pkg', 'create-cc-skill did not return the visible skill name')
     assert(createPayload.sourcePackageName === 'demo-pkg', 'create-cc-skill did not return the source package name')

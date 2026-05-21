@@ -49,8 +49,8 @@ skill-creator --help
 3. **创建skill**
 
    ```bash
-   skill-creator create-cc-skill --scope [current|user] --name <package_name> [--skill-name <visible_skill_name>] skill_dir_name --description "..." --json
-   # 打印 JSON 对象，其中包含 skillPath 和解析后的流程元数据
+   skill-creator create-cc-skill --scope [current|user|auto] --name <package_name> [--skill-name <visible_skill_name>] skill_dir_name --description "..." --json
+   # 打印 JSON 对象，其中包含 skillPath、requestedScope、resolvedScope 以及解析后的流程元数据
    ```
 
    **注意**:
@@ -64,6 +64,7 @@ skill-creator --help
       - 用户目录(`--scope user`)：`~/.claude/skills`
       - 默认选择：如果当前项目里已经存在 `./.claude/agents/skill-creator.md`，则默认 `current`；否则默认 `user`
       - **注意**：你需要通过 `AskUserQuestion` 工具来询问用户存储的位置，如果返回结果为空，那么说明 Claude Code 是否处于 bypass-permissions 模式。此时直接使用默认存储位置即可。
+      - 如果是直接使用 CLI，希望让工具自己执行这条默认规则，那么传 `--scope auto`
    2. **询问技能命名**（如果没有提供--skill-name参数）
       - 如果用户对 `skill_dir_name` 满不满意，那么就让用户提供一个新的名称
    - 确认后执行命令

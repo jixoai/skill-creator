@@ -42,7 +42,10 @@ program.hook('preAction', (thisCommand) => {
 program
   .command('create-cc-skill')
   .option('--interactive', 'Enable interactive confirmation prompts')
-  .option('--scope <scope>', 'Storage scope (user or current), or custom directory to store skills')
+  .option(
+    '--scope <scope>',
+    'Storage scope (user, current, or auto), or a custom directory to store skills'
+  )
   .option('--name <name>', 'Source package name stored in SKILL.md for later package-aware workflows')
   .option('--skill-name <name>', 'Visible skill name used in SKILL.md and JSON output')
   .option('--description <description>', 'Custom description for the skill')
@@ -67,6 +70,8 @@ program
           JSON.stringify(
             {
               skillPath,
+              requestedScope: workflow.summary.requestedScope,
+              resolvedScope: workflow.summary.resolvedScope,
               scopePath: workflow.summary.scopePath,
               skillDirName: workflow.summary.skillDirName,
               skillName: workflow.summary.skillName,

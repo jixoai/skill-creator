@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   prepareCreateSkillWorkflow,
+  resolveScopeSelection,
   SKILL_CREATION_CANCELLED_MESSAGE,
 } from '../../src/utils/createSkillWorkflow.js'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { createTempDir, cleanupTempDir } from '../test-utils.js'
 
 describe('createSkillWorkflow', () => {
@@ -36,6 +38,8 @@ describe('createSkillWorkflow', () => {
       sourcePackageVersionHint: '5',
       force: true,
     })
+    expect(workflow.summary.requestedScope).toBe('current')
+    expect(workflow.summary.resolvedScope).toBe('current')
   })
 
   it('supports separating the visible skill name from the source package identity', async () => {
@@ -160,6 +164,37 @@ describe('createSkillWorkflow', () => {
 
       const scopeQuestion = capturedQuestions[0] as { default?: string } | undefined
       expect(scopeQuestion?.default).toBe('current')
+    } finally {
+      cleanupTempDir(cwd)
+    }
+  })
+
+  it('resolves auto scope to current when the project already has a skill-creator agent', () => {
+    const cwd = createTempDir('workflow-auto-current-')
+
+    try {
+      mkdirSync(join(cwd, '.claude', 'agents'), { recursive: true })
+      writeFileSync(join(cwd, '.claude', 'agents', 'skill-creator.md'), '# installed')
+
+      expect(resolveScopeSelection('auto', cwd)).toEqual({
+        requestedScope: 'auto',
+        resolvedScope: 'current',
+        scopePath: join(cwd, '.claude', 'skills'),
+      })
+    } finally {
+      cleanupTempDir(cwd)
+    }
+  })
+
+  it('resolves auto scope to user when the project does not have a skill-creator agent', () => {
+    const cwd = createTempDir('workflow-auto-user-')
+
+    try {
+      expect(resolveScopeSelection('auto', cwd)).toEqual({
+        requestedScope: 'auto',
+        resolvedScope: 'user',
+        scopePath: join(homedir(), '.claude', 'skills'),
+      })
     } finally {
       cleanupTempDir(cwd)
     }

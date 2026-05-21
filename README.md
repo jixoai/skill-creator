@@ -97,6 +97,9 @@ skill-creator create-cc-skill --scope user --name "@tanstack/react-query" --desc
 # Create skill with a custom visible skill name while keeping the source package identity
 skill-creator create-cc-skill --scope user --name "@tanstack/react-query" --skill-name "react-query" --description "React Query for data fetching" @tanstack/react-query@5 --json
 
+# Let the CLI choose the default storage scope automatically
+skill-creator create-cc-skill --scope auto --name zod --description "Zod validation skill" zod@4 --json
+
 # Create skill with interactive prompts
 skill-creator create-cc-skill --scope user --interactive --description "React Query for data fetching" @tanstack/react-query@5
 
@@ -152,7 +155,9 @@ skill-creator add-skill --package @tanstack/react-query --title "Bundle guidance
 ### Options
 
 - `--scope <user|current>`: Storage location for skills (required)
+- `--scope auto`: Resolve the default storage location automatically (`current` when `.claude/agents/skill-creator.md` exists, otherwise `user`)
 - `--name <name>`: Package name for the skill (recommended)
+- `--skill-name <name>`: Visible skill name written into `SKILL.md`
 - `--pwd <path>`: Working directory for skill operations
 - `--package <name>`: Use package name to find skill directory
 - `--package-version <version>`: Version hint for Context7 library resolution
