@@ -190,6 +190,10 @@ program
   .option('--pwd <path>', 'Path to the skill directory')
   .option('--package <name>', 'Package name to find skill directory for')
   .option('--mode <mode>', 'Search mode: auto, fulltext, fuzzy, or vector', 'auto')
+  .option(
+    '--vector-embedder <mode>',
+    'Vector embedder mode: deterministic for offline local embeddings, or omit for the default runtime embedder'
+  )
   .option('--list', 'Show simplified list view (basic info only)', false)
   .action(async (query, options) => {
     try {
@@ -207,6 +211,7 @@ program
         const { runScript } = await import('./core/runScript.js')
         const args = ['--query', query]
         if (options.mode !== 'auto') args.push('--mode', options.mode)
+        if (options.vectorEmbedder) args.push('--vector-embedder', options.vectorEmbedder)
         if (options.list) args.push('--list')
         // Enhanced search is now enabled by default, no need for --enhanced flag
         await runScript('search-skill', args)
@@ -358,6 +363,10 @@ program
   .option('--pwd <path>', 'Path to the skill directory')
   .option('--package <name>', 'Package name to find skill directory for')
   .option('--mode <mode>', 'Index mode: auto, fulltext, or vector', 'auto')
+  .option(
+    '--vector-embedder <mode>',
+    'Vector embedder mode: deterministic for offline local embeddings, or omit for the default runtime embedder'
+  )
   .action(async (options) => {
     try {
       const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
@@ -373,6 +382,7 @@ program
         const { buildIndex } = await import('./commands/buildIndex.js')
         const args = []
         if (options.mode !== 'auto') args.push('--mode', options.mode)
+        if (options.vectorEmbedder) args.push('--vector-embedder', options.vectorEmbedder)
         await buildIndex(args)
       } finally {
         chdir(originalCwd)

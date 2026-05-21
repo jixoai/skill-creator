@@ -75,9 +75,10 @@ export async function createSearchEngine(
   options: {
     searchMode?: SearchMode
     useFormatting?: boolean
+    vectorEmbedder?: string
   } = {}
 ) {
-  const { searchMode = 'auto', useFormatting = true } = options
+  const { searchMode = 'auto', useFormatting = true, vectorEmbedder } = options
   const { UnifiedSearchEngine } = await import('../core/unifiedSearch.js')
 
   return new UnifiedSearchEngine({
@@ -89,6 +90,7 @@ export async function createSearchEngine(
     format: useFormatting ? 'enhanced' : undefined,
     adapterOptions: {
       qualityThreshold: 0.55,
+      vectorEmbedder,
     },
     formatting: {
       maxPreviewLength: 200,

@@ -312,6 +312,15 @@ skill-creator build-index --pwd ~/.claude/skills/zustand@5
 - `--mode=fulltext`: build the explicit MiniSearch index
 - `--mode=vector`: build the explicit SQLite vector index when the runtime supports it
 
+For offline or deterministic local vector verification, pass an explicit embedder:
+
+```bash
+skill-creator build-index --pwd ~/.claude/skills/zustand@5 --mode vector --vector-embedder deterministic
+skill-creator search-skill --pwd ~/.claude/skills/zustand@5 --mode vector --vector-embedder deterministic "query ownership"
+```
+
+`--vector-embedder deterministic` switches vector mode to the built-in local deterministic embedder instead of the default runtime embedder.
+
 `--mode=fuzzy` is intentionally rejected because fuzzy search does not use a standalone persisted index.
 
 ### Release Readiness

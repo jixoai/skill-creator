@@ -23,6 +23,8 @@ export interface SearchEngineOptions {
   adapterOptions?: {
     /** Auto search quality threshold */
     qualityThreshold?: number
+    /** Explicit vector embedder mode */
+    vectorEmbedder?: string
   }
 }
 
@@ -55,6 +57,7 @@ export async function buildSearchEngine(options: SearchEngineOptions = {}): Prom
     case 'vector':
       return new (await import('./sqliteVectorSearchAdapter.js')).SqliteVectorSearchAdapter({
         skillDir,
+        embedderMode: adapterOptions.vectorEmbedder,
       })
 
     default:

@@ -8,9 +8,12 @@ export interface EmbeddingFunction {
 const TOKEN_PATTERN = /[\p{L}\p{N}]+/gu
 
 export function createEmbeddingFunctionFromEnvironment(
-  dimensions: number
+  dimensions: number,
+  explicitMode?: string
 ): EmbeddingFunction | null {
-  const configuredMode = process.env.SKILL_CREATOR_VECTOR_EMBEDDER?.trim().toLowerCase()
+  const configuredMode = (
+    explicitMode ?? process.env.SKILL_CREATOR_VECTOR_EMBEDDER
+  )?.trim().toLowerCase()
 
   if (configuredMode === 'deterministic' || configuredMode === 'local') {
     return createDeterministicEmbeddingFunction(dimensions)

@@ -21,7 +21,8 @@ export const SKILL_CREATOR_TEMPLATE_CONTRACTS: TemplateContract[] = [
       'skill-creator --pwd={skill_dir_fullpath} download-context7 --package <package-name> [--package-version <version>]',
       'skill-creator --pwd={skill_dir_fullpath} download-context7',
       'skill-creator --pwd={skill_dir_fullpath} search-skill "test query"',
-      'skill-creator build-index --pwd "{{SKILL_PATH}}" [--mode=auto|fulltext|vector]',
+      'skill-creator build-index --pwd "{{SKILL_PATH}}" [--mode=auto|fulltext|vector] [--vector-embedder deterministic]',
+      'skill-creator --pwd={skill_dir_fullpath} search-skill --mode vector --vector-embedder deterministic "test query"',
       "Follow order strictly",
     ],
     forbiddenSnippets: [
@@ -45,6 +46,8 @@ export const SKILL_CREATOR_TEMPLATE_CONTRACTS: TemplateContract[] = [
       'skill-creator --pwd "{skill_dir_fullpath}" download-context7',
       'skill-creator --pwd "{skill_dir_fullpath}" search-skill "test query"',
       'skill-creator build-index --pwd="{{SKILL_PATH}}" --mode=auto',
+      'skill-creator build-index --pwd="{skill_dir_fullpath}" --mode vector --vector-embedder deterministic',
+      'skill-creator --pwd "{skill_dir_fullpath}" search-skill --mode vector --vector-embedder deterministic "test query"',
       '严格按照顺序执行',
     ],
     forbiddenSnippets: [

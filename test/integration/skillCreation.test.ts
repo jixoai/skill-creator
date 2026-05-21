@@ -945,6 +945,54 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       cleanupTempDir(tempDir)
     })
 
+    it('should acknowledge an explicit deterministic vector embedder for offline vector workflows', async () => {
+      const tempDir = createTempDir('build-index-vector-deterministic-')
+      const skillDir = join(tempDir, '.claude', 'skills', 'build-index-vector-skill')
+      const userDir = join(skillDir, 'assets', 'references', 'user')
+      mkdirSync(userDir, { recursive: true })
+      writeFileSync(
+        join(userDir, 'workflow_note.md'),
+        '# Workflow Canonical Note\n\nPrefer deterministic invalidation ownership for operational workflows.\n'
+      )
+
+      const runtimeProbe = execSync(
+        "node -e \"Promise.all([import('node:sqlite'), import('sqlite-vec')]).then(()=>process.stdout.write('ok')).catch(()=>process.stdout.write('fail'))\"",
+        {
+          encoding: 'utf-8',
+          cwd: process.cwd(),
+        }
+      ).trim()
+
+      if (runtimeProbe !== 'ok') {
+        cleanupTempDir(tempDir)
+        return
+      }
+
+      const buildOutput = execSync(
+        `node ${process.cwd()}/dist/cli.mjs build-index --pwd "${skillDir}" --mode vector --vector-embedder deterministic`,
+        {
+          encoding: 'utf-8',
+        }
+      )
+
+      expect(buildOutput).toContain('Mode: vector')
+      expect(buildOutput).toContain('Vector embedder: deterministic')
+      expect(buildOutput).toContain('Active backend: sqlite-vec (vector)')
+
+      const searchOutput = execSync(
+        `node ${process.cwd()}/dist/cli.mjs search-skill --pwd "${skillDir}" --mode vector --vector-embedder deterministic "operational workflows"`,
+        {
+          encoding: 'utf-8',
+        }
+      )
+
+      expect(searchOutput).toContain('Requested mode: vector')
+      expect(searchOutput).toContain('Vector embedder: deterministic')
+      expect(searchOutput).toContain('Workflow Canonical Note')
+
+      cleanupTempDir(tempDir)
+    }, 30_000)
+
     it('should reject fuzzy mode for standalone build-index execution', () => {
       const tempDir = createTempDir('build-index-fuzzy-')
       const skillDir = join(tempDir, '.claude', 'skills', 'build-index-fuzzy-skill')

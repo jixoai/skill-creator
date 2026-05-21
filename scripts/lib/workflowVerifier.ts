@@ -177,7 +177,6 @@ Use stringbool coercion carefully and document the project-specific rule in user
     SKILL_CREATOR_CONTEXT7_BASE_URL: `http://127.0.0.1:${address.port}`,
     SKILL_CREATOR_NPM_SEARCH_BASE_URL: `http://127.0.0.1:${address.port}/registry/search`,
     SKILL_CREATOR_NPM_REGISTRY_BASE_URL: `http://127.0.0.1:${address.port}/registry`,
-    SKILL_CREATOR_VECTOR_EMBEDDER: 'deterministic',
   }
 
   try {
@@ -352,10 +351,14 @@ Stringbool coercion rules should stay explicit inside local notes.`
     if (vectorRuntimeSupported) {
       const buildIndexOutput = await runner.run(
         tempDir,
-        ['build-index', '--pwd', skillDir, '--mode', 'vector'],
+        ['build-index', '--pwd', skillDir, '--mode', 'vector', '--vector-embedder', 'deterministic'],
         { env: baseEnv }
       )
       assert(buildIndexOutput.includes('Mode: vector'), 'build-index did not acknowledge vector mode')
+      assert(
+        buildIndexOutput.includes('Vector embedder: deterministic'),
+        'build-index did not acknowledge the explicit deterministic vector embedder'
+      )
       assert(
         buildIndexOutput.includes('Active backend: sqlite-vec (vector)'),
         'build-index did not report sqlite-vec as the active vector backend'
@@ -363,8 +366,21 @@ Stringbool coercion rules should stay explicit inside local notes.`
 
       const vectorSearchOutput = await runner.run(
         tempDir,
-        ['search-skill', '--pwd', skillDir, '--mode', 'vector', 'operational workflows'],
+        [
+          'search-skill',
+          '--pwd',
+          skillDir,
+          '--mode',
+          'vector',
+          '--vector-embedder',
+          'deterministic',
+          'operational workflows',
+        ],
         { env: baseEnv }
+      )
+      assert(
+        vectorSearchOutput.includes('Vector embedder: deterministic'),
+        'search-skill did not acknowledge the explicit deterministic vector embedder'
       )
       assert(
         vectorSearchOutput.includes('Workflow canonical note'),

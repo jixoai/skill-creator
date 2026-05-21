@@ -73,7 +73,7 @@ skill-creator --help
      1. 介绍对于这个包基础信息：包括它的设计哲学和理念、解决什么问题、如何安装等基础信息。
      2. 介绍配套的工具如何在这个 `skill_dir_fullpath` 文件夹内使用：来搜索技能信息、更新技能、扩展技能信息
         - `skill-creator --pwd "{skill_dir_fullpath}" search-skill "test query"` 查询知识点
-        - `skill-creator build-index --pwd="{{SKILL_PATH}}" --mode=auto` 构建或刷新默认持久化搜索索引；也可以切换到 `fulltext` 或 `vector`
+        - `skill-creator build-index --pwd="{{SKILL_PATH}}" --mode=auto` 构建或刷新默认持久化搜索索引；也可以切换到 `fulltext` 或 `vector`，需要离线/确定性向量验证时再追加 `--vector-embedder deterministic`
         - `skill-creator --pwd "{skill_dir_fullpath}" add-skill --title "T" --content "C"` 添加“用户知识点”
         - `skill-creator --pwd "{skill_dir_fullpath}" download-context7 {project-id} --force` 强制更新，会替换当前项目已有的 Context7 切片，再重新切分下载到的知识点文件
         - 注意，默认情况下，我们完全不需要去创建scripts文件夹，因为我们已经有 `skill-creator` 这个cli来替代scripts了。
@@ -113,6 +113,11 @@ skill-creator --help
    ```
 
    - 验证搜索结果能够正确返回 `assets/references/user/` 或 `assets/references/context7/` 中的内容。
+   - 如果要做离线或确定性的向量验证，可以额外执行：
+     ```bash
+     skill-creator build-index --pwd="{skill_dir_fullpath}" --mode vector --vector-embedder deterministic
+     skill-creator --pwd "{skill_dir_fullpath}" search-skill --mode vector --vector-embedder deterministic "test query"
+     ```
 
 ## 重要
 

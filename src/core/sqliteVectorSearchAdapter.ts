@@ -34,6 +34,7 @@ export interface SqliteVectorSearchAdapterOptions {
   skillDir: string
   embeddingDimensions?: number
   embeddingFunction?: EmbeddingFunction
+  embedderMode?: string
   candidateMultiplier?: number
   minCandidateLimit?: number
 }
@@ -321,7 +322,10 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
       return this.embedder
     }
 
-    const environmentEmbedder = createEmbeddingFunctionFromEnvironment(this.getEmbeddingDimensions())
+    const environmentEmbedder = createEmbeddingFunctionFromEnvironment(
+      this.getEmbeddingDimensions(),
+      this.options.embedderMode
+    )
     if (environmentEmbedder) {
       this.embedder = environmentEmbedder
       return this.embedder

@@ -14,6 +14,7 @@ export async function searchContent(args: string[]): Promise<void> {
     { name: 'top-k', type: 'number', default: 5 },
     { name: 'source', type: 'string', default: 'all' },
     { name: 'mode', type: 'string', default: 'auto' },
+    { name: 'vector-embedder', type: 'string' },
     { name: 'list', type: 'boolean', default: false },
   ])
 
@@ -34,6 +35,7 @@ export async function searchContent(args: string[]): Promise<void> {
   const searchEngine = await createSearchEngine({
     searchMode: normalizedMode,
     useFormatting: false, // We'll handle formatting manually for now
+    vectorEmbedder: options['vector-embedder'],
   })
 
   // Initialize search engine
@@ -55,6 +57,9 @@ export async function searchContent(args: string[]): Promise<void> {
   console.log(`Requested mode: ${normalizedMode}`)
   if (backendInfo) {
     console.log(`Active backend: ${backendInfo.backendId} (${backendInfo.mode})`)
+  }
+  if (options['vector-embedder']) {
+    console.log(`Vector embedder: ${options['vector-embedder']}`)
   }
   const autoDecisionReason =
     typeof results[0]?.metadata?.['autoDecisionReason'] === 'string' ?

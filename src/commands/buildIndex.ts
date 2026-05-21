@@ -6,7 +6,10 @@ import { join } from 'node:path'
 import { createSearchEngine, normalizeSearchMode, parseArgs } from './shared.js'
 
 export async function buildIndex(args: string[]): Promise<void> {
-  const options = parseArgs(args, [{ name: 'mode', type: 'string', default: 'auto' }])
+  const options = parseArgs(args, [
+    { name: 'mode', type: 'string', default: 'auto' },
+    { name: 'vector-embedder', type: 'string' },
+  ])
   const normalizedMode = normalizeSearchMode(options.mode)
 
   if (normalizedMode === 'fuzzy') {
@@ -30,10 +33,14 @@ export async function buildIndex(args: string[]): Promise<void> {
   const searchEngine = await createSearchEngine({
     searchMode: normalizedMode,
     useFormatting: false,
+    vectorEmbedder: options['vector-embedder'],
   })
 
   console.log('Building search index...')
   console.log(`Mode: ${normalizedMode}`)
+  if (options['vector-embedder']) {
+    console.log(`Vector embedder: ${options['vector-embedder']}`)
+  }
 
   // Build index
   const referencesDir = join(process.cwd(), 'assets', 'references')
