@@ -96,6 +96,8 @@ try {
     const cliHelp = run('pnpm cli --help')
     assert(cliHelp.includes('create-cc-skill'), 'cli help output is missing create-cc-skill')
     assert(cliHelp.includes('resolve-context7'), 'cli help output is missing resolve-context7')
+    const cliVersion = run('node dist/cli.mjs --version').trim()
+    assert(cliVersion === packageJson.version, 'packaged CLI version output does not match package.json')
     console.log('   ✅ Packaged CLI help works')
   })
 

@@ -89,7 +89,7 @@ jobs:
         run: pnpm ts
 
       - name: Test CLI build
-        run: pnpm cli -- --version
+        run: node dist/cli.mjs --version
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
