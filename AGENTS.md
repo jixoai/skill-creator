@@ -1,18 +1,19 @@
 任务必读资料：
 
-1. `/Users/kzf/.claude/agents/doc-downloader.md`
-2. `/Users/kzf/.claude/plugins/skills/skill-creator/SKILL.md`
+1. `/Users/kzf/.claude/agents/skill-creator.md`
+2. `./templates/skill-creator.md`
+3. `/Users/kzf/.claude/plugins/marketplaces/anthropic-agent-skills/skills/skill-creator/SKILL.md`
 
-`doc-downloader`是我之前创建了一个 subagents。它的作用是下载 context7 的文档，到一个
-`.claude/references`
-文件夹中。现在，claude-code 支持了 skills，那么我觉得我们可以对这个 subagetns 进行升级：
+`skill-creator` 是从之前的 `doc-downloader` subagent 演进而来。旧的 `.claude/references`
+产物模型已经废弃；当前实现直接围绕 claude-code-skills 工作流，在 `./.claude/skills/` 或
+`~/.claude/skills/` 下生成技能，并通过 `assets/references/{context7,user}` 管理资料。
 
 升级成一个 `skill-creater` 的 subagents：
 
 1. **skill-creator**
    - 现在更加可靠，直接使用预设好的脚本程序去进行执行下载，而不再是让 AI 自己去临时执行脚本去做下载
    - 使用 TypeScript + ESM 模块，提供完整的类型安全
-   - 集成了 ChromaDB 向量搜索，提供智能文档检索能力
+   - 默认使用 MiniSearch 本地全文检索；在运行时支持时，可通过 `--mode=vector` 启用 SQLite vector 显式向量检索，`--mode=chroma` 仅作为兼容别名映射到 `vector`
    - **新增 --force 选项**：支持强制覆盖已存在的技能文件
    - **默认非交互模式**：命令默认非交互执行，通过 --interactive 启用交互
 1. 它不再是产生在 `.claude/references`
@@ -32,10 +33,10 @@
       1. 切片完成的要放在 `{skill-name}/assets/references/context7/*.md` 中
       1. 因为我们还会有 `{skill-name}/assets/references/user/*.md`
          文件夹，是用户自己使用习惯生成的一些资料
-   1. 我们需要内置 search(js+Chroma) 脚本，来提供资料搜索的能力：
-      1. 在执行 search 脚本去执行 Chroma 搜索的时候，需要做一些准备工作：
+   1. 我们需要内置 search 能力，来提供资料搜索的能力：
+      1. 默认路径使用本地全文检索，并在质量较弱时回退 fuzzy；需要显式向量检索时使用 `--mode=vector`
       1. 要确保已经为资料数据做好来索引构建。注意，这里会基于`{skill-name}/assets/references/`文件夹的文件元数据做 fast-hash，如果 fast-hash 变了，那么就需要重新构建索引。
-      1. 存储到 Chroma 中的切片数据的内容要包含引用来源
+      1. 向量索引中存储的切片数据内容要包含引用来源
       1. 最终查询出来的数据要提出引用来源
    1. 我们需要内置 add(js) 脚本，能做到动态添加 `assets/references/user`
       中。
@@ -53,24 +54,24 @@
 **具体流程**：
 
 - 首先，本项目是一个nodejs项目，目的是提供“可靠工具”（可以理解成CLI工具，下文简称 cli）。
-- 如果有源代码，那么可以用 `npm link` 的方式来挂载，方便本地测试。
+- 如果有源代码，本地 smoke 验证优先使用 `pnpm verify:workflow`；需要验证安装态和 link 态时，分别使用 `pnpm verify:installed` 和 `pnpm verify:linked`。不要依赖宿主机全局 `npm link` / Volta shim 状态。
 - 本项目可以通过 `npm install -g skill-creator` 来下载运行“可靠工具”。
 
 1. **安装 subagent (可选)**:
-   如果需要，可以使用 `cli init-cc` 来将 `templates/skill-creator.md` 安装为 `~/.claude/agents/` 目录下的 subagent。
+   如果需要，可以使用 `skill-creator init-cc` 来将 `templates/skill-creator.md` 安装为 `~/.claude/agents/` 目录下的 subagent。
 
 2. **Subagent 工作流**:
    接下来，subagent 将严格遵循 `skill-creator.md` 中定义的流程来工作，该流程的核心步骤如下：
-   1. **搜索包**: 根据用户需求，通过 `cli search "KEYWORDS"` 来搜索 npm 包。如果结果不唯一，AI 需要向用户确认。
-   2. **获取包信息**: 针对选定的包，运行 `cli get-info @package/name`。这将返回一个包含 `skill_dir_name`, `name`, `version`, `homepage`, `repo` 等信息的 JSON 对象。
-   3. **创建技能**: AI 根据 `get-info` 的结果，确认存储位置后，调用 `cli create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..."` 来创建技能目录和基础文件。
+   1. **搜索包**: 根据用户需求，通过 `skill-creator search "KEYWORDS"` 来搜索 npm 包。如果结果不唯一，AI 需要向用户确认。
+   2. **获取包信息**: 针对选定的包，运行 `skill-creator get-info @package/name`。这将返回一个包含 `skill_dir_name`, `name`, `version`, `homepage`, `repo` 等信息的 JSON 对象。
+   3. **创建技能**: AI 根据 `get-info` 的结果，确认存储位置后，调用 `skill-creator create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..."` 来创建技能目录和基础文件。
       **注意**:
    - `--scope` 是必须参数，必须指定存储位置（current表示当前项目，user表示用户目录）
    - `--name` 是推荐参数，指定包名，避免从目录名猜测
-   4. **获取文档 ID**: AI 调用 `cli resolve-context7 <package_name> [--package-version <version>]` 来搜索并根据 `skill-creator.md` 中定义的评判标准确定唯一的 `project-id`。命令输出中的 `bestMatch.id` 就是下一步要使用的 `project-id`。
-   5. **下载文档**: 使用 `cli download-context7 --pwd <skill_path> <project_id>` 命令来下载文档。`<skill_path>` 是上一步创建技能时返回的完整路径。文档将被自动切分并存放到 `{skill_path}/assets/references/context7/` 目录下。
-   6. **添加用户知识**: subagent 可以通过 `cli add-skill --pwd <skill_path> --title "标题" --content "内容"` 来动态添加用户自定义的知识点。
-   7. **搜索知识**: subagent 可以使用 `cli search-skill --pwd <skill_path> "查询关键词"` 来在技能的知识库中进行搜索。
+   4. **获取文档 ID**: AI 调用 `skill-creator resolve-context7 <package_name> [--package-version <version>]` 来搜索并根据 `skill-creator.md` 中定义的评判标准确定唯一的 `project-id`。命令输出中的 `bestMatch.id` 就是下一步要使用的 `project-id`。
+   5. **下载文档**: 使用 `skill-creator download-context7 --pwd <skill_path> <project_id>` 命令来下载文档。`<skill_path>` 是上一步创建技能时返回的完整路径。文档将被自动切分并存放到 `{skill_path}/assets/references/context7/` 目录下。
+   6. **添加用户知识**: subagent 可以通过 `skill-creator add-skill --pwd <skill_path> --title "标题" --content "内容"` 来动态添加用户自定义的知识点。
+   7. **搜索知识**: subagent 可以使用 `skill-creator search-skill --pwd <skill_path> "查询关键词"` 来在技能的知识库中进行搜索。
    8. **强制更新文档**: 可以通过添加 `--force` 标志来强制更新 Context7 文档，例如 `skill-creator download-context7 --pwd <skill_path> <project_id> --force`。这会重新下载并覆盖已存在的 Context7 文档文件。
 
 ---

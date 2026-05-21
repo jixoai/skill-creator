@@ -101,7 +101,7 @@ export class PackageUtils {
   }
 
   /**
-   * Format version according to doc-downloader rules
+   * Format version according to the skill directory naming rules.
    */
   static formatVersion(version: string): string {
     if (!version) return ''
@@ -128,7 +128,7 @@ export class PackageUtils {
    * Create skill folder name according to spec
    */
   static createSkillFolderName(packageName: string, version: string): string {
-    // Replace / with __ as specified in doc-downloader.md
+    // Replace / with __ so scoped packages map cleanly to a single skill directory name.
     const safePackage = packageName.replace(/\//g, '__')
     const formattedVersion = this.formatVersion(version)
 
