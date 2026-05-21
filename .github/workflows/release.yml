@@ -104,6 +104,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }} # Use token with write permissions
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.22.0
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -111,11 +116,6 @@ jobs:
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
           scope: '@jixoai'
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.22.0
 
       - name: Upgrade npm for trusted publishing
         run: npm install --global npm@11.5.1
