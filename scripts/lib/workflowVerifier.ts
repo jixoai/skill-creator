@@ -193,12 +193,24 @@ Use stringbool coercion carefully and document the project-specific rule in user
     assert(!agentContent.includes('{{DEFAULT_SCOPE}}'), 'agent template still contains DEFAULT_SCOPE')
     assert(agentContent.includes('skill-creator --help'), 'agent template lost the stable CLI entrypoint')
     assert(
+      agentContent.includes('pass `--scope auto`'),
+      'agent template lost the explicit auto-scope contract'
+    )
+    assert(
+      agentContent.includes('default visible skill name is the package name'),
+      'agent template lost the visible skill naming contract'
+    )
+    assert(
       agentContent.includes('skill-creator resolve-context7 <package-name>'),
       'agent template lost the built-in Context7 resolver step'
     )
     assert(
       !agentContent.includes('mcp__context7__resolve-library-id'),
       'agent template still references the legacy MCP resolver'
+    )
+    assert(
+      !agentContent.includes('If user is satisfied with `skill_dir_name`, use it as-is'),
+      'agent template still describes the old skill naming fallback'
     )
 
     console.log(`${logPrefix}2. search`)

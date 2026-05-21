@@ -63,8 +63,10 @@ skill-creator --help
      - If you are using the CLI directly and want the tool to apply that defaulting rule itself, pass `--scope auto`
 
    - **Skill Naming Confirmation** (if no `--skill-name` parameter provided):
-     - If user is satisfied with `skill_dir_name`, use it as-is
-     - Otherwise, let the user provide a new name
+     - If `--name` is present, the default visible skill name is the package name
+     - Otherwise, the default visible skill name is `skill_dir_name`
+     - If the default visible skill name is acceptable, keep it
+     - Otherwise, let the user provide `--skill-name`
    - Execute command after confirmation
    - Prefer `--json` so you can read `skillPath` directly instead of parsing human-readable terminal text
    - Next, use the skills/skill-creator skill (note: we are skill-creator-subagents, don't confuse) to initially generate files in the `skill_dir_fullpath` folder, including the most important SKILL.md

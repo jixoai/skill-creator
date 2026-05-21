@@ -94,7 +94,7 @@ export async function prepareCreateSkillWorkflow(
         {
           type: 'confirm',
           name: 'packageNameConfirmed',
-          message: `Use '${finalSkillName}' as the skill name?`,
+          message: `Use '${finalSkillName}' as the visible skill name?`,
           default: true,
         },
       ])
@@ -125,7 +125,9 @@ export async function prepareCreateSkillWorkflow(
   }
 
   if (scope == null) {
-    throw new Error('Error: --scope is required. Use --scope current or --scope user.')
+    throw new Error(
+      'Error: --scope is required. Use --scope current, --scope user, or --scope auto.'
+    )
   }
 
   const resolvedScopeSelection = resolveScopeSelection(scope, cwd)
@@ -135,7 +137,7 @@ export async function prepareCreateSkillWorkflow(
     console.log('\nFinal Configuration:')
     console.log(`- Storage location: ${scopePath}`)
     console.log(`- Skill directory name: ${skillDirName}`)
-    console.log(`- Skill Name: ${finalSkillName}`)
+    console.log(`- Visible Skill Name: ${finalSkillName}`)
     console.log(`- Skill Description: ${description}`)
 
     const { confirmFinal } = await dependencies.prompt.prompt<{ confirmFinal: boolean }>([

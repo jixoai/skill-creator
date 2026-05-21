@@ -66,7 +66,10 @@ skill-creator --help
       - **注意**：你需要通过 `AskUserQuestion` 工具来询问用户存储的位置，如果返回结果为空，那么说明 Claude Code 是否处于 bypass-permissions 模式。此时直接使用默认存储位置即可。
       - 如果是直接使用 CLI，希望让工具自己执行这条默认规则，那么传 `--scope auto`
    2. **询问技能命名**（如果没有提供--skill-name参数）
-      - 如果用户对 `skill_dir_name` 满不满意，那么就让用户提供一个新的名称
+      - 如果已经提供了 `--name`，默认的可见技能名就是包名
+      - 否则默认的可见技能名就是 `skill_dir_name`
+      - 如果默认的可见技能名可以接受，就直接沿用
+      - 否则让用户提供 `--skill-name`
    - 确认后执行命令
    - 优先追加 `--json`，这样可以直接读取 `skillPath`，不需要从人类可读文案中解析路径
    - 接下来，需要AI将使用 skills/skill-creator 的技能（注意，我们是skill-creator-subagents，不要混淆）。去初步生成 `skill_dir_fullpath` 文件夹内的文件。包括最重要的SKILL.md

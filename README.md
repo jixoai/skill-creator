@@ -154,10 +154,9 @@ skill-creator add-skill --package @tanstack/react-query --title "Bundle guidance
 
 ### Options
 
-- `--scope <user|current>`: Storage location for skills (required)
-- `--scope auto`: Resolve the default storage location automatically (`current` when `.claude/agents/skill-creator.md` exists, otherwise `user`)
+- `--scope <user|current|auto>`: Storage location for skills (required). `auto` resolves to `current` when `.claude/agents/skill-creator.md` exists, otherwise `user`
 - `--name <name>`: Package name for the skill (recommended)
-- `--skill-name <name>`: Visible skill name written into `SKILL.md`
+- `--skill-name <name>`: Visible skill name written into `SKILL.md`. When omitted, the visible skill name defaults to `--name` when present, otherwise `skill_dir_name`
 - `--pwd <path>`: Working directory for skill operations
 - `--package <name>`: Use package name to find skill directory
 - `--package-version <version>`: Version hint for Context7 library resolution
@@ -195,9 +194,14 @@ When `--package <name>` is used to find an existing skill, the CLI first checks 
    # With a separate visible skill name
    skill-creator create-cc-skill --scope current --name @tanstack/router --skill-name router-skill --description "Router workflow skill" tanstack-router@1 --json
 
+   # With explicit default scope resolution handled by the CLI
+   skill-creator create-cc-skill --scope auto --name zod --description "Zod validation skill" zod@4 --json
+
    # With interactive prompts
    skill-creator create-cc-skill --scope current --interactive zustand
    ```
+
+   `--name` records the source package identity for later package-aware workflows. `--skill-name` only controls the visible skill title written into `SKILL.md`.
 
 4. **Resolve Context7 Project ID**: Pick the strongest Context7 source for the package
 

@@ -16,6 +16,8 @@ export const SKILL_CREATOR_TEMPLATE_CONTRACTS: TemplateContract[] = [
       'skill-creator search "KEYWORDS"',
       'skill-creator get-info @package/name',
       'skill-creator create-cc-skill --scope [current|user|auto] --name <package_name> [--skill-name <visible_skill_name>] skill_dir_name --description "..." --json',
+      'If `--name` is present, the default visible skill name is the package name',
+      'Otherwise, let the user provide `--skill-name`',
       'skill-creator resolve-context7 <package-name> [--package-version <version>]',
       'skill-creator --pwd={skill_dir_fullpath} download-context7 {project-id}',
       'skill-creator --pwd={skill_dir_fullpath} download-context7 --package <package-name> [--package-version <version>]',
@@ -30,6 +32,7 @@ export const SKILL_CREATOR_TEMPLATE_CONTRACTS: TemplateContract[] = [
       'mcp__context7__resolve-library-id',
       'node dist/cli.mjs search',
       'node_modules/tsx/dist/cli.mjs',
+      'If user is satisfied with `skill_dir_name`, use it as-is',
     ],
   },
   {
@@ -40,6 +43,8 @@ export const SKILL_CREATOR_TEMPLATE_CONTRACTS: TemplateContract[] = [
       'skill-creator search "KEYWORDS"',
       'skill-creator get-info @package/name',
       'skill-creator create-cc-skill --scope [current|user|auto] --name <package_name> [--skill-name <visible_skill_name>] skill_dir_name --description "..." --json',
+      '如果已经提供了 `--name`，默认的可见技能名就是包名',
+      '否则让用户提供 `--skill-name`',
       'skill-creator resolve-context7 <package-name> [--package-version <version>]',
       'skill-creator --pwd "{skill_dir_fullpath}" download-context7 {project-id}',
       'skill-creator --pwd "{skill_dir_fullpath}" download-context7 --package <package-name> [--package-version <version>]',
@@ -55,6 +60,7 @@ export const SKILL_CREATOR_TEMPLATE_CONTRACTS: TemplateContract[] = [
       'mcp__context7__resolve-library-id',
       'node dist/cli.mjs search',
       'node_modules/tsx/dist/cli.mjs',
+      '如果用户对 `skill_dir_name` 满不满意，那么就让用户提供一个新的名称',
     ],
   },
 ]

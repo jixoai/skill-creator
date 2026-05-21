@@ -132,6 +132,25 @@ describe('createSkillWorkflow', () => {
     ).rejects.toThrow(SKILL_CREATION_CANCELLED_MESSAGE)
   })
 
+  it('explains auto scope in the missing-scope error', async () => {
+    await expect(
+      prepareCreateSkillWorkflow(
+        'demo-skill@1',
+        {},
+        {
+          cwd: '/tmp/project',
+          prompt: {
+            prompt: async () => {
+              throw new Error('prompt should not be called')
+            },
+          },
+        }
+      )
+    ).rejects.toThrow(
+      'Error: --scope is required. Use --scope current, --scope user, or --scope auto.'
+    )
+  })
+
   it('defaults the interactive scope to current when the project already has a skill-creator agent', async () => {
     const capturedQuestions: unknown[] = []
     const cwd = createTempDir('workflow-default-scope-')

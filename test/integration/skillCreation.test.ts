@@ -55,7 +55,7 @@ describe('Skill Creation Integration Tests', () => {
         const description = 'Zod is a TypeScript-first schema declaration and validation library.' // Mock description as it can be null
         const skillDir = join(tempDir, '.claude', 'skills', skill_dir_name)
 
-        // 3. Create skill using new command format: skill-creator create-cc-skill --scope [current|user] --name packageName --description "desc" skill_dir_name
+        // 3. Create skill using new command format: skill-creator create-cc-skill --scope [current|user|auto] --name packageName --description "desc" skill_dir_name
         const createCommand = [
           cliCmd,
           'create-cc-skill',
@@ -833,7 +833,16 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
 
     it('should fail create-cc-skill without required options', () => {
       const command = `node ${process.cwd()}/dist/cli.mjs create-cc-skill my-skill`
-      expect(() => execSync(command, { encoding: 'utf-8' })).toThrow()
+      try {
+        execSync(command, { encoding: 'utf-8' })
+        throw new Error('expected create-cc-skill to fail without --scope')
+      } catch (error) {
+        expect(error).toMatchObject({
+          stderr: expect.stringContaining(
+            'Error: --scope is required. Use --scope current, --scope user, or --scope auto.'
+          ),
+        })
+      }
     })
   })
 
