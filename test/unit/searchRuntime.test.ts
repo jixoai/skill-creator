@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { normalizeSearchMode } from '../../src/commands/shared.js'
 import { AutoSearchAdapter } from '../../src/core/autoSearchAdapter.js'
+import { createDeterministicEmbeddingFunction } from '../../src/core/embeddingFunctions.js'
 import { MiniSearchAdapter } from '../../src/core/miniSearchAdapter.js'
 import { buildSearchEngine } from '../../src/core/searchEngineFactory.js'
 import type { SearchBackendInfo, SearchEngine, SearchIndexState, SearchOptions, SearchResult } from '../../src/core/searchAdapter.js'
@@ -142,6 +143,35 @@ describe('search runtime contract', () => {
     expect(results[0]?.title).toBe('Router Notes')
     expect(existsSync(join(assetsDir, 'search', 'vector-index.db'))).toBe(true)
     expect(existsSync(join(assetsDir, 'search', 'vector-index-state.json'))).toBe(true)
+
+    cleanupTempDir(tempDir)
+  })
+
+  it('supports deterministic local vector embeddings for offline runtime verification', async () => {
+    const tempDir = createTempDir('search-runtime-vector-local-')
+    const assetsDir = join(tempDir, 'assets')
+    const referencesDir = join(assetsDir, 'references')
+    const userDir = join(referencesDir, 'user')
+    mkdirSync(userDir, { recursive: true })
+    writeFileSync(
+      join(userDir, 'workflow_note.md'),
+      '# Workflow Canonical Note\n\nPrefer deterministic invalidation ownership for operational workflows.\n'
+    )
+    writeFileSync(
+      join(userDir, 'release_note.md'),
+      '# Release Notes\n\nPackaging updates and changelog only.\n'
+    )
+
+    const adapter = new SqliteVectorSearchAdapter({
+      skillDir: assetsDir,
+      embeddingFunction: createDeterministicEmbeddingFunction(384),
+    })
+
+    await adapter.buildIndex(referencesDir)
+    const results = await adapter.search('operational workflows', { topK: 1 })
+
+    expect(results).toHaveLength(1)
+    expect(results[0]?.title).toBe('Workflow Canonical Note')
 
     cleanupTempDir(tempDir)
   })

@@ -24,6 +24,14 @@ export interface SearchOptions {
   minScore?: number
 }
 
+async function discardResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel()
+  } catch {
+    // Ignore cleanup failures on best-effort response disposal.
+  }
+}
+
 export class PackageUtils {
   private static getRegistryBaseUrl(): string {
     return (process.env.SKILL_CREATOR_NPM_REGISTRY_BASE_URL ?? 'https://registry.npmjs.org').replace(
@@ -44,7 +52,10 @@ export class PackageUtils {
   static async getPackageVersion(packageName: string): Promise<string | null> {
     try {
       const response = await fetch(`${this.getRegistryBaseUrl()}/${packageName}/latest`)
-      if (!response.ok) return null
+      if (!response.ok) {
+        await discardResponseBody(response)
+        return null
+      }
 
       const data = await response.json()
       return data.version as string
@@ -66,7 +77,10 @@ export class PackageUtils {
   } | null> {
     try {
       const response = await fetch(`${this.getRegistryBaseUrl()}/${packageName}`)
-      if (!response.ok) return null
+      if (!response.ok) {
+        await discardResponseBody(response)
+        return null
+      }
 
       const data = await response.json()
       const latestVersionTag = data['dist-tags']?.latest
@@ -179,7 +193,10 @@ export class PackageUtils {
       searchUrl.searchParams.set('size', String(limit * 2))
       const response = await fetch(searchUrl)
 
-      if (!response.ok) return []
+      if (!response.ok) {
+        await discardResponseBody(response)
+        return []
+      }
 
       const data = await response.json()
       const results: SearchResult[] = []

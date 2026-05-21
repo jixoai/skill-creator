@@ -177,6 +177,7 @@ Use stringbool coercion carefully and document the project-specific rule in user
     SKILL_CREATOR_CONTEXT7_BASE_URL: `http://127.0.0.1:${address.port}`,
     SKILL_CREATOR_NPM_SEARCH_BASE_URL: `http://127.0.0.1:${address.port}/registry/search`,
     SKILL_CREATOR_NPM_REGISTRY_BASE_URL: `http://127.0.0.1:${address.port}/registry`,
+    SKILL_CREATOR_VECTOR_EMBEDDER: 'deterministic',
   }
 
   try {

@@ -38,7 +38,6 @@ export async function searchContent(args: string[]): Promise<void> {
 
   // Initialize search engine
   await searchEngine.initialize()
-  const backendInfo = await searchEngine.getBackendInfo()
 
   // Build index if needed
   const referencesDir = join(process.cwd(), 'assets', 'references')
@@ -50,6 +49,7 @@ export async function searchContent(args: string[]): Promise<void> {
 
   // Perform search
   const results = await searchEngine.search(options.query, topK || 5, whereFilter)
+  const backendInfo = await searchEngine.getBackendInfo()
 
   console.log(`\nSearch Results for: '${options.query}'`)
   console.log(`Requested mode: ${normalizedMode}`)

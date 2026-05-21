@@ -15,10 +15,10 @@ import {
   detectReferenceSource,
   normalizeSearchableText,
 } from './referenceSearchUtils.js'
-
-export interface EmbeddingFunction {
-  generate(input: string[]): Promise<number[][]>
-}
+import {
+  createEmbeddingFunctionFromEnvironment,
+  type EmbeddingFunction,
+} from './embeddingFunctions.js'
 
 interface VectorDocumentRecord {
   id: string
@@ -318,6 +318,12 @@ export class SqliteVectorSearchAdapter implements SearchEngine {
 
   private async ensureEmbedder(): Promise<EmbeddingFunction> {
     if (this.embedder) {
+      return this.embedder
+    }
+
+    const environmentEmbedder = createEmbeddingFunctionFromEnvironment(this.getEmbeddingDimensions())
+    if (environmentEmbedder) {
+      this.embedder = environmentEmbedder
       return this.embedder
     }
 

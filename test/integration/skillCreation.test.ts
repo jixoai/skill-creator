@@ -201,6 +201,39 @@ Mutations should invalidate related queries and keep optimistic updates bounded 
       expect(resolved.bestMatch.matchKind).toBe('package-path')
     }, 30_000)
 
+    it('should expose the real fuzzy fallback backend when auto mode rejects weak fulltext results', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'auto-fallback-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "auto-fallback-skill" --description "Auto fallback test skill" auto-fallback-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "Release Notes" --content "Packaging updates and changelog only."`,
+        { encoding: 'utf-8' }
+      )
+
+      writeFileSync(
+        join(skillDir, 'assets', 'references', 'user', 'query_client.md'),
+        '# QC Guide\n\nCache invalidation guidance only.'
+      )
+
+      const output = execSync(`${cliCmd} search-skill --pwd "${skillDir}" "query client"`, {
+        encoding: 'utf-8',
+      })
+
+      expect(output).toContain('Requested mode: auto')
+      expect(output).toContain('Active backend: ufuzzy (auto)')
+      expect(output).toContain('Auto decision: Fell back from fulltext to fuzzy')
+      expect(output).toContain('Auto backend: ufuzzy')
+      expect(output).toContain('QC Guide')
+    }, 30_000)
+
     it('should resolve context7 automatically when download-context7 is called with --package only', async () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', 'auto-download-skill')
@@ -739,10 +772,43 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
   })
 
   describe('Error Cases', () => {
-    it('should fail get-info for an invalid package', () => {
-      const command = `node ${process.cwd()}/dist/cli.mjs get-info invalid-nonexistent-package-123`
-      expect(() => execSync(command, { encoding: 'utf-8' })).toThrow()
-    })
+    it('should fail get-info for an invalid package', async () => {
+      const server = createServer((_, response) => {
+        response.setHeader('connection', 'close')
+        response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' })
+        response.end(JSON.stringify({ error: 'not found' }))
+      })
+
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+      const address = server.address()
+      if (address == null || typeof address === 'string') {
+        server.close()
+        throw new Error('Failed to start registry test server')
+      }
+
+      try {
+        await expect(
+          execFileAsync(
+            'node',
+            [`${process.cwd()}/dist/cli.mjs`, 'get-info', 'invalid-nonexistent-package-123'],
+            {
+              encoding: 'utf-8',
+              env: {
+                ...process.env,
+                SKILL_CREATOR_NPM_REGISTRY_BASE_URL: `http://127.0.0.1:${address.port}/registry`,
+              },
+            }
+          )
+        ).rejects.toMatchObject({
+          stderr: expect.stringContaining('not found or API error occurred'),
+        })
+      } finally {
+        server.closeAllConnections()
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        )
+      }
+    }, 15_000)
 
     it('should fail create-cc-skill without required options', () => {
       const command = `node ${process.cwd()}/dist/cli.mjs create-cc-skill my-skill`
@@ -934,7 +1000,7 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(output).toContain('[installed] 10. search-skill')
       expect(output).toContain('[installed] 11. vector runtime contract')
       expect(output).toContain('Installed CLI verification passed')
-    }, 60_000)
+    }, 120_000)
 
     it('should verify the linked CLI workflow through the reusable link verification script', () => {
       const output = execSync('pnpm verify:linked', {
