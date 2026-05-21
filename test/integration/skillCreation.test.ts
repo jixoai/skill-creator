@@ -346,6 +346,17 @@ The JSON payload should expose the resolved project id and indexing result.`)
       expect(resolved.bestMatch.matchKind).toBe('package-path')
     }, 30_000)
 
+    it('should fail resolve-context7 when no reliable package-path candidate exists', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+
+      expect(() =>
+        execSync(`${cliCmd} resolve-context7 is-odd --package-version 3.0.1`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        })
+      ).toThrow(/No Context7 library found for package "is-odd"/)
+    })
+
     it('should expose the real fuzzy fallback backend when auto mode rejects weak fulltext results', () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const skillDir = join(tempDir, '.claude', 'skills', 'auto-fallback-skill')

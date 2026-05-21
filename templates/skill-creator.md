@@ -94,6 +94,7 @@ skill-creator --help
      - prefer package-path matches over website mirrors
      - prefer candidates whose published versions match the requested package version
      - then prefer the candidate with the highest snippet count
+   - If no reliable package-path or package-slug candidate exists, treat the resolution as failed instead of accepting an unrelated website mirror.
    - After confirming project-id, execute download:
      ```bash
      skill-creator --pwd={skill_dir_fullpath} download-context7 {project-id}

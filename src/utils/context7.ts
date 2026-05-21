@@ -43,6 +43,14 @@ export interface ResolveContext7Options {
   fetchImpl?: typeof fetch
 }
 
+interface Context7CandidateAcceptance {
+  accepted: boolean
+  reason?:
+    | 'empty'
+    | 'unrelated-match'
+    | 'website-without-package-match'
+}
+
 export class Context7Utils {
   static async resolveLibrary(
     packageName: string,
@@ -58,6 +66,10 @@ export class Context7Utils {
 
     const bestMatch = candidates[0]
     if (!bestMatch) return null
+    const acceptance = this.acceptBestMatch(bestMatch)
+    if (!acceptance.accepted) {
+      return null
+    }
 
     return {
       packageName,
@@ -120,6 +132,38 @@ export class Context7Utils {
     return packageName.replace(/^@/, '').split('/').pop() ?? packageName
   }
 
+  private static tokenizeIdentifier(value: string): string[] {
+    return value
+      .toLowerCase()
+      .replace(/^@/, '')
+      .split(/[^a-z0-9]+/g)
+      .filter(Boolean)
+  }
+
+  private static acceptBestMatch(
+    candidate: ResolvedContext7Candidate
+  ): Context7CandidateAcceptance {
+    if (!candidate) {
+      return { accepted: false, reason: 'empty' }
+    }
+
+    if (candidate.matchKind === 'package-path' || candidate.matchKind === 'package-slug') {
+      return { accepted: true }
+    }
+
+    if (candidate.matchKind === 'website') {
+      return {
+        accepted: false,
+        reason: 'website-without-package-match',
+      }
+    }
+
+    return {
+      accepted: false,
+      reason: 'unrelated-match',
+    }
+  }
+
   private static annotateCandidate(
     candidate: Context7SearchCandidate,
     packageName: string,
@@ -166,13 +210,27 @@ export class Context7Utils {
       return 'website'
     }
 
+    const packageTokens = packageSegments.flatMap((segment) => this.tokenizeIdentifier(segment))
+    const candidateTokens = candidateSegments.flatMap((segment) => this.tokenizeIdentifier(segment))
     const candidateTail = candidateSegments.slice(-packageSegments.length)
     if (candidateTail.join('/') === packageSegments.join('/')) {
       return 'package-path'
     }
 
+    const candidateTokenTail = candidateTokens.slice(-packageTokens.length)
+    if (candidateTokenTail.join('/') === packageTokens.join('/')) {
+      return 'package-path'
+    }
+
     const packageBaseName = packageSegments[packageSegments.length - 1]
-    if (candidateSegments[candidateSegments.length - 1] === packageBaseName) {
+    const candidateLastSegment = candidateSegments[candidateSegments.length - 1] ?? ''
+    if (candidateLastSegment === packageBaseName) {
+      return 'package-slug'
+    }
+
+    const packageBaseTokens = this.tokenizeIdentifier(packageBaseName)
+    const candidateLastTokens = this.tokenizeIdentifier(candidateLastSegment)
+    if (candidateLastTokens.join('/') === packageBaseTokens.join('/')) {
       return 'package-slug'
     }
 

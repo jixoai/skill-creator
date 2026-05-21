@@ -97,6 +97,7 @@ skill-creator --help
      - 优先 package-path 命中，而不是 website mirror
      - 优先版本与目标包匹配的候选
      - 然后再比较 snippets 数量
+   - 如果不存在可靠的 package-path 或 package-slug 候选，则视为解析失败，不要接受无关的 website mirror。
    - 确认 project-id 后，执行下载：
      ```bash
      skill-creator --pwd "{skill_dir_fullpath}" download-context7 {project-id}

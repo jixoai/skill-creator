@@ -243,5 +243,45 @@ describe('PackageUtils', () => {
       expect(resolved?.bestMatch.versionMatched).toBe(true)
       expect(resolved?.candidates).toHaveLength(1)
     })
+
+    it('should reject unrelated website-only matches for low-signal package names', async () => {
+      const fetchMock = async () =>
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                id: '/websites/odds-api_io',
+                title: 'Odds-API.io',
+                description: 'Sports betting odds API.',
+                totalSnippets: 588,
+                trustScore: 8.1,
+                benchmarkScore: 61.5,
+                versions: [],
+              },
+              {
+                id: '/the-odds-api/samples-python',
+                title: 'The Odds API',
+                description: 'Python code samples for a betting API',
+                totalSnippets: 2,
+                trustScore: 7,
+                benchmarkScore: 0,
+                versions: [],
+              },
+            ],
+            searchFilterApplied: false,
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+
+      const resolved = await Context7Utils.resolveLibrary('is-odd', {
+        version: '3.0.1',
+        fetchImpl: fetchMock as typeof fetch,
+      })
+
+      expect(resolved).toBeNull()
+    })
   })
 })

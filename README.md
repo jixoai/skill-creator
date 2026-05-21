@@ -121,6 +121,9 @@ skill-creator create-cc-skill --scope user --interactive --description "React Qu
 # Resolve the best Context7 project id
 skill-creator resolve-context7 @tanstack/react-query
 
+# If no package-path candidate matches reliably, the command exits instead of returning a wrong website mirror
+skill-creator resolve-context7 is-odd --package-version 3.0.1
+
 # Download documentation directly from the package name
 skill-creator download-context7 --package @tanstack/react-query --package-version 5.0.0
 
