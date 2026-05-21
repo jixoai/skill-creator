@@ -2,24 +2,21 @@
  * Interactive init command to install skill-creator as subagent
  */
 
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { parseArgs } from './shared.js'
 import { rootResolver } from '../utils/path.js'
+import {
+  getDefaultScopedLocation,
+  resolveAgentInstallScopeSelection,
+} from '../utils/scopeSelection.js'
 
 /**
  * Install skill-creator as subagent in specified directory
  */
-async function installSubagent(location: 'current' | 'user'): Promise<void> {
-  let targetDir: string
-
-  if (location === 'user') {
-    targetDir = join(homedir(), '.claude', 'agents')
-  } else {
-    // current directory
-    targetDir = join(process.cwd(), '.claude', 'agents')
-  }
+async function installSubagent(
+  selection: ReturnType<typeof resolveAgentInstallScopeSelection>
+): Promise<void> {
+  const { targetDir, targetFile, resolvedScope } = selection
 
   // Create directories
   mkdirSync(targetDir, { recursive: true })
@@ -29,15 +26,14 @@ async function installSubagent(location: 'current' | 'user'): Promise<void> {
   const templateContent = readFileSync(templatePath, 'utf-8')
 
   // Write skill-creator.md file
-  const targetFile = join(targetDir, 'skill-creator.md')
   writeFileSync(targetFile, templateContent)
 
   const { default: gradient } = await import('gradient-string')
   console.log(gradient('green', 'cyan')('\n✅ Skill-creator subagent installed successfully!'))
   console.log(`📍 Location: ${targetFile}`)
-  console.log(`📁 Default scope: ${location}`)
+  console.log(`📁 Installed scope: ${resolvedScope}`)
 
-  if (location === 'user') {
+  if (resolvedScope === 'user') {
     console.log('💡 This makes skill-creator available in all Claude Code sessions')
   } else {
     console.log('💡 This makes skill-creator available in this project only')
@@ -46,20 +42,19 @@ async function installSubagent(location: 'current' | 'user'): Promise<void> {
 
 export async function init(args: string[]): Promise<void> {
   const { default: gradient } = await import('gradient-string')
+  const cwd = process.cwd()
 
   // Parse arguments
   const options = parseArgs(args, [{ name: 'scope', type: 'string' }])
 
-  let location: 'current' | 'user'
+  let scopeSelection: ReturnType<typeof resolveAgentInstallScopeSelection>
 
   // Non-interactive mode if scope is provided
   if (options.scope) {
-    if (options.scope === 'user') {
-      location = 'user'
-    } else if (options.scope === 'current') {
-      location = 'current'
-    } else {
-      console.error('❌ Invalid scope value. Use: user or current')
+    try {
+      scopeSelection = resolveAgentInstallScopeSelection(options.scope, cwd)
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error))
       process.exit(1)
     }
   } else {
@@ -83,19 +78,21 @@ export async function init(args: string[]): Promise<void> {
             value: 'current',
           },
         ],
-        default: 'user',
+        default: getDefaultScopedLocation(cwd),
       },
     ])
 
-    location = answers.location
+    scopeSelection = resolveAgentInstallScopeSelection(answers.location, cwd)
   }
 
   console.log(
-    `\n📦 Installing in ${location === 'user' ? 'user directory' : 'current directory'}...\n`
+    `\n📦 Installing in ${
+      scopeSelection.resolvedScope === 'user' ? 'user directory' : 'current directory'
+    }...\n`
   )
 
   try {
-    await installSubagent(location)
+    await installSubagent(scopeSelection)
   } catch (error) {
     console.error('❌ Installation failed:', error instanceof Error ? error.message : String(error))
     process.exit(1)

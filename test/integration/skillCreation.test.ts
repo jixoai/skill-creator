@@ -900,6 +900,7 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       const output = execSync(command, { encoding: 'utf-8' })
 
       expect(output).toContain('✅ Skill-creator subagent installed successfully!')
+      expect(output).toContain('📁 Installed scope: user')
       expect(existsSync(skillCreatorFile)).toBe(true)
 
       // Check that it's a proper markdown file with frontmatter
@@ -914,6 +915,26 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
 
       // Restore original HOME
       process.env.HOME = originalEnv
+
+      cleanupTempDir(tempDir)
+    })
+
+    it('should let init resolve --scope auto to current when the project already has a local subagent', () => {
+      const tempDir = createTempDir('init-auto-current-')
+      const agentsDir = join(tempDir, '.claude', 'agents')
+      const skillCreatorFile = join(agentsDir, 'skill-creator.md')
+
+      mkdirSync(agentsDir, { recursive: true })
+      writeFileSync(skillCreatorFile, '# existing local install')
+
+      const output = execSync(`node ${process.cwd()}/dist/cli.mjs init --scope auto`, {
+        cwd: tempDir,
+        encoding: 'utf-8',
+      })
+
+      expect(output).toContain('📁 Installed scope: current')
+      expect(output).toContain('📦 Installing in current directory...')
+      expect(readFileSync(skillCreatorFile, 'utf-8')).toContain('skill-creator --help')
 
       cleanupTempDir(tempDir)
     })
@@ -1165,16 +1186,17 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       })
 
       expect(output).toContain('1. init-cc')
-      expect(output).toContain('2. search')
-      expect(output).toContain('3. get-info')
-      expect(output).toContain('4. create-cc-skill')
-      expect(output).toContain('5. download-context7')
-      expect(output).toContain('6. download-context7 --force')
-      expect(output).toContain('7. add-skill')
-      expect(output).toContain('8. add-skill --force-append')
-      expect(output).toContain('9. add-skill --force via --package')
-      expect(output).toContain('10. search-skill')
-      expect(output).toContain('11. vector runtime contract')
+      expect(output).toContain('2. init --scope auto')
+      expect(output).toContain('3. search')
+      expect(output).toContain('4. get-info')
+      expect(output).toContain('5. create-cc-skill')
+      expect(output).toContain('6. download-context7')
+      expect(output).toContain('7. download-context7 --force')
+      expect(output).toContain('8. add-skill')
+      expect(output).toContain('9. add-skill --force-append')
+      expect(output).toContain('10. add-skill --force via --package')
+      expect(output).toContain('11. search-skill')
+      expect(output).toContain('12. vector runtime contract')
       expect(output).toContain('CLI workflow verification passed')
     }, 30_000)
 
@@ -1189,9 +1211,10 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(output).toContain('3. verify installed cli help')
       expect(output).toContain('4. verify installed cli workflow')
       expect(output).toContain('[installed] 1. init-cc')
-      expect(output).toContain('[installed] 2. search')
-      expect(output).toContain('[installed] 10. search-skill')
-      expect(output).toContain('[installed] 11. vector runtime contract')
+      expect(output).toContain('[installed] 2. init --scope auto')
+      expect(output).toContain('[installed] 3. search')
+      expect(output).toContain('[installed] 11. search-skill')
+      expect(output).toContain('[installed] 12. vector runtime contract')
       expect(output).toContain('Installed CLI verification passed')
     }, 180_000)
 
@@ -1205,8 +1228,9 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(output).toContain('2. verify linked cli help')
       expect(output).toContain('3. verify linked cli workflow')
       expect(output).toContain('[linked] 1. init-cc')
-      expect(output).toContain('[linked] 10. search-skill')
-      expect(output).toContain('[linked] 11. vector runtime contract')
+      expect(output).toContain('[linked] 2. init --scope auto')
+      expect(output).toContain('[linked] 11. search-skill')
+      expect(output).toContain('[linked] 12. vector runtime contract')
       expect(output).toContain('Linked CLI verification passed')
     }, 60_000)
   })

@@ -60,8 +60,11 @@ npm install -g skill-creator
 ### 2. Setup for Claude Code
 
 ```bash
-# Interactive installation - installs skill-creator to Claude Code
+# Interactive installation - defaults to current when a local subagent already exists, otherwise user
 skill-creator init
+
+# Non-interactive installation with explicit default scope resolution
+skill-creator init --scope auto
 ```
 
 ### 3. Choose Your Usage Mode
@@ -129,7 +132,7 @@ skill-creator add-skill --package @tanstack/react-query --title "Bundle guidance
 
 | Command   | Description                                                 |
 | --------- | ----------------------------------------------------------- |
-| `init`    | Install skill-creator as Claude Code subagent (interactive) |
+| `init`    | Install skill-creator as Claude Code subagent (`user`, `current`, or `auto`) |
 | `init-cc` | Install skill-creator as subagent in user directory         |
 
 ### Skill Creation (CLI Mode)

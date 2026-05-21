@@ -1,8 +1,10 @@
-import path, { join } from 'node:path'
-import { homedir } from 'node:os'
-import { existsSync } from 'node:fs'
+import path from 'node:path'
 import type { CreateSkillOptions } from '../types/index.js'
 import { inferVersionHintFromSkillDirectory } from './skillIdentity.js'
+import {
+  getDefaultScopedLocation,
+  resolveStorageScopeSelection,
+} from './scopeSelection.js'
 
 export const SKILL_CREATION_CANCELLED_MESSAGE = 'Skill creation cancelled.'
 
@@ -33,6 +35,8 @@ export interface PreparedCreateSkillWorkflow {
     skillDescription?: string
   }
 }
+
+export const resolveScopeSelection = resolveStorageScopeSelection
 
 export async function prepareCreateSkillWorkflow(
   skillDirName: string,
@@ -70,7 +74,7 @@ export async function prepareCreateSkillWorkflow(
               value: 'custom',
             },
           ],
-          default: existsSync(join(cwd, '.claude/agents/skill-creator.md')) ? 'current' : 'user',
+          default: getDefaultScopedLocation(cwd),
         },
       ])
       scope = scopeAnswer.scope
@@ -130,7 +134,7 @@ export async function prepareCreateSkillWorkflow(
     )
   }
 
-  const resolvedScopeSelection = resolveScopeSelection(scope, cwd)
+  const resolvedScopeSelection = resolveStorageScopeSelection(scope, cwd)
   const { requestedScope, resolvedScope, scopePath } = resolvedScopeSelection
 
   if (interactive) {
@@ -177,42 +181,5 @@ export async function prepareCreateSkillWorkflow(
       sourcePackageVersionHint,
       skillDescription: description,
     },
-  }
-}
-
-export function resolveScopeSelection(
-  scope: string,
-  cwd: string,
-  requestedScope: string = scope
-): {
-  requestedScope: string
-  resolvedScope: 'current' | 'user' | 'custom'
-  scopePath: string
-} {
-  if (scope === 'auto') {
-    const hasProjectAgent = existsSync(join(cwd, '.claude/agents/skill-creator.md'))
-    return resolveScopeSelection(hasProjectAgent ? 'current' : 'user', cwd, requestedScope)
-  }
-
-  if (scope === 'user') {
-    return {
-      requestedScope,
-      resolvedScope: 'user',
-      scopePath: path.join(homedir(), '.claude/skills'),
-    }
-  }
-
-  if (scope === 'current') {
-    return {
-      requestedScope,
-      resolvedScope: 'current',
-      scopePath: path.join(cwd, '.claude/skills'),
-    }
-  }
-
-  return {
-    requestedScope,
-    resolvedScope: 'custom',
-    scopePath: scope,
   }
 }

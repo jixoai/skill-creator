@@ -103,7 +103,7 @@ program
 program
   .command('init')
   .description('Install skill-creator as subagent (interactive mode)')
-  .option('--scope <scope>', 'Storage scope (user or current)')
+  .option('--scope <scope>', 'Storage scope (user, current, or auto)')
   .action(async (options) => {
     const { runScript } = await import('./core/runScript.js')
     const args = []

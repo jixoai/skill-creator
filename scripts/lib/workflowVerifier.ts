@@ -213,16 +213,27 @@ Use stringbool coercion carefully and document the project-specific rule in user
       'agent template still describes the old skill naming fallback'
     )
 
-    console.log(`${logPrefix}2. search`)
+    console.log(`${logPrefix}2. init --scope auto`)
+    const initAutoOutput = await runner.run(tempDir, ['init', '--scope', 'auto'], { env: baseEnv })
+    assert(
+      initAutoOutput.includes('Installed scope: current'),
+      'init --scope auto did not resolve to the current project after local installation'
+    )
+    assert(
+      initAutoOutput.includes('Installing in current directory'),
+      'init --scope auto did not report the current-directory install target'
+    )
+
+    console.log(`${logPrefix}3. search`)
     const searchOutput = await runner.run(commandRoot, ['search', 'demo-pkg'], { env: baseEnv })
     assert(searchOutput.includes('"name": "demo-pkg"'), 'search did not return the mock package')
 
-    console.log(`${logPrefix}3. get-info`)
+    console.log(`${logPrefix}4. get-info`)
     const getInfoOutput = await runner.run(commandRoot, ['get-info', 'demo-pkg'], { env: baseEnv })
     assert(getInfoOutput.includes('"skill_dir_name": "demo-pkg@1"'), 'get-info did not return normalized skill_dir_name')
     assert(getInfoOutput.includes('"homepage": "https://example.com/demo-pkg"'), 'get-info did not return homepage')
 
-    console.log(`${logPrefix}4. create-cc-skill`)
+    console.log(`${logPrefix}5. create-cc-skill`)
     const createOutput = await runner.run(
       tempDir,
       [
@@ -260,7 +271,7 @@ Use stringbool coercion carefully and document the project-specific rule in user
     assert(createPayload.sourcePackageName === 'demo-pkg', 'create-cc-skill did not return the source package name')
     assert(existsSync(skillDir), 'skill directory was not created')
 
-    console.log(`${logPrefix}5. download-context7`)
+    console.log(`${logPrefix}6. download-context7`)
     const downloadOutput = await runner.run(
       tempDir,
       [
@@ -278,7 +289,7 @@ Use stringbool coercion carefully and document the project-specific rule in user
     assert(downloadOutput.includes('Documentation downloaded and sliced'), 'download-context7 did not finish')
     assert(directoryContainsText(context7Dir, 'background refresh behavior'), 'initial context7 slices missing expected text')
 
-    console.log(`${logPrefix}6. download-context7 --force`)
+    console.log(`${logPrefix}7. download-context7 --force`)
     context7Document = `# Demo Package
 
 This overview is still long enough to be preserved by the slicer and indexed.
@@ -302,7 +313,7 @@ Stringbool coercion rules should stay explicit inside local notes.`
       'force download did not refresh context7 slices'
     )
 
-    console.log(`${logPrefix}7. add-skill`)
+    console.log(`${logPrefix}8. add-skill`)
     await runner.run(
       tempDir,
       [
@@ -317,7 +328,7 @@ Stringbool coercion rules should stay explicit inside local notes.`
       { env: baseEnv }
     )
 
-    console.log(`${logPrefix}8. add-skill --force-append`)
+    console.log(`${logPrefix}9. add-skill --force-append`)
     const appendOutput = await runner.run(
       tempDir,
       [
@@ -342,7 +353,7 @@ Stringbool coercion rules should stay explicit inside local notes.`
     assert(userFileContent.includes('## Knowledge updates'), 'knowledge updates section missing')
     assert(userFileContent.includes('### Update 1: Workflow update'), 'update heading missing')
 
-    console.log(`${logPrefix}9. add-skill --force via --package`)
+    console.log(`${logPrefix}10. add-skill --force via --package`)
     const replaceOutput = await runner.run(
       tempDir,
       [
@@ -369,7 +380,7 @@ Stringbool coercion rules should stay explicit inside local notes.`
       'force replace did not rewrite the note content'
     )
 
-    console.log(`${logPrefix}10. search-skill`)
+    console.log(`${logPrefix}11. search-skill`)
     const searchSkillOutput = await runner.run(
       tempDir,
       ['search-skill', '--package', 'demo-pkg', 'operational workflows'],
@@ -381,7 +392,7 @@ Stringbool coercion rules should stay explicit inside local notes.`
       'search-skill preview did not surface the replaced note content'
     )
 
-    console.log(`${logPrefix}11. vector runtime contract`)
+    console.log(`${logPrefix}12. vector runtime contract`)
     const vectorRuntimeSupported = await detectVectorRuntimeSupport(baseEnv)
 
     if (vectorRuntimeSupported) {
