@@ -309,8 +309,11 @@ program
   .option('-t, --title <title>', 'Content title')
   .option('-c, --content <content>', 'Content text')
   .option('-f, --file <file>', 'Read content from file')
-  .option('--force', 'Force overwrite existing content')
-  .option('--force-append', 'Append content to existing file instead of creating new file')
+  .option('--force', 'Replace the closest matching user knowledge note')
+  .option(
+    '--force-append',
+    'Append content as a knowledge update in the closest matching user note'
+  )
   .action(async (options) => {
     if (!options.title && !options.file) {
       console.error('❌ Please provide either --title or --file')

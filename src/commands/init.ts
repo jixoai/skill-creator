@@ -3,9 +3,8 @@
  */
 
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
-import { createInterface } from 'node:readline'
+import { join } from 'node:path'
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { parseArgs } from './shared.js'
 import { rootResolver } from '../utils/path.js'
 
@@ -29,15 +28,9 @@ async function installSubagent(location: 'current' | 'user'): Promise<void> {
   const templatePath = rootResolver('templates/skill-creator.md')
   const templateContent = readFileSync(templatePath, 'utf-8')
 
-  // Inject DEFAULT_SCOPE if the template has the placeholder
-  let finalTemplateContent = templateContent
-  if (templateContent.includes('{{DEFAULT_SCOPE}}')) {
-    finalTemplateContent = templateContent.replace(/{{DEFAULT_SCOPE}}/g, location)
-  }
-
   // Write skill-creator.md file
   const targetFile = join(targetDir, 'skill-creator.md')
-  writeFileSync(targetFile, finalTemplateContent)
+  writeFileSync(targetFile, templateContent)
 
   const { default: gradient } = await import('gradient-string')
   console.log(gradient('green', 'cyan')('\n✅ Skill-creator subagent installed successfully!'))

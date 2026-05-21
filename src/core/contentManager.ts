@@ -13,7 +13,6 @@ import {
   readFileSync,
 } from 'node:fs'
 import { createHash } from 'node:crypto'
-import MarkdownIt from 'markdown-it'
 import type {
   SearchResult,
   ContentStats,
@@ -39,13 +38,11 @@ export class ContentManager {
   private options: ContentManagerOptions
   private userDir: string
   private context7BaseDir: string
-  private md: MarkdownIt
 
   constructor(options: ContentManagerOptions) {
     this.options = options
     this.userDir = join(options.referencesDir, 'user')
     this.context7BaseDir = join(options.referencesDir, 'context7')
-    this.md = new MarkdownIt()
   }
 
   /**
@@ -189,7 +186,7 @@ export class ContentManager {
             result.skipped = true
             result.message = 'Existing content is comprehensive enough'
           } else if (options.autoUpdate && this.isContentEnhanced(bestMatch, options.content)) {
-            writeFileSync(filePath, `# ${options.title}\n\n${options.content}`)
+            writeFileSync(filePath, this.renderKnowledgeNote(options.title, options.content))
 
             result.updated = true
             result.filePath = filePath

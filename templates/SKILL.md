@@ -18,6 +18,12 @@ description: |
 # Add user content
 skill-creator add-skill --pwd "{{SKILL_PATH}}" [--title "Title" --content "Content"]|[--file=*.md]
 
+# Replace the closest matching user note with new knowledge
+skill-creator add-skill --pwd "{{SKILL_PATH}}" --title "Replacement" --content "Content" --force
+
+# Append a structured knowledge update into the closest matching user note
+skill-creator add-skill --pwd "{{SKILL_PATH}}" --title "Update" --content "Content" --force-append
+
 # Search documentation
 skill-creator search-skill --pwd "{{SKILL_PATH}}" "query" [--mode=auto|fulltext|fuzzy|vector]
 

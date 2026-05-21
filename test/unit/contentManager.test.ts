@@ -343,6 +343,10 @@ describe('ContentManager', () => {
       expect(result.filePath).toBe(initial.filePath)
       expect(result.message).toContain('Updated existing content')
       expect(result.existingFile).toBeUndefined()
+
+      const fileContent = readFileSync(result.filePath!, 'utf-8')
+      expect(fileContent).toContain('# Upgrade Title')
+      expect(fileContent).not.toContain('# Upgrade Title\n\n# Upgrade Title')
     })
 
     it('should create unique file names', async () => {

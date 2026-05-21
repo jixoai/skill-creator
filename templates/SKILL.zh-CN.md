@@ -166,6 +166,18 @@ skill-creator search-skill --pwd="{{SKILL_PATH}}" --list "搜索关键词"
 skill-creator add-skill --pwd="{{SKILL_PATH}}" --title "知识点标题" --content "详细内容"
 ```
 
+如果要直接替换最接近的用户知识点：
+
+```bash
+skill-creator add-skill --pwd="{{SKILL_PATH}}" --title "替换标题" --content "详细内容" --force
+```
+
+如果要把新增内容作为结构化知识更新追加到最接近的用户知识点：
+
+```bash
+skill-creator add-skill --pwd="{{SKILL_PATH}}" --title "更新标题" --content "详细内容" --force-append
+```
+
 **添加内容类型：**
 
 - 🚀 **最佳实践**: 项目中的实际经验和技巧

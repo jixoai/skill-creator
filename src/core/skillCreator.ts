@@ -2,19 +2,11 @@
  * Main skill creator class
  */
 
-import { join, resolve } from 'node:path'
-import { existsSync, mkdirSync, writeFileSync, chmodSync, readdirSync, readFileSync } from 'node:fs'
-import { createHash } from 'node:crypto'
-import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 'node:fs'
 import type { CreateSkillOptions, CreateSkillResult } from '../types/index.js'
-import { Config } from '../utils/config.js'
 import { match } from 'ts-pattern'
 import { rootResolver } from '../utils/path.js'
-
-// Internal config interface used during skill creation
-interface SkillCreateConfig {
-  context7LibraryId?: string
-}
 
 export class SkillCreator {
   private templateDir: string

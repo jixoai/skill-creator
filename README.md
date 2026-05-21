@@ -17,7 +17,7 @@ A powerful composite tool for creating and managing Claude Code skills. It serve
 ### CLI & Subagent
 
 - 🛠️ **Modern TypeScript**: Full type safety with ESM modules
-- 🎯 **Interactive CLI**: Professional command-line interface with inquirer prompts
+- 🎯 **CLI-first Workflow**: Non-interactive by default, with explicit interactive prompts when requested
 - 🤖 **Subagent Mode**: Intelligent agent that handles the entire skill creation workflow
 - 📦 **Flexible Storage**: Store skills in project (`.claude/skills/`) or user directory (`~/.claude/skills`)
 
@@ -112,6 +112,9 @@ skill-creator download-context7 --package @tanstack/react-query /tanstack/react-
 
 # Search your skill knowledge base
 skill-creator search-skill --package @tanstack/react-query "useQuery hook"
+
+# Append a structured knowledge update into the closest matching user note
+skill-creator add-skill --package @tanstack/react-query --title "Bundle guidance" --content "Prefer React Query cache ownership conventions in bundle-sensitive apps." --force-append
 ```
 
 ## Commands
@@ -150,7 +153,8 @@ skill-creator search-skill --package @tanstack/react-query "useQuery hook"
 - `--package <name>`: Use package name to find skill directory
 - `--package-version <version>`: Version hint for Context7 library resolution
 - `--description <description>`: Custom description for the skill
-- `--force`: Force overwrite existing files
+- `--force`: Replace the closest matching user knowledge note when adding content
+- `--force-append`: Append a structured knowledge update into the closest matching user note
 - `--skip-indexing`: Skip automatic local index building
 - `--interactive`: Enable interactive prompts
 
@@ -206,6 +210,12 @@ When `--package <name>` is used to find an existing skill, the CLI first checks 
 
    ```bash
    skill-creator add-skill --package zustand --title "Best Practices" --content "Your custom notes"
+
+   # Replace the closest existing user note
+   skill-creator add-skill --package zustand --title "Best Practices" --content "Updated note" --force
+
+   # Append a structured update into the closest existing user note
+   skill-creator add-skill --package zustand --title "Operational update" --content "Additional guidance" --force-append
    ```
 
 7. **Search Knowledge Base**: Query your skill
@@ -265,6 +275,8 @@ skill-creator download-context7 --help
 - `fulltext`: explicit MiniSearch-backed local index
 - `fuzzy`: explicit `uFuzzy` fallback for path/term-style matching
 - `vector`: explicit SQLite vector search path when the local runtime supports it
+
+`chroma` remains accepted only as an undocumented legacy alias for `vector`.
 
 ## Architecture
 

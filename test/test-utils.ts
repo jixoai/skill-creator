@@ -1,11 +1,9 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { rmSync, mkdirSync } from 'node:fs'
+import { rmSync, mkdtempSync } from 'node:fs'
 
 export function createTempDir(prefix = 'test-'): string {
-  const tempDir = join(tmpdir(), prefix + Date.now())
-  mkdirSync(tempDir, { recursive: true })
-  return tempDir
+  return mkdtempSync(join(tmpdir(), prefix))
 }
 
 export function cleanupTempDir(dir: string): void {

@@ -74,7 +74,7 @@ skill-creator --help
      2. 介绍配套的工具如何在这个 `skill_dir_fullpath` 文件夹内使用：来搜索技能信息、更新技能、扩展技能信息
         - `skill-creator --pwd "{skill_dir_fullpath}" search-skill "test query"` 查询知识点
         - `skill-creator --pwd "{skill_dir_fullpath}" add-skill --title "T" --content "C"` 添加“用户知识点”
-        - `skill-creator --pwd "{skill_dir_fullpath}" download-context7 {project-id} --force` 强制更新，会清空 context7 文件夹，重新切分知识点文件
+        - `skill-creator --pwd "{skill_dir_fullpath}" download-context7 {project-id} --force` 强制更新，会替换当前项目已有的 Context7 切片，再重新切分下载到的知识点文件
         - 注意，默认情况下，我们完全不需要去创建scripts文件夹，因为我们已经有 `skill-creator` 这个cli来替代scripts了。
 
 4. **解析 Context7 项目 ID 并下载文档**
