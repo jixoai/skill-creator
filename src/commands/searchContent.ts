@@ -56,6 +56,13 @@ export async function searchContent(args: string[]): Promise<void> {
   if (backendInfo) {
     console.log(`Active backend: ${backendInfo.backendId} (${backendInfo.mode})`)
   }
+  const autoDecisionReason =
+    typeof results[0]?.metadata?.['autoDecisionReason'] === 'string' ?
+      results[0].metadata['autoDecisionReason']
+    : undefined
+  if (autoDecisionReason) {
+    console.log(`Auto decision: ${autoDecisionReason}`)
+  }
   console.log('='.repeat(50))
 
   if (results.length === 0) {
@@ -95,6 +102,9 @@ export async function searchContent(args: string[]): Promise<void> {
     console.log(`   Source: ${result.source} (${sourceLabel})`)
     if (typeof result.metadata.backendId === 'string') {
       console.log(`   Backend: ${result.metadata.backendId}`)
+    }
+    if (typeof result.metadata.autoBackendId === 'string') {
+      console.log(`   Auto backend: ${result.metadata.autoBackendId}`)
     }
     console.log(`   File: ${result.relativePath || result.file_path}`)
 

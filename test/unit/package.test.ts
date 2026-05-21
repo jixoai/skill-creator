@@ -51,7 +51,11 @@ describe('PackageUtils', () => {
     })
 
     it('should return null for unknown packages', async () => {
-      // This would test actual npm command execution
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response('not found', { status: 404 }))
+      )
+
       const version = await PackageUtils.getPackageVersion('non-existent-package-12345')
       expect(version).toBeNull()
     })
@@ -122,6 +126,11 @@ describe('PackageUtils', () => {
     })
 
     it('should return null for an unknown package', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response('not found', { status: 404 }))
+      )
+
       const info = await PackageUtils.getPackageInfo('non-existent-package-12345abc')
       expect(info).toBeNull()
     })

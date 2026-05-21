@@ -447,6 +447,9 @@ describe('search runtime contract', () => {
     const results = await auto.search('query client')
 
     expect(results[0]?.id).toBe('fulltext-1')
+    expect(results[0]?.metadata.autoBackendId).toBe('minisearch')
+    expect(String(results[0]?.metadata.autoDecisionReason)).toContain('Kept fulltext results')
+    expect(auto.getBackendInfo().backendId).toBe('minisearch')
   })
 
   it('falls back to fuzzy when fulltext confidence is weak', async () => {
@@ -497,5 +500,8 @@ describe('search runtime contract', () => {
     const results = await auto.search('query client')
 
     expect(results[0]?.id).toBe('fuzzy-strong')
+    expect(results[0]?.metadata.autoBackendId).toBe('ufuzzy')
+    expect(String(results[0]?.metadata.autoDecisionReason)).toContain('Fell back from fulltext to fuzzy')
+    expect(auto.getBackendInfo().backendId).toBe('ufuzzy')
   })
 })

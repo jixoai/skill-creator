@@ -85,6 +85,7 @@ describe('Skill Creation Integration Tests', () => {
       expect(searchSkillOutput).toContain('Search Results')
       expect(searchSkillOutput).toContain('Requested mode: auto')
       expect(searchSkillOutput).toContain('Active backend: minisearch (auto)')
+      expect(searchSkillOutput).toContain('Auto decision: Kept fulltext results')
       expect(searchSkillOutput).toContain('Zod Validation Guide')
 
         // 7. Verify file structure
@@ -476,6 +477,7 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
 
       expect(output).toContain('Preview Result')
       expect(output).toContain('Backend: minisearch')
+      expect(output).toContain('Auto backend: minisearch')
       expect(output).toContain('Preview:')
       expect(output).toContain('Lines: 1,2,3')
       expect(output).not.toContain('<!-- Score:')

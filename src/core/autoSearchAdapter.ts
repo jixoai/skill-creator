@@ -35,6 +35,8 @@ export class AutoSearchAdapter implements SearchEngine {
   private fuzzyAdapter: FuzzySearchAdapter
   private miniSearchAdapter: MiniSearchAdapter
   private options: AutoSearchOptions
+  private lastBackendInfo: SearchBackendInfo | null = null
+  private lastDecisionReason: string | null = null
 
   constructor(options: AutoSearchOptions, dependencies: AutoSearchDependencies = {}) {
     this.options = options
@@ -60,10 +62,33 @@ export class AutoSearchAdapter implements SearchEngine {
     const quality = this.evaluateSearchQuality(fulltextResults, query)
 
     if (quality.score >= qualityThreshold) {
-      return fulltextResults
+      const backendInfo = this.miniSearchAdapter.getBackendInfo()
+      this.lastBackendInfo = backendInfo
+      this.lastDecisionReason = `Kept fulltext results (${quality.reason}, score ${quality.score.toFixed(2)} >= threshold ${qualityThreshold.toFixed(2)})`
+      return fulltextResults.map((result) => ({
+        ...result,
+        metadata: {
+          ...result.metadata,
+          autoBackendId: backendInfo.backendId,
+          autoRequestedMode: 'auto',
+          autoDecisionReason: this.lastDecisionReason,
+        },
+      }))
     }
 
-    return this.fuzzyAdapter.search(query, { topK, where })
+    const fuzzyResults = await this.fuzzyAdapter.search(query, { topK, where })
+    const backendInfo = this.fuzzyAdapter.getBackendInfo()
+    this.lastBackendInfo = backendInfo
+    this.lastDecisionReason = `Fell back from fulltext to fuzzy (${quality.reason}, score ${quality.score.toFixed(2)} < threshold ${qualityThreshold.toFixed(2)})`
+    return fuzzyResults.map((result) => ({
+      ...result,
+      metadata: {
+        ...result.metadata,
+        autoBackendId: backendInfo.backendId,
+        autoRequestedMode: 'auto',
+        autoDecisionReason: this.lastDecisionReason,
+      },
+    }))
   }
 
   /**
@@ -92,6 +117,13 @@ export class AutoSearchAdapter implements SearchEngine {
   }
 
   getBackendInfo(): SearchBackendInfo {
+    if (this.lastBackendInfo) {
+      return {
+        ...this.lastBackendInfo,
+        mode: 'auto',
+      }
+    }
+
     return {
       backendId: 'minisearch',
       mode: 'auto',
@@ -115,5 +147,7 @@ export class AutoSearchAdapter implements SearchEngine {
   clearIndex(): void {
     this.fuzzyAdapter.clearIndex()
     this.miniSearchAdapter.clearIndex()
+    this.lastBackendInfo = null
+    this.lastDecisionReason = null
   }
 }
