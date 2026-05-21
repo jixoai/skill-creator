@@ -38,6 +38,7 @@ export async function searchContent(args: string[]): Promise<void> {
 
   // Initialize search engine
   await searchEngine.initialize()
+  const backendInfo = await searchEngine.getBackendInfo()
 
   // Build index if needed
   const referencesDir = join(process.cwd(), 'assets', 'references')
@@ -51,6 +52,10 @@ export async function searchContent(args: string[]): Promise<void> {
   const results = await searchEngine.search(options.query, topK || 5, whereFilter)
 
   console.log(`\nSearch Results for: '${options.query}'`)
+  console.log(`Requested mode: ${normalizedMode}`)
+  if (backendInfo) {
+    console.log(`Active backend: ${backendInfo.backendId} (${backendInfo.mode})`)
+  }
   console.log('='.repeat(50))
 
   if (results.length === 0) {
@@ -88,6 +93,9 @@ export async function searchContent(args: string[]): Promise<void> {
 
     console.log(`\n${i + 1}. [Score: ${scoreLabel}] ${result.title}`)
     console.log(`   Source: ${result.source} (${sourceLabel})`)
+    if (typeof result.metadata.backendId === 'string') {
+      console.log(`   Backend: ${result.metadata.backendId}`)
+    }
     console.log(`   File: ${result.relativePath || result.file_path}`)
 
     // Display formatted content based on content type

@@ -50,6 +50,7 @@ describe('EnhancedFormatter', () => {
     expect(formatted[0]?.result.metadata.displayRank).toBe(1)
     expect(formatted[0]?.result.metadata.displayScore).toBeGreaterThan(70)
     expect(formatted[0]?.result.metadata.sourceRank).toBe('primary')
+    expect(formatted[0]?.result.metadata.backendId).toBe('minisearch')
 
     expect(formatted[1]?.contentType).toBe('preview')
     expect(formatted[1]?.content).toContain('<limit-content lines-indexs="1,3,4">')

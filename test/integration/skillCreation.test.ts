@@ -81,9 +81,11 @@ describe('Skill Creation Integration Tests', () => {
 
         // 5. Search skill
         const searchSkillCommand = `${cliCmd} search-skill --pwd "${skillDir}" "validation"`
-        const searchSkillOutput = execSync(searchSkillCommand, { encoding: 'utf-8' })
-        expect(searchSkillOutput).toContain('Search Results')
-        expect(searchSkillOutput).toContain('Zod Validation Guide')
+      const searchSkillOutput = execSync(searchSkillCommand, { encoding: 'utf-8' })
+      expect(searchSkillOutput).toContain('Search Results')
+      expect(searchSkillOutput).toContain('Requested mode: auto')
+      expect(searchSkillOutput).toContain('Active backend: minisearch (auto)')
+      expect(searchSkillOutput).toContain('Zod Validation Guide')
 
         // 7. Verify file structure
         const expectedFiles = [
@@ -473,6 +475,7 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
       })
 
       expect(output).toContain('Preview Result')
+      expect(output).toContain('Backend: minisearch')
       expect(output).toContain('Preview:')
       expect(output).toContain('Lines: 1,2,3')
       expect(output).not.toContain('<!-- Score:')
