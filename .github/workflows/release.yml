@@ -2,6 +2,7 @@ name: Auto Release to NPM
 
 permissions:
   contents: write # Allow pushing tags and creating releases
+  id-token: write # Required for npm trusted publishing
 
 on:
   push:
@@ -27,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.14.0'
           cache: 'npm'
 
       - name: Check if package.json version changed
@@ -80,7 +81,7 @@ jobs:
         run: npm test
 
       - name: Type check
-        run: npm run type-check
+        run: npm run ts
 
       - name: Test CLI build
         run: npm run cli -- --version
@@ -109,9 +110,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.14.0'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
+          scope: '@jixoai'
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -129,9 +131,10 @@ jobs:
           git push origin "v$VERSION"
 
       - name: Publish to NPM
-        run: npm publish
+        run: npm publish --provenance
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ''
+        # Trusted Publishing uses OIDC via id-token; no npm token secret is needed.
 
       - name: Generate Release Notes
         id: release-notes
@@ -190,7 +193,7 @@ jobs:
 
           echo "" >> $GITHUB_OUTPUT
           echo "### 📖 Documentation" >> $GITHUB_OUTPUT
-          echo "View the [README.md](https://github.com/gaubee/skill-creator/blob/main/README.md) for usage instructions" >> $GITHUB_OUTPUT
+          echo "View the [README.md](https://github.com/jixoai/skill-creator/blob/main/README.md) for usage instructions" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
           echo "---" >> $GITHUB_OUTPUT
           echo "*Generated automatically on $(date '+%Y-%m-%d %H:%M:%S')*" >> $GITHUB_OUTPUT
