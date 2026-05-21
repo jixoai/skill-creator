@@ -285,6 +285,11 @@ pnpm verify:installed
 pnpm verify:linked
 ```
 
+These workflow gates now also prove the vector-runtime contract:
+
+- if the local runtime supports `node:sqlite` and `sqlite-vec`, the verification path builds and queries a real `--mode=vector` index
+- otherwise, the verification path proves that the CLI returns the expected runtime-support error
+
 If you still want a linked local binary for ad hoc manual testing, use an isolated prefix:
 
 ```bash

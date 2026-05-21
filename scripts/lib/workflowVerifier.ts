@@ -11,6 +11,12 @@ export interface WorkflowRunner {
   run(cwd: string, args: string[], options?: { env?: NodeJS.ProcessEnv }): Promise<string>
 }
 
+export interface WorkflowCommandError extends Error {
+  stdout?: string
+  stderr?: string
+  exitCode?: number
+}
+
 function createTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
@@ -23,6 +29,13 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
+}
+
+function asWorkflowCommandError(error: unknown): WorkflowCommandError {
+  if (error instanceof Error) {
+    return error as WorkflowCommandError
+  }
+  return new Error(String(error)) as WorkflowCommandError
 }
 
 function directoryContainsText(dir: string, snippet: string): boolean {
@@ -332,6 +345,46 @@ Stringbool coercion rules should stay explicit inside local notes.`
       'search-skill preview did not surface the replaced note content'
     )
 
+    console.log(`${logPrefix}11. vector runtime contract`)
+    const vectorRuntimeSupported = await detectVectorRuntimeSupport(baseEnv)
+
+    if (vectorRuntimeSupported) {
+      const buildIndexOutput = await runner.run(
+        tempDir,
+        ['build-index', '--pwd', skillDir, '--mode', 'vector'],
+        { env: baseEnv }
+      )
+      assert(buildIndexOutput.includes('Mode: vector'), 'build-index did not acknowledge vector mode')
+      assert(
+        buildIndexOutput.includes('Active backend: sqlite-vec (vector)'),
+        'build-index did not report sqlite-vec as the active vector backend'
+      )
+
+      const vectorSearchOutput = await runner.run(
+        tempDir,
+        ['search-skill', '--pwd', skillDir, '--mode', 'vector', 'operational workflows'],
+        { env: baseEnv }
+      )
+      assert(
+        vectorSearchOutput.includes('Workflow canonical note'),
+        'vector search did not find the expected user note'
+      )
+    } else {
+      try {
+        await runner.run(tempDir, ['build-index', '--pwd', skillDir, '--mode', 'vector'], {
+          env: baseEnv,
+        })
+        throw new Error('vector build-index unexpectedly succeeded without runtime support')
+      } catch (error) {
+        const commandError = asWorkflowCommandError(error)
+        const output = `${commandError.stdout ?? ''}\n${commandError.stderr ?? ''}\n${commandError.message}`
+        assert(
+          output.includes('Vector mode is unavailable in this runtime'),
+          'vector build-index did not explain the runtime support requirement'
+        )
+      }
+    }
+
     console.log('\n✅ CLI workflow verification passed')
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -341,17 +394,51 @@ Stringbool coercion rules should stay explicit inside local notes.`
   }
 }
 
+async function detectVectorRuntimeSupport(env: NodeJS.ProcessEnv): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync(
+      'node',
+      [
+        '-e',
+        "Promise.all([import('node:sqlite'), import('sqlite-vec')]).then(()=>process.stdout.write('ok')).catch(()=>process.stdout.write('fail'))",
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        env,
+      }
+    )
+    return stdout.trim() === 'ok'
+  } catch {
+    return false
+  }
+}
+
 export function createSourceCliRunner(repoRoot: string): WorkflowRunner {
   return {
     async run(cwd, args, options) {
       const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs')
       const cliSourcePath = join(repoRoot, 'src', 'cli.ts')
-      const { stdout } = await execFileAsync('node', [tsxCliPath, cliSourcePath, ...args], {
-        cwd,
-        encoding: 'utf-8',
-        env: options?.env,
-      })
-      return stdout
+      try {
+        const { stdout } = await execFileAsync('node', [tsxCliPath, cliSourcePath, ...args], {
+          cwd,
+          encoding: 'utf-8',
+          env: options?.env,
+        })
+        return stdout
+      } catch (error) {
+        const commandError = error as {
+          stdout?: string | Buffer
+          stderr?: string | Buffer
+          status?: number
+          message?: string
+        }
+        const wrapped = new Error(commandError.message ?? 'Command failed') as WorkflowCommandError
+        wrapped.stdout = String(commandError.stdout ?? '')
+        wrapped.stderr = String(commandError.stderr ?? '')
+        wrapped.exitCode = commandError.status
+        throw wrapped
+      }
     },
   }
 }
@@ -359,12 +446,26 @@ export function createSourceCliRunner(repoRoot: string): WorkflowRunner {
 export function createInstalledCliRunner(commandPath: string): WorkflowRunner {
   return {
     async run(cwd, args, options) {
-      const { stdout } = await execFileAsync(commandPath, args, {
-        cwd,
-        encoding: 'utf-8',
-        env: options?.env,
-      })
-      return stdout
+      try {
+        const { stdout } = await execFileAsync(commandPath, args, {
+          cwd,
+          encoding: 'utf-8',
+          env: options?.env,
+        })
+        return stdout
+      } catch (error) {
+        const commandError = error as {
+          stdout?: string | Buffer
+          stderr?: string | Buffer
+          status?: number
+          message?: string
+        }
+        const wrapped = new Error(commandError.message ?? 'Command failed') as WorkflowCommandError
+        wrapped.stdout = String(commandError.stdout ?? '')
+        wrapped.stderr = String(commandError.stderr ?? '')
+        wrapped.exitCode = commandError.status
+        throw wrapped
+      }
     },
   }
 }
