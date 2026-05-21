@@ -48,18 +48,20 @@ skill-creator --help
 3. **Create Skill**
 
    ```bash
-   skill-creator create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..." --json
+   skill-creator create-cc-skill --scope [current|user] --name <package_name> [--skill-name <visible_skill_name>] skill_dir_name --description "..." --json
    # Prints a JSON object containing skillPath and the resolved workflow metadata
    ```
 
    **Note**: `--scope` is a required parameter
+   - `--name` stores the source package identity used by `download-context7 --pwd ...` and `--package` resolution
+   - `--skill-name` controls the visible skill title written into `SKILL.md`; omit it when the package name itself should be the visible title
    - **Storage Location Confirmation**:
      - Current project (`--scope current`): `./.claude/skills/`
      - User directory (`--scope user`): `~/.claude/skills`
      - **Default selection**: `current` when `./.claude/agents/skill-creator.md` already exists in the current project, otherwise `user`
      - **Note**: You need to use the `AskUserQuestion` tool to ask the user about the storage location. If the result is empty, it means Claude Code is in bypass-permissions mode. In this case, you can directly use the default storage location.
 
-   - **Skill Naming Confirmation** (if no `--name` parameter provided):
+   - **Skill Naming Confirmation** (if no `--skill-name` parameter provided):
      - If user is satisfied with `skill_dir_name`, use it as-is
      - Otherwise, let the user provide a new name
    - Execute command after confirmation

@@ -91,8 +91,11 @@ skill-creator search "react query"
 # Get package information (Options)
 skill-creator get-info @tanstack/react-query
 
-# Create skill with custom package name (recommended)
+# Create skill with package identity only
 skill-creator create-cc-skill --scope user --name "@tanstack/react-query" --description "React Query for data fetching" @tanstack/react-query@5 --json
+
+# Create skill with a custom visible skill name while keeping the source package identity
+skill-creator create-cc-skill --scope user --name "@tanstack/react-query" --skill-name "react-query" --description "React Query for data fetching" @tanstack/react-query@5 --json
 
 # Create skill with interactive prompts
 skill-creator create-cc-skill --scope user --interactive --description "React Query for data fetching" @tanstack/react-query@5
@@ -181,8 +184,11 @@ When `--package <name>` is used to find an existing skill, the CLI first checks 
 3. **Create Skill**: Set up skill directory (requires --scope, recommended to use --name)
 
    ```bash
-   # With custom package name (recommended)
+   # With source package identity only
    skill-creator create-cc-skill --scope current --name zustand --description "Zustand state management" zustand@5 --json
+
+   # With a separate visible skill name
+   skill-creator create-cc-skill --scope current --name @tanstack/router --skill-name router-skill --description "Router workflow skill" tanstack-router@1 --json
 
    # With interactive prompts
    skill-creator create-cc-skill --scope current --interactive zustand

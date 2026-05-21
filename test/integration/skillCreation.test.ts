@@ -79,11 +79,14 @@ describe('Skill Creation Integration Tests', () => {
           scopePath: string
           skillDirName: string
           skillName: string
+          sourcePackageName: string
+          sourcePackageVersionHint: string
           skillDescription: string
         }
         expect(normalizeRealPath(createPayload.skillPath)).toBe(normalizeRealPath(skillDir))
         expect(createPayload.skillDirName).toBe(skill_dir_name)
         expect(createPayload.skillName).toBe('zod')
+        expect(createPayload.sourcePackageName).toBe('zod')
 
         expect(existsSync(skillDir)).toBe(true)
 
@@ -929,11 +932,14 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
         scopePath: string
         skillDirName: string
         skillName: string
+        sourcePackageName: string
+        sourcePackageVersionHint: string
         skillDescription: string
       }
 
       expect(payload.skillDirName).toBe('json-skill@1')
       expect(payload.skillName).toBe('json-skill')
+      expect(payload.sourcePackageName).toBe('json-skill')
       expect(payload.skillDescription).toBe('JSON contract skill')
       expect(normalizeRealPath(payload.scopePath)).toBe(
         normalizeRealPath(join(tempDir, '.claude', 'skills'))
@@ -942,6 +948,41 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
         normalizeRealPath(join(tempDir, '.claude', 'skills', 'json-skill@1'))
       )
       expect(existsSync(payload.skillPath)).toBe(true)
+
+      cleanupTempDir(tempDir)
+    })
+
+    it('should let create-cc-skill separate visible skill name from source package identity', () => {
+      const tempDir = createTempDir('create-skill-visible-name-')
+      const output = execSync(
+        `node ${process.cwd()}/dist/cli.mjs create-cc-skill --scope current --name "@tanstack/router" --skill-name "router-skill" --description "Router workflow skill" --json tanstack-router@1`,
+        {
+          cwd: tempDir,
+          encoding: 'utf-8',
+        }
+      )
+
+      const payload = JSON.parse(output) as {
+        skillPath: string
+        scopePath: string
+        skillDirName: string
+        skillName: string
+        sourcePackageName: string
+        sourcePackageVersionHint: string
+        skillDescription: string
+      }
+
+      expect(payload.skillDirName).toBe('tanstack-router@1')
+      expect(payload.skillName).toBe('router-skill')
+      expect(payload.sourcePackageName).toBe('@tanstack/router')
+      expect(payload.sourcePackageVersionHint).toBe('1')
+      expect(normalizeRealPath(payload.skillPath)).toBe(
+        normalizeRealPath(join(tempDir, '.claude', 'skills', 'tanstack-router@1'))
+      )
+
+      const skillMd = readFileSync(join(payload.skillPath, 'SKILL.md'), 'utf-8')
+      expect(skillMd).toContain('# router-skill')
+      expect(skillMd).toContain('<skill-package name="@tanstack/router" version="1">')
 
       cleanupTempDir(tempDir)
     })

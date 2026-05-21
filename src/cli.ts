@@ -43,7 +43,8 @@ program
   .command('create-cc-skill')
   .option('--interactive', 'Enable interactive confirmation prompts')
   .option('--scope <scope>', 'Storage scope (user or current), or custom directory to store skills')
-  .option('--name <name>', 'The skill name')
+  .option('--name <name>', 'Source package name stored in SKILL.md for later package-aware workflows')
+  .option('--skill-name <name>', 'Visible skill name used in SKILL.md and JSON output')
   .option('--description <description>', 'Custom description for the skill')
   .option('--force', 'Force overwrite existing files in the skill directory')
   .option('--json', 'Print machine-readable creation output')
@@ -69,6 +70,8 @@ program
               scopePath: workflow.summary.scopePath,
               skillDirName: workflow.summary.skillDirName,
               skillName: workflow.summary.skillName,
+              sourcePackageName: workflow.summary.sourcePackageName,
+              sourcePackageVersionHint: workflow.summary.sourcePackageVersionHint ?? '',
               skillDescription: workflow.summary.skillDescription ?? '',
             },
             null,

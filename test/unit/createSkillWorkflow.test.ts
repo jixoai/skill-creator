@@ -38,6 +38,36 @@ describe('createSkillWorkflow', () => {
     })
   })
 
+  it('supports separating the visible skill name from the source package identity', async () => {
+    const workflow = await prepareCreateSkillWorkflow(
+      'tanstack-router@1',
+      {
+        scope: 'current',
+        name: '@tanstack/router',
+        skillName: 'router-skill',
+        description: 'Router workflow skill',
+      },
+      {
+        cwd: '/tmp/project',
+        prompt: {
+          prompt: async () => {
+            throw new Error('prompt should not be called')
+          },
+        },
+      }
+    )
+
+    expect(workflow.createOptions).toEqual({
+      baseDir: '/tmp/project/.claude/skills',
+      skillDirname: 'tanstack-router@1',
+      skillName: 'router-skill',
+      skillDescription: 'Router workflow skill',
+      sourcePackageName: '@tanstack/router',
+      sourcePackageVersionHint: '1',
+      force: undefined,
+    })
+  })
+
   it('supports interactive custom naming and custom scope selection', async () => {
     const answers = [
       { scope: 'custom' },

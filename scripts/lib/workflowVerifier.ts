@@ -231,6 +231,8 @@ Use stringbool coercion carefully and document the project-specific rule in user
       scopePath: string
       skillDirName: string
       skillName: string
+      sourcePackageName: string
+      sourcePackageVersionHint: string
       skillDescription: string
     }
     assert(
@@ -238,6 +240,8 @@ Use stringbool coercion carefully and document the project-specific rule in user
       'create-cc-skill did not return the created skill path'
     )
     assert(createPayload.skillDirName === 'workflow-skill@1', 'create-cc-skill did not return the skill directory name')
+    assert(createPayload.skillName === 'demo-pkg', 'create-cc-skill did not return the visible skill name')
+    assert(createPayload.sourcePackageName === 'demo-pkg', 'create-cc-skill did not return the source package name')
     assert(existsSync(skillDir), 'skill directory was not created')
 
     console.log(`${logPrefix}5. download-context7`)

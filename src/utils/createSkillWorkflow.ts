@@ -10,6 +10,7 @@ export interface CreateSkillCliOptions {
   interactive?: boolean
   scope?: string
   name?: string
+  skillName?: string
   description?: string
   force?: boolean
 }
@@ -25,6 +26,8 @@ export interface PreparedCreateSkillWorkflow {
     scopePath: string
     skillDirName: string
     skillName: string
+    sourcePackageName: string
+    sourcePackageVersionHint?: string
     skillDescription?: string
   }
 }
@@ -38,8 +41,8 @@ export async function prepareCreateSkillWorkflow(
   }
 ): Promise<PreparedCreateSkillWorkflow> {
   const cwd = dependencies.cwd ?? process.cwd()
-  let { scope, interactive, force, description, name } = options
-  let finalSkillName = name || skillDirName
+  let { scope, interactive, force, description, name: sourcePackageName, skillName } = options
+  let finalSkillName = skillName || sourcePackageName || skillDirName
 
   if (interactive) {
     console.log('Skill Creation Configuration:')
@@ -82,14 +85,14 @@ export async function prepareCreateSkillWorkflow(
       }
     }
 
-    if (!name) {
+    if (!skillName) {
       const { packageNameConfirmed } = await dependencies.prompt.prompt<{
         packageNameConfirmed: boolean
       }>([
         {
           type: 'confirm',
           name: 'packageNameConfirmed',
-          message: `Use '${skillDirName}' as the package name?`,
+          message: `Use '${finalSkillName}' as the skill name?`,
           default: true,
         },
       ])
@@ -149,20 +152,25 @@ export async function prepareCreateSkillWorkflow(
     }
   }
 
+  const resolvedSourcePackageName = sourcePackageName ?? finalSkillName
+  const sourcePackageVersionHint = inferVersionHintFromSkillDirectory(skillDirName)
+
   return {
     createOptions: {
       baseDir: scopePath,
       skillDirname: skillDirName,
       skillName: finalSkillName,
       skillDescription: description,
-      sourcePackageName: name ?? finalSkillName,
-      sourcePackageVersionHint: inferVersionHintFromSkillDirectory(skillDirName),
+      sourcePackageName: resolvedSourcePackageName,
+      sourcePackageVersionHint,
       force,
     },
     summary: {
       scopePath,
       skillDirName,
       skillName: finalSkillName,
+      sourcePackageName: resolvedSourcePackageName,
+      sourcePackageVersionHint,
       skillDescription: description,
     },
   }
