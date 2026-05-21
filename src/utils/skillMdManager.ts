@@ -14,6 +14,13 @@ export interface TagContent {
   endIndex: number
 }
 
+export interface SkillPackageTag {
+  name: string
+  version: string
+  startIndex: number
+  endIndex: number
+}
+
 /**
  * Parse all tags from SKILL.md content
  */
@@ -51,6 +58,40 @@ export function parseSkillMdTags(content: string): TagContent[] {
   }
 
   return tags.sort((a, b) => a.startIndex - b.startIndex)
+}
+
+export function parseSkillPackageTag(content: string): SkillPackageTag | undefined {
+  const match = content.match(
+    /<skill-package\s+name="([^"]*)"\s+version="([^"]*)">\s*<\/skill-package>/
+  )
+
+  if (!match || match.index == null) {
+    return undefined
+  }
+
+  const [, name, version] = match
+  return {
+    name,
+    version,
+    startIndex: match.index,
+    endIndex: match.index + match[0].length,
+  }
+}
+
+export function updateSkillPackageTag(
+  content: string,
+  metadata: {
+    name: string
+    version?: string
+  }
+): string {
+  const existingTag = parseSkillPackageTag(content)
+  if (!existingTag) {
+    return content
+  }
+
+  const updatedTag = `<skill-package name="${metadata.name}" version="${metadata.version ?? ''}">\n</skill-package>`
+  return content.slice(0, existingTag.startIndex) + updatedTag + content.slice(existingTag.endIndex)
 }
 
 /**
@@ -211,6 +252,18 @@ export function updateSkillMdFile(
 ): void {
   const content = readFileSync(filePath, 'utf-8')
   const updated = updateSkillMdTag(content, tagName, newContent, id, baseDir)
+  writeFileSync(filePath, updated, 'utf-8')
+}
+
+export function updateSkillPackageMetadataFile(
+  filePath: string,
+  metadata: {
+    name: string
+    version?: string
+  }
+): void {
+  const content = readFileSync(filePath, 'utf-8')
+  const updated = updateSkillPackageTag(content, metadata)
   writeFileSync(filePath, updated, 'utf-8')
 }
 

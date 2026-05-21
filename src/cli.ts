@@ -272,10 +272,14 @@ program
   )
   .option('-f, --force', 'Force update even if up to date')
   .option('--skip-indexing', 'Skip automatic local index building after download')
+  .option('--json', 'Print machine-readable download output')
   .action(async (projectId, options) => {
     try {
       const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
       let resolvedProjectId = projectId as string | undefined
+      let resolvedContext7Query: string | undefined
+      let resolvedPackageName: string | undefined
+      let resolvedVersionHint: string | undefined
 
       if (!resolvedProjectId) {
         const inferredMetadata = inferPackageMetadataFromSkill(skillDir)
@@ -294,10 +298,12 @@ program
 
         const { Context7Utils } = await import('./utils/context7.js')
 
-        console.log(gradient('cyan', 'magenta')('\n🧭 Resolving Context7 library...'))
-        console.log(`Package: ${packageName}`)
-        if (versionHint) {
-          console.log(`Version hint: ${versionHint}`)
+        if (!options.json) {
+          console.log(gradient('cyan', 'magenta')('\n🧭 Resolving Context7 library...'))
+          console.log(`Package: ${packageName}`)
+          if (versionHint) {
+            console.log(`Version hint: ${versionHint}`)
+          }
         }
 
         const resolved = await Context7Utils.resolveLibrary(packageName, {
@@ -310,13 +316,20 @@ program
         }
 
         resolvedProjectId = resolved.bestMatch.id
-        console.log(`Resolved Context7 ID: ${resolvedProjectId}`)
-        console.log(`Resolution query: ${resolved.query}`)
+        resolvedContext7Query = resolved.query
+        resolvedPackageName = packageName
+        resolvedVersionHint = resolved.version ?? versionHint
+        if (!options.json) {
+          console.log(`Resolved Context7 ID: ${resolvedProjectId}`)
+          console.log(`Resolution query: ${resolved.query}`)
+        }
       }
 
-      console.log(gradient('cyan', 'magenta')('\n📥 Downloading Context7 documentation...'))
-      console.log(`Skill Path: ${skillDir}`)
-      console.log(`Context7 ID: ${resolvedProjectId}`)
+      if (!options.json) {
+        console.log(gradient('cyan', 'magenta')('\n📥 Downloading Context7 documentation...'))
+        console.log(`Skill Path: ${skillDir}`)
+        console.log(`Context7 ID: ${resolvedProjectId}`)
+      }
 
       const { chdir } = await import('node:process')
       const originalCwd = process.cwd()
@@ -328,14 +341,37 @@ program
 
         if (options.force) args.push('--force')
         if (options['skipIndexing']) args.push('--skip-indexing')
+        if (options.json) args.push('--json')
+        if (resolvedPackageName) args.push('--package-name', resolvedPackageName)
+        if (resolvedVersionHint) args.push('--package-version', resolvedVersionHint)
         args.push('--project-id', resolvedProjectId)
 
-        await runScript('download-context7', args)
+        const result = await runScript('download-context7', args)
+
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              {
+                skillPath: skillDir,
+                requestedProjectId: projectId ?? null,
+                resolvedProjectId,
+                resolvedPackageName: resolvedPackageName ?? null,
+                resolvedVersionHint: resolvedVersionHint ?? null,
+                resolutionQuery: resolvedContext7Query ?? null,
+                ...(result as Record<string, unknown>),
+              },
+              null,
+              2
+            )
+          )
+        }
       } finally {
         chdir(originalCwd)
       }
 
-      console.log(gradient('green', 'cyan')('\n✅ Documentation downloaded and sliced!'))
+      if (!options.json) {
+        console.log(gradient('green', 'cyan')('\n✅ Documentation downloaded and sliced!'))
+      }
     } catch (error) {
       console.error(error)
       process.exit(1)
@@ -355,6 +391,7 @@ program
     '--force-append',
     'Append content as a knowledge update in the closest matching user note'
   )
+  .option('--json', 'Print machine-readable add-content output')
   .action(async (options) => {
     if (!options.title && !options.file) {
       console.error('❌ Please provide either --title or --file')
@@ -364,8 +401,10 @@ program
     try {
       const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
 
-      console.log(gradient('cyan', 'magenta')('\n📝 Adding content to skill...'))
-      console.log(`Skill Path: ${skillDir}`)
+      if (!options.json) {
+        console.log(gradient('cyan', 'magenta')('\n📝 Adding content to skill...'))
+        console.log(`Skill Path: ${skillDir}`)
+      }
 
       const { chdir } = await import('node:process')
       const originalCwd = process.cwd()
@@ -380,8 +419,22 @@ program
         if (options.file) args.push('--file', options.file)
         if (options.force) args.push('--force')
         if (options.forceAppend) args.push('--force-append')
+        if (options.json) args.push('--json')
 
-        await runScript('add', args)
+        const result = await runScript('add', args)
+
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              {
+                skillPath: skillDir,
+                ...(result as Record<string, unknown>),
+              },
+              null,
+              2
+            )
+          )
+        }
       } finally {
         chdir(originalCwd)
       }
@@ -403,12 +456,15 @@ program
     '--vector-embedder <mode>',
     'Vector embedder mode: deterministic for offline local embeddings, or omit for the default runtime embedder'
   )
+  .option('--json', 'Print machine-readable index build output')
   .action(async (options) => {
     try {
       const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
 
-      console.log(gradient('cyan', 'magenta')('\n🔧 Building search index...'))
-      console.log(`Skill Path: ${skillDir}`)
+      if (!options.json) {
+        console.log(gradient('cyan', 'magenta')('\n🔧 Building search index...'))
+        console.log(`Skill Path: ${skillDir}`)
+      }
 
       const { chdir } = await import('node:process')
       const originalCwd = process.cwd()
@@ -419,12 +475,28 @@ program
         const args = []
         if (options.mode !== 'auto') args.push('--mode', options.mode)
         if (options.vectorEmbedder) args.push('--vector-embedder', options.vectorEmbedder)
-        await buildIndex(args)
+        if (options.json) args.push('--json')
+        const result = await buildIndex(args)
+
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              {
+                skillPath: skillDir,
+                ...result,
+              },
+              null,
+              2
+            )
+          )
+        }
       } finally {
         chdir(originalCwd)
       }
 
-      console.log(gradient('green', 'cyan')('\n✅ Search index ready!'))
+      if (!options.json) {
+        console.log(gradient('green', 'cyan')('\n✅ Search index ready!'))
+      }
     } catch (error) {
       console.error(error)
       process.exit(1)

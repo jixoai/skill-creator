@@ -1,3 +1,5 @@
+import type { SearchBackendInfo, SearchMode } from '../core/searchAdapter.js'
+
 export type { SkillConfig } from '../utils/config.js'
 
 export interface SearchResult {
@@ -50,6 +52,23 @@ export interface UpdateContext7Result {
   message: string
 }
 
+export interface CommandIndexingResult {
+  attempted: boolean
+  skipped: boolean
+  succeeded: boolean
+  totalDocuments: number
+  backendInfo?: SearchBackendInfo | null
+  error?: string
+}
+
+export interface DownloadContext7CommandResult {
+  projectId: string
+  update: UpdateContext7Result
+  skillMdUpdated: boolean
+  context7Files: string[]
+  indexing: CommandIndexingResult
+}
+
 export interface AddContentResult {
   added: boolean
   updated: boolean
@@ -68,6 +87,18 @@ export interface AddContentResult {
     path: string
     content: string
   }
+}
+
+export interface AddContentCommandResult extends AddContentResult {
+  skillMdUpdated: boolean
+  userFiles: string[]
+}
+
+export interface BuildIndexCommandResult {
+  mode: Exclude<SearchMode, 'chroma'>
+  vectorEmbedder?: string
+  totalDocuments: number
+  backendInfo?: SearchBackendInfo | null
 }
 
 export interface PackageVersion {

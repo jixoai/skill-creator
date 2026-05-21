@@ -4,12 +4,15 @@
 
 import { join } from 'node:path'
 import { createSearchEngine, normalizeSearchMode, parseArgs } from './shared.js'
+import type { BuildIndexCommandResult } from '../types/index.js'
 
-export async function buildIndex(args: string[]): Promise<void> {
+export async function buildIndex(args: string[]): Promise<BuildIndexCommandResult> {
   const options = parseArgs(args, [
     { name: 'mode', type: 'string', default: 'auto' },
     { name: 'vector-embedder', type: 'string' },
+    { name: 'json', type: 'boolean' },
   ])
+  const jsonMode = Boolean(options.json)
   const normalizedMode = normalizeSearchMode(options.mode)
 
   if (normalizedMode === 'fuzzy') {
@@ -36,12 +39,6 @@ export async function buildIndex(args: string[]): Promise<void> {
     vectorEmbedder: options['vector-embedder'],
   })
 
-  console.log('Building search index...')
-  console.log(`Mode: ${normalizedMode}`)
-  if (options['vector-embedder']) {
-    console.log(`Vector embedder: ${options['vector-embedder']}`)
-  }
-
   // Build index
   const referencesDir = join(process.cwd(), 'assets', 'references')
   await searchEngine.buildIndex(referencesDir)
@@ -49,8 +46,21 @@ export async function buildIndex(args: string[]): Promise<void> {
   // Show stats
   const stats = await searchEngine.getStats()
   const backendInfo = await searchEngine.getBackendInfo()
-  console.log(`✅ Index built: ${stats.totalDocuments || 0} documents`)
-  if (backendInfo) {
-    console.log(`🎯 Active backend: ${backendInfo.backendId} (${backendInfo.mode})`)
+  if (!jsonMode) {
+    console.log('Building search index...')
+    console.log(`Mode: ${normalizedMode}`)
+    if (options['vector-embedder']) {
+      console.log(`Vector embedder: ${options['vector-embedder']}`)
+    }
+    console.log(`✅ Index built: ${stats.totalDocuments || 0} documents`)
+    if (backendInfo) {
+      console.log(`🎯 Active backend: ${backendInfo.backendId} (${backendInfo.mode})`)
+    }
+  }
+  return {
+    mode: normalizedMode,
+    vectorEmbedder: options['vector-embedder'],
+    totalDocuments: stats.totalDocuments || 0,
+    backendInfo,
   }
 }

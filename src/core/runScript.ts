@@ -10,7 +10,7 @@ import { buildIndex } from '../commands/buildIndex.js'
 import { listSkills } from '../commands/listSkills.js'
 import { removeSkill } from '../commands/removeSkill.js'
 
-type CommandFunction = (args: string[]) => Promise<void>
+type CommandFunction = (args: string[]) => Promise<unknown>
 
 const commands: Record<string, CommandFunction> = {
   'search-skill': searchContent,
@@ -24,7 +24,7 @@ const commands: Record<string, CommandFunction> = {
   'remove-skill': removeSkill,
 }
 
-export async function runScript(script: string, args: string[]): Promise<void> {
+export async function runScript(script: string, args: string[]): Promise<unknown> {
   // Normalize script name
   const normalizedScript = script.toLowerCase()
 
@@ -38,7 +38,7 @@ export async function runScript(script: string, args: string[]): Promise<void> {
   }
 
   try {
-    await command(args)
+    return await command(args)
   } catch (error) {
     console.error(`❌ Error executing ${script}:`, error)
     process.exit(1)

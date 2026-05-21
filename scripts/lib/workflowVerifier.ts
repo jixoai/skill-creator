@@ -337,21 +337,57 @@ Use stringbool coercion carefully and document the project-specific rule in user
     assert(existsSync(skillDir), 'skill directory was not created')
 
     console.log(`${logPrefix}7. download-context7`)
-    const downloadOutput = await runner.run(
-      workspaceDir,
-      [
-        'download-context7',
-        '--pwd',
-        skillDir,
-        '--package',
-        'demo-pkg',
-        '--package-version',
-        '1.0.0',
-      ],
-      { env: baseEnv }
+    const downloadPayload = JSON.parse(
+      await runner.run(
+        workspaceDir,
+        [
+          'download-context7',
+          '--pwd',
+          skillDir,
+          '--package',
+          'demo-pkg',
+          '--package-version',
+          '1.0.0',
+          '--json',
+        ],
+        { env: baseEnv }
+      )
+    ) as {
+      skillPath: string
+      requestedProjectId: string | null
+      resolvedProjectId: string
+      resolvedPackageName: string | null
+      resolvedVersionHint: string | null
+      resolutionQuery: string | null
+      projectId: string
+      update: {
+        updated: boolean
+        skipped: boolean
+        filesCreated: number
+        message: string
+      }
+      skillMdUpdated: boolean
+      context7Files: string[]
+      indexing: {
+        attempted: boolean
+        skipped: boolean
+        succeeded: boolean
+        totalDocuments: number
+        backendInfo?: { backendId: string; mode: string } | null
+        error?: string
+      }
+    }
+    assert(downloadPayload.resolvedProjectId === '/demo/pkg', 'download-context7 did not resolve the package')
+    assert(downloadPayload.projectId === '/demo/pkg', 'download-context7 did not return the effective project id')
+    assert(downloadPayload.resolvedPackageName === 'demo-pkg', 'download-context7 did not record the resolved package name')
+    assert(downloadPayload.resolvedVersionHint === '1.0.0', 'download-context7 did not record the resolved version hint')
+    assert(downloadPayload.skillMdUpdated, 'download-context7 did not report the SKILL.md update')
+    assert(downloadPayload.context7Files.length > 0, 'download-context7 did not return context7 slice files')
+    assert(downloadPayload.indexing.attempted, 'download-context7 did not attempt indexing by default')
+    assert(
+      downloadPayload.indexing.succeeded || typeof downloadPayload.indexing.error === 'string',
+      'download-context7 indexing payload is incomplete'
     )
-    assert(downloadOutput.includes('Resolved Context7 ID: /demo/pkg'), 'download-context7 did not resolve the package')
-    assert(downloadOutput.includes('Documentation downloaded and sliced'), 'download-context7 did not finish')
     assert(directoryContainsText(context7Dir, 'background refresh behavior'), 'initial context7 slices missing expected text')
 
     console.log(`${logPrefix}8. download-context7 --force`)
@@ -366,52 +402,79 @@ The query client now enforces stricter invalidation ownership across operational
 ## Coercion
 
     Stringbool coercion rules should stay explicit inside local notes.`
-    const forceDownloadOutput = await runner.run(
-      workspaceDir,
-      ['download-context7', '--pwd', skillDir, '--force'],
-      { env: baseEnv }
-    )
-    assert(forceDownloadOutput.includes('Package: demo-pkg'), 'metadata-only download did not infer package metadata')
-    assert(forceDownloadOutput.includes('Resolved Context7 ID: /demo/pkg'), 'force download did not re-resolve Context7')
+    const forceDownloadPayload = JSON.parse(
+      await runner.run(
+        workspaceDir,
+        ['download-context7', '--pwd', skillDir, '--force', '--json'],
+        { env: baseEnv }
+      )
+    ) as {
+      resolvedProjectId: string
+      resolvedPackageName: string | null
+      resolvedVersionHint: string | null
+      update: { updated: boolean; skipped: boolean }
+    }
+    assert(forceDownloadPayload.resolvedPackageName === 'demo-pkg', 'metadata-only download did not infer package metadata')
+    assert(forceDownloadPayload.resolvedVersionHint === '1.0.0', 'metadata-only download did not infer version hint')
+    assert(forceDownloadPayload.resolvedProjectId === '/demo/pkg', 'force download did not re-resolve Context7')
     assert(
       directoryContainsText(context7Dir, 'stricter invalidation ownership'),
       'force download did not refresh context7 slices'
     )
 
     console.log(`${logPrefix}9. add-skill`)
-    await runner.run(
-      workspaceDir,
-      [
-        'add-skill',
-        '--pwd',
-        skillDir,
-        '--title',
-        'Workflow local note',
-        '--content',
-        'Prefer local stringbool coercion guidance for bundle-sensitive applications.',
-      ],
-      { env: baseEnv }
-    )
+    const addPayload = JSON.parse(
+      await runner.run(
+        workspaceDir,
+        [
+          'add-skill',
+          '--pwd',
+          skillDir,
+          '--title',
+          'Workflow local note',
+          '--content',
+          'Prefer local stringbool coercion guidance for bundle-sensitive applications.',
+          '--json',
+        ],
+        { env: baseEnv }
+      )
+    ) as {
+      skillPath: string
+      added: boolean
+      updated: boolean
+      skipped: boolean
+      message: string
+      skillMdUpdated: boolean
+      userFiles: string[]
+    }
+    assert(addPayload.added, 'add-skill did not report a new user note')
+    assert(addPayload.skillMdUpdated, 'add-skill did not report the SKILL.md update')
+    assert(addPayload.userFiles.length > 0, 'add-skill did not return the user skill files')
 
     console.log(`${logPrefix}10. add-skill --force-append`)
-    const appendOutput = await runner.run(
-      workspaceDir,
-      [
-        'add-skill',
-        '--pwd',
-        skillDir,
-        '--title',
-        'Workflow update',
-        '--content',
-        'Append a stricter coercion rule for operational workflows.',
-        '--force-append',
-      ],
-      { env: baseEnv }
-    )
-    assert(
-      appendOutput.includes('Appended content to existing knowledge note'),
-      'force-append did not append to the closest note'
-    )
+    const appendPayload = JSON.parse(
+      await runner.run(
+        workspaceDir,
+        [
+          'add-skill',
+          '--pwd',
+          skillDir,
+          '--title',
+          'Workflow update',
+          '--content',
+          'Append a stricter coercion rule for operational workflows.',
+          '--force-append',
+          '--json',
+        ],
+        { env: baseEnv }
+      )
+    ) as {
+      added: boolean
+      updated: boolean
+      skipped: boolean
+      message: string
+    }
+    assert(appendPayload.added, 'force-append did not append to the closest note')
 
     const userFile = join(skillDir, 'assets', 'references', 'user', 'workflow_local_note.md')
     const userFileContent = readFileSync(userFile, 'utf-8')
@@ -419,24 +482,30 @@ The query client now enforces stricter invalidation ownership across operational
     assert(userFileContent.includes('### Update 1: Workflow update'), 'update heading missing')
 
     console.log(`${logPrefix}11. add-skill --force via --package`)
-    const replaceOutput = await runner.run(
-      workspaceDir,
-      [
-        'add-skill',
-        '--package',
-        'demo-pkg',
-        '--title',
-        'Workflow canonical note',
-        '--content',
-        'Prefer deterministic invalidation ownership for operational workflows.',
-        '--force',
-      ],
-      { env: baseEnv }
-    )
-    assert(
-      replaceOutput.includes('Replaced existing knowledge note'),
-      'force replace did not target the closest user note'
-    )
+    const replacePayload = JSON.parse(
+      await runner.run(
+        workspaceDir,
+        [
+          'add-skill',
+          '--package',
+          'demo-pkg',
+          '--title',
+          'Workflow canonical note',
+          '--content',
+          'Prefer deterministic invalidation ownership for operational workflows.',
+          '--force',
+          '--json',
+        ],
+        { env: baseEnv }
+      )
+    ) as {
+      added: boolean
+      updated: boolean
+      skipped: boolean
+      filePath?: string
+      message: string
+    }
+    assert(replacePayload.added, 'force replace did not target the closest user note')
 
     const replacedFileContent = readFileSync(userFile, 'utf-8')
     assert(replacedFileContent.includes('# Workflow canonical note'), 'force replace did not rewrite the note title')
@@ -461,18 +530,35 @@ The query client now enforces stricter invalidation ownership across operational
     const vectorRuntimeSupported = await detectVectorRuntimeSupport(baseEnv)
 
     if (vectorRuntimeSupported) {
-      const buildIndexOutput = await runner.run(
-        workspaceDir,
-        ['build-index', '--pwd', skillDir, '--mode', 'vector', '--vector-embedder', 'deterministic'],
-        { env: baseEnv }
-      )
-      assert(buildIndexOutput.includes('Mode: vector'), 'build-index did not acknowledge vector mode')
+      const buildIndexPayload = JSON.parse(
+        await runner.run(
+          workspaceDir,
+          [
+            'build-index',
+            '--pwd',
+            skillDir,
+            '--mode',
+            'vector',
+            '--vector-embedder',
+            'deterministic',
+            '--json',
+          ],
+          { env: baseEnv }
+        )
+      ) as {
+        skillPath: string
+        mode: string
+        vectorEmbedder?: string
+        totalDocuments: number
+        backendInfo?: { backendId: string; mode: string } | null
+      }
+      assert(buildIndexPayload.mode === 'vector', 'build-index did not acknowledge vector mode')
       assert(
-        buildIndexOutput.includes('Vector embedder: deterministic'),
+        buildIndexPayload.vectorEmbedder === 'deterministic',
         'build-index did not acknowledge the explicit deterministic vector embedder'
       )
       assert(
-        buildIndexOutput.includes('Active backend: sqlite-vec (vector)'),
+        buildIndexPayload.backendInfo?.backendId === 'sqlite-vec',
         'build-index did not report sqlite-vec as the active vector backend'
       )
 

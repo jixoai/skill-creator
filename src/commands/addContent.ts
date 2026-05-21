@@ -6,8 +6,9 @@ import { join } from 'node:path'
 import { existsSync, readdirSync } from 'node:fs'
 import { parseArgs, createSearchEngine } from './shared.js'
 import { updateSkillMdFile } from '../utils/skillMdManager.js'
+import type { AddContentCommandResult } from '../types/index.js'
 
-export async function addContent(args: string[]): Promise<void> {
+export async function addContent(args: string[]): Promise<AddContentCommandResult> {
   const searchEngine = await createSearchEngine({})
 
   const { ContentManager } = await import('../core/contentManager.js')
@@ -25,7 +26,9 @@ export async function addContent(args: string[]): Promise<void> {
     { name: 'force', type: 'boolean' },
     { name: 'force-append', type: 'boolean' },
     { name: 'no-update', type: 'boolean' },
+    { name: 'json', type: 'boolean' },
   ])
+  const jsonMode = Boolean(options.json)
 
   if (!options.title && !options.file) {
     console.error('❌ Please provide either --title or --file')
@@ -63,19 +66,27 @@ export async function addContent(args: string[]): Promise<void> {
     forceAppend: options['force-append'],
     autoUpdate: !options['no-update'],
   })
-
-  console.log(result.message)
+  if (!jsonMode) {
+    console.log(result.message)
+  }
 
   // Handle existing file case
   if (result.existingFile) {
-    console.log('\n📄 Existing file content:')
-    console.log('─'.repeat(50))
-    console.log(result.existingFile.content)
-    console.log('─'.repeat(50))
-    process.exit(1)
+    if (!jsonMode) {
+      console.log('\n📄 Existing file content:')
+      console.log('─'.repeat(50))
+      console.log(result.existingFile.content)
+      console.log('─'.repeat(50))
+      process.exit(1)
+    }
+    return {
+      ...result,
+      skillMdUpdated: false,
+      userFiles: [],
+    }
   }
 
-  if (result.similarContent && result.similarContent.length > 0) {
+  if (!jsonMode && result.similarContent && result.similarContent.length > 0) {
     console.log('\nSimilar content found:')
     result.similarContent.forEach((similar, i) => {
       const sourceLabel = similar.sourceRank ?? 'match'
@@ -86,17 +97,28 @@ export async function addContent(args: string[]): Promise<void> {
   }
 
   // Update SKILL.md with user files list
+  let skillMdUpdated = false
+  let userFiles: string[] = []
   if (result.added || result.updated) {
     const skillMdPath = join(process.cwd(), 'SKILL.md')
     if (existsSync(skillMdPath)) {
       const userDir = join(process.cwd(), 'assets', 'references', 'user')
       if (existsSync(userDir)) {
-        const files = readdirSync(userDir).filter((f) => f.endsWith('.md'))
-        const fileList = files.map((f) => `- ${f}`).join('\n')
+        userFiles = readdirSync(userDir).filter((f) => f.endsWith('.md'))
+        const fileList = userFiles.map((f) => `- ${f}`).join('\n')
 
         updateSkillMdFile(skillMdPath, 'user-skills', fileList)
-        console.log(`📝 Updated SKILL.md with user skills`)
+        skillMdUpdated = true
+        if (!jsonMode) {
+          console.log(`📝 Updated SKILL.md with user skills`)
+        }
       }
     }
+  }
+
+  return {
+    ...result,
+    skillMdUpdated,
+    userFiles,
   }
 }

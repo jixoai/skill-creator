@@ -210,6 +210,130 @@ Mutations should invalidate related queries and keep optimistic updates bounded 
       }
     }, 30_000)
 
+    it('should expose machine-readable download-context7 output via --json', async () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'download-json-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "download-json-skill" --description "Download JSON skill" download-json-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      const server = createServer((request, response) => {
+        if (request.url?.startsWith('/api/v2/libs/search')) {
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          response.end(
+            JSON.stringify({
+              results: [
+                {
+                  id: '/demo/pkg',
+                  title: 'Demo Package',
+                  description: 'Repository docs',
+                  totalSnippets: 42,
+                  trustScore: 8.5,
+                  benchmarkScore: 87,
+                  versions: ['v1.0.0'],
+                },
+              ],
+            })
+          )
+          return
+        }
+
+        if (request.url?.startsWith('/demo/pkg/llms.txt')) {
+          response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+          response.end(`# Demo Package
+
+Detailed overview content that is long enough to be preserved by the slicer and later indexed.
+
+## JSON Contract
+
+The JSON payload should expose the resolved project id and indexing result.`)
+          return
+        }
+
+        response.writeHead(404)
+        response.end('not found')
+      })
+
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+      const address = server.address()
+      if (address == null || typeof address === 'string') {
+        server.close()
+        throw new Error('Failed to start test server')
+      }
+
+      try {
+        const { stdout } = await execFileAsync(
+          'node',
+          [
+            `${process.cwd()}/dist/cli.mjs`,
+            'download-context7',
+            '--pwd',
+            skillDir,
+            '--package',
+            'demo-pkg',
+            '--package-version',
+            '1.0.0',
+            '--json',
+          ],
+          {
+            encoding: 'utf-8',
+            env: {
+              ...process.env,
+              SKILL_CREATOR_CONTEXT7_SEARCH_BASE_URL: `http://127.0.0.1:${address.port}/api/v2/libs/search`,
+              SKILL_CREATOR_CONTEXT7_BASE_URL: `http://127.0.0.1:${address.port}`,
+            },
+          }
+        )
+
+        const payload = JSON.parse(stdout) as {
+          skillPath: string
+          requestedProjectId: string | null
+          resolvedProjectId: string
+          resolvedPackageName: string | null
+          resolvedVersionHint: string | null
+          resolutionQuery: string | null
+          projectId: string
+          update: {
+            updated: boolean
+            skipped: boolean
+            filesCreated: number
+            message: string
+          }
+          skillMdUpdated: boolean
+          context7Files: string[]
+          indexing: {
+            attempted: boolean
+            skipped: boolean
+            succeeded: boolean
+            totalDocuments: number
+          }
+        }
+
+        expect(normalizeRealPath(payload.skillPath)).toBe(normalizeRealPath(skillDir))
+        expect(payload.requestedProjectId).toBeNull()
+        expect(payload.resolvedProjectId).toBe('/demo/pkg')
+        expect(payload.resolvedPackageName).toBe('demo-pkg')
+        expect(payload.resolvedVersionHint).toBe('1.0.0')
+        expect(payload.projectId).toBe('/demo/pkg')
+        expect(payload.update.updated || payload.update.skipped).toBe(true)
+        expect(payload.skillMdUpdated).toBe(true)
+        expect(payload.context7Files.length).toBeGreaterThan(0)
+        expect(payload.indexing.attempted).toBe(true)
+
+        const skillMd = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8')
+        expect(skillMd).toContain('<skill-package name="demo-pkg" version="1.0.0">')
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        )
+      }
+    }, 30_000)
+
     it('should resolve the best context7 project id for a package', async () => {
       const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
       const output = execSync(`${cliCmd} resolve-context7 vitest --package-version 4.1.7`, {
@@ -678,6 +802,43 @@ The package metadata stored in the skill allows automatic Context7 resolution.`)
       )
       expect(searchOutput).toContain('Zod Mini local note')
       expect(searchOutput).toContain('Knowledge updates')
+    }, 30_000)
+
+    it('should expose machine-readable add-skill output via --json', () => {
+      const cliCmd = `node "${process.cwd()}/dist/cli.mjs"`
+      const skillDir = join(tempDir, '.claude', 'skills', 'add-json-skill')
+
+      execSync(
+        `${cliCmd} create-cc-skill --scope current --name "add-json-skill" --description "Add JSON skill" add-json-skill`,
+        {
+          encoding: 'utf-8',
+          cwd: tempDir,
+        }
+      )
+
+      const output = execSync(
+        `${cliCmd} add-skill --pwd "${skillDir}" --title "JSON note" --content "Structured output should include user file lists." --json`,
+        {
+          encoding: 'utf-8',
+        }
+      )
+
+      const payload = JSON.parse(output) as {
+        skillPath: string
+        added: boolean
+        updated: boolean
+        skipped: boolean
+        filePath?: string
+        message: string
+        skillMdUpdated: boolean
+        userFiles: string[]
+      }
+
+      expect(normalizeRealPath(payload.skillPath)).toBe(normalizeRealPath(skillDir))
+      expect(payload.added).toBe(true)
+      expect(payload.skillMdUpdated).toBe(true)
+      expect(payload.userFiles).toContain('json_note.md')
+      expect(payload.filePath).toContain('json_note.md')
     }, 30_000)
 
     it('should persist user notes even when similar context7 content already exists', async () => {
@@ -1269,6 +1430,39 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
           }
         )
       ).toThrow(/Fuzzy mode does not support standalone prebuilt indexes/)
+
+      cleanupTempDir(tempDir)
+    })
+
+    it('should expose machine-readable build-index output via --json', () => {
+      const tempDir = createTempDir('build-index-json-')
+      const skillDir = join(tempDir, '.claude', 'skills', 'build-index-json-skill')
+      const userDir = join(skillDir, 'assets', 'references', 'user')
+      mkdirSync(userDir, { recursive: true })
+      writeFileSync(join(userDir, 'note.md'), '# Build JSON Note\n\nStandalone JSON index test.\n')
+
+      const output = execSync(
+        `node ${process.cwd()}/dist/cli.mjs build-index --pwd "${skillDir}" --json`,
+        {
+          encoding: 'utf-8',
+        }
+      )
+
+      const payload = JSON.parse(output) as {
+        skillPath: string
+        mode: string
+        vectorEmbedder?: string
+        totalDocuments: number
+        backendInfo?: {
+          backendId: string
+          mode: string
+        } | null
+      }
+
+      expect(normalizeRealPath(payload.skillPath)).toBe(normalizeRealPath(skillDir))
+      expect(payload.mode).toBe('auto')
+      expect(payload.totalDocuments).toBeGreaterThan(0)
+      expect(payload.backendInfo?.backendId).toBeTruthy()
 
       cleanupTempDir(tempDir)
     })

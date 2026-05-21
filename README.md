@@ -68,6 +68,15 @@ skill-creator init --scope auto
 
 # Machine-readable installation output for tooling/subagents
 skill-creator init-cc --json
+
+# Machine-readable documentation sync output
+skill-creator download-context7 --pwd ~/.claude/skills/zustand@5 --package zustand --package-version 5.0.0 --json
+
+# Machine-readable user-note output
+skill-creator add-skill --package zustand --title "Best Practices" --content "Your custom notes" --json
+
+# Machine-readable index build output
+skill-creator build-index --pwd ~/.claude/skills/zustand@5 --json
 ```
 
 ### 3. Choose Your Usage Mode
@@ -171,7 +180,7 @@ skill-creator add-skill --package @tanstack/react-query --title "Bundle guidance
 - `--force-append`: Append a structured knowledge update into the closest matching user note
 - `--skip-indexing`: Skip automatic local index building
 - `--interactive`: Enable interactive prompts
-- `--json`: Print machine-readable output for `init`, `init-cc`, and `create-cc-skill`
+- `--json`: Print machine-readable output for `init`, `init-cc`, `create-cc-skill`, `download-context7`, `add-skill`, and `build-index`
 
 When `--package <name>` is used to find an existing skill, the CLI first checks the
 `<skill-package ...>` metadata stored in `SKILL.md`. Directory-name matching is only a fallback.
