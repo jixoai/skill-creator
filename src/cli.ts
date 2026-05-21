@@ -351,6 +351,37 @@ program
     }
   })
 
+// Add build-index command
+program
+  .command('build-index')
+  .description('Build or refresh the local search index for a skill')
+  .option('--pwd <path>', 'Path to the skill directory')
+  .option('--package <name>', 'Package name to find skill directory for')
+  .action(async (options) => {
+    try {
+      const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
+
+      console.log(gradient('cyan', 'magenta')('\n🔧 Building search index...'))
+      console.log(`Skill Path: ${skillDir}`)
+
+      const { chdir } = await import('node:process')
+      const originalCwd = process.cwd()
+      chdir(skillDir)
+
+      try {
+        const { buildIndex } = await import('./commands/buildIndex.js')
+        await buildIndex([])
+      } finally {
+        chdir(originalCwd)
+      }
+
+      console.log(gradient('green', 'cyan')('\n✅ Search index ready!'))
+    } catch (error) {
+      console.error(error)
+      process.exit(1)
+    }
+  })
+
 // Add sub-commands for script execution
 program
   .command('list-skills')

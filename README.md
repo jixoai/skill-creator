@@ -140,6 +140,7 @@ skill-creator add-skill --package @tanstack/react-query --title "Bundle guidance
 | Command                          | Description                               |
 | -------------------------------- | ----------------------------------------- |
 | `download-context7 [project_id]` | Download and slice Context7 documentation |
+| `build-index`                    | Build or refresh the local search index   |
 | `search-skill <query>`           | Search in skill knowledge base            |
 | `add-skill`                      | Add custom knowledge to skill             |
 
@@ -293,6 +294,12 @@ PATH="$TMP_PREFIX/bin:$PATH" skill-creator --help
 ```
 
 This avoids toolchain managers such as Volta interfering with the linked executable.
+
+If you intentionally skip indexing during documentation download, rebuild it explicitly with:
+
+```bash
+skill-creator build-index --pwd ~/.claude/skills/zustand@5
+```
 
 ### Release Readiness
 

@@ -826,6 +826,7 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(output).toContain('Create claude-code-skills with documentation management')
       expect(output).toContain('create-cc-skill')
       expect(output).toContain('resolve-context7')
+      expect(output).toContain('build-index')
     })
 
     it('should describe knowledge-level merge semantics in add-skill help output', () => {
@@ -840,6 +841,36 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(normalizedOutput).not.toContain(
         'Append content to existing file instead of creating new file'
       )
+    })
+
+    it('should expose build-index as a first-class CLI command', () => {
+      const tempDir = createTempDir('build-index-help-')
+      const skillDir = join(tempDir, '.claude', 'skills', 'build-index-skill')
+      const userDir = join(skillDir, 'assets', 'references', 'user')
+      mkdirSync(userDir, { recursive: true })
+      writeFileSync(
+        join(userDir, 'note.md'),
+        '# Build Index Note\n\nA standalone note for search indexing.\n'
+      )
+
+      const helpOutput = execSync(`node ${process.cwd()}/dist/cli.mjs build-index --help`, {
+        encoding: 'utf-8',
+      })
+      expect(helpOutput).toContain('Build or refresh the local search index for a skill')
+
+      const output = execSync(
+        `node ${process.cwd()}/dist/cli.mjs build-index --pwd "${skillDir}"`,
+        {
+          encoding: 'utf-8',
+        }
+      )
+
+      expect(output).toContain('Building search index')
+      expect(output).toContain('Index built: 1 documents')
+      expect(output).toContain('Search index ready')
+      expect(existsSync(join(skillDir, 'assets', 'search', 'minisearch-index.json'))).toBe(true)
+
+      cleanupTempDir(tempDir)
     })
 
     it('should verify the real CLI workflow through the reusable verification script', () => {
