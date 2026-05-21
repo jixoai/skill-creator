@@ -49,8 +49,8 @@ skill-creator --help
 3. **创建skill**
 
    ```bash
-   skill-creator create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..."
-   # 打印出最终的文件夹路径 skill_dir_fullpath
+   skill-creator create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..." --json
+   # 打印 JSON 对象，其中包含 skillPath 和解析后的流程元数据
    ```
 
    **注意**:
@@ -66,6 +66,7 @@ skill-creator --help
    2. **询问技能命名**（如果没有提供--name参数）
       - 如果用户对 `skill_dir_name` 满不满意，那么就让用户提供一个新的名称
    - 确认后执行命令
+   - 优先追加 `--json`，这样可以直接读取 `skillPath`，不需要从人类可读文案中解析路径
    - 接下来，需要AI将使用 skills/skill-creator 的技能（注意，我们是skill-creator-subagents，不要混淆）。去初步生成 `skill_dir_fullpath` 文件夹内的文件。包括最重要的SKILL.md
      - 这里的内容依据是，是通过 主页、仓库地址，或者AI自己去通过搜索，得来。
      - 生成的 `SKILL.md` 还会记录来源 package 身份，这样后续 `download-context7 --pwd ...` 可以自动推断 package

@@ -92,7 +92,7 @@ skill-creator search "react query"
 skill-creator get-info @tanstack/react-query
 
 # Create skill with custom package name (recommended)
-skill-creator create-cc-skill --scope user --name "@tanstack/react-query" --description "React Query for data fetching" @tanstack/react-query@5
+skill-creator create-cc-skill --scope user --name "@tanstack/react-query" --description "React Query for data fetching" @tanstack/react-query@5 --json
 
 # Create skill with interactive prompts
 skill-creator create-cc-skill --scope user --interactive --description "React Query for data fetching" @tanstack/react-query@5
@@ -182,7 +182,7 @@ When `--package <name>` is used to find an existing skill, the CLI first checks 
 
    ```bash
    # With custom package name (recommended)
-   skill-creator create-cc-skill --scope current --name zustand --description "Zustand state management" zustand@5
+   skill-creator create-cc-skill --scope current --name zustand --description "Zustand state management" zustand@5 --json
 
    # With interactive prompts
    skill-creator create-cc-skill --scope current --interactive zustand

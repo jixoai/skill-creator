@@ -46,6 +46,7 @@ program
   .option('--name <name>', 'The skill name')
   .option('--description <description>', 'Custom description for the skill')
   .option('--force', 'Force overwrite existing files in the skill directory')
+  .option('--json', 'Print machine-readable creation output')
   .argument('<skill_dir_name>', 'The name of the skill directory to create')
   .action(async (skillDirName, options) => {
     try {
@@ -57,8 +58,26 @@ program
           Separator: inquirer.Separator,
         },
       })
-      const skillPath = await createSkillForPackage(workflow.createOptions)
-      console.log(`Skill created successfully at: ${skillPath}`)
+      const skillPath = await createSkillForPackage(workflow.createOptions, {
+        json: options.json,
+      })
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            {
+              skillPath,
+              scopePath: workflow.summary.scopePath,
+              skillDirName: workflow.summary.skillDirName,
+              skillName: workflow.summary.skillName,
+              skillDescription: workflow.summary.skillDescription ?? '',
+            },
+            null,
+            2
+          )
+        )
+      } else {
+        console.log(`Skill created successfully at: ${skillPath}`)
+      }
     } catch (error) {
       if (error instanceof Error && error.message === SKILL_CREATION_CANCELLED_MESSAGE) {
         console.log(error.message)

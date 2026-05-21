@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest'
-import { rmSync, existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
+import { rmSync, existsSync, readFileSync, readdirSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFile, execSync } from 'node:child_process'
 import { createServer } from 'node:http'
@@ -7,6 +7,10 @@ import { promisify } from 'node:util'
 import { createTempDir, cleanupTempDir } from '../test-utils.js'
 
 const execFileAsync = promisify(execFile)
+
+function normalizeRealPath(target: string): string {
+  return realpathSync.native?.(target) ?? realpathSync(target)
+}
 
 describe('Skill Creation Integration Tests', () => {
   let tempDir: string
@@ -61,6 +65,7 @@ describe('Skill Creation Integration Tests', () => {
           '"zod"',
           '--description',
           `"${description}"`,
+          '--json',
           `"${skill_dir_name}"`,
         ].join(' ')
 
@@ -69,7 +74,16 @@ describe('Skill Creation Integration Tests', () => {
           encoding: 'utf-8',
           cwd: tempDir,
         })
-        expect(createOutput).toContain('✅ Skill created successfully:')
+        const createPayload = JSON.parse(createOutput) as {
+          skillPath: string
+          scopePath: string
+          skillDirName: string
+          skillName: string
+          skillDescription: string
+        }
+        expect(normalizeRealPath(createPayload.skillPath)).toBe(normalizeRealPath(skillDir))
+        expect(createPayload.skillDirName).toBe(skill_dir_name)
+        expect(createPayload.skillName).toBe('zod')
 
         expect(existsSync(skillDir)).toBe(true)
 
@@ -898,6 +912,38 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(output).toContain('create-cc-skill')
       expect(output).toContain('resolve-context7')
       expect(output).toContain('build-index')
+    })
+
+    it('should expose machine-readable create-cc-skill output via --json', () => {
+      const tempDir = createTempDir('create-skill-json-')
+      const output = execSync(
+        `node ${process.cwd()}/dist/cli.mjs create-cc-skill --scope current --name "json-skill" --description "JSON contract skill" --json json-skill@1`,
+        {
+          cwd: tempDir,
+          encoding: 'utf-8',
+        }
+      )
+
+      const payload = JSON.parse(output) as {
+        skillPath: string
+        scopePath: string
+        skillDirName: string
+        skillName: string
+        skillDescription: string
+      }
+
+      expect(payload.skillDirName).toBe('json-skill@1')
+      expect(payload.skillName).toBe('json-skill')
+      expect(payload.skillDescription).toBe('JSON contract skill')
+      expect(normalizeRealPath(payload.scopePath)).toBe(
+        normalizeRealPath(join(tempDir, '.claude', 'skills'))
+      )
+      expect(normalizeRealPath(payload.skillPath)).toBe(
+        normalizeRealPath(join(tempDir, '.claude', 'skills', 'json-skill@1'))
+      )
+      expect(existsSync(payload.skillPath)).toBe(true)
+
+      cleanupTempDir(tempDir)
     })
 
     it('should describe knowledge-level merge semantics in add-skill help output', () => {

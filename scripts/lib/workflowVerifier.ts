@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -46,6 +46,10 @@ function directoryContainsText(dir: string, snippet: string): boolean {
   return readdirSync(dir)
     .filter((file) => file.endsWith('.md'))
     .some((file) => readFileSync(join(dir, file), 'utf-8').includes(snippet))
+}
+
+function normalizeRealPath(target: string): string {
+  return realpathSync.native?.(target) ?? realpathSync(target)
 }
 
 export async function verifyCliWorkflow(
@@ -217,11 +221,23 @@ Use stringbool coercion carefully and document the project-specific rule in user
         'demo-pkg',
         '--description',
         'Workflow verification skill',
+        '--json',
         'workflow-skill@1',
       ],
       { env: baseEnv }
     )
-    assert(createOutput.includes('Skill created successfully'), 'create-cc-skill failed')
+    const createPayload = JSON.parse(createOutput) as {
+      skillPath: string
+      scopePath: string
+      skillDirName: string
+      skillName: string
+      skillDescription: string
+    }
+    assert(
+      normalizeRealPath(createPayload.skillPath) === normalizeRealPath(skillDir),
+      'create-cc-skill did not return the created skill path'
+    )
+    assert(createPayload.skillDirName === 'workflow-skill@1', 'create-cc-skill did not return the skill directory name')
     assert(existsSync(skillDir), 'skill directory was not created')
 
     console.log(`${logPrefix}5. download-context7`)

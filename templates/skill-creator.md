@@ -48,8 +48,8 @@ skill-creator --help
 3. **Create Skill**
 
    ```bash
-   skill-creator create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..."
-   # Prints the final folder path skill_dir_fullpath
+   skill-creator create-cc-skill --scope [current|user] --name <package_name> skill_dir_name --description "..." --json
+   # Prints a JSON object containing skillPath and the resolved workflow metadata
    ```
 
    **Note**: `--scope` is a required parameter
@@ -63,6 +63,7 @@ skill-creator --help
      - If user is satisfied with `skill_dir_name`, use it as-is
      - Otherwise, let the user provide a new name
    - Execute command after confirmation
+   - Prefer `--json` so you can read `skillPath` directly instead of parsing human-readable terminal text
    - Next, use the skills/skill-creator skill (note: we are skill-creator-subagents, don't confuse) to initially generate files in the `skill_dir_fullpath` folder, including the most important SKILL.md
      - Content is based on homepage, repository URL, or AI's own research
      - The generated `SKILL.md` also stores the source package identity so later `download-context7 --pwd ...` calls can infer the package automatically
