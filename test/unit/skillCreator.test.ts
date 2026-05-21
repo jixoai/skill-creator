@@ -150,6 +150,8 @@ describe('SkillCreator', () => {
       expect(content).toContain('skill-creator add-skill --pwd') // Check CLI commands section
       expect(content).toContain('--force')
       expect(content).toContain('--force-append')
+      expect(content).toContain('skill-creator build-index --pwd')
+      expect(content).toContain('[--mode=auto|fulltext|vector]')
       expect(content).toContain('<skill-package name="test-template" version="1.0.0">')
       expect(content).toContain('<user-skills baseDir="assets/references/user">') // Check user skills tag with baseDir
       expect(content).toContain('## Context7 Documentation') // Check context7 section

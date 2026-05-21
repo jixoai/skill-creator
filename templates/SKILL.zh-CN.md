@@ -150,6 +150,26 @@ skill-creator search-skill --pwd="{{SKILL_PATH}}" "路由配置"  # --mode=auto 
 skill-creator search-skill --pwd="{{SKILL_PATH}}" --list "搜索关键词"
 ```
 
+### 构建或刷新搜索索引
+
+当你希望提前构建本地持久化索引，或者在 `download-context7 --skip-indexing` 之后补建索引时，可以使用：
+
+```bash
+# 自动模式（默认）- 构建默认持久化索引路径
+skill-creator build-index --pwd="{{SKILL_PATH}}" --mode=auto
+
+# Fulltext 模式 - 显式构建 MiniSearch 索引
+skill-creator build-index --pwd="{{SKILL_PATH}}" --mode=fulltext
+
+# Vector 模式 - 显式构建 SQLite vector 索引（要求当前 runtime 支持）
+skill-creator build-index --pwd="{{SKILL_PATH}}" --mode=vector
+```
+
+说明：
+
+- `--mode=fuzzy` 不支持单独预建索引，因此会被拒绝
+- `--mode=vector` 需要当前 Node runtime 支持 `node:sqlite` 和 `sqlite-vec`
+
 **示例查询：**
 
 - "如何创建router"

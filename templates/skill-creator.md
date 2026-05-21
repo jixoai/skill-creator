@@ -70,6 +70,7 @@ skill-creator --help
      1. Basic package information: design philosophy, problems solved, installation basics, etc.
      2. How to use the companion tools in this `skill_dir_fullpath` folder: search skill info, update skill, extend skill info
         - `skill-creator --pwd={skill_dir_fullpath} search-skill "test query"` Query knowledge points
+        - `skill-creator build-index --pwd "{{SKILL_PATH}}" [--mode=auto|fulltext|vector]` Build or refresh the persisted local search index
         - `skill-creator --pwd={skill_dir_fullpath} add-skill --title "T" --content "C"` Add "user knowledge points"
         - `skill-creator --pwd={skill_dir_fullpath} download-context7 {project-id} --force` Force update, replaces the current project's existing Context7 slices, then re-slices the downloaded knowledge files
         - Note: By default, there's no need to create a scripts folder since we have the `skill-creator` CLI to replace scripts.

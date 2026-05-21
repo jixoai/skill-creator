@@ -27,6 +27,9 @@ skill-creator add-skill --pwd "{{SKILL_PATH}}" --title "Update" --content "Conte
 # Search documentation
 skill-creator search-skill --pwd "{{SKILL_PATH}}" "query" [--mode=auto|fulltext|fuzzy|vector]
 
+# Build or refresh the persisted search index
+skill-creator build-index --pwd "{{SKILL_PATH}}" [--mode=auto|fulltext|vector]
+
 # Download Context7 docs from the package metadata stored in this skill
 skill-creator download-context7 --pwd "{{SKILL_PATH}}"
 

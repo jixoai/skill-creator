@@ -301,6 +301,14 @@ If you intentionally skip indexing during documentation download, rebuild it exp
 skill-creator build-index --pwd ~/.claude/skills/zustand@5
 ```
 
+`build-index` supports the same persistent index modes as the runtime:
+
+- `--mode=auto`: build the default lightweight persisted index path
+- `--mode=fulltext`: build the explicit MiniSearch index
+- `--mode=vector`: build the explicit SQLite vector index when the runtime supports it
+
+`--mode=fuzzy` is intentionally rejected because fuzzy search does not use a standalone persisted index.
+
 ### Release Readiness
 
 `pnpm pre-release-check` is a release gate, not a diagnostic summary. It now fails when:

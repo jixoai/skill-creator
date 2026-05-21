@@ -357,6 +357,7 @@ program
   .description('Build or refresh the local search index for a skill')
   .option('--pwd <path>', 'Path to the skill directory')
   .option('--package <name>', 'Package name to find skill directory for')
+  .option('--mode <mode>', 'Index mode: auto, fulltext, or vector', 'auto')
   .action(async (options) => {
     try {
       const skillDir = resolveSkillDirectoryFromOptions(options, globalOptions)
@@ -370,7 +371,9 @@ program
 
       try {
         const { buildIndex } = await import('./commands/buildIndex.js')
-        await buildIndex([])
+        const args = []
+        if (options.mode !== 'auto') args.push('--mode', options.mode)
+        await buildIndex(args)
       } finally {
         chdir(originalCwd)
       }

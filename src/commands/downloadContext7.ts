@@ -75,12 +75,12 @@ export async function downloadContext7(args: string[]): Promise<void> {
           `⚠️ Search indexing failed: ${error instanceof Error ? error.message : String(error)}`
         )
         console.log(
-          `💡 You can still use search-skill with another mode, or retry with --skip-indexing to skip this step`
+          `💡 You can still use search-skill with another mode, or rebuild later with: skill-creator build-index --pwd "${process.cwd()}"`
         )
       }
     } else {
       console.log(`\n⏭️ Skipping search indexing (as requested)`)
-      console.log(`💡 To build index later, run: skill-creator build-index`)
+      console.log(`💡 To build index later, run: skill-creator build-index --pwd "${process.cwd()}"`)
     }
   } catch (error) {
     console.error(`❌ Error downloading Context7 documentation:`, error)

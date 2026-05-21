@@ -866,9 +866,30 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       )
 
       expect(output).toContain('Building search index')
+      expect(output).toContain('Mode: auto')
       expect(output).toContain('Index built: 1 documents')
       expect(output).toContain('Search index ready')
       expect(existsSync(join(skillDir, 'assets', 'search', 'minisearch-index.json'))).toBe(true)
+
+      cleanupTempDir(tempDir)
+    })
+
+    it('should reject fuzzy mode for standalone build-index execution', () => {
+      const tempDir = createTempDir('build-index-fuzzy-')
+      const skillDir = join(tempDir, '.claude', 'skills', 'build-index-fuzzy-skill')
+      const userDir = join(skillDir, 'assets', 'references', 'user')
+      mkdirSync(userDir, { recursive: true })
+      writeFileSync(join(userDir, 'note.md'), '# Fuzzy Note\n\nStandalone index test.\n')
+
+      expect(() =>
+        execSync(
+          `node ${process.cwd()}/dist/cli.mjs build-index --pwd "${skillDir}" --mode fuzzy`,
+          {
+            encoding: 'utf-8',
+            stdio: 'pipe',
+          }
+        )
+      ).toThrow(/Fuzzy mode does not support standalone prebuilt indexes/)
 
       cleanupTempDir(tempDir)
     })
