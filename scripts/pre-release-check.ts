@@ -53,6 +53,10 @@ try {
     version: string
     bin?: Record<string, string>
     scripts?: Record<string, string>
+    repository?: {
+      type?: string
+      url?: string
+    }
   }
 
   runStep('1️⃣ Checking package.json...', () => {
@@ -81,6 +85,10 @@ try {
       packageJson.scripts?.cli === 'node dist/cli.mjs',
       'The local cli script must point to dist/cli.mjs'
     )
+    assert(
+      packageJson.repository?.url === 'git+https://github.com/jixoai/skill-creator.git',
+      'repository.url must exactly match the trusted publishing GitHub repository URL'
+    )
     console.log('   ✅ CLI entrypoints target the ESM build output')
   })
 
@@ -101,7 +109,14 @@ try {
     console.log('   ✅ Packaged CLI help works')
   })
 
-  runStep('4️⃣ Checking templates...', () => {
+  runStep('4️⃣ Verifying publish tarball...', () => {
+    const packOutput = run('npm pack --dry-run')
+    assert(packOutput.includes('dist/cli.mjs'), 'publish tarball is missing dist/cli.mjs')
+    assert(packOutput.includes('dist/index.mjs'), 'publish tarball is missing dist/index.mjs')
+    console.log('   ✅ Publish tarball contains built artifacts')
+  })
+
+  runStep('5️⃣ Checking templates...', () => {
     assert(existsSync('templates'), 'Templates directory not found')
     for (const contract of SKILL_CREATOR_TEMPLATE_CONTRACTS) {
       validateTemplateContract(contract)
@@ -109,37 +124,37 @@ try {
     }
   })
 
-  runStep('5️⃣ Running test suite...', () => {
+  runStep('6️⃣ Running test suite...', () => {
     run('pnpm test')
     console.log('   ✅ All tests passed')
   })
 
-  runStep('6️⃣ Running type check...', () => {
+  runStep('7️⃣ Running type check...', () => {
     run('pnpm ts')
     console.log('   ✅ Type check passed')
   })
 
-  runStep('7️⃣ Validating OpenSpec...', () => {
+  runStep('8️⃣ Validating OpenSpec...', () => {
     run('openspec validate --all --strict')
     console.log('   ✅ OpenSpec validation passed')
   })
 
-  runStep('8️⃣ Verifying real CLI workflow...', () => {
+  runStep('9️⃣ Verifying real CLI workflow...', () => {
     run('pnpm verify:workflow')
     console.log('   ✅ Real CLI workflow passed')
   })
 
-  runStep('9️⃣ Verifying installed CLI workflow...', () => {
+  runStep('🔟 Verifying installed CLI workflow...', () => {
     run('pnpm verify:installed')
     console.log('   ✅ Installed CLI workflow passed')
   })
 
-  runStep('🔟 Verifying linked CLI workflow...', () => {
+  runStep('1️⃣1️⃣ Verifying linked CLI workflow...', () => {
     run('pnpm verify:linked')
     console.log('   ✅ Linked CLI workflow passed')
   })
 
-  runStep('1️⃣1️⃣ Checking version status...', () => {
+  runStep('1️⃣2️⃣ Checking version status...', () => {
     const publishedVersion = run(`npm view ${packageJson.name} version`).trim()
     const result = evaluatePublishedVersionReadiness({
       packageName: packageJson.name,
