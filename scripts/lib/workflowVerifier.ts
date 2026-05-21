@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -64,7 +64,13 @@ export async function verifyCliWorkflow(
   const commandRoot = options.commandRoot ?? repoRoot
   const logPrefix = options.logPrefix ?? ''
   const tempDir = createTempDir('skill-creator-workflow-')
-  const skillDir = join(tempDir, '.claude', 'skills', 'workflow-skill@1')
+  const homeDir = join(tempDir, 'home')
+  const workspaceDir = join(tempDir, 'workspace')
+  mkdirSync(homeDir, { recursive: true })
+  mkdirSync(workspaceDir, { recursive: true })
+  const skillDir = join(workspaceDir, '.claude', 'skills', 'workflow-skill@1')
+  const userAgentFile = join(homeDir, '.claude', 'agents', 'skill-creator.md')
+  const currentAgentFile = join(workspaceDir, '.claude', 'agents', 'skill-creator.md')
   const encodedProjectId = encodeURIComponent('/demo/pkg')
   const context7Dir = join(skillDir, 'assets', 'references', 'context7', encodedProjectId)
   let context7Document = `# Demo Package
@@ -176,7 +182,7 @@ Use stringbool coercion carefully and document the project-specific rule in user
 
   const baseEnv = {
     ...process.env,
-    HOME: tempDir,
+    HOME: homeDir,
     SKILL_CREATOR_CONTEXT7_SEARCH_BASE_URL: `http://127.0.0.1:${address.port}/api/v2/libs/search`,
     SKILL_CREATOR_CONTEXT7_BASE_URL: `http://127.0.0.1:${address.port}`,
     SKILL_CREATOR_NPM_SEARCH_BASE_URL: `http://127.0.0.1:${address.port}/registry/search`,
@@ -185,11 +191,28 @@ Use stringbool coercion carefully and document the project-specific rule in user
 
   try {
     console.log(`${logPrefix}1. init-cc`)
-    const initOutput = await runner.run(commandRoot, ['init-cc'], { env: baseEnv })
-    assert(initOutput.includes('Skill-creator subagent installed successfully'), 'init-cc failed')
-    const agentFile = join(tempDir, '.claude', 'agents', 'skill-creator.md')
-    assert(existsSync(agentFile), 'init-cc did not create skill-creator.md')
-    const agentContent = readFileSync(agentFile, 'utf-8')
+    const initPayload = JSON.parse(
+      await runner.run(workspaceDir, ['init-cc', '--json'], { env: baseEnv })
+    ) as {
+      requestedScope: string
+      resolvedScope: string
+      defaultScope: string
+      targetDir: string
+      targetFile: string
+    }
+    assert(initPayload.requestedScope === 'user', 'init-cc did not record the requested user scope')
+    assert(initPayload.resolvedScope === 'user', 'init-cc did not resolve to the user scope')
+    assert(initPayload.defaultScope === 'user', 'init-cc did not report the default user scope')
+    assert(
+      normalizeRealPath(initPayload.targetDir) === normalizeRealPath(join(homeDir, '.claude', 'agents')),
+      'init-cc did not return the expected user agent directory'
+    )
+    assert(
+      normalizeRealPath(initPayload.targetFile) === normalizeRealPath(userAgentFile),
+      'init-cc did not return the expected user agent file'
+    )
+    assert(existsSync(userAgentFile), 'init-cc did not create skill-creator.md')
+    const agentContent = readFileSync(userAgentFile, 'utf-8')
     assert(!agentContent.includes('{{DEFAULT_SCOPE}}'), 'agent template still contains DEFAULT_SCOPE')
     assert(agentContent.includes('skill-creator --help'), 'agent template lost the stable CLI entrypoint')
     assert(
@@ -213,29 +236,71 @@ Use stringbool coercion carefully and document the project-specific rule in user
       'agent template still describes the old skill naming fallback'
     )
 
-    console.log(`${logPrefix}2. init --scope auto`)
-    const initAutoOutput = await runner.run(tempDir, ['init', '--scope', 'auto'], { env: baseEnv })
+    console.log(`${logPrefix}2. init --scope current`)
+    const initCurrentPayload = JSON.parse(
+      await runner.run(workspaceDir, ['init', '--scope', 'current', '--json'], { env: baseEnv })
+    ) as {
+      requestedScope: string
+      resolvedScope: string
+      defaultScope: string
+      targetDir: string
+      targetFile: string
+    }
     assert(
-      initAutoOutput.includes('Installed scope: current'),
+      initCurrentPayload.requestedScope === 'current',
+      'init --scope current did not record the requested current scope'
+    )
+    assert(
+      initCurrentPayload.resolvedScope === 'current',
+      'init --scope current did not resolve to the current project scope'
+    )
+    assert(
+      normalizeRealPath(initCurrentPayload.targetDir) ===
+        normalizeRealPath(join(workspaceDir, '.claude', 'agents')),
+      'init --scope current did not return the expected current agent directory'
+    )
+    assert(
+      normalizeRealPath(initCurrentPayload.targetFile) === normalizeRealPath(currentAgentFile),
+      'init --scope current did not return the expected current agent file'
+    )
+    assert(existsSync(currentAgentFile), 'init --scope current did not create skill-creator.md')
+
+    console.log(`${logPrefix}3. init --scope auto`)
+    const initAutoPayload = JSON.parse(
+      await runner.run(workspaceDir, ['init', '--scope', 'auto', '--json'], { env: baseEnv })
+    ) as {
+      requestedScope: string
+      resolvedScope: string
+      defaultScope: string
+      targetDir: string
+      targetFile: string
+    }
+    assert(initAutoPayload.requestedScope === 'auto', 'init --scope auto did not record the requested auto scope')
+    assert(
+      initAutoPayload.resolvedScope === 'current',
       'init --scope auto did not resolve to the current project after local installation'
     )
     assert(
-      initAutoOutput.includes('Installing in current directory'),
-      'init --scope auto did not report the current-directory install target'
+      initAutoPayload.defaultScope === 'current',
+      'init --scope auto did not report the current default scope after local installation'
+    )
+    assert(
+      normalizeRealPath(initAutoPayload.targetFile) === normalizeRealPath(currentAgentFile),
+      'init --scope auto did not return the expected current agent file'
     )
 
-    console.log(`${logPrefix}3. search`)
+    console.log(`${logPrefix}4. search`)
     const searchOutput = await runner.run(commandRoot, ['search', 'demo-pkg'], { env: baseEnv })
     assert(searchOutput.includes('"name": "demo-pkg"'), 'search did not return the mock package')
 
-    console.log(`${logPrefix}4. get-info`)
+    console.log(`${logPrefix}5. get-info`)
     const getInfoOutput = await runner.run(commandRoot, ['get-info', 'demo-pkg'], { env: baseEnv })
     assert(getInfoOutput.includes('"skill_dir_name": "demo-pkg@1"'), 'get-info did not return normalized skill_dir_name')
     assert(getInfoOutput.includes('"homepage": "https://example.com/demo-pkg"'), 'get-info did not return homepage')
 
-    console.log(`${logPrefix}5. create-cc-skill`)
+    console.log(`${logPrefix}6. create-cc-skill`)
     const createOutput = await runner.run(
-      tempDir,
+      workspaceDir,
       [
         'create-cc-skill',
         '--scope',
@@ -271,9 +336,9 @@ Use stringbool coercion carefully and document the project-specific rule in user
     assert(createPayload.sourcePackageName === 'demo-pkg', 'create-cc-skill did not return the source package name')
     assert(existsSync(skillDir), 'skill directory was not created')
 
-    console.log(`${logPrefix}6. download-context7`)
+    console.log(`${logPrefix}7. download-context7`)
     const downloadOutput = await runner.run(
-      tempDir,
+      workspaceDir,
       [
         'download-context7',
         '--pwd',
@@ -289,7 +354,7 @@ Use stringbool coercion carefully and document the project-specific rule in user
     assert(downloadOutput.includes('Documentation downloaded and sliced'), 'download-context7 did not finish')
     assert(directoryContainsText(context7Dir, 'background refresh behavior'), 'initial context7 slices missing expected text')
 
-    console.log(`${logPrefix}7. download-context7 --force`)
+    console.log(`${logPrefix}8. download-context7 --force`)
     context7Document = `# Demo Package
 
 This overview is still long enough to be preserved by the slicer and indexed.
@@ -300,9 +365,9 @@ The query client now enforces stricter invalidation ownership across operational
 
 ## Coercion
 
-Stringbool coercion rules should stay explicit inside local notes.`
+    Stringbool coercion rules should stay explicit inside local notes.`
     const forceDownloadOutput = await runner.run(
-      tempDir,
+      workspaceDir,
       ['download-context7', '--pwd', skillDir, '--force'],
       { env: baseEnv }
     )
@@ -313,9 +378,9 @@ Stringbool coercion rules should stay explicit inside local notes.`
       'force download did not refresh context7 slices'
     )
 
-    console.log(`${logPrefix}8. add-skill`)
+    console.log(`${logPrefix}9. add-skill`)
     await runner.run(
-      tempDir,
+      workspaceDir,
       [
         'add-skill',
         '--pwd',
@@ -328,9 +393,9 @@ Stringbool coercion rules should stay explicit inside local notes.`
       { env: baseEnv }
     )
 
-    console.log(`${logPrefix}9. add-skill --force-append`)
+    console.log(`${logPrefix}10. add-skill --force-append`)
     const appendOutput = await runner.run(
-      tempDir,
+      workspaceDir,
       [
         'add-skill',
         '--pwd',
@@ -353,9 +418,9 @@ Stringbool coercion rules should stay explicit inside local notes.`
     assert(userFileContent.includes('## Knowledge updates'), 'knowledge updates section missing')
     assert(userFileContent.includes('### Update 1: Workflow update'), 'update heading missing')
 
-    console.log(`${logPrefix}10. add-skill --force via --package`)
+    console.log(`${logPrefix}11. add-skill --force via --package`)
     const replaceOutput = await runner.run(
-      tempDir,
+      workspaceDir,
       [
         'add-skill',
         '--package',
@@ -380,9 +445,9 @@ Stringbool coercion rules should stay explicit inside local notes.`
       'force replace did not rewrite the note content'
     )
 
-    console.log(`${logPrefix}11. search-skill`)
+    console.log(`${logPrefix}12. search-skill`)
     const searchSkillOutput = await runner.run(
-      tempDir,
+      workspaceDir,
       ['search-skill', '--package', 'demo-pkg', 'operational workflows'],
       { env: baseEnv }
     )
@@ -392,12 +457,12 @@ Stringbool coercion rules should stay explicit inside local notes.`
       'search-skill preview did not surface the replaced note content'
     )
 
-    console.log(`${logPrefix}12. vector runtime contract`)
+    console.log(`${logPrefix}13. vector runtime contract`)
     const vectorRuntimeSupported = await detectVectorRuntimeSupport(baseEnv)
 
     if (vectorRuntimeSupported) {
       const buildIndexOutput = await runner.run(
-        tempDir,
+        workspaceDir,
         ['build-index', '--pwd', skillDir, '--mode', 'vector', '--vector-embedder', 'deterministic'],
         { env: baseEnv }
       )
@@ -412,7 +477,7 @@ Stringbool coercion rules should stay explicit inside local notes.`
       )
 
       const vectorSearchOutput = await runner.run(
-        tempDir,
+        workspaceDir,
         [
           'search-skill',
           '--pwd',
@@ -435,7 +500,7 @@ Stringbool coercion rules should stay explicit inside local notes.`
       )
     } else {
       try {
-        await runner.run(tempDir, ['build-index', '--pwd', skillDir, '--mode', 'vector'], {
+        await runner.run(workspaceDir, ['build-index', '--pwd', skillDir, '--mode', 'vector'], {
           env: baseEnv,
         })
         throw new Error('vector build-index unexpectedly succeeded without runtime support')

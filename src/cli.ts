@@ -104,6 +104,7 @@ program
   .command('init')
   .description('Install skill-creator as subagent (interactive mode)')
   .option('--scope <scope>', 'Storage scope (user, current, or auto)')
+  .option('--json', 'Print machine-readable installation output')
   .action(async (options) => {
     const { runScript } = await import('./core/runScript.js')
     const args = []
@@ -111,6 +112,9 @@ program
     // Pass scope to init command
     if (options.scope) {
       args.push('--scope', options.scope)
+    }
+    if (options.json) {
+      args.push('--json')
     }
 
     await runScript('init', args)
@@ -120,11 +124,16 @@ program
 program
   .command('init-cc')
   .description('Install skill-creator as subagent in ~/.claude/agents/')
-  .action(async () => {
+  .option('--json', 'Print machine-readable installation output')
+  .action(async (options) => {
     const { runScript } = await import('./core/runScript.js')
     // For init-cc, we want the non-interactive version that installs to user directory
     // Use --scope=user for consistency with other CLI commands
-    await runScript('init', ['--scope', 'user'])
+    const args = ['--scope', 'user']
+    if (options.json) {
+      args.push('--json')
+    }
+    await runScript('init', args)
   })
 
 // Add search command for package searching

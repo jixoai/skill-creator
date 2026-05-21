@@ -919,6 +919,43 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       cleanupTempDir(tempDir)
     })
 
+    it('should expose machine-readable init-cc output via --json', () => {
+      const tempDir = createTempDir('init-json-user-')
+      const homeDir = join(tempDir, 'home')
+
+      const originalEnv = process.env.HOME
+      process.env.HOME = homeDir
+
+      try {
+        const output = execSync(`node ${process.cwd()}/dist/cli.mjs init-cc --json`, {
+          cwd: tempDir,
+          encoding: 'utf-8',
+        })
+
+        const payload = JSON.parse(output) as {
+          requestedScope: string
+          resolvedScope: string
+          defaultScope: string
+          targetDir: string
+          targetFile: string
+        }
+
+        expect(payload.requestedScope).toBe('user')
+        expect(payload.resolvedScope).toBe('user')
+        expect(payload.defaultScope).toBe('user')
+        expect(normalizeRealPath(payload.targetDir)).toBe(
+          normalizeRealPath(join(homeDir, '.claude', 'agents'))
+        )
+        expect(normalizeRealPath(payload.targetFile)).toBe(
+          normalizeRealPath(join(homeDir, '.claude', 'agents', 'skill-creator.md'))
+        )
+        expect(existsSync(payload.targetFile)).toBe(true)
+      } finally {
+        process.env.HOME = originalEnv
+        cleanupTempDir(tempDir)
+      }
+    })
+
     it('should let init resolve --scope auto to current when the project already has a local subagent', () => {
       const tempDir = createTempDir('init-auto-current-')
       const agentsDir = join(tempDir, '.claude', 'agents')
@@ -937,6 +974,63 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(readFileSync(skillCreatorFile, 'utf-8')).toContain('skill-creator --help')
 
       cleanupTempDir(tempDir)
+    })
+
+    it('should expose machine-readable init output via --json when auto resolves current', () => {
+      const tempDir = createTempDir('init-json-current-')
+      const homeDir = join(tempDir, 'home')
+
+      const originalEnv = process.env.HOME
+      process.env.HOME = homeDir
+
+      try {
+        const currentOutput = execSync(
+          `node ${process.cwd()}/dist/cli.mjs init --scope current --json`,
+          {
+            cwd: tempDir,
+            encoding: 'utf-8',
+          }
+        )
+
+        const currentPayload = JSON.parse(currentOutput) as {
+          requestedScope: string
+          resolvedScope: string
+          defaultScope: string
+          targetDir: string
+          targetFile: string
+        }
+
+        expect(currentPayload.requestedScope).toBe('current')
+        expect(currentPayload.resolvedScope).toBe('current')
+        expect(currentPayload.defaultScope).toBe('user')
+        expect(normalizeRealPath(currentPayload.targetDir)).toBe(
+          normalizeRealPath(join(tempDir, '.claude', 'agents'))
+        )
+
+        const autoOutput = execSync(`node ${process.cwd()}/dist/cli.mjs init --scope auto --json`, {
+          cwd: tempDir,
+          encoding: 'utf-8',
+        })
+
+        const autoPayload = JSON.parse(autoOutput) as {
+          requestedScope: string
+          resolvedScope: string
+          defaultScope: string
+          targetDir: string
+          targetFile: string
+        }
+
+        expect(autoPayload.requestedScope).toBe('auto')
+        expect(autoPayload.resolvedScope).toBe('current')
+        expect(autoPayload.defaultScope).toBe('current')
+        expect(normalizeRealPath(autoPayload.targetFile)).toBe(
+          normalizeRealPath(join(tempDir, '.claude', 'agents', 'skill-creator.md'))
+        )
+        expect(existsSync(autoPayload.targetFile)).toBe(true)
+      } finally {
+        process.env.HOME = originalEnv
+        cleanupTempDir(tempDir)
+      }
     })
 
     it('should expose a working packaged CLI entrypoint through pnpm cli', () => {
@@ -1186,17 +1280,18 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       })
 
       expect(output).toContain('1. init-cc')
-      expect(output).toContain('2. init --scope auto')
-      expect(output).toContain('3. search')
-      expect(output).toContain('4. get-info')
-      expect(output).toContain('5. create-cc-skill')
-      expect(output).toContain('6. download-context7')
-      expect(output).toContain('7. download-context7 --force')
-      expect(output).toContain('8. add-skill')
-      expect(output).toContain('9. add-skill --force-append')
-      expect(output).toContain('10. add-skill --force via --package')
-      expect(output).toContain('11. search-skill')
-      expect(output).toContain('12. vector runtime contract')
+      expect(output).toContain('2. init --scope current')
+      expect(output).toContain('3. init --scope auto')
+      expect(output).toContain('4. search')
+      expect(output).toContain('5. get-info')
+      expect(output).toContain('6. create-cc-skill')
+      expect(output).toContain('7. download-context7')
+      expect(output).toContain('8. download-context7 --force')
+      expect(output).toContain('9. add-skill')
+      expect(output).toContain('10. add-skill --force-append')
+      expect(output).toContain('11. add-skill --force via --package')
+      expect(output).toContain('12. search-skill')
+      expect(output).toContain('13. vector runtime contract')
       expect(output).toContain('CLI workflow verification passed')
     }, 30_000)
 
@@ -1211,10 +1306,11 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(output).toContain('3. verify installed cli help')
       expect(output).toContain('4. verify installed cli workflow')
       expect(output).toContain('[installed] 1. init-cc')
-      expect(output).toContain('[installed] 2. init --scope auto')
-      expect(output).toContain('[installed] 3. search')
-      expect(output).toContain('[installed] 11. search-skill')
-      expect(output).toContain('[installed] 12. vector runtime contract')
+      expect(output).toContain('[installed] 2. init --scope current')
+      expect(output).toContain('[installed] 3. init --scope auto')
+      expect(output).toContain('[installed] 4. search')
+      expect(output).toContain('[installed] 12. search-skill')
+      expect(output).toContain('[installed] 13. vector runtime contract')
       expect(output).toContain('Installed CLI verification passed')
     }, 180_000)
 
@@ -1228,9 +1324,10 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       expect(output).toContain('2. verify linked cli help')
       expect(output).toContain('3. verify linked cli workflow')
       expect(output).toContain('[linked] 1. init-cc')
-      expect(output).toContain('[linked] 2. init --scope auto')
-      expect(output).toContain('[linked] 11. search-skill')
-      expect(output).toContain('[linked] 12. vector runtime contract')
+      expect(output).toContain('[linked] 2. init --scope current')
+      expect(output).toContain('[linked] 3. init --scope auto')
+      expect(output).toContain('[linked] 12. search-skill')
+      expect(output).toContain('[linked] 13. vector runtime contract')
       expect(output).toContain('Linked CLI verification passed')
     }, 60_000)
   })

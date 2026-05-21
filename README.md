@@ -65,6 +65,9 @@ skill-creator init
 
 # Non-interactive installation with explicit default scope resolution
 skill-creator init --scope auto
+
+# Machine-readable installation output for tooling/subagents
+skill-creator init-cc --json
 ```
 
 ### 3. Choose Your Usage Mode
@@ -168,6 +171,7 @@ skill-creator add-skill --package @tanstack/react-query --title "Bundle guidance
 - `--force-append`: Append a structured knowledge update into the closest matching user note
 - `--skip-indexing`: Skip automatic local index building
 - `--interactive`: Enable interactive prompts
+- `--json`: Print machine-readable output for `init`, `init-cc`, and `create-cc-skill`
 
 When `--package <name>` is used to find an existing skill, the CLI first checks the
 `<skill-package ...>` metadata stored in `SKILL.md`. Directory-name matching is only a fallback.
