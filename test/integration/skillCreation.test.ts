@@ -816,5 +816,47 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
 
       cleanupTempDir(tempDir)
     })
+
+    it('should expose a working packaged CLI entrypoint through pnpm cli', () => {
+      const output = execSync('pnpm cli --help', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+      })
+
+      expect(output).toContain('Create claude-code-skills with documentation management')
+      expect(output).toContain('create-cc-skill')
+      expect(output).toContain('resolve-context7')
+    })
+
+    it('should describe knowledge-level merge semantics in add-skill help output', () => {
+      const command = `node ${process.cwd()}/dist/cli.mjs add-skill --help`
+      const output = execSync(command, { encoding: 'utf-8' })
+      const normalizedOutput = output.replace(/\s+/g, ' ')
+
+      expect(normalizedOutput).toContain('Replace the closest matching user knowledge note')
+      expect(normalizedOutput).toContain(
+        'Append content as a knowledge update in the closest matching user note'
+      )
+      expect(normalizedOutput).not.toContain(
+        'Append content to existing file instead of creating new file'
+      )
+    })
+
+    it('should verify the real CLI workflow through the reusable verification script', () => {
+      const output = execSync('pnpm verify:workflow', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+      })
+
+      expect(output).toContain('1. init-cc')
+      expect(output).toContain('2. create-cc-skill')
+      expect(output).toContain('3. download-context7')
+      expect(output).toContain('4. download-context7 --force')
+      expect(output).toContain('5. add-skill')
+      expect(output).toContain('6. add-skill --force-append')
+      expect(output).toContain('7. add-skill --force via --package')
+      expect(output).toContain('8. search-skill')
+      expect(output).toContain('CLI workflow verification passed')
+    }, 30_000)
   })
 })

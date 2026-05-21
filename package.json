@@ -24,14 +24,15 @@
     "sc": "pnpm tsx src/cli.ts",
     "demo:search-tech-eval": "pnpm tsx demo/search-tech-eval/run.ts",
     "dev": "tsdown --watch",
-    "cli": "node dist/cli.js",
+    "cli": "node dist/cli.mjs",
+    "verify:workflow": "pnpm tsx scripts/verify-cli-workflow.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "fmt": "prettier --write .",
     "ts": "tsc --noEmit",
-    "pre-release": "node scripts/pre-release-check.js",
-    "pre-release-check": "node scripts/pre-release-check.js"
+    "pre-release": "pnpm tsx scripts/pre-release-check.ts",
+    "pre-release-check": "pnpm tsx scripts/pre-release-check.ts"
   },
   "keywords": [
     "claude-code",
