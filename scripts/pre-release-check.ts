@@ -4,6 +4,7 @@ import {
   SKILL_CREATOR_TEMPLATE_CONTRACTS,
   validateTemplateContract,
 } from './lib/templateContract.js'
+import { evaluatePublishedVersionReadiness } from './lib/releaseReadiness.js'
 
 function run(command: string): string {
   try {
@@ -137,17 +138,15 @@ try {
   })
 
   runStep('1️⃣1️⃣ Checking version status...', () => {
-    try {
-      const publishedVersion = run('npm view skill-creator version').trim()
-      if (packageJson.version === publishedVersion) {
-        console.log(`   ⚠️  Version ${packageJson.version} is already published to NPM`)
-        console.log('   💡 Update version with: npm version patch|minor|major')
-      } else {
-        console.log(`   ✅ New version: ${packageJson.version} (published: ${publishedVersion})`)
-      }
-    } catch {
-      console.log('   ℹ️  Could not check published version')
-    }
+    const publishedVersion = run(`npm view ${packageJson.name} version`).trim()
+    const result = evaluatePublishedVersionReadiness({
+      packageName: packageJson.name,
+      localVersion: packageJson.version,
+      publishedVersion,
+    })
+
+    assert(result.ready, result.message)
+    console.log(`   ✅ ${result.message}`)
   })
 
   console.log('\n✅ All checks passed! Ready for release.')

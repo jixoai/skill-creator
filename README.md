@@ -294,6 +294,15 @@ PATH="$TMP_PREFIX/bin:$PATH" skill-creator --help
 
 This avoids toolchain managers such as Volta interfering with the linked executable.
 
+### Release Readiness
+
+`pnpm pre-release-check` is a release gate, not a diagnostic summary. It now fails when:
+
+- the current `package.json` version is already published to npm
+- the published npm version cannot be verified
+
+That means a green result is evidence that the repository is both technically verified and version-ready for release.
+
 ## Search Modes
 
 - `auto`: default path, tries full-text first and falls back to fuzzy when quality is weak
