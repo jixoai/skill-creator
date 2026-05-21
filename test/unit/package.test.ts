@@ -1,8 +1,18 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { PackageUtils } from '../../src/utils/package.js'
 import { Context7Utils } from '../../src/utils/context7.js'
 
 describe('PackageUtils', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
   describe('createSkillFolderName', () => {
     it('should create skill folder name with package and major version', () => {
       const name = PackageUtils.createSkillFolderName('react', '18.2.0')
@@ -73,6 +83,35 @@ describe('PackageUtils', () => {
 
   describe('getPackageInfo', () => {
     it('should return full package info for a known package', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          new Response(
+            JSON.stringify({
+              'dist-tags': {
+                latest: '4.4.3',
+              },
+              versions: {
+                '4.4.3': {
+                  name: 'zod',
+                  version: '4.4.3',
+                  description: 'TypeScript-first schema validation with static type inference',
+                  homepage: 'https://zod.dev',
+                  repository: {
+                    type: 'git',
+                    url: 'https://github.com/colinhacks/zod.git',
+                  },
+                },
+              },
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }
+          )
+        )
+      )
+
       const info = await PackageUtils.getPackageInfo('zod')
       expect(info).not.toBeNull()
       expect(info.name).toBe('zod')

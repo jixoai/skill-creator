@@ -25,12 +25,25 @@ export interface SearchOptions {
 }
 
 export class PackageUtils {
+  private static getRegistryBaseUrl(): string {
+    return (process.env.SKILL_CREATOR_NPM_REGISTRY_BASE_URL ?? 'https://registry.npmjs.org').replace(
+      /\/+$/,
+      ''
+    )
+  }
+
+  private static getSearchBaseUrl(): string {
+    return (
+      process.env.SKILL_CREATOR_NPM_SEARCH_BASE_URL ?? `${this.getRegistryBaseUrl()}/-/v1/search`
+    ).replace(/\/+$/, '')
+  }
+
   /**
    * Get package version from npm registry
    */
   static async getPackageVersion(packageName: string): Promise<string | null> {
     try {
-      const response = await fetch(`https://registry.npmjs.org/${packageName}/latest`)
+      const response = await fetch(`${this.getRegistryBaseUrl()}/${packageName}/latest`)
       if (!response.ok) return null
 
       const data = await response.json()
@@ -52,7 +65,7 @@ export class PackageUtils {
     [key: string]: any
   } | null> {
     try {
-      const response = await fetch(`https://registry.npmjs.org/${packageName}`)
+      const response = await fetch(`${this.getRegistryBaseUrl()}/${packageName}`)
       if (!response.ok) return null
 
       const data = await response.json()
@@ -161,9 +174,10 @@ export class PackageUtils {
 
     try {
       const query = keywords.join(' ')
-      const response = await fetch(
-        `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=${limit * 2}`
-      )
+      const searchUrl = new URL(this.getSearchBaseUrl())
+      searchUrl.searchParams.set('text', query)
+      searchUrl.searchParams.set('size', String(limit * 2))
+      const response = await fetch(searchUrl)
 
       if (!response.ok) return []
 

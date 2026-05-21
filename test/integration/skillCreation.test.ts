@@ -849,14 +849,46 @@ Use stringbool when you need to coerce textual boolean values into booleans.`)
       })
 
       expect(output).toContain('1. init-cc')
-      expect(output).toContain('2. create-cc-skill')
-      expect(output).toContain('3. download-context7')
-      expect(output).toContain('4. download-context7 --force')
-      expect(output).toContain('5. add-skill')
-      expect(output).toContain('6. add-skill --force-append')
-      expect(output).toContain('7. add-skill --force via --package')
-      expect(output).toContain('8. search-skill')
+      expect(output).toContain('2. search')
+      expect(output).toContain('3. get-info')
+      expect(output).toContain('4. create-cc-skill')
+      expect(output).toContain('5. download-context7')
+      expect(output).toContain('6. download-context7 --force')
+      expect(output).toContain('7. add-skill')
+      expect(output).toContain('8. add-skill --force-append')
+      expect(output).toContain('9. add-skill --force via --package')
+      expect(output).toContain('10. search-skill')
       expect(output).toContain('CLI workflow verification passed')
     }, 30_000)
+
+    it('should verify the installed CLI workflow through the reusable install verification script', () => {
+      const output = execSync('pnpm verify:installed', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+      })
+
+      expect(output).toContain('1. pack published-style tarball')
+      expect(output).toContain('2. install packed binary into isolated prefix')
+      expect(output).toContain('3. verify installed cli help')
+      expect(output).toContain('4. verify installed cli workflow')
+      expect(output).toContain('[installed] 1. init-cc')
+      expect(output).toContain('[installed] 2. search')
+      expect(output).toContain('[installed] 10. search-skill')
+      expect(output).toContain('Installed CLI verification passed')
+    }, 60_000)
+
+    it('should verify the linked CLI workflow through the reusable link verification script', () => {
+      const output = execSync('pnpm verify:linked', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+      })
+
+      expect(output).toContain('1. create isolated linked binary')
+      expect(output).toContain('2. verify linked cli help')
+      expect(output).toContain('3. verify linked cli workflow')
+      expect(output).toContain('[linked] 1. init-cc')
+      expect(output).toContain('[linked] 10. search-skill')
+      expect(output).toContain('Linked CLI verification passed')
+    }, 60_000)
   })
 })

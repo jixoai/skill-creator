@@ -26,6 +26,8 @@
     "dev": "tsdown --watch",
     "cli": "node dist/cli.mjs",
     "verify:workflow": "pnpm tsx scripts/verify-cli-workflow.ts",
+    "verify:installed": "pnpm tsx scripts/verify-installed-cli.ts",
+    "verify:linked": "pnpm tsx scripts/verify-linked-cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

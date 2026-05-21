@@ -269,6 +269,31 @@ skill-creator resolve-context7 vitest --package-version 4.1.7
 skill-creator download-context7 --help
 ```
 
+### Verifying Installed Binaries During Development
+
+When validating the real installed CLI during local development, prefer isolated install roots instead of relying on your machine's global package manager state:
+
+```bash
+# Source-mode workflow verification
+pnpm verify:workflow
+
+# Published-style installed binary verification in an isolated prefix
+pnpm verify:installed
+
+# Source-linked binary verification in an isolated prefix
+pnpm verify:linked
+```
+
+If you still want a linked local binary for ad hoc manual testing, use an isolated prefix:
+
+```bash
+TMP_PREFIX="$(mktemp -d /tmp/skill-creator-link-XXXXXX)"
+npm_config_prefix="$TMP_PREFIX" npm link
+PATH="$TMP_PREFIX/bin:$PATH" skill-creator --help
+```
+
+This avoids toolchain managers such as Volta interfering with the linked executable.
+
 ## Search Modes
 
 - `auto`: default path, tries full-text first and falls back to fuzzy when quality is weak

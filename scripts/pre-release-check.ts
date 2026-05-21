@@ -57,7 +57,16 @@ try {
   runStep('1️⃣ Checking package.json...', () => {
     console.log(`   ✅ Package: ${packageJson.name}@${packageJson.version}`)
 
-    const requiredScripts = ['build', 'cli', 'test', 'ts', 'verify:workflow', 'pre-release-check']
+    const requiredScripts = [
+      'build',
+      'cli',
+      'test',
+      'ts',
+      'verify:workflow',
+      'verify:installed',
+      'verify:linked',
+      'pre-release-check',
+    ]
     for (const script of requiredScripts) {
       assert(packageJson.scripts?.[script], `Missing required script: ${script}`)
       console.log(`   ✅ Script: ${script}`)
@@ -117,7 +126,17 @@ try {
     console.log('   ✅ Real CLI workflow passed')
   })
 
-  runStep('9️⃣ Checking version status...', () => {
+  runStep('9️⃣ Verifying installed CLI workflow...', () => {
+    run('pnpm verify:installed')
+    console.log('   ✅ Installed CLI workflow passed')
+  })
+
+  runStep('🔟 Verifying linked CLI workflow...', () => {
+    run('pnpm verify:linked')
+    console.log('   ✅ Linked CLI workflow passed')
+  })
+
+  runStep('1️⃣1️⃣ Checking version status...', () => {
     try {
       const publishedVersion = run('npm view skill-creator version').trim()
       if (packageJson.version === publishedVersion) {
