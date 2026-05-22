@@ -213,6 +213,8 @@ Use stringbool coercion carefully and document the project-specific rule in user
     )
     assert(existsSync(userAgentFile), 'init-cc did not create skill-creator.md')
     const agentContent = readFileSync(userAgentFile, 'utf-8')
+    const expectedAgentTemplate = readFileSync(join(repoRoot, 'templates', 'skill-creator.md'), 'utf-8')
+    assert(agentContent === expectedAgentTemplate, 'init-cc did not install the current skill-creator template verbatim')
     assert(!agentContent.includes('{{DEFAULT_SCOPE}}'), 'agent template still contains DEFAULT_SCOPE')
     assert(agentContent.includes('skill-creator --help'), 'agent template lost the stable CLI entrypoint')
     assert(
@@ -335,6 +337,23 @@ Use stringbool coercion carefully and document the project-specific rule in user
     assert(createPayload.skillName === 'demo-pkg', 'create-cc-skill did not return the visible skill name')
     assert(createPayload.sourcePackageName === 'demo-pkg', 'create-cc-skill did not return the source package name')
     assert(existsSync(skillDir), 'skill directory was not created')
+    const createdSkillMd = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8')
+    assert(
+      createdSkillMd.includes('https://example.com/demo-pkg'),
+      'create-cc-skill did not seed the homepage into SKILL.md'
+    )
+    assert(
+      createdSkillMd.includes('https://github.com/example/demo-pkg.git'),
+      'create-cc-skill did not seed the repository into SKILL.md'
+    )
+    assert(
+      createdSkillMd.includes('pnpm add demo-pkg'),
+      'create-cc-skill did not seed installation basics into SKILL.md'
+    )
+    assert(
+      createdSkillMd.includes('Workflow verification package'),
+      'create-cc-skill did not seed the package summary into SKILL.md'
+    )
 
     console.log(`${logPrefix}7. download-context7`)
     const downloadPayload = JSON.parse(

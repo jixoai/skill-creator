@@ -36,6 +36,9 @@ export interface CreateSkillOptions {
   skillDescription?: string
   sourcePackageName?: string
   sourcePackageVersionHint?: string
+  packageSummary?: string
+  packageHomepage?: string
+  packageRepository?: string
   force?: boolean
 }
 

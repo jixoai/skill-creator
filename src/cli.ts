@@ -62,9 +62,20 @@ program
           Separator: inquirer.Separator,
         },
       })
-      const skillPath = await createSkillForPackage(workflow.createOptions, {
-        json: options.json,
-      })
+      const packageInfo = workflow.summary.sourcePackageName
+        ? await PackageUtils.getPackageInfo(workflow.summary.sourcePackageName)
+        : null
+      const skillPath = await createSkillForPackage(
+        {
+          ...workflow.createOptions,
+          packageSummary: packageInfo?.description || undefined,
+          packageHomepage: packageInfo?.homepage || undefined,
+          packageRepository: packageInfo?.repository?.url || undefined,
+        },
+        {
+          json: options.json,
+        }
+      )
       if (options.json) {
         console.log(
           JSON.stringify(

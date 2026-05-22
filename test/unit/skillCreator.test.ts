@@ -53,6 +53,9 @@ describe('SkillCreator', () => {
         skillDirname: 'tanstack-router@1.2.3',
         skillName: '@tanstack/router',
         skillDescription: 'Custom description for TanStack Router',
+        packageSummary: 'TanStack Router provides fully type-safe routing for React applications.',
+        packageHomepage: 'https://tanstack.com/router',
+        packageRepository: 'https://github.com/TanStack/router',
       }
 
       const result = await skillCreator.createSkill(options)
@@ -65,6 +68,9 @@ describe('SkillCreator', () => {
       const skillContent = readFileSync(skillMdPath, 'utf-8')
       expect(skillContent).toContain('@tanstack/router')
       expect(skillContent).toContain('Custom description for TanStack Router')
+      expect(skillContent).toContain('https://tanstack.com/router')
+      expect(skillContent).toContain('https://github.com/TanStack/router')
+      expect(skillContent).toContain('TanStack Router provides fully type-safe routing')
     })
 
     it('should handle storage in user directory', async () => {
@@ -153,6 +159,14 @@ describe('SkillCreator', () => {
       expect(content).toContain('skill-creator build-index --pwd')
       expect(content).toContain('[--mode=auto|fulltext|vector]')
       expect(content).toContain('<skill-package name="test-template" version="1.0.0">')
+      expect(content).toContain('- Homepage: Not provided in package metadata.')
+      expect(content).toContain('- Repository: Not provided in package metadata.')
+      expect(content).toContain(
+        '- Summary: Package-specific references and operational notes should be collected in this skill.'
+      )
+      expect(content).toContain('pnpm add test-template')
+      expect(content).toContain('npm install test-template')
+      expect(content).toContain('yarn add test-template')
       expect(content).toContain('<user-skills baseDir="assets/references/user">') // Check user skills tag with baseDir
       expect(content).toContain('## Context7 Documentation') // Check context7 section
       expect(content).toContain(result.skillPath) // {{SKILL_PATH}} should be replaced

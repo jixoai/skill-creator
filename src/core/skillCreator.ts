@@ -102,6 +102,20 @@ export class SkillCreator {
           'package_version_hint',
           () => options.sourcePackageVersionHint ?? this.inferVersionHint(options.skillDirname)
         )
+        .with(
+          'package_summary',
+          () =>
+            options.packageSummary ??
+            'Package-specific references and operational notes should be collected in this skill.'
+        )
+        .with(
+          'package_homepage',
+          () => options.packageHomepage ?? 'Not provided in package metadata.'
+        )
+        .with(
+          'package_repository',
+          () => options.packageRepository ?? 'Not provided in package metadata.'
+        )
         .with('skill_path', () => skillDir)
         .otherwise(() => _)
     })

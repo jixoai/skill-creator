@@ -70,10 +70,10 @@ skill-creator --help
    - Execute command after confirmation
    - Prefer `--json` so you can read `skillPath` directly instead of parsing human-readable terminal text
    - Next, use the skills/skill-creator skill (note: we are skill-creator-subagents, don't confuse) to initially generate files in the `skill_dir_fullpath` folder, including the most important SKILL.md
-     - Content is based on homepage, repository URL, or AI's own research
+     - The seeded content should reflect the package metadata the CLI can reliably provide at creation time
      - The generated `SKILL.md` also stores the source package identity so later `download-context7 --pwd ...` calls can infer the package automatically
      - SKILL.md contains two main parts:
-     1. Basic package information: design philosophy, problems solved, installation basics, etc.
+     1. Basic package information available at creation time: package identity, summary, homepage, repository URL, and installation basics
      2. How to use the companion tools in this `skill_dir_fullpath` folder: search skill info, update skill, extend skill info
         - `skill-creator --pwd={skill_dir_fullpath} search-skill "test query"` Query knowledge points
         - `skill-creator build-index --pwd "{{SKILL_PATH}}" [--mode=auto|fulltext|vector] [--vector-embedder deterministic]` Build or refresh the persisted local search index

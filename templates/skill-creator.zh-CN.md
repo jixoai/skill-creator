@@ -73,10 +73,10 @@ skill-creator --help
    - 确认后执行命令
    - 优先追加 `--json`，这样可以直接读取 `skillPath`，不需要从人类可读文案中解析路径
    - 接下来，需要AI将使用 skills/skill-creator 的技能（注意，我们是skill-creator-subagents，不要混淆）。去初步生成 `skill_dir_fullpath` 文件夹内的文件。包括最重要的SKILL.md
-     - 这里的内容依据是，是通过 主页、仓库地址，或者AI自己去通过搜索，得来。
+     - 这里的初始内容只应承诺 CLI 在创建阶段能够可靠提供的包元信息。
      - 生成的 `SKILL.md` 还会记录来源 package 身份，这样后续 `download-context7 --pwd ...` 可以自动推断 package
      - 我们在 SKILL.md 中，主要包含两部分的内容：
-     1. 介绍对于这个包基础信息：包括它的设计哲学和理念、解决什么问题、如何安装等基础信息。
+     1. 介绍创建阶段可获得的基础包信息：包标识、摘要、homepage、repository URL、安装基础。
      2. 介绍配套的工具如何在这个 `skill_dir_fullpath` 文件夹内使用：来搜索技能信息、更新技能、扩展技能信息
         - `skill-creator --pwd "{skill_dir_fullpath}" search-skill "test query"` 查询知识点
         - `skill-creator build-index --pwd="{{SKILL_PATH}}" --mode=auto` 构建或刷新默认持久化搜索索引；也可以切换到 `fulltext` 或 `vector`，需要离线/确定性向量验证时再追加 `--vector-embedder deterministic`

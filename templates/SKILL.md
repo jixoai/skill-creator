@@ -12,6 +12,21 @@ description: |
 <skill-package name="{{PACKAGE_NAME}}" version="{{PACKAGE_VERSION_HINT}}">
 </skill-package>
 
+## Package Basics
+
+- Package: `{{PACKAGE_NAME}}`
+- Homepage: {{PACKAGE_HOMEPAGE}}
+- Repository: {{PACKAGE_REPOSITORY}}
+- Summary: {{PACKAGE_SUMMARY}}
+
+## Installation Basics
+
+```bash
+pnpm add {{PACKAGE_NAME}}
+npm install {{PACKAGE_NAME}}
+yarn add {{PACKAGE_NAME}}
+```
+
 ## CLI Commands
 
 ```bash
