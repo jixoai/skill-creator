@@ -1,0 +1,6 @@
+packages:
+  - webui
+
+onlyBuiltDependencies:
+  - "@tailwindcss/oxide"
+  - esbuild

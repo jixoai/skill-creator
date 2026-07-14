@@ -1,0 +1,8 @@
+node_modules
+dist
+webui/build
+webui/.svelte-kit
+*.log
+.DS_Store
+.zcode/
+tmp/

@@ -1,0 +1,16 @@
+<!--
+原始需求 [2026-07-14]：「webui 的框架我已经搭建好了」。
+正交意图：1. 提供静态 HTML 容器；2. 声明视口与应用 favicon 入口。
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="text-scale" content="scale" />
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>

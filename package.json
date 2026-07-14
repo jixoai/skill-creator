@@ -1,0 +1,71 @@
+{
+  "name": "skill-creator",
+  "version": "2.0.0",
+  "description": "A local-first CLI and tray workbench for discovering, creating, validating, and installing agent skills.",
+  "keywords": [
+    "ccski",
+    "claude-code",
+    "codex",
+    "opentray",
+    "skills",
+    "tray",
+    "webui"
+  ],
+  "license": "MIT",
+  "author": "Gaubee",
+  "bin": {
+    "skill-creator": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "type": "module",
+  "scripts": {
+    "build:webui": "pnpm --dir webui build",
+    "build:core": "bun scripts/build-core.sh.ts",
+    "build": "pnpm run build:core && pnpm run build:webui && pnpm run stage:webui",
+    "stage:webui": "bun scripts/stage-webui.sh.ts",
+    "dev": "pnpm --dir webui dev",
+    "dev:cli": "bun src/cli/cli.ts",
+    "dev:daemon": "bun src/daemon/main.ts",
+    "skill-creator": "node dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run",
+    "test:watch": "vp test",
+    "check": "pnpm test && pnpm typecheck && pnpm --dir webui check && pnpm exec vp fmt --check",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@opentray/ext-webview": "^0.12.0",
+    "@orpc/contract": "1.14.6",
+    "@orpc/server": "1.14.6",
+    "ccski": "^2.4.0",
+    "execa": "^9.6.1",
+    "gray-matter": "^4.0.3",
+    "opentray": "^0.12.0",
+    "ws": "^8.18.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.7.2",
+    "vite-plus": "^0.2.4",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@10.22.0"
+}
