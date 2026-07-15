@@ -1,8 +1,10 @@
 /**
- * User input [2026-07-14]: "可新增 test/cli-lifecycle.test.ts；完成后跑 root typecheck/相关测试。"
+ * User input [2026-07-14]: "参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)"
+ * Architecture decision [2026-07-14]: lifecycle behavior is verified through
+ * the public CLI and framed IPC boundary.
  *
  * Orthogonal intents:
- *   [1] Replace a daemon whose package version differs from the CLI.
+ *   [1] Start/replace a daemon and preserve actionable startup diagnostics.
  *   [2] Project tray/headless status through the CLI.
  *   [3] Wait through starting and mounted-before-openable races.
  *   [4] Report stop success only after asynchronous teardown releases the socket.
@@ -17,7 +19,8 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { IpcServer } from "../src/daemon/ipc-server.js";
 import { readCliVersion } from "../src/cli/package-version.js";
-import { setHomeOverride, socketPath } from "../src/shared/paths.js";
+import { appDir, daemonLogPath, setHomeOverride, socketPath } from "../src/shared/paths.js";
+import { socketAcceptsConnections } from "../src/shared/socket-liveness.js";
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(import.meta.dirname, "..");
@@ -173,6 +176,34 @@ describe("CLI daemon lifecycle", () => {
       await daemon.stop();
     }
   });
+
+  it("records a strict Registry startup failure before the detached daemon exits", async () => {
+    const home = await createTemporaryHome();
+    setHomeOverride(home);
+    fs.mkdirSync(appDir(), { recursive: true });
+    const registryFile = path.join(appDir(), "workspaces.json");
+    const registrySource = JSON.stringify({ activeId: "~", workspaces: [] });
+    fs.writeFileSync(registryFile, registrySource, "utf8");
+
+    let failure: unknown = null;
+    try {
+      await runCli(home, ["start"]);
+    } catch (error) {
+      failure = error;
+    }
+
+    if (!isCliExecutionFailure(failure)) {
+      throw new Error(`Expected CLI execution to fail, received: ${String(failure)}`);
+    }
+    expect(failure.code).toBe(1);
+    expect(failure.stderr).toContain(daemonLogPath());
+    expect(await fs.promises.readFile(daemonLogPath(), "utf8")).toContain(
+      "Invalid workspace registry",
+    );
+    expect(await fs.promises.readFile(registryFile, "utf8")).toBe(registrySource);
+    expect(await socketAcceptsConnections(socketPath(), 50)).toBe(false);
+    if (process.platform !== "win32") expect(fs.existsSync(socketPath())).toBe(false);
+  }, 15_000);
 });
 
 function createDaemon(status: {
@@ -273,4 +304,20 @@ void main();
 `;
   await fs.promises.writeFile(entry, source, "utf8");
   return entry;
+}
+
+interface CliExecutionFailure {
+  code: number;
+  stderr: string;
+}
+
+function isCliExecutionFailure(value: unknown): value is CliExecutionFailure {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "code" in value &&
+    typeof value.code === "number" &&
+    "stderr" in value &&
+    typeof value.stderr === "string"
+  );
 }

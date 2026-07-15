@@ -1,9 +1,11 @@
 /**
- * User input [2026-07-14]: "live socket 不夺锁、stale socket 仅探活失败清理一次；stop 失败语义诚实。"
+ * User input [2026-07-14]: "参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)"
+ * Architecture decision [2026-07-14]: live sockets retain ownership, stale
+ * sockets require a failed liveness probe, and stop acknowledgement is truthful.
  *
  * Orthogonal intents:
  *   [1] Prove bind-first ownership never removes a live socket and retries stale cleanup once.
- *   [2] Prove stop preparation can fail before acknowledgement and teardown starts after it.
+ *   [2] Prove stop acknowledgement ordering and bounded connection teardown.
  *   [3] Prove oversized wire input receives a stable protocol rejection.
  */
 import fs from "node:fs";
@@ -107,6 +109,20 @@ describe("IPC stop lifecycle", () => {
     await expect(request({ type: "stop" })).resolves.toEqual({ ok: true });
     await expect(waitForSocketRelease()).resolves.toBe(true);
     expect(teardownStarted).toBe(true);
+  });
+
+  it("force-closes an idle client after the graceful shutdown window", async () => {
+    await useTemporaryHome();
+    const server = trackServer(createServer());
+    expect(await server.start()).toBe(true);
+    const client = await connectIdleClient();
+
+    const stopping = server.stop({ graceMs: 20 });
+    const completedInTime = await settlesWithin(stopping, 250);
+    client.destroy();
+    await stopping;
+
+    expect(completedInTime).toBe(true);
   });
 
   it("rejects a client using an incompatible protocol version", async () => {
@@ -219,4 +235,24 @@ async function waitForSocketRelease(maxMs = 2_000): Promise<boolean> {
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
   return false;
+}
+
+function connectIdleClient(): Promise<net.Socket> {
+  return new Promise<net.Socket>((resolve, reject) => {
+    const socket = net.createConnection({ path: socketPath(), allowHalfOpen: true });
+    socket.once("connect", () => resolve(socket));
+    socket.once("error", reject);
+  });
+}
+
+async function settlesWithin(promise: Promise<void>, maxMs: number): Promise<boolean> {
+  let timeout: NodeJS.Timeout | undefined;
+  const result = await Promise.race([
+    promise.then(() => true),
+    new Promise<false>((resolve) => {
+      timeout = setTimeout(() => resolve(false), maxMs);
+    }),
+  ]);
+  if (timeout) clearTimeout(timeout);
+  return result;
 }

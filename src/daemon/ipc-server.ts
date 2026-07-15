@@ -4,7 +4,7 @@
  * 1. 先 bind，仅清理已确认失活的 Unix socket。
  * 2. 分发前校验带版本的客户端协议。
  * 3. 每个连接只分发一个 framed request。
- * 4. 先确认 shutdown，再执行进程回收。
+ * 4. 先确认 shutdown，再有界回收所有 CLI 连接。
  * 妥协声明：socket bind、协议分发与 stop acknowledgement 必须共享同一
  * server 生命周期；拆分会引入竞态，领域处理已下沉到 daemon services。
  */
@@ -37,9 +37,16 @@ export interface IpcServerHandlers {
   onOpen: () => Promise<void>;
 }
 
+/** 非协作 IPC 客户端被强制断开前的宽限期。 */
+export interface IpcStopOptions {
+  graceMs?: number;
+}
+
 /** 持有本地单实例 CLI socket，并为每个连接分发一个带版本请求。 */
 export class IpcServer {
   private server?: net.Server;
+  private stopPromise?: Promise<void>;
+  private readonly connections = new Set<net.Socket>();
 
   constructor(private readonly handlers: IpcServerHandlers) {}
 
@@ -51,22 +58,50 @@ export class IpcServer {
     const server = await this.bindSocket(true);
     if (!server) return false;
     this.server = server;
+    this.stopPromise = undefined;
     return true;
   }
 
   /** 停止接受新 CLI 连接并释放 socket 路径。 */
-  async stop(): Promise<void> {
-    if (!this.server) return;
+  stop(options: IpcStopOptions = {}): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    if (!this.server) return Promise.resolve();
     const server = this.server;
-    await new Promise<void>((resolve) => server.close(() => resolve()));
     this.server = undefined;
+    const graceMs = Math.max(0, options.graceMs ?? 1_000);
+    this.stopPromise = new Promise<void>((resolve, reject) => {
+      const forceClose = (): void => {
+        for (const connection of this.connections) connection.destroy();
+      };
+      const timer = setTimeout(forceClose, graceMs);
+      timer.unref();
+      try {
+        server.close((error) => {
+          clearTimeout(timer);
+          this.connections.clear();
+          if (error) reject(error);
+          else resolve();
+        });
+        for (const connection of this.connections) connection.end();
+        if (graceMs === 0) forceClose();
+      } catch (error) {
+        clearTimeout(timer);
+        forceClose();
+        reject(error);
+      }
+    });
+    return this.stopPromise;
   }
 
   private async bindSocket(allowStaleCleanup: boolean): Promise<net.Server | null> {
     const socket = socketPath();
     const result = await new Promise<{ server?: net.Server; error?: NodeJS.ErrnoException }>(
       (resolve) => {
-        const server = net.createServer((connection) => void this.handle(connection));
+        const server = net.createServer((connection) => {
+          this.connections.add(connection);
+          connection.once("close", () => this.connections.delete(connection));
+          void this.handle(connection);
+        });
         server.once("error", (error: NodeJS.ErrnoException) => resolve({ error }));
         server.listen(socket, () => resolve({ server }));
       },

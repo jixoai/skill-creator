@@ -93,7 +93,7 @@ dist/
 | `start`   | 启动 daemon，等待 WebUI 与 tray 完成挂载，然后显示窗口；版本不同时先替换旧 daemon |
 | `open`    | 显示并聚焦现有 tray 窗口，重复调用不会切换为隐藏                                  |
 | `status`  | 输出 PID、版本、HTTP 端口、tray 状态和可用的 tray 错误                            |
-| `stop`    | 请求 daemon 优雅退出，并等待 IPC endpoint 释放                                    |
+| `stop`    | 请求 daemon 退出；grace deadline 后强制回收非协作连接，并等待 IPC endpoint 释放   |
 | `version` | 输出包版本                                                                        |
 | `help`    | 输出命令帮助                                                                      |
 
@@ -120,10 +120,11 @@ src/daemon/ipc-server.ts ---------------------- single-instance owner
     |       `-- TrayHost -> OpenTray ext-webview
     |
     +--> src/daemon/rpc-router.ts
-            |-- skill-service.ts ------------ ccski adapter
-            |-- workspace-service.ts -------- registry/scope resolver
-            |-- creator-service.ts ---------- revision-safe document writes
-            `-- repository-service.ts ------- pinned clone sessions
+            `--> domain.ts ------------------ one daemon composition root
+                    |-- workspace-registry/ -- persisted truth + dynamic projection
+                    |-- skill-service.ts ----- ccski adapter
+                    |-- creator-service.ts --- revision-safe document writes
+                    `-- repository-service.ts  pinned clone lifecycle
 
 src/shared/rpc-contract.ts
     ^                    ^
@@ -165,10 +166,12 @@ Git source + ref --> temporary clone --> commit SHA --> repo_<session>
 - daemon 每次启动生成 32-byte Web token。token 经 URL fragment 交给 WebUI，捕获到当前标签页的 `sessionStorage` 后从地址栏移除；`/ws/rpc` 在升级前校验 token。
 - IPC endpoint 是单例锁。macOS 上 runtime 目录权限为 `0700`、socket 为 `0600`；Windows 使用 `\\.\pipe\skill-creator-sock`。
 - Workspace、Skill、Repository Session 与 Remote Skill 均由 server 生成或验证 opaque ID。除 `workspace.add` 的显式导入和 `repository.scan` 的 Git source 外，mutation 不接受调用方输出路径。
+- daemon 生命周期内只有一个内存 Workspace Registry。持久路径必须绝对且规范化，`ws_*` 必须与路径 digest 相符；导入、移除和切换先原子提交完整 next state，再替换内存状态。`skillCount` 与可用性只在读取时派生，永不写入 registry。
 - Creator 新建只允许已导入 Workspace 的直接子目录；编辑和删除必须仍在 Workspace 内。文档使用临时文件加 rename 原子落盘，update/delete 以 SHA-256 revision 拒绝陈旧操作。
-- Repository 扫描先 clone，再解析 HEAD commit。预览和安装复用同一临时快照与 session ID，避免扫描后仓库变化导致内容漂移。
+- Repository 扫描先 clone，再用 Zod 收窄 HEAD commit。预览和安装复用同一临时快照与 session ID；淘汰立即拒绝新操作，但会让已接受的安装持有快照直到完成。daemon stop 会终止 pending clone，且 late scan 不得重新登记 session。
 - Repository 安装不能指向 `~`；目标必须是存在且可写的 Imported Workspace。
-- 当前 v2 registry 没有旧 schema 的迁移层。格式不合法时直接报错，由发布阶段决定迁移方式。
+- daemon 在 tray mount 前发布 stop coordinator 与 signal listeners。stop 先关闭 HTTP/WebSocket 与 IPC admission，再并行回收 Repository、tray 与连接；mount 期间迟到的 native handles 会被立即销毁，非协作 socket 在 grace deadline 后强制关闭，并发 stop 合并为同一完成态。
+- 当前 v2 registry 没有旧 schema 的迁移层。格式不合法时拒绝启动、保留原文件，并把具体原因写入当前 home 下的 `.skill-creator/logs/daemon.log`；迁移由发布阶段决定。
 
 ## 状态路径
 

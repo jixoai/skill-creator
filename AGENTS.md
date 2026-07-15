@@ -1,7 +1,8 @@
 <!--
-文件意图（2026-07-14）
+文件意图（2026-07-15）
 用户原始需求摘录：
 - 「现在你将作为总负责人，接手这个项目，研究 claude-code 的代码……进行大胆的开发。」
+- 「按照你自己的节奏去推进开发迭代。」
 - 「Chat 针对人（澄清意图），Spec 针对意图（形成规范），Style 针对代码（约束产出）。」
 - 「单个物理文件的正交意图上限为 5 个。达到 3 个即需触发警报，考虑重构拆分。」
 正交意图：1. 固化产品真相；2. 固化模块与安全边界；3. 固化工程风格；4. 固化验证标准；5. 固化演进与无兼容策略。
@@ -10,7 +11,7 @@
 
 # AGENTS.md
 
-本文件是 2026-07-14 架构诊断后的覆盖性事实源。每次架构诊断都应根据真实代码覆盖更新本文件，不追加失效历史；领域词汇同步到 `i18n.zh.md`。
+本文件是 2026-07-15 架构诊断后的覆盖性事实源。每次架构诊断都应根据真实代码覆盖更新本文件，不追加失效历史；领域词汇同步到 `i18n.zh.md`。
 
 ## 1. 决策闭环
 
@@ -89,7 +90,7 @@ CLI              |                               |       Filesystem
  |               |  IPC Server  -> lifecycle     |          ^
  +-- framed IPC -+                status          |          |
                  |                               |          |
-                 |  HTTP 127.0.0.1               |     service layer
+                 |  HTTP 127.0.0.1               |     domain modules
 Tray WebUI        |    |                          |          ^
  |               |    +-- static SPA             |          |
  +-- oRPC/WS -----+    `-- /ws/rpc -> RPC router -+----------+
@@ -123,6 +124,9 @@ CLI start
    |                         v
    |                    HTTP mounted
    |                         |
+   |                         v
+   |              publish stop coordinator + signal listeners
+   |                         |
    |              +----------+----------+
    |              |                     |
    |              v                     v
@@ -135,7 +139,15 @@ CLI start
                 ready
 
 version mismatch --> stop old --> wait endpoint release --> spawn current
-stop request      --> flush acknowledgement --> destroy tray --> stop HTTP/IPC
+
+stop request --> flush acknowledgement --> close HTTP/IPC admission
+                                      |--> Repository terminal gate + abort scans
+                                      |--> destroy tray
+                                      `--> grace deadline -> force sockets
+                                                        -> inactive -> exit once
+
+stop during tray mount --> bounded teardown --> late native handles arrive
+                                                `--> destroy; never retain
 ```
 
 `open` 是 show/focus，不是 visibility toggle。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
@@ -147,21 +159,32 @@ WebUI 的 route load 必须绑定当前 effect/连接代次；HMR、路由变化
 ### 3.2 Workspace 数据流
 
 ```text
-workspace.add(path, label?)
+daemon boot -> strict schemaVersion=1 load -> one in-memory Registry
+              absolute + normalized path
+              id = digest(path), unique IDs/paths, registered activeId
+                                            |
+workspace.add(path, label?)                  |
+          |                                  |
+          v                                  |
+path.resolve -> realpath -> ws_<digest> -----+
           |
           v
-path.resolve -> realpath -> isDirectory
-          |
-          v
-ws_<sha256-prefix> + canonical path -> workspaces.json
-          |
-          +--> idempotent when same canonical path already exists
+pure next state -> atomic workspaces.json commit -> replace memory state
 
-subsequent operation
-workspaceId + skillId -> registry -> allowed root -> containment -> action
+workspace.list
+     |
+     +--> immutable state snapshot -> availability + ccski counts
+     |                                      |
+     |                         registry revision changed?
+     |                              | yes          | no
+     |                              `--- retry     `--> UI projection
+     |
+     `--> never writes observations back to registry
+
+workspaceId + skillId -> resolve scope -> allowed root -> containment -> action
 ```
 
-`~` 是保留 Workspace ID，不是由 WebUI 展开的文件系统路径。Imported Workspace ID 使用 canonical path 的 digest，Skill ID 使用 server 发现到的 canonical skill path digest。
+`~` 是保留 Workspace ID，不是由 WebUI 展开的文件系统路径。Imported Workspace ID 使用 canonical path 的 digest，Skill ID 使用 server 发现到的 canonical skill path digest。`skillCount` 和 `available` 是动态观察值，不属于持久态；同一 daemon 内不得出现第二个 Registry 实例。
 
 ### 3.3 Creator 状态机
 
@@ -205,7 +228,7 @@ repo_<opaque-session> -- owns --> clone directory + rsk_<opaque-id> map
           |
      +----+-------------------+
      |                        |
- preview                  dry-run/install
+ preview                  dry-run/install -- acquire active operation reference
      |                        |
  same SKILL.md           same clone + selected IDs
                               |
@@ -213,9 +236,16 @@ repo_<opaque-session> -- owns --> clone directory + rsk_<opaque-id> map
                       Imported Workspace root
 
 session missing/evicted --> reject --> scan again
+
+session eviction --> revoke session capability
+                          |-- no active operation --> delete clone
+                          `-- active operation ----> retire clone --> delete on release
+
+daemon stop --> terminal gate --> abort pending clone --> reject late retain
+                                                `-----> delete unowned snapshot
 ```
 
-扫描会话最多保留有限数量，淘汰时删除临时 clone。重复 skill name、非法 frontmatter 或不安全目录名必须在安装前变为不可安装状态。
+扫描会话最多保留有限数量。淘汰先撤销 session capability；正在使用的 clone 必须等已接受操作释放后再删除。重复 skill name、非法 frontmatter 或不安全目录名必须在安装前变为不可安装状态。
 
 ## 4. 目录与模块意图
 
@@ -242,14 +272,19 @@ src/
 |
 |-- daemon/
 |   |-- index.ts -------------- [4] lock / HTTP / tray / teardown
-|   |-- rpc-router.ts ---------- [4] skill / workspace+creator / repository / status handlers
-|   |-- skill-service.ts ------- [4] discovery / identity+detail / toggle / validate
-|   |-- workspace-service.ts --- [3] registry / scope resolution / counts
+|   |-- domain.ts ------------- [2] domain module composition / dependency wiring
+|   |-- rpc-router.ts ---------- [5] skill / workspace+creator / repository / status / error boundary
+|   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
 |   |-- creator-service.ts ----- [3] create / round-trip update / revision delete
-|   |-- repository-service.ts -- [3] pinned clone / inspect / preview-install
+|   |-- repository-service.ts -- [3] pinned lifecycle / inspect / preview-install
+|   |-- workspace-registry/
+|   |   |-- index.ts ---------- [3] registry truth / scope resolution / retry-consistent list
+|   |   |-- state.ts ---------- [2] strict persisted state / pure transitions
+|   |   |-- persistence.ts ---- [2] strict load / atomic commit
+|   |   `-- projection.ts ----- [2] dynamic counts / availability projection
 |   |-- path-safety.ts --------- [3] identity / containment / atomic revision write
-|   |-- web-server.ts ---------- [3] SPA / auth upgrade / oRPC host
-|   |-- ipc-server.ts ---------- [4] lock / protocol / dispatch / acknowledged stop
+|   |-- web-server.ts ---------- [3] SPA / auth upgrade / bounded oRPC lifecycle
+|   |-- ipc-server.ts ---------- [4] lock / protocol / dispatch / bounded acknowledged stop
 |   `-- tray-host.ts ----------- native capability adapter
 |
 `-- webui/
@@ -264,12 +299,12 @@ src/
 ### 4.1 依赖方向
 
 ```text
-shared contracts <----- daemon services <----- daemon entry
-       ^
-       +-------------- WebUI typed client
+shared contracts <----- domain modules <----- domain composition <----- transports <----- entry
+       ^                       |
+       +-- WebUI typed client  `--> path safety / ccski / Git / registry persistence
 
 route -> domain store -> RPC client -> shared contract
-router -> service -> path safety / ccski / Git
+router -> injected daemon domain -> module interface
 ```
 
 禁止：
@@ -278,7 +313,7 @@ router -> service -> path safety / ccski / Git
 WebUI -> node:fs
 WebUI -> daemon implementation import
 route -> handwritten transport payload mirror
-service -> UI store
+domain module -> UI store
 shared contract -> native/runtime-only dependency
 ```
 
@@ -289,6 +324,7 @@ UNTRUSTED                         VALIDATION / AUTHORITY                 EFFECT
 
 WebSocket upgrade token -------> exact startup token -----------------> oRPC
 RPC JSON ----------------------> shared Zod schema -------------------> router
+workspaces.json ---------------> strict schema + path/ID identity ----> registry state
 workspace import path ---------> realpath + directory ----------------> registry
 workspaceId / skillId ---------> server registry + opaque ID --------> scoped root
 Creator directoryName ---------> lowercase safe name + direct child -> SKILL.md
@@ -307,8 +343,10 @@ IPC bytes ---------------------> frame size + schema + protocol ------> CLI comm
 4. 文件 mutation 必须由 server-owned Workspace root 派生，不能信任调用方组合的路径。
 5. 创建目标必须是 Workspace direct child；编辑、删除、预览必须通过 containment check。
 6. 文档写入使用同目录临时文件加 rename；并发编辑由 revision 拒绝，不做 last-write-wins。
-7. Repository preview/install 必须绑定同一个 commit 和 session；session 失效就重新 scan。
+7. Repository preview/install 必须绑定同一个 commit 和 session；session 淘汰立即拒绝新操作，但不得删除已接受安装仍在使用的 clone。
 8. 启用/禁用发生冲突时返回 conflict，不以破坏性 force 掩盖目标状态。
+9. Workspace Registry mutation 必须先原子持久化完整 next state，成功后才替换内存真相；动态计数不得写回持久态。
+10. daemon stop coordinator 与 signal listeners 必须先于 tray mount 发布；stop 先关闭 transport admission，再关停 domain，迟到的 native handles 不得重新挂载；非协作连接在 grace deadline 后强制回收，所有 stop 来源共享完成态与退出意图。
 
 ## 6. 文件意图法
 

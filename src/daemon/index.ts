@@ -14,8 +14,8 @@ import { randomBytes } from "node:crypto";
 import { ensureAppDirs } from "../shared/paths.js";
 import { WEB_TOKEN_PLACEHOLDER } from "../shared/index.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
+import { createDaemonDomain, type DaemonDomain } from "./domain.js";
 import { IpcServer } from "./ipc-server.js";
-import * as repositoryService from "./repository-service.js";
 import { WebServer } from "./web-server.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
 import { log } from "./log.js";
@@ -33,6 +33,8 @@ export interface DaemonOptions {
   webviewUrl?: string;
   /** Deterministic token for isolated dev/browser verification only. */
   webToken?: string;
+  /** Native tray mount adapter; replace only at the daemon lifecycle test boundary. */
+  trayMounter?: typeof mountTray;
   exitProcess?: (code: number) => void;
 }
 
@@ -48,6 +50,35 @@ export interface DaemonHandles {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SHUTDOWN_GRACE_MS = 1_000;
+const SHUTDOWN_TASK_TIMEOUT_MS = 2_000;
+
+async function settleTeardown(label: string, action: () => void | Promise<void>): Promise<void> {
+  let task: Promise<void>;
+  try {
+    task = Promise.resolve(action());
+  } catch (error) {
+    log(`${label} teardown: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      task,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`timed out after ${SHUTDOWN_TASK_TIMEOUT_MS}ms`)),
+          SHUTDOWN_TASK_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } catch (error) {
+    log(`${label} teardown: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 /** Resolve the directory holding the built SvelteKit SPA. */
 function resolveWebuiDir(override?: string): string {
@@ -95,7 +126,11 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     tray: opts.withTray === false ? "headless" : "starting",
   };
 
-  let stopping = false;
+  let stopPromise: Promise<void> | null = null;
+  let stopCompleted = false;
+  let exitRequested = false;
+  let exitInvoked = false;
+  let removeSignalHandlers = (): void => {};
   type StopDaemon = (opts?: { exit?: boolean }) => Promise<void>;
   let resolveStopReady: (stop: StopDaemon) => void = () => {};
   const stopReady = new Promise<StopDaemon>((resolve) => {
@@ -129,19 +164,80 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     return null;
   }
 
-  const web = new WebServer({
-    webToken,
-    webuiDir: resolveWebuiDir(opts.webuiDir),
-    status: () => status,
-  });
-  const port = await web.start(opts.port ?? 0);
+  let domain: DaemonDomain;
+  try {
+    domain = createDaemonDomain();
+  } catch (error) {
+    await ipc.stop();
+    throw error;
+  }
+
+  let web: WebServer;
+  let port: number;
+  try {
+    web = new WebServer({
+      webToken,
+      webuiDir: resolveWebuiDir(opts.webuiDir),
+      status: () => status,
+      domain,
+    });
+    port = await web.start(opts.port ?? 0);
+  } catch (error) {
+    await domain.repository.dispose();
+    await ipc.stop();
+    throw error;
+  }
   status.port = port;
   log(`web server listening on 127.0.0.1:${port}`);
+
+  const performStop = async (): Promise<void> => {
+    log("daemon stop requested");
+    try {
+      const tasks = [
+        settleTeardown("web server", () => web.stop({ graceMs: SHUTDOWN_GRACE_MS })),
+        settleTeardown("IPC server", () => ipc.stop({ graceMs: SHUTDOWN_GRACE_MS })),
+        settleTeardown("repository sessions", () => domain.repository.dispose()),
+        settleTeardown("tray placement", () => handlesRef.stopPlacement()),
+        settleTeardown("tray host", async () => handlesRef.trayHost?.destroy()),
+      ];
+      await Promise.allSettled(tasks);
+    } finally {
+      removeSignalHandlers();
+      status.active = false;
+      stopCompleted = true;
+    }
+  };
+  const exitIfRequested = (): void => {
+    if (!stopCompleted || !exitRequested || exitInvoked) return;
+    exitInvoked = true;
+    (opts.exitProcess ?? process.exit)(0);
+  };
+  const stop = (stopOpts: { exit?: boolean } = {}): Promise<void> => {
+    if (stopOpts.exit) exitRequested = true;
+    stopPromise ??= performStop();
+    return stopPromise.then(exitIfRequested);
+  };
+  resolveStopReady(stop);
+
+  const onSigint = (): void => {
+    log("received SIGINT — stopping daemon");
+    void stop({ exit: true });
+  };
+  const onSigterm = (): void => {
+    log("received SIGTERM — stopping daemon");
+    void stop({ exit: true });
+  };
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
+  removeSignalHandlers = () => {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
+  };
 
   // Tray mount (best-effort). Headless when unavailable.
   if (opts.withTray !== false) {
     const url = resolveWebviewUrl(opts.webviewUrl, web.webUiUrl(port), webToken);
-    const { result, host } = await mountTray({
+    const { result, host } = await (opts.trayMounter ?? mountTray)({
       url,
       packageVersion: opts.cliVersion,
       enableDevtools: opts.enableDevtools ?? false,
@@ -150,48 +246,21 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
         await stop({ exit: true });
       },
     });
-    handlesRef.trayHost = host;
-    handlesRef.stopPlacement = result.stopPlacement;
-    status.tray = host ? "mounted" : "headless";
-    if (result.failure) {
-      status.trayError = `${result.failure.stage}: ${result.failure.cause instanceof Error ? result.failure.cause.message : String(result.failure.cause)}`;
+    if (stopPromise) {
+      await Promise.allSettled([
+        settleTeardown("late tray placement", () => result.stopPlacement()),
+        settleTeardown("late tray host", async () => host?.destroy()),
+      ]);
+    } else {
+      handlesRef.trayHost = host;
+      handlesRef.stopPlacement = result.stopPlacement;
+      status.tray = host ? "mounted" : "headless";
+      if (result.failure) {
+        status.trayError = `${result.failure.stage}: ${result.failure.cause instanceof Error ? result.failure.cause.message : String(result.failure.cause)}`;
+      }
     }
   }
-  log(`WebUI available at ${web.webUiUrlRedacted(port)}`);
-
-  const stop = async (stopOpts: { exit?: boolean } = {}): Promise<void> => {
-    if (stopping) return;
-    stopping = true;
-    const exit = stopOpts.exit ?? false;
-    log(`daemon stop requested (exit=${String(exit)})`);
-    try {
-      handlesRef.stopPlacement?.();
-      await handlesRef.trayHost?.destroy();
-    } catch (err) {
-      log(`tray teardown: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    try {
-      repositoryService.clearSessions();
-    } catch (err) {
-      log(`repository session teardown: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    await web.stop();
-    await ipc.stop();
-    status.active = false;
-    if (exit) {
-      (opts.exitProcess ?? process.exit)(0);
-    }
-  };
-  resolveStopReady(stop);
-
-  process.on("SIGINT", () => {
-    log("received SIGINT — stopping daemon");
-    void stop({ exit: true });
-  });
-  process.on("SIGTERM", () => {
-    log("received SIGTERM — stopping daemon");
-    void stop({ exit: true });
-  });
+  if (status.active) log(`WebUI available at ${web.webUiUrlRedacted(port)}`);
 
   return { web, ipc, port, webToken, status, trayHost: handlesRef.trayHost, stop };
 }

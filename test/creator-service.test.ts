@@ -1,8 +1,9 @@
 /**
  * Creator service contract tests.
  *
- * Original request [2026-07-14]: prove workspace containment, passthrough
- * frontmatter round-trips, revision conflicts, and bounded deletion.
+ * User input [2026-07-14]: "我们还需要有一个 创造、编辑 技能的路由(/creator)。二者是有机互联的"
+ * Architecture decision [2026-07-14]: verify containment, frontmatter round-trip,
+ * revision conflicts, and bounded deletion at the Creator service boundary.
  *
  * Orthogonal intents:
  *   [1] Create accepts only safe direct-child directories.
@@ -13,35 +14,37 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import * as creatorService from "../src/daemon/creator-service.js";
-import * as workspaceService from "../src/daemon/workspace-service.js";
+import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
+import type { ImportedWorkspace } from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
 let sandbox = "";
+let domain: DaemonDomain;
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-creator-test-"));
   const isolatedHome = path.join(sandbox, "state");
   process.env.SKILL_CREATOR_HOME = isolatedHome;
   setHomeOverride(isolatedHome);
+  domain = createDaemonDomain();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await domain.repository.dispose();
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousHome;
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
-function importWorkspace(name: string): ReturnType<typeof workspaceService.add> {
+function importWorkspace(name: string): ImportedWorkspace {
   const directory = path.join(sandbox, name);
   fs.mkdirSync(directory, { recursive: true });
-  return workspaceService.add(directory, name);
+  return domain.workspaces.import(directory, name);
 }
 
-function directoryPath(workspace: ReturnType<typeof workspaceService.add>): string {
-  if (workspace.path === null) throw new Error("Expected an imported directory workspace.");
+function directoryPath(workspace: ImportedWorkspace): string {
   return workspace.path;
 }
 
@@ -51,7 +54,7 @@ describe("creator service", () => {
     const escaped = path.join(sandbox, "escaped");
 
     await expect(
-      creatorService.save({
+      domain.creator.save({
         mode: "create",
         workspaceId: workspace.id,
         directoryName: "../escaped",
@@ -65,7 +68,7 @@ describe("creator service", () => {
 
   it("round-trips additional frontmatter through create, load, and update", async () => {
     const workspace = importWorkspace("round-trip-root");
-    const created = await creatorService.save({
+    const created = await domain.creator.save({
       mode: "create",
       workspaceId: workspace.id,
       directoryName: "release-guide",
@@ -78,7 +81,7 @@ describe("creator service", () => {
       body: "# Release\n\nShip the reviewed artifact.\n",
     });
 
-    const loaded = await creatorService.load(workspace.id, created.document.skillId);
+    const loaded = await domain.creator.load(workspace.id, created.document.skillId);
     expect(loaded.frontmatter).toEqual({
       name: "release-guide",
       description: "Guide a production release.",
@@ -87,7 +90,7 @@ describe("creator service", () => {
     });
     expect(loaded.body).toBe("# Release\n\nShip the reviewed artifact.\n");
 
-    const updated = await creatorService.save({
+    const updated = await domain.creator.save({
       mode: "update",
       workspaceId: workspace.id,
       skillId: loaded.skillId,
@@ -110,7 +113,7 @@ describe("creator service", () => {
 
   it("rejects an update based on a stale revision", async () => {
     const workspace = importWorkspace("revision-root");
-    const created = await creatorService.save({
+    const created = await domain.creator.save({
       mode: "create",
       workspaceId: workspace.id,
       directoryName: "incident-guide",
@@ -131,7 +134,7 @@ describe("creator service", () => {
     fs.writeFileSync(file, concurrentContent, "utf8");
 
     await expect(
-      creatorService.save({
+      domain.creator.save({
         mode: "update",
         workspaceId: workspace.id,
         skillId: created.document.skillId,
@@ -147,7 +150,7 @@ describe("creator service", () => {
   it("rejects deleting a skill through a different workspace boundary", async () => {
     const sourceWorkspace = importWorkspace("source-root");
     const otherWorkspace = importWorkspace("other-root");
-    const created = await creatorService.save({
+    const created = await domain.creator.save({
       mode: "create",
       workspaceId: sourceWorkspace.id,
       directoryName: "protected-skill",
@@ -157,7 +160,7 @@ describe("creator service", () => {
     const sourceDirectory = path.join(directoryPath(sourceWorkspace), "protected-skill");
 
     await expect(
-      creatorService.remove(otherWorkspace.id, created.document.skillId, created.document.revision),
+      domain.creator.remove(otherWorkspace.id, created.document.skillId, created.document.revision),
     ).rejects.toThrow("Skill not found in workspace");
 
     expect(fs.existsSync(sourceDirectory)).toBe(true);

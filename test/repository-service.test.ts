@@ -1,8 +1,9 @@
 /**
  * Repository service contract tests.
  *
- * Original request [2026-07-14]: exercise a real local Git repository through
- * scan, preview, pinned-session install/dry-run, and invalid-skill rejection.
+ * User input [2026-07-14]: "我们还需要一个 `/repository/`，来支持远程仓库预览 skills 并安装 它们"
+ * Architecture decision [2026-07-14]: exercise scan, preview, pinned install,
+ * dry-run, and invalid-skill rejection against a real local Git repository.
  *
  * Orthogonal intents:
  *   [1] A scan session pins preview and install to one immutable commit.
@@ -15,19 +16,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import * as repositoryService from "../src/daemon/repository-service.js";
-import * as workspaceService from "../src/daemon/workspace-service.js";
+import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
+import type { ImportedWorkspace } from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
 let sandbox = "";
 let repository = "";
+let domain: DaemonDomain;
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-repository-test-"));
   const isolatedHome = path.join(sandbox, "state");
   process.env.SKILL_CREATOR_HOME = isolatedHome;
   setHomeOverride(isolatedHome);
+  domain = createDaemonDomain();
   repository = path.join(sandbox, "source-repository");
   fs.mkdirSync(repository, { recursive: true });
   git("init", "--quiet");
@@ -35,8 +38,8 @@ beforeEach(() => {
   git("config", "user.email", "skill-creator-test@example.invalid");
 });
 
-afterEach(() => {
-  repositoryService.clearSessions();
+afterEach(async () => {
+  await domain.repository.dispose();
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousHome;
@@ -63,14 +66,13 @@ function commit(message: string): string {
   return git("rev-parse", "HEAD");
 }
 
-function importDestination(): ReturnType<typeof workspaceService.add> {
+function importDestination(): ImportedWorkspace {
   const destination = path.join(sandbox, "destination");
   fs.mkdirSync(destination, { recursive: true });
-  return workspaceService.add(destination, "Destination");
+  return domain.workspaces.import(destination, "Destination");
 }
 
-function directoryPath(workspace: ReturnType<typeof workspaceService.add>): string {
-  if (workspace.path === null) throw new Error("Expected an imported directory workspace.");
+function directoryPath(workspace: ImportedWorkspace): string {
   return workspace.path;
 }
 
@@ -86,16 +88,16 @@ describe("repository service", () => {
     const destination = importDestination();
     const destinationPath = directoryPath(destination);
 
-    const scan = await repositoryService.scan(repository);
+    const scan = await domain.repository.scan(repository);
     const selected = scan.skills.find((skill) => skill.name === "reviewed");
     expect(scan.commit).toBe(scannedCommit);
     expect(selected).toMatchObject({ installable: true, relativePath: "skills/reviewed" });
     if (!selected) throw new Error("Expected the reviewed skill in the scan result.");
 
-    const initialPreview = await repositoryService.preview(scan.sessionId, selected.id);
+    const initialPreview = await domain.repository.preview(scan.sessionId, selected.id);
     expect(initialPreview.content).toContain("version one");
 
-    const dryRun = await repositoryService.install({
+    const dryRun = await domain.repository.install({
       sessionId: scan.sessionId,
       skillIds: [selected.id],
       workspaceId: destination.id,
@@ -117,11 +119,11 @@ describe("repository service", () => {
     );
     commit("change reviewed skill after scan");
 
-    const pinnedPreview = await repositoryService.preview(scan.sessionId, selected.id);
+    const pinnedPreview = await domain.repository.preview(scan.sessionId, selected.id);
     expect(pinnedPreview.content).toContain("version one");
     expect(pinnedPreview.content).not.toContain("version two");
 
-    const installed = await repositoryService.install({
+    const installed = await domain.repository.install({
       sessionId: scan.sessionId,
       skillIds: [selected.id],
       workspaceId: destination.id,
@@ -141,9 +143,9 @@ describe("repository service", () => {
     commit("add two skills");
     const destination = importDestination();
     const destinationPath = directoryPath(destination);
-    const scan = await repositoryService.scan(repository);
+    const scan = await domain.repository.scan(repository);
 
-    const dryRun = await repositoryService.install({
+    const dryRun = await domain.repository.install({
       sessionId: scan.sessionId,
       skillIds: scan.skills.map((skill) => skill.id),
       workspaceId: destination.id,
@@ -167,13 +169,13 @@ describe("repository service", () => {
     commit("add unsafe skill");
     const destination = importDestination();
     const destinationPath = directoryPath(destination);
-    const scan = await repositoryService.scan(repository);
+    const scan = await domain.repository.scan(repository);
     const unsafe = scan.skills.find((skill) => skill.relativePath === "skills/unsafe");
     expect(unsafe?.installable).toBe(false);
     if (!unsafe) throw new Error("Expected the unsafe skill in the scan result.");
 
     await expect(
-      repositoryService.install({
+      domain.repository.install({
         sessionId: scan.sessionId,
         skillIds: [unsafe.id],
         workspaceId: destination.id,
@@ -187,10 +189,10 @@ describe("repository service", () => {
     commit("add known skill");
     const destination = importDestination();
     const destinationPath = directoryPath(destination);
-    const scan = await repositoryService.scan(repository);
+    const scan = await domain.repository.scan(repository);
 
     await expect(
-      repositoryService.install({
+      domain.repository.install({
         sessionId: scan.sessionId,
         skillIds: ["rsk_000000000000000000000000"],
         workspaceId: destination.id,

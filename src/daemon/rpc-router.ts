@@ -1,10 +1,9 @@
 /**
  * Daemon implementation of the shared oRPC contract.
  *
- * User intent [2026-07-14]: every WebUI action resolves opaque IDs through a
- * server-owned workspace or repository session.
- * Original error request [2026-07-14]: safely expose typed business errors and
- * keep unknown failures masked as internal errors.
+ * User input [2026-07-15]: "type-safe 就是 runtime-safe 的核心，从类型安全上杜绝线上运行程序的安全性"
+ * Architecture decisions [2026-07-14]: resolve opaque IDs through server-owned
+ * scopes, expose expected DomainErrors, and mask unknown infrastructure failures.
  *
  * Orthogonal intents:
  *   [1] Workspace-scoped skill reads and mutations.
@@ -20,14 +19,11 @@ import { implement, ORPCError } from "@orpc/server";
 import { RpcErrorDefinitions } from "../shared/contracts/errors.js";
 import { rpcContract } from "../shared/rpc-contract.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
-import * as creatorService from "./creator-service.js";
+import type { DaemonDomain } from "./domain.js";
 import { DomainError } from "./domain-error.js";
-import * as repositoryService from "./repository-service.js";
-import * as skillService from "./skill-service.js";
-import * as workspaceService from "./workspace-service.js";
 
-/** Bind domain services to the shared contract behind one error boundary. */
-export function createRpcRouter(status: () => DaemonStatus) {
+/** Bind daemon domain modules to the shared contract behind one error boundary. */
+export function createRpcRouter(status: () => DaemonStatus, domain: DaemonDomain) {
   const rpc = implement(rpcContract);
   const domainErrorBoundary = rpc.middleware(async ({ next }) => {
     try {
@@ -47,50 +43,50 @@ export function createRpcRouter(status: () => DaemonStatus) {
   return rpc.use(domainErrorBoundary).router({
     skills: {
       list: rpc.skills.list.handler(async ({ input }) => ({
-        skills: await skillService.list(input.workspaceId, input.includeDisabled ?? true),
+        skills: await domain.skills.list(input.workspaceId, input.includeDisabled ?? true),
       })),
       info: rpc.skills.info.handler(async ({ input }) =>
-        skillService.info(input.workspaceId, input.skillId),
+        domain.skills.info(input.workspaceId, input.skillId),
       ),
       toggle: rpc.skills.toggle.handler(async ({ input }) =>
-        skillService.toggle(input.workspaceId, input.skillIds, input.mode),
+        domain.skills.toggle(input.workspaceId, input.skillIds, input.mode),
       ),
       validate: rpc.skills.validate.handler(async ({ input }) =>
-        skillService.validate(input.workspaceId, input.skillId),
+        domain.skills.validate(input.workspaceId, input.skillId),
       ),
     },
     workspace: {
       list: rpc.workspace.list.handler(async () => ({
-        workspaces: await workspaceService.listWithFreshCounts(),
+        workspaces: await domain.workspaces.list(),
       })),
       add: rpc.workspace.add.handler(({ input }) => ({
-        workspace: workspaceService.add(input.path, input.label),
+        workspace: domain.workspaces.import(input.path, input.label),
       })),
       remove: rpc.workspace.remove.handler(({ input }) => ({
-        activeId: workspaceService.remove(input.id),
+        activeId: domain.workspaces.forget(input.id),
       })),
       setActive: rpc.workspace.setActive.handler(({ input }) => ({
-        activeId: workspaceService.setActive(input.id),
+        activeId: domain.workspaces.activate(input.id),
       })),
     },
     creator: {
-      save: rpc.creator.save.handler(({ input }) => creatorService.save(input)),
+      save: rpc.creator.save.handler(({ input }) => domain.creator.save(input)),
       load: rpc.creator.load.handler(({ input }) =>
-        creatorService.load(input.workspaceId, input.skillId),
+        domain.creator.load(input.workspaceId, input.skillId),
       ),
       remove: rpc.creator.remove.handler(async ({ input }) => {
-        await creatorService.remove(input.workspaceId, input.skillId, input.expectedRevision);
+        await domain.creator.remove(input.workspaceId, input.skillId, input.expectedRevision);
         return { removed: true as const };
       }),
     },
     repository: {
       scan: rpc.repository.scan.handler(({ input }) =>
-        repositoryService.scan(input.source, input.ref),
+        domain.repository.scan(input.source, input.ref),
       ),
       preview: rpc.repository.preview.handler(({ input }) =>
-        repositoryService.preview(input.sessionId, input.skillId),
+        domain.repository.preview(input.sessionId, input.skillId),
       ),
-      install: rpc.repository.install.handler(({ input }) => repositoryService.install(input)),
+      install: rpc.repository.install.handler(({ input }) => domain.repository.install(input)),
     },
     daemon: {
       status: rpc.daemon.status.handler(() => status()),

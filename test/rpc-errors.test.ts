@@ -1,8 +1,9 @@
 /**
  * RPC domain-error boundary tests.
  *
- * Original request [2026-07-14]: "safe, strongly typed WebUI business errors;
- * Creator revision conflicts must not degrade to Internal server error."
+ * User input [2026-07-15]: "type-safe 就是 runtime-safe 的核心，从类型安全上杜绝线上运行程序的安全性"
+ * Architecture decision [2026-07-14]: expected domain failures cross RPC as
+ * typed business errors while unknown infrastructure failures remain masked.
  *
  * Orthogonal intents:
  *   [1] Observe defined business errors through the public router client.
@@ -14,9 +15,11 @@ import os from "node:os";
 import path from "node:path";
 import { ORPCError, createActionableClient, createRouterClient } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { DomainError } from "../src/daemon/domain-error.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
-import { appDir, setHomeOverride } from "../src/shared/paths.js";
+import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
+import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
 let sandbox = "";
@@ -35,16 +38,19 @@ afterEach(() => {
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
-function createClient() {
+function createClient(domain: DaemonDomain = createDaemonDomain()) {
   return createRouterClient(
-    createRpcRouter(() => ({
-      active: true,
-      pid: process.pid,
-      version: "test",
-      port: 0,
-      startedAt: 0,
-      tray: "headless",
-    })),
+    createRpcRouter(
+      () => ({
+        active: true,
+        pid: process.pid,
+        version: "test",
+        port: 0,
+        startedAt: 0,
+        tray: "headless",
+      }),
+      domain,
+    ),
   );
 }
 
@@ -95,14 +101,15 @@ describe("RPC domain-error boundary", () => {
     }
   });
 
-  it("does not promote an unknown registry-corruption failure to DomainError", async () => {
-    const client = createClient();
-    fs.mkdirSync(appDir(), { recursive: true });
-    fs.writeFileSync(path.join(appDir(), "workspaces.json"), "not-json", "utf8");
+  it("does not promote an unknown projection failure to DomainError", async () => {
+    const workspaces = createWorkspaceRegistry({
+      countSkills: () => Promise.reject(new Error("count adapter failed")),
+    });
+    const client = createClient(createDaemonDomain(workspaces));
 
     try {
       await client.workspace.list({});
-      expect.fail("Expected registry corruption to fail.");
+      expect.fail("Expected the projection adapter to fail.");
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       expect(error).not.toBeInstanceOf(DomainError);

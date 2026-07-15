@@ -13,11 +13,17 @@ export const RepositorySessionIdSchema = z
   .string()
   .regex(/^repo_[a-f0-9]{24}$/)
   .brand<"RepositorySessionId">();
+/** 固定仓库扫描快照的不透明会话 ID。 */
+export type RepositorySessionId = z.infer<typeof RepositorySessionIdSchema>;
 /** 扫描会话内的、不透明远程技能 ID。 */
 export const RemoteSkillIdSchema = z
   .string()
   .regex(/^rsk_[a-f0-9]{24}$/)
   .brand<"RemoteSkillId">();
+/** 固定仓库扫描会话内的远程技能 ID。 */
+export type RemoteSkillId = z.infer<typeof RemoteSkillIdSchema>;
+/** Git 返回并经运行时收窄的完整 commit identity。 */
+export const PinnedCommitSchema = z.string().regex(/^[a-f0-9]{40,64}$/);
 
 /** 仓库扫描发现的技能摘要。 */
 export const RemoteSkillSchema = z.object({
@@ -36,7 +42,7 @@ export const RemoteRepoScanSchema = z.object({
   sessionId: RepositorySessionIdSchema,
   source: z.string(),
   title: z.string(),
-  commit: z.string().regex(/^[a-f0-9]{40,64}$/),
+  commit: PinnedCommitSchema,
   skills: z.array(RemoteSkillSchema),
 });
 /** 固定 commit 的仓库扫描结果。 */

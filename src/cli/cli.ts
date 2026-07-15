@@ -32,7 +32,7 @@ import {
   type IpcErrorCode,
 } from "../shared/frame.js";
 import { DaemonStatusSchema, type DaemonStatus } from "../shared/contracts/daemon.js";
-import { ensureAppDirs, socketPath } from "../shared/paths.js";
+import { daemonLogPath, ensureAppDirs, socketPath } from "../shared/paths.js";
 import { socketAcceptsConnections } from "../shared/socket-liveness.js";
 import { readCliVersion } from "./package-version.js";
 
@@ -261,7 +261,7 @@ async function runStart(): Promise<number> {
   if (!openable) {
     console.error(
       spawned
-        ? "Failed to start the daemon. Check ~/.skill-creator/logs/daemon.log"
+        ? `Failed to start the daemon. Check ${daemonLogPath()}`
         : "Timed out waiting for the daemon to finish starting.",
     );
     return 1;

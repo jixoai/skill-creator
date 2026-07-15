@@ -1,13 +1,12 @@
 /**
  * Immutable repository scan, preview, and install sessions.
  *
- * User intent [2026-07-14]: people can review remote skills and install the
- * exact reviewed revision into a chosen workspace.
- * Original error request [2026-07-14]: repository errors must be typed and
- * actionable without exposing Git output that may contain credentials.
+ * User input [2026-07-14]: "我们还需要一个 `/repository/`，来支持远程仓库预览 skills 并安装 它们"
+ * Architecture decisions [2026-07-14]: preview/install share one pinned clone;
+ * expected failures are actionable without exposing credential-bearing Git output.
  *
  * Orthogonal intents:
- *   [1] Clone and pin a repository session to one commit.
+ *   [1] Clone, pin, and terminally dispose daemon-owned repository sessions.
  *   [2] Discover and validate installable SKILL.md entries.
  *   [3] Preview/install only opaque IDs from that pinned session.
  */
@@ -21,18 +20,21 @@ import matter from "gray-matter";
 import { ZodError } from "zod";
 import { SkillDirectoryNameSchema, SkillFrontmatterSchema } from "../shared/contracts/creator.js";
 import {
+  PinnedCommitSchema,
   RemoteSkillIdSchema,
   RepositorySessionIdSchema,
   type InstallPreview,
   type InstallResult,
   type InstallSummary,
   type RemoteRepoScan,
+  type RemoteSkillId,
   type RemoteSkill,
   type RemoteSkillPreview,
   type RepositoryInstallInput,
+  type RepositorySessionId,
 } from "../shared/contracts/repository.js";
 import { DomainError } from "./domain-error.js";
-import { writableDirectory } from "./workspace-service.js";
+import type { WorkspaceRegistry } from "./workspace-registry/index.js";
 
 const CLONE_TIMEOUT_MS = 60_000;
 const MAX_SESSIONS = 6;
@@ -40,10 +42,98 @@ const MAX_SESSIONS = 6;
 interface RepositorySession {
   scan: RemoteRepoScan;
   directory: string;
-  skillsById: Map<string, RemoteSkill>;
+  skillsById: Map<RemoteSkillId, RemoteSkill>;
+  activeLeases: number;
+  retired: boolean;
 }
 
-const sessions = new Map<string, RepositorySession>();
+type RepositorySessions = Map<RepositorySessionId, RepositorySession>;
+
+/** Clone adapter; failed clones must remove any snapshot before rejecting. */
+export type RepositoryCloner = (
+  source: string,
+  ref: string | undefined,
+  cancelSignal: AbortSignal,
+) => Promise<{ directory: string; commit: string }>;
+
+/** ccski install adapter retained behind the Repository module boundary. */
+export type RepositoryInstaller = typeof installSkills;
+
+/** Repository service dependencies that may be replaced at the module boundary. */
+export interface RepositoryServiceOptions {
+  clone?: RepositoryCloner;
+  installSkills?: RepositoryInstaller;
+}
+
+/** Daemon-owned Repository scan, preview, install, and teardown capability. */
+export interface RepositoryService {
+  scan(source: string, ref?: string): Promise<RemoteRepoScan>;
+  preview(sessionId: RepositorySessionId, skillId: RemoteSkillId): Promise<RemoteSkillPreview>;
+  install(input: RepositoryInstallInput): Promise<InstallResult>;
+  dispose(): Promise<void>;
+}
+
+/** Bind pinned repository sessions to one daemon and Workspace Registry. */
+export function createRepositoryService(
+  workspaces: WorkspaceRegistry,
+  options: RepositoryServiceOptions = {},
+): RepositoryService {
+  const sessions: RepositorySessions = new Map();
+  const activeTasks = new Set<Promise<unknown>>();
+  const scanControllers = new Set<AbortController>();
+  const clone = options.clone ?? cloneRepository;
+  const installer = options.installSkills ?? installSkills;
+  let closing = false;
+  let disposePromise: Promise<void> | null = null;
+
+  const assertOpen = (): void => {
+    if (closing) {
+      throw new DomainError("UNAVAILABLE", "Repository service is shutting down.");
+    }
+  };
+
+  const runTask = <T>(operation: () => Promise<T>): Promise<T> => {
+    try {
+      assertOpen();
+      let tracked: Promise<T>;
+      tracked = operation().finally(() => activeTasks.delete(tracked));
+      activeTasks.add(tracked);
+      return tracked;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  };
+
+  return {
+    scan: (source: string, ref?: string) =>
+      runTask(async () => {
+        const controller = new AbortController();
+        scanControllers.add(controller);
+        try {
+          return await scan(sessions, clone, assertOpen, source, ref, controller.signal);
+        } finally {
+          scanControllers.delete(controller);
+        }
+      }),
+    preview: (sessionId: RepositorySessionId, skillId: RemoteSkillId) =>
+      runTask(() =>
+        preview(
+          sessions,
+          RepositorySessionIdSchema.parse(sessionId),
+          RemoteSkillIdSchema.parse(skillId),
+        ),
+      ),
+    install: (input: RepositoryInstallInput) =>
+      runTask(() => install(sessions, workspaces, installer, input)),
+    dispose: (): Promise<void> => {
+      if (disposePromise) return disposePromise;
+      closing = true;
+      for (const controller of scanControllers) controller.abort();
+      disposePromise = Promise.allSettled([...activeTasks]).then(() => clearSessions(sessions));
+      return disposePromise;
+    },
+  };
+}
 
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 24);
@@ -56,18 +146,33 @@ function repoTitle(source: string): string {
 
 async function cloneRepository(
   source: string,
-  ref?: string,
+  ref: string | undefined,
+  cancelSignal: AbortSignal,
 ): Promise<{ directory: string; commit: string }> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-repo-"));
   const args = ["clone", "--depth", "1"];
   if (ref) args.push("--branch", ref);
   args.push("--", source, directory);
   try {
-    await execa("git", args, { timeout: CLONE_TIMEOUT_MS });
-    const result = await execa("git", ["rev-parse", "HEAD"], { cwd: directory });
-    return { directory, commit: result.stdout.trim() };
+    await execa("git", args, {
+      timeout: CLONE_TIMEOUT_MS,
+      cancelSignal,
+      forceKillAfterDelay: 1_000,
+    });
+    const result = await execa("git", ["rev-parse", "HEAD"], {
+      cwd: directory,
+      timeout: CLONE_TIMEOUT_MS,
+      cancelSignal,
+      forceKillAfterDelay: 1_000,
+    });
+    return { directory, commit: PinnedCommitSchema.parse(result.stdout.trim()) };
   } catch (error) {
     fs.rmSync(directory, { recursive: true, force: true });
+    if (cancelSignal.aborted) {
+      throw new DomainError("UNAVAILABLE", "Repository service is shutting down.", {
+        cause: error,
+      });
+    }
     throw new DomainError(
       "UNAVAILABLE",
       "Repository could not be cloned. Verify the source and reference, then try again.",
@@ -135,52 +240,102 @@ function rejectDuplicateNames(skills: RemoteSkill[]): void {
   }
 }
 
-function retainSession(session: RepositorySession): void {
+function retainSession(sessions: RepositorySessions, session: RepositorySession): void {
   sessions.set(session.scan.sessionId, session);
   while (sessions.size > MAX_SESSIONS) {
-    const oldestId = sessions.keys().next().value as string | undefined;
+    const oldestId = sessions.keys().next().value;
     if (!oldestId) return;
     const oldest = sessions.get(oldestId);
     sessions.delete(oldestId);
-    if (oldest) fs.rmSync(oldest.directory, { recursive: true, force: true });
+    if (oldest) retireSession(oldest);
   }
 }
 
-function getSession(sessionId: string): RepositorySession {
-  const parsedId = RepositorySessionIdSchema.parse(sessionId);
-  const session = sessions.get(parsedId);
+function getSession(
+  sessions: RepositorySessions,
+  sessionId: RepositorySessionId,
+): RepositorySession {
+  const session = sessions.get(sessionId);
   if (!session || !fs.existsSync(session.directory)) {
     throw new DomainError("UNAVAILABLE", "Repository session expired. Scan the repository again.");
   }
   return session;
 }
 
+function acquireSession(
+  sessions: RepositorySessions,
+  sessionId: RepositorySessionId,
+): RepositorySession {
+  const session = getSession(sessions, sessionId);
+  session.activeLeases += 1;
+  return session;
+}
+
+function releaseSession(session: RepositorySession): void {
+  session.activeLeases -= 1;
+  if (session.activeLeases === 0 && session.retired) removeSnapshot(session);
+}
+
+function retireSession(session: RepositorySession): void {
+  if (session.retired) return;
+  session.retired = true;
+  if (session.activeLeases === 0) removeSnapshot(session);
+}
+
+function removeSnapshot(session: RepositorySession): void {
+  fs.rmSync(session.directory, { recursive: true, force: true });
+}
+
 /** Clone and pin a repository source to an immutable preview session. */
-export async function scan(source: string, ref?: string): Promise<RemoteRepoScan> {
-  const clone = await cloneRepository(source, ref);
-  const skills = findSkillFiles(clone.directory).map((file) => inspectSkill(clone.directory, file));
-  rejectDuplicateNames(skills);
-  const sessionId = RepositorySessionIdSchema.parse(
-    `repo_${digest(`${source}\0${clone.commit}\0${randomBytes(8).toString("hex")}`)}`,
-  );
-  const result: RemoteRepoScan = {
-    sessionId,
-    source,
-    title: repoTitle(source),
-    commit: clone.commit,
-    skills,
-  };
-  retainSession({
-    scan: result,
-    directory: clone.directory,
-    skillsById: new Map(skills.map((skill) => [skill.id, skill])),
-  });
-  return result;
+async function scan(
+  sessions: RepositorySessions,
+  clone: RepositoryCloner,
+  assertOpen: () => void,
+  source: string,
+  ref: string | undefined,
+  cancelSignal: AbortSignal,
+): Promise<RemoteRepoScan> {
+  const snapshot = await clone(source, ref, cancelSignal);
+  let retained = false;
+  try {
+    assertOpen();
+    const commit = PinnedCommitSchema.parse(snapshot.commit);
+    const skills = findSkillFiles(snapshot.directory).map((file) =>
+      inspectSkill(snapshot.directory, file),
+    );
+    rejectDuplicateNames(skills);
+    const sessionId = RepositorySessionIdSchema.parse(
+      `repo_${digest(`${source}\0${commit}\0${randomBytes(8).toString("hex")}`)}`,
+    );
+    const result: RemoteRepoScan = {
+      sessionId,
+      source,
+      title: repoTitle(source),
+      commit,
+      skills,
+    };
+    assertOpen();
+    retainSession(sessions, {
+      scan: result,
+      directory: snapshot.directory,
+      skillsById: new Map(skills.map((skill) => [skill.id, skill])),
+      activeLeases: 0,
+      retired: false,
+    });
+    retained = true;
+    return result;
+  } finally {
+    if (!retained) fs.rmSync(snapshot.directory, { recursive: true, force: true });
+  }
 }
 
 /** Read one opaque remote skill from its pinned repository session. */
-export async function preview(sessionId: string, skillId: string): Promise<RemoteSkillPreview> {
-  const session = getSession(sessionId);
+async function preview(
+  sessions: RepositorySessions,
+  sessionId: RepositorySessionId,
+  skillId: RemoteSkillId,
+): Promise<RemoteSkillPreview> {
+  const session = getSession(sessions, sessionId);
   const skill = session.skillsById.get(RemoteSkillIdSchema.parse(skillId));
   if (!skill) {
     throw new DomainError("NOT_FOUND", `Remote skill not found in scan session: ${skillId}`);
@@ -231,68 +386,82 @@ function appendPreview(
 }
 
 /** Preview or install selected skills from one pinned session into a workspace. */
-export async function install(input: RepositoryInstallInput): Promise<InstallResult> {
-  const session = getSession(input.sessionId);
-  const selected = input.skillIds.map((skillId) => {
-    const skill = session.skillsById.get(skillId);
-    if (!skill) {
-      throw new DomainError("NOT_FOUND", `Remote skill not found in scan session: ${skillId}`);
-    }
-    if (!skill.installable) {
+async function install(
+  sessions: RepositorySessions,
+  workspaces: WorkspaceRegistry,
+  installer: RepositoryInstaller,
+  input: RepositoryInstallInput,
+): Promise<InstallResult> {
+  const session = acquireSession(sessions, input.sessionId);
+  try {
+    const selected = input.skillIds.map((skillId) => {
+      const skill = session.skillsById.get(skillId);
+      if (!skill) {
+        throw new DomainError("NOT_FOUND", `Remote skill not found in scan session: ${skillId}`);
+      }
+      if (!skill.installable) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `Skill ${skill.name} is not installable: ${skill.issues.join(" ")}`,
+        );
+      }
+      return skill;
+    });
+    const scope = workspaces.resolve(input.workspaceId);
+    if (scope.kind !== "directory") {
       throw new DomainError(
         "INVALID_OPERATION",
-        `Skill ${skill.name} is not installable: ${skill.issues.join(" ")}`,
+        "Repository installs require an imported Workspace.",
       );
     }
-    return skill;
-  });
-  const destination = writableDirectory(input.workspaceId);
+    const destination = scope.directory;
 
-  if (input.dryRun) {
-    const preview: InstallPreview = {
-      kind: "preview",
-      skills: [],
-      destinations: [],
-      totalInstalls: 0,
-    };
+    if (input.dryRun) {
+      const preview: InstallPreview = {
+        kind: "preview",
+        skills: [],
+        destinations: [],
+        totalInstalls: 0,
+      };
+      for (const skill of selected) {
+        const result = await installer({
+          source: session.directory,
+          path: skill.relativePath,
+          outDir: [destination],
+          all: true,
+          force: input.force,
+          yes: true,
+          dryRun: true,
+        });
+        if (!("dryRun" in result) || !result.dryRun) {
+          throw new Error("ccski returned an unexpected install result for dry-run.");
+        }
+        appendPreview(preview, result);
+      }
+      return preview;
+    }
+
+    const summary = emptySummary();
     for (const skill of selected) {
-      const result = await installSkills({
+      const result = await installer({
         source: session.directory,
         path: skill.relativePath,
         outDir: [destination],
         all: true,
         force: input.force,
         yes: true,
-        dryRun: true,
       });
-      if (!("dryRun" in result) || !result.dryRun) {
-        throw new Error("ccski returned an unexpected install result for dry-run.");
-      }
-      appendPreview(preview, result);
+      if ("dryRun" in result) throw new Error("ccski returned an unexpected dry-run result.");
+      appendSummary(summary, result);
     }
-    return preview;
+    return summary;
+  } finally {
+    releaseSession(session);
   }
-
-  const summary = emptySummary();
-  for (const skill of selected) {
-    const result = await installSkills({
-      source: session.directory,
-      path: skill.relativePath,
-      outDir: [destination],
-      all: true,
-      force: input.force,
-      yes: true,
-    });
-    if ("dryRun" in result) throw new Error("ccski returned an unexpected dry-run result.");
-    appendSummary(summary, result);
-  }
-  return summary;
 }
 
 /** Dispose all temporary repository snapshots; used during shutdown and tests. */
-export function clearSessions(): void {
-  for (const session of sessions.values()) {
-    fs.rmSync(session.directory, { recursive: true, force: true });
-  }
+function clearSessions(sessions: RepositorySessions): void {
+  for (const session of sessions.values()) retireSession(session);
   sessions.clear();
 }

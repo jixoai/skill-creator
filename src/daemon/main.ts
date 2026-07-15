@@ -5,6 +5,7 @@
  * 2. 统一处理单实例退出与顶层启动异常。
  */
 import { bootDaemon } from "./index.js";
+import { isDevRuntime, log } from "./log.js";
 import { readPackageVersion } from "./package-version.js";
 
 async function main(): Promise<void> {
@@ -18,6 +19,8 @@ async function main(): Promise<void> {
 }
 
 void main().catch((err: unknown) => {
-  console.error(err);
+  const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  log(`daemon startup failed: ${message}`);
+  if (!isDevRuntime()) console.error(message);
   process.exit(1);
 });

@@ -3,15 +3,17 @@
  * 正交意图：
  * 1. 提供健康检查、SPA 静态资源与路由回退。
  * 2. 在协议升级前拒绝未授权 WebSocket。
- * 3. 通过受权 socket 承载共享 oRPC router。
+ * 3. 通过受权 socket 承载共享 oRPC router，并有界回收完整连接生命周期。
  */
 import { existsSync, promises as fs } from "node:fs";
 import http from "node:http";
+import type { Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { RPCHandler } from "@orpc/server/ws";
 import { WebSocketServer } from "ws";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
+import type { DaemonDomain } from "./domain.js";
 import { log } from "./log.js";
 import { createRpcRouter } from "./rpc-router.js";
 
@@ -20,6 +22,12 @@ export interface WebServerOptions {
   webToken: string;
   webuiDir: string;
   status: () => DaemonStatus;
+  domain: DaemonDomain;
+}
+
+/** 本地 HTTP 与 WebSocket 客户端被强制断开前的宽限期。 */
+export interface WebServerStopOptions {
+  graceMs?: number;
 }
 
 const MIME: Readonly<Record<string, string>> = {
@@ -40,14 +48,16 @@ const MIME: Readonly<Record<string, string>> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-/** 同时承载 WebUI SPA 与强类型 WebSocket RPC 的本地服务。 */
+/** 单生命周期地承载 WebUI SPA 与强类型 WebSocket RPC 的本地服务。 */
 export class WebServer {
   private server?: http.Server;
+  private stopPromise?: Promise<void>;
+  private readonly connections = new Set<Socket>();
   private readonly rpcWsServer = new WebSocketServer({ noServer: true });
   private readonly rpcHandler: RPCHandler<Record<never, never>>;
 
   constructor(private readonly options: WebServerOptions) {
-    this.rpcHandler = new RPCHandler(createRpcRouter(options.status));
+    this.rpcHandler = new RPCHandler(createRpcRouter(options.status, options.domain));
   }
 
   /** 启动环回服务，并返回实际监听端口。 */
@@ -56,23 +66,78 @@ export class WebServer {
       const server = http.createServer((request, response) => {
         void this.handleHttp(request, response);
       });
+      server.on("connection", (connection) => {
+        this.connections.add(connection);
+        connection.once("close", () => this.connections.delete(connection));
+      });
       server.on("upgrade", (request, socket, head) => this.handleUpgrade(request, socket, head));
       server.once("error", reject);
       server.listen(port, "127.0.0.1", () => {
         const address = server.address();
         this.server = server;
+        this.stopPromise = undefined;
         resolve(typeof address === "object" && address ? address.port : port);
       });
     });
   }
 
   /** 关闭所有 RPC 客户端和 HTTP 服务。 */
-  async stop(): Promise<void> {
-    if (!this.server) return;
-    for (const client of this.rpcWsServer.clients) client.close();
+  stop(options: WebServerStopOptions = {}): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    if (!this.server) return Promise.resolve();
     const server = this.server;
-    await new Promise<void>((resolve) => server.close(() => resolve()));
     this.server = undefined;
+    const graceMs = Math.max(0, options.graceMs ?? 1_000);
+    this.stopPromise = new Promise<void>((resolve, reject) => {
+      let serverClosed = false;
+      let wsServerClosed = false;
+      let closeError: Error | undefined;
+      let settled = false;
+      const finishIfClosed = (): void => {
+        if (settled || !serverClosed || !wsServerClosed || this.connections.size > 0) return;
+        settled = true;
+        clearTimeout(timer);
+        if (closeError) reject(closeError);
+        else resolve();
+      };
+      const forceClose = (): void => {
+        for (const client of this.rpcWsServer.clients) client.terminate();
+        for (const connection of this.connections) connection.destroy();
+        server.closeAllConnections();
+      };
+      const timer = setTimeout(forceClose, graceMs);
+      timer.unref();
+
+      try {
+        server.close((error) => {
+          serverClosed = true;
+          closeError ??= error;
+          finishIfClosed();
+        });
+      } catch (error) {
+        serverClosed = true;
+        closeError = error instanceof Error ? error : new Error(String(error));
+      }
+      this.rpcWsServer.close((error) => {
+        wsServerClosed = true;
+        closeError ??= error;
+        finishIfClosed();
+      });
+      for (const connection of this.connections) connection.once("close", finishIfClosed);
+      for (const client of this.rpcWsServer.clients) {
+        try {
+          client.close(1001, "Server shutting down");
+        } catch (error) {
+          closeError ??= error instanceof Error ? error : new Error(String(error));
+          client.terminate();
+        }
+      }
+      if (graceMs === 0 || closeError) {
+        forceClose();
+        finishIfClosed();
+      }
+    });
+    return this.stopPromise;
   }
 
   /** 生成带当前授权 token 的 WebUI 入口。 */

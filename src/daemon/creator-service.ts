@@ -1,10 +1,9 @@
 /**
  * Revision-safe skill creation, editing, and deletion.
  *
- * User intent [2026-07-14]: Creator is linked to the selected workspace and
- * must preserve skill documents instead of rebuilding lossy YAML.
- * Original error request [2026-07-14]: Creator revision conflicts must remain
- * safe, typed, and actionable across the WebUI RPC boundary.
+ * User input [2026-07-14]: "我们还需要有一个 创造、编辑 技能的路由(/creator)。二者是有机互联的"
+ * Architecture decisions [2026-07-14]: preserve unknown frontmatter and expose
+ * revision conflicts as typed, actionable RPC errors.
  *
  * Orthogonal intents:
  *   [1] Create only safe direct-child skill directories.
@@ -24,8 +23,8 @@ import {
 import type { SkillId } from "../shared/contracts/skills.js";
 import { DomainError } from "./domain-error.js";
 import { assertPathInside, atomicWriteUtf8, contentRevision, directChild } from "./path-safety.js";
-import * as skillService from "./skill-service.js";
-import { writableDirectory } from "./workspace-service.js";
+import type { SkillService } from "./skill-service.js";
+import type { WorkspaceRegistry } from "./workspace-registry/index.js";
 
 function parseDocument(
   workspaceId: SkillDocument["workspaceId"],
@@ -44,21 +43,44 @@ function parseDocument(
   };
 }
 
+/** Bind Creator operations to one Workspace Registry and skill module. */
+export function createCreatorService(workspaces: WorkspaceRegistry, skills: SkillService) {
+  return {
+    load: (workspaceId: SkillDocument["workspaceId"], skillId: SkillId) =>
+      load(workspaces, skills, workspaceId, skillId),
+    save: (input: SaveSkillInput) => save(workspaces, skills, input),
+    remove: (
+      workspaceId: SkillDocument["workspaceId"],
+      skillId: SkillId,
+      expectedRevision: string,
+    ) => remove(workspaces, skills, workspaceId, skillId, expectedRevision),
+  };
+}
+
+/** Creator operations bound to one daemon-owned Workspace Registry. */
+export type CreatorService = ReturnType<typeof createCreatorService>;
+
 /** Load an editable skill document from one writable workspace. */
-export async function load(
+async function load(
+  workspaces: WorkspaceRegistry,
+  skills: SkillService,
   workspaceId: SkillDocument["workspaceId"],
   skillId: SkillId,
 ): Promise<SkillDocument> {
-  const workspaceRoot = writableDirectory(workspaceId);
-  const skill = await skillService.resolveSkill(workspaceId, skillId);
+  const workspaceRoot = writableDirectory(workspaces, workspaceId);
+  const skill = await skills.resolve(workspaceId, skillId);
   assertPathInside(workspaceRoot, skill.path);
-  const file = skillService.skillFile(skill);
+  const file = skills.skillFile(skill);
   return parseDocument(workspaceId, skillId, skill.directoryName, fs.readFileSync(file, "utf8"));
 }
 
 /** Create a skill or revision-check and atomically update an existing skill. */
-export async function save(input: SaveSkillInput): Promise<SaveSkillResult> {
-  const workspaceRoot = writableDirectory(input.workspaceId);
+async function save(
+  workspaces: WorkspaceRegistry,
+  skills: SkillService,
+  input: SaveSkillInput,
+): Promise<SaveSkillResult> {
+  const workspaceRoot = writableDirectory(workspaces, input.workspaceId);
   let created = false;
   let skillDirectory: string;
   let targetFile: string;
@@ -72,10 +94,10 @@ export async function save(input: SaveSkillInput): Promise<SaveSkillResult> {
     }
     created = true;
   } else {
-    const skill = await skillService.resolveSkill(input.workspaceId, input.skillId);
+    const skill = await skills.resolve(input.workspaceId, input.skillId);
     skillDirectory = skill.path;
     assertPathInside(workspaceRoot, skillDirectory);
-    targetFile = skillService.skillFile(skill);
+    targetFile = skills.skillFile(skill);
     const current = fs.readFileSync(targetFile, "utf8");
     if (contentRevision(current) !== input.expectedRevision) {
       throw new DomainError(
@@ -91,29 +113,42 @@ export async function save(input: SaveSkillInput): Promise<SaveSkillResult> {
 
   const skillId =
     input.mode === "create"
-      ? (await skillService.list(input.workspaceId, true)).find(
+      ? (await skills.list(input.workspaceId, true)).find(
           (skill) => skill.path === fs.realpathSync(skillDirectory),
         )?.id
       : input.skillId;
   if (!skillId) throw new Error("The saved skill could not be rediscovered by ccski.");
 
-  const document = await load(input.workspaceId, skillId);
-  const validation = await skillService.validate(input.workspaceId, skillId);
+  const document = await load(workspaces, skills, input.workspaceId, skillId);
+  const validation = await skills.validate(input.workspaceId, skillId);
   return { created, document, validation };
 }
 
 /** Delete a workspace-scoped skill only when its observed revision still matches. */
-export async function remove(
+async function remove(
+  workspaces: WorkspaceRegistry,
+  skills: SkillService,
   workspaceId: SkillDocument["workspaceId"],
   skillId: SkillId,
   expectedRevision: string,
 ): Promise<void> {
-  const workspaceRoot = writableDirectory(workspaceId);
-  const skill = await skillService.resolveSkill(workspaceId, skillId);
+  const workspaceRoot = writableDirectory(workspaces, workspaceId);
+  const skill = await skills.resolve(workspaceId, skillId);
   assertPathInside(workspaceRoot, skill.path);
-  const current = fs.readFileSync(skillService.skillFile(skill), "utf8");
+  const current = fs.readFileSync(skills.skillFile(skill), "utf8");
   if (contentRevision(current) !== expectedRevision) {
     throw new DomainError("CONFLICT", "This skill changed on disk. Reload it before deleting.");
   }
   fs.rmSync(skill.path, { recursive: true, force: false });
+}
+
+function writableDirectory(
+  workspaces: WorkspaceRegistry,
+  workspaceId: SkillDocument["workspaceId"],
+): string {
+  const scope = workspaces.resolve(workspaceId);
+  if (scope.kind !== "directory") {
+    throw new DomainError("INVALID_OPERATION", "Creator requires an imported Workspace.");
+  }
+  return scope.directory;
 }
