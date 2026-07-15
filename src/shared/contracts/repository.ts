@@ -3,9 +3,10 @@
  * 正交意图：
  * 1. 将扫描会话固定到不可变 Git commit。
  * 2. 以不透明 ID 标识发现的技能。
- * 3. 无损表达安装与 dry-run 结果。
+ * 3. 无损表达带本地技能身份的安装结果与 dry-run 结果。
  */
 import { z } from "zod";
+import { SkillIdSchema } from "./skills.js";
 import { ImportedWorkspaceIdSchema } from "./workspaces.js";
 
 /** 固定仓库扫描快照的、不透明会话 ID。 */
@@ -57,18 +58,38 @@ export const RemoteSkillPreviewSchema = z.object({
 /** 单个远程技能的可审阅内容。 */
 export type RemoteSkillPreview = z.infer<typeof RemoteSkillPreviewSchema>;
 
-/** 单个技能安装结果项。 */
-export const InstallResultEntrySchema = z.object({
+const InstallResultEntryBaseSchema = z.object({
   skill: z.string(),
   destination: z.string(),
   path: z.string(),
-  status: z.enum(["installed", "skipped", "overwritten", "failed"]),
-  error: z.string().optional(),
 });
+
+/** 单个技能安装结果项；只有实际落盘的技能拥有本地 Skill ID。 */
+export const InstallResultEntrySchema = z.discriminatedUnion("status", [
+  InstallResultEntryBaseSchema.extend({
+    status: z.literal("installed"),
+    skillId: SkillIdSchema,
+  }),
+  InstallResultEntryBaseSchema.extend({
+    status: z.literal("overwritten"),
+    skillId: SkillIdSchema,
+  }),
+  InstallResultEntryBaseSchema.extend({
+    status: z.literal("skipped"),
+    error: z.string().optional(),
+  }),
+  InstallResultEntryBaseSchema.extend({
+    status: z.literal("failed"),
+    error: z.string().optional(),
+  }),
+]);
+/** 单个技能安装结果项。 */
+export type InstallResultEntry = z.infer<typeof InstallResultEntrySchema>;
 
 /** 实际安装操作的聚合结果。 */
 export const InstallSummarySchema = z.object({
   kind: z.literal("result"),
+  workspaceId: ImportedWorkspaceIdSchema,
   results: z.array(InstallResultEntrySchema),
   installed: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),

@@ -94,4 +94,10 @@
     cursor: default;
     user-select: none;
   }
+
+  @media (max-width: 720px) {
+    .drag-strip {
+      height: 2.75rem;
+    }
+  }
 </style>

@@ -21,6 +21,7 @@
   import ToastContainer from "$lib/components/toast-container.svelte";
   import { resizeWindow, CREATOR_WINDOW_SIZE, HOME_WINDOW_SIZE } from "$lib/window-size";
   import { TooltipProvider } from "$lib/components/ui/tooltip";
+  import IconCommand from "@lucide/svelte/icons/command";
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
 
   let { children } = $props();
@@ -67,17 +68,18 @@
       {/snippet}
       {#snippet right()}
         <button
-          class="no-drag flex h-6 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          class="no-drag flex h-6 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground max-[720px]:h-11 max-[720px]:w-11"
           onpointerdown={(e) => e.stopPropagation()}
           aria-label="Open command palette"
+          aria-keyshortcuts="Meta+K"
           title="Command palette (Cmd+K)"
           onclick={() =>
             globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
         >
-          ⌘K
+          <IconCommand class="h-3.5 w-3.5" />
         </button>
         <button
-          class="no-drag flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
+          class="no-drag flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground max-[720px]:h-11 max-[720px]:w-11"
           onpointerdown={(e) => e.stopPropagation()}
           aria-label="Reload app"
           title="Reload"

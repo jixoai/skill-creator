@@ -4,9 +4,14 @@
    * 原始需求 [2026-07-14]：「我们还需要一个 `/repository/`，来支持远程仓库预览 skills 并安装 它们」。
    * 1. 扫描并固定 Git commit，预览与安装复用同一快照。
    * 2. 选择目标 workspace、冲突策略与 dry-run，再执行安装。
-   * 3. 安装后同步 workspace 技能计数。
+   * 3. 以安装时的 workspace 身份呈现结果，并同步技能计数。
+   * 4. 在窄屏显式切换技能列表与快照预览，始终保留返回路径。
+   * 妥协声明：四项属于 Repository 单页连续任务；RPC 状态已拆入 store，继续拆散页面状态会破坏操作上下文。
    */
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { tick } from "svelte";
+  import { ImportedWorkspaceIdSchema } from "$shared/contracts/workspaces.js";
   import { Button } from "$lib/components/ui/button";
   import { Checkbox } from "$lib/components/ui/checkbox";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
@@ -22,7 +27,8 @@
     scanRemoteRepo,
     writableWorkspaces,
   } from "$lib/store.svelte";
-  import type { InstallResult } from "$lib/types";
+  import type { ImportedWorkspaceId, InstallResult, RemoteSkillId, SkillId } from "$lib/types";
+  import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconAlert from "@lucide/svelte/icons/triangle-alert";
   import IconCheck from "@lucide/svelte/icons/circle-check";
   import IconChevron from "@lucide/svelte/icons/chevron-down";
@@ -30,49 +36,103 @@
   import IconEye from "@lucide/svelte/icons/eye";
   import IconGit from "@lucide/svelte/icons/git-branch";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
+  import IconPen from "@lucide/svelte/icons/file-pen-line";
   import IconSearch from "@lucide/svelte/icons/search";
 
   let source = $state("");
   let ref = $state("");
-  let workspaceId = $state("");
-  let selectedIds = $state<Set<string>>(new Set());
-  let selectedPreviewId = $state<string | null>(null);
+  interface InstallOutcome {
+    result: InstallResult;
+    workspaceLabel: string;
+  }
+
+  let workspaceId = $state<ImportedWorkspaceId | null>(null);
+  let selectedIds = $state<Set<RemoteSkillId>>(new Set());
+  let selectedPreviewId = $state<RemoteSkillId | null>(null);
   let force = $state(false);
-  let result = $state<InstallResult | null>(null);
+  let outcome = $state<InstallOutcome | null>(null);
   let initialized = $state(false);
+  let appliedRouteWorkspace = "";
   let actionError = $state<string | null>(null);
+  let mobilePreviewOpen = $state(false);
+  let previewTrigger = $state<HTMLButtonElement | null>(null);
+  let mobilePreviewHeading = $state<HTMLElement | null>(null);
 
   let workspaces = $derived(writableWorkspaces());
   let targetWorkspace = $derived(workspaces.find((workspace) => workspace.id === workspaceId));
   let scan = $derived(repositoryState.scan);
   let preview = $derived(repositoryState.preview);
+  let selectedPreview = $derived(
+    scan?.skills.find((skill) => skill.id === selectedPreviewId) ?? null,
+  );
+  let reviewTargets = $derived.by(() => {
+    if (!outcome || outcome.result.kind !== "result") return [];
+    const targets = new Map<SkillId, string>();
+    for (const entry of outcome.result.results) {
+      if (entry.status === "installed" || entry.status === "overwritten") {
+        targets.set(entry.skillId, entry.skill);
+      }
+    }
+    return [...targets].map(([skillId, name]) => ({ skillId, name }));
+  });
 
   $effect(() => {
-    if (connectionState.status !== "connected" || initialized) return;
+    if (connectionState.status !== "connected") {
+      initialized = false;
+      return;
+    }
+    if (initialized) return;
     initialized = true;
-    void (async () => {
-      await loadWorkspaces();
-      const requested = page.url.searchParams.get("workspace");
-      workspaceId =
-        workspaces.find((workspace) => workspace.id === requested)?.id ?? workspaces[0]?.id ?? "";
-    })();
+    void loadWorkspaces();
+  });
+
+  $effect(() => {
+    const requestedValue = page.url.searchParams.get("workspace") ?? "";
+    const availableWorkspaces = workspaces;
+    if (connectionState.status !== "connected" || !initialized) return;
+    if (availableWorkspaces.length === 0) {
+      workspaceId = null;
+      return;
+    }
+
+    const targetStillAvailable = availableWorkspaces.some(
+      (workspace) => workspace.id === workspaceId,
+    );
+    if (appliedRouteWorkspace === requestedValue && targetStillAvailable) return;
+    const requested = ImportedWorkspaceIdSchema.safeParse(requestedValue);
+    workspaceId =
+      availableWorkspaces.find((workspace) => workspace.id === requested.data)?.id ??
+      availableWorkspaces[0].id;
+    appliedRouteWorkspace = requestedValue;
   });
 
   async function scanRepository(): Promise<void> {
     if (!source.trim()) return;
     selectedIds = new Set();
     selectedPreviewId = null;
-    result = null;
+    outcome = null;
     actionError = null;
+    mobilePreviewOpen = false;
     await scanRemoteRepo(source.trim(), ref.trim() || undefined);
   }
 
-  async function choosePreview(skillId: string): Promise<void> {
+  async function choosePreview(skillId: RemoteSkillId, trigger: HTMLButtonElement): Promise<void> {
+    if (repositoryState.installing) return;
+    previewTrigger = trigger;
     selectedPreviewId = skillId;
+    mobilePreviewOpen = true;
+    await tick();
+    if (mobilePreviewHeading?.offsetParent) mobilePreviewHeading.focus();
     await previewRemoteSkill(skillId);
   }
 
-  function toggleSelection(skillId: string): void {
+  async function closeMobilePreview(): Promise<void> {
+    mobilePreviewOpen = false;
+    await tick();
+    if (previewTrigger?.isConnected) previewTrigger.focus();
+  }
+
+  function toggleSelection(skillId: RemoteSkillId): void {
     const next = new Set(selectedIds);
     if (next.has(skillId)) next.delete(skillId);
     else next.add(skillId);
@@ -86,49 +146,73 @@
   }
 
   async function install(dryRun: boolean): Promise<void> {
-    if (!workspaceId || selectedIds.size === 0) return;
+    const submittedWorkspaceId = workspaceId;
+    const submittedWorkspace = workspaces.find(
+      (workspace) => workspace.id === submittedWorkspaceId,
+    );
+    if (!submittedWorkspaceId || !submittedWorkspace || selectedIds.size === 0) return;
+    const submittedSkillIds = [...selectedIds];
     actionError = null;
-    result = null;
+    outcome = null;
     try {
-      result = await installRemoteSkills({
-        skillIds: [...selectedIds],
-        workspaceId,
+      const result = await installRemoteSkills({
+        skillIds: submittedSkillIds,
+        workspaceId: submittedWorkspaceId,
         force,
         dryRun,
       });
+      if (!result) return;
+      if (result.kind === "result" && result.workspaceId !== submittedWorkspaceId) {
+        throw new Error("The daemon returned an install result for a different Workspace.");
+      }
+      outcome = {
+        result,
+        workspaceLabel: submittedWorkspace.label,
+      };
       if (!dryRun && result.kind === "result") await loadWorkspaces();
     } catch (cause) {
       actionError = cause instanceof Error ? cause.message : String(cause);
     }
   }
+
+  function creatorReviewUrl(skillId: SkillId): string {
+    if (!outcome || outcome.result.kind !== "result") return "/creator";
+    const search = new URLSearchParams({
+      workspace: outcome.result.workspaceId,
+      skill: skillId,
+    });
+    return `/creator?${search.toString()}`;
+  }
 </script>
 
 <div class="repository-surface flex h-full min-w-0 flex-col">
   <header class="border-b border-border px-4 py-3">
-    <div class="flex items-end gap-2">
-      <div class="min-w-0 flex-1 space-y-1">
+    <div class="repository-search flex items-end gap-2">
+      <div class="repository-source min-w-0 flex-1 space-y-1">
         <Label for="repository-source" class="text-xs">Git repository</Label>
         <Input
           id="repository-source"
           bind:value={source}
-          class="h-8 font-mono text-xs"
+          class="repository-mobile-control h-8 font-mono text-xs"
           placeholder="https://github.com/owner/repository"
           onkeydown={(event) => event.key === "Enter" && scanRepository()}
+          disabled={repositoryState.scanning || repositoryState.installing}
         />
       </div>
-      <div class="w-32 space-y-1">
+      <div class="repository-ref w-32 space-y-1">
         <Label for="repository-ref" class="text-xs">Branch or tag</Label><Input
           id="repository-ref"
           bind:value={ref}
-          class="h-8 font-mono text-xs"
+          class="repository-mobile-control h-8 font-mono text-xs"
           placeholder="default"
+          disabled={repositoryState.scanning || repositoryState.installing}
         />
       </div>
       <Button
-        class="h-8 gap-1.5"
+        class="repository-mobile-control h-8 gap-1.5"
         size="sm"
         onclick={scanRepository}
-        disabled={!source.trim() || repositoryState.scanning}
+        disabled={!source.trim() || repositoryState.scanning || repositoryState.installing}
       >
         {#if repositoryState.scanning}<IconLoader class="h-4 w-4 animate-spin" />{:else}<IconSearch
             class="h-4 w-4"
@@ -149,25 +233,64 @@
     >
       {repositoryState.error ?? actionError}
     </div>{/if}
-  {#if result}
+  {#if outcome}
     <div
-      class="flex items-center gap-2 border-b border-border bg-muted/50 px-4 py-2 text-xs"
+      class="repository-outcome flex min-w-0 flex-wrap items-center gap-2 border-b border-border bg-muted/50 px-4 py-2 text-xs"
       aria-live="polite"
     >
-      <IconCheck class="h-4 w-4 text-emerald-600" />
-      {#if result.kind === "preview"}Preview: {result.totalInstalls} installation(s) into {targetWorkspace?.label}.{:else}Installed
-        {result.installed}; overwritten {result.overwritten}; skipped {result.skipped}; failed {result.failed}.{/if}
+      {#if outcome.result.kind === "result" && (outcome.result.failed > 0 || reviewTargets.length === 0)}<IconAlert
+          class="h-4 w-4 shrink-0 text-amber-600"
+        />{:else}<IconCheck class="h-4 w-4 shrink-0 text-emerald-600" />{/if}
+      <span class="min-w-0">
+        {#if outcome.result.kind === "preview"}Preview: {outcome.result.totalInstalls} installation(s)
+          into
+          {outcome.workspaceLabel}.{:else}Installation result for {outcome.workspaceLabel}: {outcome
+            .result.installed} installed; {outcome.result.overwritten} overwritten; {outcome.result
+            .skipped} skipped; {outcome.result.failed} failed.{/if}
+      </span>
+      {#if reviewTargets.length === 1}
+        <Button
+          href={creatorReviewUrl(reviewTargets[0].skillId)}
+          variant="outline"
+          size="sm"
+          class="repository-outcome-action h-7 gap-1.5"
+        >
+          <IconPen class="h-3.5 w-3.5" />Review installed
+        </Button>
+      {:else if reviewTargets.length > 1}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}<Button
+                {...props}
+                variant="outline"
+                size="sm"
+                class="repository-outcome-action h-7 gap-1.5"
+              >
+                <IconPen class="h-3.5 w-3.5" />Review installed<IconChevron class="h-3.5 w-3.5" />
+              </Button>{/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="end" class="max-w-64">
+            {#each reviewTargets as target (target.skillId)}
+              <DropdownMenu.Item onclick={() => goto(creatorReviewUrl(target.skillId))}>
+                <IconPen class="h-3.5 w-3.5" /><span class="truncate">{target.name}</span>
+              </DropdownMenu.Item>
+            {/each}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      {/if}
     </div>
   {/if}
 
-  <div class="min-h-0 flex-1">
+  <div class="repository-body min-h-0 flex-1" data-mobile-preview={mobilePreviewOpen}>
     <aside class="repository-list flex h-full w-[300px] shrink-0 flex-col border-r border-border">
-      <div class="flex h-10 items-center gap-2 border-b border-border px-3 text-xs">
+      <div
+        class="repository-list-heading flex h-10 items-center gap-2 border-b border-border px-3 text-xs"
+      >
         <span class="font-medium">Discovered skills</span>
         <button
-          class="ml-auto text-primary disabled:text-muted-foreground"
+          class="repository-select-all ml-auto text-primary disabled:text-muted-foreground"
           onclick={selectAll}
-          disabled={!scan}>Select all</button
+          disabled={!scan || repositoryState.installing}>Select all</button
         >
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto">
@@ -188,17 +311,19 @@
               class:bg-accent={selectedPreviewId === skill.id}
             >
               <label
-                class="flex w-9 shrink-0 items-start justify-center pt-3"
+                class="flex w-11 shrink-0 items-start justify-center pt-3"
                 aria-label={`Select ${skill.name}`}
                 ><Checkbox
                   checked={selectedIds.has(skill.id)}
-                  disabled={!skill.installable}
+                  disabled={!skill.installable || repositoryState.installing}
                   onCheckedChange={() => toggleSelection(skill.id)}
                 /></label
               >
               <button
                 class="min-w-0 flex-1 px-1 py-2.5 pr-3 text-left"
-                onclick={() => choosePreview(skill.id)}
+                onclick={(event) => choosePreview(skill.id, event.currentTarget)}
+                disabled={repositoryState.installing}
+                aria-current={selectedPreviewId === skill.id ? "true" : undefined}
               >
                 <span class="flex items-center gap-1.5"
                   ><span class="truncate text-xs font-medium">{skill.name}</span
@@ -224,7 +349,8 @@
                 {...props}
                 variant="outline"
                 size="sm"
-                class="h-8 w-full justify-between"
+                class="repository-destination h-8 w-full justify-between"
+                disabled={repositoryState.installing}
                 ><span class="truncate">{targetWorkspace?.label ?? "Choose destination"}</span
                 ><IconChevron class="h-3.5 w-3.5" /></Button
               >{/snippet}</DropdownMenu.Trigger
@@ -235,20 +361,23 @@
               >{/each}</DropdownMenu.Content
           >
         </DropdownMenu.Root>
-        <label class="flex items-center justify-between text-xs"
-          ><span>Overwrite conflicts</span><Switch bind:checked={force} /></label
+        <label class="repository-force flex items-center justify-between text-xs"
+          ><span>Overwrite conflicts</span><Switch
+            bind:checked={force}
+            disabled={repositoryState.installing}
+          /></label
         >
         <div class="grid grid-cols-2 gap-2">
           <Button
             variant="outline"
             size="sm"
-            class="h-8"
+            class="repository-install-action h-8"
             disabled={!workspaceId || selectedIds.size === 0 || repositoryState.installing}
             onclick={() => install(true)}>Preview</Button
           >
           <Button
             size="sm"
-            class="h-8 gap-1.5"
+            class="repository-install-action h-8 gap-1.5"
             disabled={!workspaceId || selectedIds.size === 0 || repositoryState.installing}
             onclick={() => install(false)}
             >{#if repositoryState.installing}<IconLoader
@@ -260,26 +389,49 @@
       </div>
     </aside>
 
-    <main class="repository-preview h-full min-w-0 flex-1">
-      {#if repositoryState.previewing}<div
-          class="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground"
+    <main class="repository-preview flex h-full min-w-0 flex-1 flex-col">
+      <div
+        class="repository-preview-mobile-header h-10 items-center gap-2 border-b border-border px-2"
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          class="repository-preview-back h-8 w-8"
+          aria-label="Back to discovered skills"
+          title="Back to discovered skills"
+          onclick={closeMobilePreview}
         >
-          <IconLoader class="h-4 w-4 animate-spin" />Loading snapshot
-        </div>
-      {:else if preview}<div class="flex h-full flex-col">
-          <div class="border-b border-border px-4 py-3">
-            <h2 class="text-sm font-semibold">{preview.skill.name}</h2>
-            <p class="mt-0.5 text-xs text-muted-foreground">{preview.skill.description}</p>
+          <IconArrowLeft class="h-4 w-4" />
+        </Button>
+        <h2
+          bind:this={mobilePreviewHeading}
+          class="min-w-0 truncate text-xs font-medium focus:outline-none"
+          tabindex="-1"
+        >
+          {selectedPreview ? `${selectedPreview.name} snapshot` : "Skill snapshot"}
+        </h2>
+      </div>
+      <div class="min-h-0 flex-1">
+        {#if repositoryState.previewing}<div
+            class="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground"
+          >
+            <IconLoader class="h-4 w-4 animate-spin" />Loading snapshot
           </div>
-          <pre
-            class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-[11px] leading-5">{preview.content}</pre>
-        </div>
-      {:else}<div
-          class="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground"
-        >
-          <IconEye class="h-8 w-8 opacity-50" />
-          <p class="text-xs">Select a skill to inspect the exact SKILL.md snapshot.</p>
-        </div>{/if}
+        {:else if preview}<div class="flex h-full flex-col">
+            <div class="border-b border-border px-4 py-3">
+              <h2 class="text-sm font-semibold">{preview.skill.name}</h2>
+              <p class="mt-0.5 text-xs text-muted-foreground">{preview.skill.description}</p>
+            </div>
+            <pre
+              class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-[11px] leading-5">{preview.content}</pre>
+          </div>
+        {:else}<div
+            class="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground"
+          >
+            <IconEye class="h-8 w-8 opacity-50" />
+            <p class="text-xs">Select a skill to inspect the exact SKILL.md snapshot.</p>
+          </div>{/if}
+      </div>
     </main>
   </div>
 </div>
@@ -291,13 +443,53 @@
   .repository-surface > :last-child {
     display: flex;
   }
+  .repository-preview-mobile-header {
+    display: none;
+  }
+  :global(.repository-outcome-action) {
+    margin-left: auto;
+  }
   @container (max-width: 650px) {
+    .repository-search {
+      flex-wrap: wrap;
+    }
+    .repository-source {
+      flex-basis: 100%;
+    }
+    .repository-ref {
+      width: auto;
+      min-width: 0;
+      flex: 1;
+    }
     .repository-list {
       width: 100%;
       border-right: 0;
     }
-    .repository-preview {
+    .repository-body[data-mobile-preview="false"] .repository-preview,
+    .repository-body[data-mobile-preview="true"] .repository-list {
       display: none;
+    }
+    .repository-body[data-mobile-preview="true"] .repository-preview,
+    .repository-preview-mobile-header {
+      display: flex;
+    }
+    .repository-preview-mobile-header {
+      height: 2.75rem;
+    }
+    :global(.repository-mobile-control),
+    :global(.repository-destination),
+    :global(.repository-install-action),
+    :global(.repository-preview-back),
+    :global(.repository-outcome-action),
+    .repository-force {
+      min-height: 2.75rem;
+    }
+    .repository-list-heading,
+    .repository-select-all {
+      min-height: 2.75rem;
+    }
+    :global(.repository-preview-back) {
+      width: 2.75rem;
     }
   }
 </style>

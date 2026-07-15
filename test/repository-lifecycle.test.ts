@@ -20,6 +20,7 @@ import {
   type RepositoryInstaller,
   type RepositoryService,
 } from "../src/daemon/repository-service.js";
+import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
@@ -63,7 +64,8 @@ describe("repository service lifecycle", () => {
       releaseClone = resolve;
     });
     let cloneSignal: AbortSignal | null = null;
-    repository = createRepositoryService(createWorkspaceRegistry(), {
+    const workspaces = createWorkspaceRegistry();
+    repository = createRepositoryService(workspaces, createSkillService(workspaces), {
       clone: async (_source, _ref, cancelSignal) => {
         cloneSignal = cancelSignal;
         signalStarted();
@@ -90,7 +92,8 @@ describe("repository service lifecycle", () => {
   it("rejects an invalid Git commit identity and removes its unretained snapshot", async () => {
     const snapshot = path.join(sandbox, "invalid-commit-snapshot");
     fs.mkdirSync(snapshot);
-    repository = createRepositoryService(createWorkspaceRegistry(), {
+    const workspaces = createWorkspaceRegistry();
+    repository = createRepositoryService(workspaces, createSkillService(workspaces), {
       clone: async () => ({ directory: snapshot, commit: "not-a-commit" }),
     });
 
@@ -118,13 +121,17 @@ describe("repository service lifecycle", () => {
       leasedSnapshot = options.source;
       signalInstallStarted();
       await installReleased;
-      expect(fs.existsSync(path.join(leasedSnapshot, "skills", "leased", "SKILL.md"))).toBe(true);
+      const sourceFile = path.join(leasedSnapshot, "skills", "leased", "SKILL.md");
+      expect(fs.existsSync(sourceFile)).toBe(true);
+      const installedDirectory = path.join(destination, "leased");
+      fs.mkdirSync(installedDirectory);
+      fs.copyFileSync(sourceFile, path.join(installedDirectory, "SKILL.md"));
       return {
         results: [
           {
             skill: "leased",
             destination,
-            path: path.join(destination, "leased"),
+            path: installedDirectory,
             status: "installed",
           },
         ],
@@ -134,7 +141,7 @@ describe("repository service lifecycle", () => {
         failed: 0,
       };
     };
-    repository = createRepositoryService(workspaces, {
+    repository = createRepositoryService(workspaces, createSkillService(workspaces), {
       clone: async () => {
         cloneIndex += 1;
         const snapshot = path.join(sandbox, `snapshot-${cloneIndex}`);

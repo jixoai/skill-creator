@@ -1,6 +1,6 @@
 <!--
 文件意图（2026-07-14）
-用户原始需求摘录：「skills manager 只是路由的一部分(`/workspace/~/`)；支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。二者是有机互联的。」
+用户原始需求摘录：「skills manager 只是路由的一部分(`/workspace/~/`)；支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。二者是有机互联的。」；[2026-07-15]「按照你自己的节奏去推进开发迭代。」
 正交意图：1. 定义 WebUI 的三路由职责；2. 解释前端状态和共享契约；3. 记录开发与组件边界。
 妥协声明：本文件是 WebUI package 的单一入口，三项都属于使用该 package 前不可缺少的上下文；产品细节已下沉到独立 route、store 与 component。
 -->
@@ -28,15 +28,31 @@ domain store --> typed oRPC client --> WebSocket --> daemon
 
 ## 路由职责
 
-| Route             | 人的任务                                                                                | RPC module                       |
-| ----------------- | --------------------------------------------------------------------------------------- | -------------------------------- |
-| `/workspace`      | 浏览 Home/Imported Workspace，并在所有视口导入或移除 registry entry                     | `workspace`                      |
-| `/workspace/[id]` | 扫描、搜索、查看、校验、启用或禁用当前 Workspace 的技能                                 | `skills`, `workspace`            |
-| `/workspace/~/`   | 查看 ccski 默认 Agent 位置中的技能                                                      | `skills`                         |
-| `/creator`        | 选择 Imported Workspace，创建或 revision-safe 编辑技能                                  | `creator`, `skills`, `workspace` |
-| `/repository`     | 扫描 Git source，选择并预览固定 commit 中的技能，再 dry-run 或安装到 Imported Workspace | `repository`, `workspace`        |
+| Route             | 人的任务                                                                              | RPC module                       |
+| ----------------- | ------------------------------------------------------------------------------------- | -------------------------------- |
+| `/workspace`      | 浏览 Home/Imported Workspace，并在所有视口导入或移除 registry entry                   | `workspace`                      |
+| `/workspace/[id]` | 扫描、搜索、查看、校验、启用或禁用当前 Workspace 的技能                               | `skills`, `workspace`            |
+| `/workspace/~/`   | 查看 ccski 默认 Agent 位置中的技能                                                    | `skills`                         |
+| `/creator`        | 无 query 新建、workspace-only 定位新建目标、workspace+skill revision-safe 编辑        | `creator`, `skills`, `workspace` |
+| `/repository`     | 扫描并预览固定 commit，安装到 Imported Workspace，再以本地 Skill ID 衔接 Creator 复核 | `repository`, `workspace`        |
 
 Creator 与 Repository 只把 Imported Workspace 作为写入目标。`~` 是发现视图，不是这两个路由的目标目录。
+
+```text
+Creator route load
+  no query --------------------> blank draft
+  workspace -------------------> explicit create scope
+  workspace + skill -----------> explicit edit scope
+  skill-only / invalid IDs ----> redirect /creator
+
+Repository result
+  installed / overwritten -----> workspaceId + daemon-signed local skillId
+                                      |
+                                      +-- one ---> direct Review installed
+                                      `-- many --> review menu
+                                                    |
+                                                    `--> /creator?workspace=...&skill=...
+```
 
 ## 前端结构
 
@@ -48,6 +64,7 @@ webui/src/
 |   |-- workspace/[id]/+page.svelte --- workspace scope
 |   |-- workspace/[id]/+page.ts ------- route ID validation / redirect
 |   |-- creator/+page.svelte ---------- create/edit surface
+|   |-- creator/+page.ts -------------- query identity validation / redirect
 |   `-- repository/+page.svelte ------- scan/preview/install surface
 |
 |-- lib/
@@ -55,6 +72,7 @@ webui/src/
 |   |-- store.svelte.ts --------------- public state facade
 |   |-- stores/
 |   |   |-- connection.svelte.ts ------ socket lifecycle
+|   |   |-- request-generation.ts ----- latest-request-wins commit capability
 |   |   |-- workspaces.svelte.ts ------ registry projection
 |   |   |-- skills.svelte.ts ---------- scoped list/detail/toggle
 |   |   |-- creator.ts ---------------- document/revision state
@@ -80,7 +98,31 @@ session token --> ws(s)://same-origin/ws/rpc?token=...
                                       `--> daemon validates before upgrade
 ```
 
-开发态由 Vite 把 `/ws/` 代理到随机端口 daemon；release 由 daemon 同源提供静态 SPA 与 WebSocket。组件不持有文件输出路径，后续 mutation 使用 Workspace ID、Skill ID 或 Repository Session ID。
+开发态按以下顺序建立同源边界；release 由 daemon 同源提供静态 SPA 与 WebSocket。组件不持有文件输出路径，后续 mutation 使用 Workspace ID、Skill ID 或 Repository Session ID。
+
+```text
+allocate daemon port
+  -> mount /api/ Connect proxy
+  -> mount /ws/ upgrade proxy
+  -> Vite/SvelteKit SPA fallback
+  -> HTTP listening
+  -> spawn daemon
+```
+
+## 异步状态
+
+```text
+request N -- capture request generation + RPC owner --> await RPC
+request N+1 / scope reset ------------------------------ invalidates N
+RPC client replacement ------------------------------ changes owner
+                                                              |
+                                                              +-- isLatest
+                                                              |      `--> loading cleanup
+                                                              `-- isCurrent
+                                                                     `--> data/error/follow-up commit
+```
+
+Workspace、Skills 与 Repository store 的读取和 mutation 各自持有代次门，互不共享取消域。Workspace list 明确返回 `loaded`、`superseded`、`failed`；Creator 在同一路由和连接仍有效时重试被 Layout 并发请求 supersede 的初始化，不能把尚未提交的空投影误判为显式 Workspace 不存在。Creator 再用 route key 与 document 代次隔离同路由 query 切换；取消选择、断线或组件销毁会主动撤销旧响应的提交资格。失效 mutation 返回无结果，不能让旧请求在新连接上继续 refresh、toast 或导航；断线重连不清空已经接纳的 dirty draft。
 
 ## 开发
 
@@ -117,3 +159,4 @@ pnpm build
 - shadcn-svelte / bits-ui 提供行为原语，Lucide 提供图标，`tailwind-scrollbar` 提供一致的紧凑滚动条。
 - `webui/src/lib/components/ui/**` 是 registry 工具生成的物理隔离区。不要在其中加入会被 registry 更新覆盖的手工意图头；产品语义、组合和场景定制放在 `components/` 或 route 中。
 - WebUI 可以为人的操作密度聚合场景代码，但不能绕过共享契约或复制 daemon 的路径判定。
+- 窄屏的 Creator 与 Repository 使用单屏列表/详情切换，进入后聚焦语义标题，返回后恢复原触发项；可见操作或其关联 label 命中区至少 `44px`。

@@ -40,7 +40,7 @@
     ),
   );
   const navItemClass =
-    "group flex h-9 items-center gap-2 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    "group flex h-9 items-center gap-2 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-[720px]:h-11 max-[720px]:min-w-11";
 
   function isWorkspaceActive(id: string): boolean {
     return pathname === `/workspace/${id}` || pathname === `/workspace/${id}/`;
@@ -93,7 +93,7 @@
   </div>
   <Separator />
 
-  <nav class="no-drag flex flex-col gap-1 p-2" aria-label="Primary navigation">
+  <nav class="no-drag flex flex-col gap-1 p-2 max-[720px]:p-1.5" aria-label="Primary navigation">
     <a
       href="/workspace"
       class={cn(
@@ -146,7 +146,7 @@
 
   <Separator />
   <nav
-    class="no-drag flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2"
+    class="no-drag flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2 max-[720px]:p-1.5"
     aria-label="Imported workspaces"
   >
     {#if !collapsed}
@@ -206,11 +206,19 @@
     {/if}
   </nav>
 
-  <div class={cn("no-drag border-t border-sidebar-border p-2", collapsed && "flex justify-center")}>
+  <div
+    class={cn(
+      "no-drag border-t border-sidebar-border p-2 max-[720px]:p-1.5",
+      collapsed && "flex justify-center",
+    )}
+  >
     <Button
       variant="ghost"
       size="sm"
-      class={cn("w-full gap-2 text-xs", collapsed && "h-9 w-9 px-0")}
+      class={cn(
+        "w-full gap-2 text-xs",
+        collapsed && "h-9 w-9 px-0 max-[720px]:h-11 max-[720px]:w-11",
+      )}
       onclick={onImport}
       aria-label="Import workspace"
       title={collapsed ? "Import workspace" : undefined}

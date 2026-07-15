@@ -15,18 +15,38 @@ import type { Plugin } from "vite";
 
 /** Spawn the development daemon and proxy its browser transport through Vite. */
 export function skillCreatorDaemonDev(): Plugin {
+  let daemon: ResultPromise | null = null;
+  let daemonExitExpected = false;
+  let stopDaemonPromise: Promise<void> | null = null;
+
+  const stopDaemon = (): Promise<void> => {
+    if (stopDaemonPromise) return stopDaemonPromise;
+    daemonExitExpected = true;
+    const child = daemon;
+    stopDaemonPromise = (async () => {
+      if (!child) return;
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      try {
+        await child;
+      } catch {
+        // Execa rejects when an intentional signal terminates the child.
+      } finally {
+        if (daemon === child) daemon = null;
+      }
+    })();
+    return stopDaemonPromise;
+  };
+
   return {
     name: "skill-creator/daemon-dev",
     apply: "serve",
     enforce: "pre",
-    configureServer(server) {
+    async configureServer(server) {
       const httpServer = server.httpServer;
       if (!httpServer) return;
 
-      const portPromise = process.env.SKILL_CREATOR_DEV_DAEMON_PORT
-        ? Promise.resolve(Number(process.env.SKILL_CREATOR_DEV_DAEMON_PORT))
-        : allocateRandomPort();
-      let daemon: ResultPromise | null = null;
+      const configuredPort = readOptionalPort(process.env.SKILL_CREATOR_DEV_DAEMON_PORT);
+      const port = configuredPort ?? (await allocateRandomPort());
       let shuttingDown = false;
 
       const shutdown = async (reason: string): Promise<void> => {
@@ -38,9 +58,13 @@ export function skillCreatorDaemonDev(): Plugin {
       };
 
       const spawnDaemon = (port: number, webuiUrl: string): void => {
+        if (daemon) throw new Error("The Vite plugin already owns a development daemon.");
+        daemonExitExpected = false;
+        stopDaemonPromise = null;
         const entry = path.resolve(repoRoot(), "src/daemon/dev.ts");
         daemon = execa("bun", [entry], {
           stdio: "inherit",
+          forceKillAfterDelay: 3_000,
           env: {
             ...process.env,
             SKILL_CREATOR_DEV_DAEMON_PORT: String(port),
@@ -48,43 +72,46 @@ export function skillCreatorDaemonDev(): Plugin {
             SKILL_CREATOR_DEV_SUPERVISOR_PID: String(process.pid),
           },
         });
-        daemon.on("exit", (code, signal) => {
+        daemon.once("exit", (code, signal) => {
+          if (daemonExitExpected) return;
           console.error(`[dev] daemon child exit: code=${String(code)} signal=${String(signal)}`);
           void shutdown(`daemon exited (code=${String(code)} signal=${String(signal)})`);
         });
       };
 
-      void portPromise.then((port) => {
-        process.env.SKILL_CREATOR_DEV_DAEMON_PORT = String(port);
-        const target = `http://127.0.0.1:${port}`;
-        const proxy = httpProxy.createProxyServer({ target, ws: true });
-        const isDaemonRoute = (url: string): boolean =>
-          url.startsWith("/api/") || url.startsWith("/ws/");
-        const handler = (
-          req: http.IncomingMessage,
-          res: http.ServerResponse,
-          next: () => void,
-        ): void => {
-          if (!isDaemonRoute(req.url ?? "")) {
-            next();
-            return;
-          }
-          proxy.web(req, res, undefined, () => respondDaemonUnavailable(res));
-        };
+      process.env.SKILL_CREATOR_DEV_DAEMON_PORT = String(port);
+      const target = `http://127.0.0.1:${port}`;
+      const proxy = httpProxy.createProxyServer({ target, ws: true });
+      const isDaemonRoute = (url: string): boolean =>
+        url.startsWith("/api/") || url.startsWith("/ws/");
+      const handler = (
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        next: () => void,
+      ): void => {
+        if (!isDaemonRoute(req.url ?? "")) {
+          next();
+          return;
+        }
+        proxy.web(req, res, undefined, () => respondDaemonUnavailable(res));
+      };
 
-        // `pre` puts this public Connect middleware before SvelteKit's SPA fallback.
-        server.middlewares.use(handler);
-        httpServer.on("upgrade", (req, socket, head) => {
-          if (!isDaemonRoute(req.url ?? "")) return;
-          proxy.ws(req, socket, head, undefined, () => respondWebSocketUnavailable(socket));
-        });
-
-        const startDaemon = (): void => {
-          spawnDaemon(port, webuiUrlFromAddress(httpServer.address()));
-        };
-        if (httpServer.listening) startDaemon();
-        else httpServer.once("listening", startDaemon);
+      // Async configureServer hooks finish before Vite mounts its internal SPA middleware.
+      server.middlewares.use(handler);
+      httpServer.on("upgrade", (req, socket, head) => {
+        if (!isDaemonRoute(req.url ?? "")) return;
+        proxy.ws(req, socket, head, undefined, () => respondWebSocketUnavailable(socket));
       });
+
+      const startDaemon = (): void => {
+        spawnDaemon(port, webuiUrlFromAddress(httpServer.address()));
+      };
+      if (httpServer.listening) startDaemon();
+      else httpServer.once("listening", startDaemon);
+    },
+    // Vite 8 invokes closeBundle once per environment; share one awaited child teardown.
+    closeBundle() {
+      return stopDaemon();
     },
   };
 }
@@ -103,7 +130,18 @@ function respondDaemonUnavailable(res: http.ServerResponse): void {
 
 function respondWebSocketUnavailable(socket: import("node:stream").Duplex): void {
   if (socket.destroyed) return;
-  socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nRetry-After: 1\r\n\r\n");
+  socket.end(
+    "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\nRetry-After: 1\r\n\r\n",
+  );
+}
+
+function readOptionalPort(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("SKILL_CREATOR_DEV_DAEMON_PORT must be an integer between 1 and 65535.");
+  }
+  return port;
 }
 
 function repoRoot(): string {

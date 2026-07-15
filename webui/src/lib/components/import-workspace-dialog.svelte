@@ -38,6 +38,7 @@
     error = null;
     try {
       const workspace = await addWorkspace(dirPath.trim(), label.trim() || undefined);
+      if (!workspace) return;
       open = false;
       await goto(`/workspace/${workspace.id}`);
     } catch (err) {

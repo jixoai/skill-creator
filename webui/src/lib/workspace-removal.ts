@@ -17,7 +17,8 @@ export async function confirmRemoveWorkspace(workspace: ImportedWorkspace): Prom
   }
 
   try {
-    await removeWorkspace(workspace.id);
+    const removed = await removeWorkspace(workspace.id);
+    if (!removed) return false;
     showToast(`Removed ${workspace.label}. Files remain on disk.`);
     return true;
   } catch (error) {

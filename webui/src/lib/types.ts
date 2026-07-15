@@ -18,6 +18,7 @@ export type {
   InstallSummary,
   RemoteRepoScan,
   RemoteSkill,
+  RemoteSkillId,
   RemoteSkillPreview,
 } from "$shared/contracts/repository.js";
 /** Workspace 页面使用的共享技能类型。 */

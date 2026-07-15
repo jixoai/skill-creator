@@ -4,7 +4,7 @@
    * 正交意图：
    * 1. 呈现技能来源、资源与完整正文。
    * 2. 编排校验、编辑与启停操作。
-   * 3. 在窄容器中提供返回列表操作。
+   * 3. 在窄容器中提供带语义焦点的列表/详情往返路径。
    */
   import type { SkillInfo, ValidateResult } from "$lib/types";
   import { formatSize, locationLabel, shortenPath } from "$lib/format";
@@ -24,6 +24,7 @@
   /** 技能详情及由 workspace 页面提供的操作能力。 */
   let {
     skill,
+    headingRef = $bindable(null),
     busy = false,
     editable = false,
     onToggle,
@@ -32,24 +33,43 @@
     onValidate,
   }: {
     skill: SkillInfo | null;
+    headingRef?: HTMLHeadingElement | null;
     busy?: boolean;
     editable?: boolean;
     onToggle?: (mode: "enable" | "disable") => void;
     onEdit?: () => void;
     onBack?: () => void;
-    onValidate?: () => Promise<ValidateResult>;
+    onValidate?: () => Promise<ValidateResult | null>;
   } = $props();
 
   let validating = $state(false);
   let validation = $state<ValidateResult | null>(null);
+  let validationError = $state<string | null>(null);
+  let validationGeneration = 0;
+
+  $effect(() => {
+    void skill?.id;
+    validationGeneration += 1;
+    validating = false;
+    validation = null;
+    validationError = null;
+  });
 
   async function validate(): Promise<void> {
-    if (!onValidate) return;
+    const skillId = skill?.id;
+    if (!onValidate || !skillId) return;
+    const generation = ++validationGeneration;
+    const canCommit = (): boolean => generation === validationGeneration && skill?.id === skillId;
     validating = true;
+    validation = null;
+    validationError = null;
     try {
-      validation = await onValidate();
+      const result = await onValidate();
+      if (canCommit() && result) validation = result;
+    } catch (error) {
+      if (canCommit()) validationError = error instanceof Error ? error.message : String(error);
     } finally {
-      validating = false;
+      if (canCommit()) validating = false;
     }
   }
 </script>
@@ -76,19 +96,25 @@
           <IconArrowLeft class="h-4 w-4" />
         </button>
         <div class="detail-summary min-w-0 flex-1">
-          <h2 class="truncate text-base font-semibold">{skill.name}</h2>
+          <h2
+            bind:this={headingRef}
+            class="truncate text-base font-semibold focus:outline-none"
+            tabindex="-1"
+          >
+            {skill.name}
+          </h2>
           <p class="mt-0.5 text-xs leading-5 text-muted-foreground">{skill.description}</p>
         </div>
         <div class="detail-actions flex shrink-0 items-center gap-1.5">
           {#if editable}
-            <Button variant="ghost" size="sm" class="h-8 gap-1.5" onclick={onEdit}>
+            <Button variant="ghost" size="sm" class="detail-action h-8 gap-1.5" onclick={onEdit}>
               <IconPencil class="h-3.5 w-3.5" /> Edit
             </Button>
           {/if}
           <Button
             variant="outline"
             size="sm"
-            class="h-8 gap-1.5"
+            class="detail-action h-8 gap-1.5"
             onclick={validate}
             disabled={validating}
           >
@@ -100,7 +126,7 @@
           <Button
             size="sm"
             variant={skill.disabled ? "default" : "outline"}
-            class="h-8 gap-1.5"
+            class="detail-action h-8 gap-1.5"
             disabled={busy}
             onclick={() => onToggle?.(skill.disabled ? "enable" : "disable")}
           >
@@ -120,6 +146,11 @@
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      {#if validationError}
+        <p class="mb-4 border-b border-destructive/30 pb-3 text-xs text-destructive" role="alert">
+          {validationError}
+        </p>
+      {/if}
       {#if validation}
         <section class="mb-4 border-b border-border pb-3" aria-live="polite">
           <div class="flex items-center gap-2 text-xs font-medium">
@@ -184,6 +215,13 @@
     .detail-actions {
       width: 100%;
       padding-left: 2.75rem;
+    }
+    .detail-back {
+      min-width: 2.75rem;
+      min-height: 2.75rem;
+    }
+    :global(.detail-action) {
+      min-height: 2.75rem;
     }
   }
 </style>

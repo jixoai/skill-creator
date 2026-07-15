@@ -20,7 +20,7 @@
   });
 </script>
 
-<div class="flex h-full flex-col overflow-y-auto">
+<div class="workspace-index-surface flex h-full flex-col overflow-y-auto">
   <header class="shrink-0 border-b border-border px-5 py-4">
     <h1 class="text-lg font-semibold">Skill locations</h1>
     <p class="mt-0.5 text-xs text-muted-foreground">
@@ -98,7 +98,7 @@
               <Button
                 variant="ghost"
                 size="icon"
-                class="mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                class="workspace-remove mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
                 aria-label={`Remove ${ws.label}`}
                 title={`Remove ${ws.label}`}
                 onclick={() => void confirmRemoveWorkspace(ws)}
@@ -112,3 +112,16 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .workspace-index-surface {
+    container-type: inline-size;
+  }
+
+  @container (max-width: 680px) {
+    :global(.workspace-remove) {
+      min-width: 2.75rem;
+      min-height: 2.75rem;
+    }
+  }
+</style>

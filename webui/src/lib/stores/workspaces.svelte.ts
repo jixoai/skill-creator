@@ -1,12 +1,19 @@
 /**
  * 原始需求 [2026-07-14]：「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace」。
  * 正交意图：
- * 1. 投影 home 与导入 workspace 的导航状态。
+ * 1. 按最新请求代次投影 home 与导入 workspace 的导航状态。
  * 2. 编排 workspace 导入、移除与当前目标切换。
  */
 import type { ImportedWorkspace, Workspace, WorkspaceId } from "../types";
 import { ImportedWorkspaceIdSchema } from "$shared/contracts/workspaces.js";
-import { getRpc, requireRpc } from "./connection.svelte";
+import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
+import { createRequestGenerationGate } from "./request-generation.js";
+
+const workspaceRequests = createRequestGenerationGate(getConnectionGeneration);
+const workspaceMutationRequests = createRequestGenerationGate(getConnectionGeneration);
+
+/** 一次 Workspace 投影请求对调用方可见的终态。 */
+export type WorkspaceLoadOutcome = "loaded" | "superseded" | "failed";
 
 /** home 与导入 workspace 的全局导航状态。 */
 export const workspaceState = $state<{
@@ -17,46 +24,80 @@ export const workspaceState = $state<{
 }>({ workspaces: [], activeId: "~", loading: true, error: null });
 
 /** 从 daemon 刷新 workspace registry 投影。 */
-export async function loadWorkspaces(): Promise<void> {
+export async function loadWorkspaces(): Promise<WorkspaceLoadOutcome> {
+  const request = workspaceRequests.issue();
   const rpc = getRpc();
   if (!rpc) {
-    workspaceState.loading = false;
-    return;
+    if (request.isLatest()) workspaceState.loading = false;
+    return "failed";
   }
   workspaceState.loading = true;
   workspaceState.error = null;
   try {
     const { workspaces } = await rpc.workspace.list({});
+    if (!request.isCurrent()) return "superseded";
     workspaceState.workspaces = workspaces;
     workspaceState.activeId = workspaces.find((workspace) => workspace.active)?.id ?? "~";
+    return "loaded";
   } catch (error) {
+    if (!request.isCurrent()) return "superseded";
     workspaceState.error = error instanceof Error ? error.message : String(error);
+    return "failed";
   } finally {
-    workspaceState.loading = false;
+    if (request.isLatest()) workspaceState.loading = false;
   }
 }
 
 /** 导入一个目录 workspace 并刷新 registry。 */
-export async function addWorkspace(directoryPath: string, label?: string): Promise<Workspace> {
-  const { workspace } = await requireRpc().workspace.add({ path: directoryPath, label });
+export async function addWorkspace(
+  directoryPath: string,
+  label?: string,
+): Promise<Workspace | null> {
+  const request = workspaceMutationRequests.issue();
+  let workspace: Workspace;
+  try {
+    ({ workspace } = await requireRpc().workspace.add({ path: directoryPath, label }));
+  } catch (error) {
+    if (!request.isCurrent()) return null;
+    throw error;
+  }
+  if (!request.isCurrent()) return null;
   await loadWorkspaces();
-  return workspace;
+  return request.isCurrent() ? workspace : null;
 }
 
 /** 从 registry 移除一个导入 workspace。 */
-export async function removeWorkspace(id: string): Promise<void> {
+export async function removeWorkspace(id: string): Promise<boolean> {
   const importedId = ImportedWorkspaceIdSchema.parse(id);
-  const { activeId } = await requireRpc().workspace.remove({ id: importedId });
+  const request = workspaceMutationRequests.issue();
+  let activeId: WorkspaceId;
+  try {
+    ({ activeId } = await requireRpc().workspace.remove({ id: importedId }));
+  } catch (error) {
+    if (!request.isCurrent()) return false;
+    throw error;
+  }
+  if (!request.isCurrent()) return false;
   workspaceState.activeId = activeId;
   await loadWorkspaces();
+  return request.isCurrent();
 }
 
 /** 将 workspace 设为 daemon 与界面的当前目标。 */
-export async function setActiveWorkspace(id: WorkspaceId): Promise<void> {
-  const result = await requireRpc().workspace.setActive({ id });
-  workspaceState.activeId = result.activeId;
-  for (const workspace of workspaceState.workspaces)
-    workspace.active = workspace.id === result.activeId;
+export async function setActiveWorkspace(id: WorkspaceId): Promise<boolean> {
+  const request = workspaceMutationRequests.issue();
+  let activeId: WorkspaceId;
+  try {
+    ({ activeId } = await requireRpc().workspace.setActive({ id }));
+  } catch (error) {
+    if (!request.isCurrent()) return false;
+    throw error;
+  }
+  if (!request.isCurrent()) return false;
+  workspaceRequests.invalidate();
+  workspaceState.activeId = activeId;
+  for (const workspace of workspaceState.workspaces) workspace.active = workspace.id === activeId;
+  return true;
 }
 
 /** 返回当前 workspace 投影。 */

@@ -1,7 +1,7 @@
 /**
  * 原始需求 [2026-07-14]：「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)」。
  * 正交意图：
- * 1. 管理 WebSocket 与 oRPC client 生命周期。
+ * 1. 管理 WebSocket、oRPC client 与连接所有权世代。
  * 2. 投影连接状态并在非主动断开后重连。
  */
 import { createRpcClient, createRpcWebSocket, type RpcClient } from "../rpc-client";
@@ -14,8 +14,14 @@ export const connectionState = $state<{
 
 let websocket: WebSocket | null = null;
 let rpcClient: RpcClient | null = null;
+let connectionGeneration = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let deliberateClose = false;
+
+/** 返回当前 RPC client 所有权世代，供异步提交门识别断线与重连。 */
+export function getConnectionGeneration(): number {
+  return connectionGeneration;
+}
 
 /** 建立 daemon RPC 连接；重复调用幂等。 */
 export function connect(): void {
@@ -28,14 +34,14 @@ export function connect(): void {
 
   candidate.onopen = () => {
     if (websocket !== candidate) return;
-    rpcClient = createRpcClient(candidate);
+    replaceRpcClient(createRpcClient(candidate));
     connectionState.status = "connected";
     connectionState.error = null;
   };
   candidate.onclose = (event) => {
     if (websocket !== candidate) return;
     websocket = null;
-    rpcClient = null;
+    replaceRpcClient(null);
     connectionState.status = "disconnected";
     connectionState.error =
       event.code === 1006
@@ -52,7 +58,7 @@ export function disconnect(): void {
   reconnectTimer = null;
   websocket?.close();
   websocket = null;
-  rpcClient = null;
+  replaceRpcClient(null);
   connectionState.status = "idle";
 }
 
@@ -65,4 +71,10 @@ export function getRpc(): RpcClient | null {
 export function requireRpc(): RpcClient {
   if (!rpcClient) throw new Error("The Skill Creator daemon is not connected.");
   return rpcClient;
+}
+
+function replaceRpcClient(nextClient: RpcClient | null): void {
+  if (rpcClient === nextClient) return;
+  rpcClient = nextClient;
+  connectionGeneration += 1;
 }

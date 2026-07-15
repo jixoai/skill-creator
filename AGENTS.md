@@ -79,6 +79,7 @@ Repository         = clone + pin commit + scan + preview + install
 3. Repository 的 preview 与 install 必须来自同一个 pinned clone session。
 4. WebUI 不拼接 mutation 输出路径；server 解析 opaque ID 到真实根目录。
 5. UI 服务于人的直觉与操作密度，允许场景聚合，但不能绕过协议和文件系统边界。
+6. Creator 允许无 query、workspace-only 新建上下文、workspace+skill 编辑上下文；skill-only 或非法身份必须在渲染前清理。
 
 ## 3. 系统拓扑
 
@@ -152,9 +153,24 @@ stop during tray mount --> bounded teardown --> late native handles arrive
 
 `open` 是 show/focus，不是 visibility toggle。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
 
-WebUI 的 route load 必须绑定当前 effect/连接代次；HMR、路由变化或断线时取消旧异步链，并清空 loaded guard。旧连接的 await 尾部不得调用新连接的 RPC client。
+WebUI 的 Workspace、Skill、Repository 读取与 mutation 分别使用独立 latest-request-wins 代次门；新请求、主动清理、路由变化或断线会撤销旧响应的提交资格。每次替换 RPC client 都递增 connection owner generation；请求令牌的 `isLatest` 只允许当前请求清理自身 loading，`isCurrent` 还要求 owner generation 未变化，只有它能提交数据、错误或后续 RPC。失效 mutation 的成功和 rejection 都投影为无结果，不能 toast、导航、刷新或调用新 client。Creator 额外把 query route key 与初始化代次绑定；旧连接的 await 尾部不得调用新连接的 RPC client。
+
+```text
+issue request N --> capture request generation + connection owner generation
+       |
+       +--> isLatest = N remains newest ----------------------> loading cleanup
+       `--> isCurrent = isLatest + same connection owner ----> state/error/follow-up commit
+
+disconnect / reconnect -> replace RPC client -> owner generation++ -> old isCurrent = false
+```
 
 动态 Workspace 路由先在 `+page.ts` 做 Zod load-time 收窄；非法 opaque ID 必须在组件渲染前 redirect，不能让组件以 fallback 数据掩盖地址错误。
+
+Creator 的 `+page.ts` 接受无 query、有效 workspace-only、有效 workspace+skill 三态；skill-only 或任一非法 ID 在组件创建前 redirect 到 canonical `/creator`。
+
+开发态 Vite 必须先分配动态 daemon 端口，再在 SvelteKit SPA fallback 之前挂载 `/api/` 与 `/ws/` middleware；HTTP 开始监听后才启动 daemon。daemon 启动窗口返回可重试 `503`，不能被 SPA `index.html` 吞掉。
+
+Vite config restart 必须 await 旧 plugin 的 `closeBundle`：先向旧 daemon 发出终止并等待 child exit/单例资源释放，replacement server 才能 spawn 新 daemon。重复 environment close hook 共享同一个 teardown promise，不能重复终止 child。
 
 ### 3.2 Workspace 数据流
 
@@ -181,6 +197,17 @@ workspace.list
      |
      `--> never writes observations back to registry
 
+WebUI workspace.list
+     |
+     +--> loaded ------ current owner commits projection
+     +--> superseded -- newer list request owns projection; caller must not infer absence
+     `--> failed ------ current owner records the actual failure
+
+Creator initialization
+     |
+     `--> superseded by concurrent Layout load
+              `--> same route/owner still current? retry : stop stale chain
+
 workspaceId + skillId -> resolve scope -> allowed root -> containment -> action
 ```
 
@@ -189,10 +216,15 @@ workspaceId + skillId -> resolve scope -> allowed root -> containment -> action
 ### 3.3 Creator 状态机
 
 ```text
-                    +--> create
-Imported Workspace |      directoryName -> direct child -> atomic SKILL.md
-                    |
-                    `--> load -> revision = sha256(content)
+/creator -----------------------------> first writable Workspace / blank draft
+/creator?workspace=ws_* --------------> explicit Workspace / blank draft
+/creator?workspace=ws_*&skill=sk_* ---> explicit Workspace / existing document
+skill-only or invalid opaque ID ------> redirect /creator before render
+
+                                       +--> create
+Imported Workspace -------------------|      directoryName -> direct child -> atomic SKILL.md
+                                       |
+                                       `--> load -> revision = sha256(content)
                                |
                           edit in WebUI
                                |
@@ -211,6 +243,8 @@ Imported Workspace |      directoryName -> direct child -> atomic SKILL.md
 ```
 
 Frontmatter 通过 `gray-matter` round-trip，核心字段经 Zod 校验，未知合法字段 passthrough。不得以重建 YAML 的方式丢失扩展字段。
+
+Creator 已接纳的草稿由 route identity 拥有。断线只撤销在途 RPC 的提交资格，不重置 baseline 或 draft；同一路由重连必须保留 dirty draft。只有显式新建、切换文档/Workspace、合法导航或保存/删除过程可以按现有 discard guard 替换草稿。
 
 ### 3.4 Repository 状态机
 
@@ -234,6 +268,27 @@ repo_<opaque-session> -- owns --> clone directory + rsk_<opaque-id> map
                               |
                               v
                       Imported Workspace root
+                              |
+                              v
+                bind ExpectedInstallTarget
+      workspaceId + canonical root + selected name + direct-child path
+                              |
+                              v
+        ccski unknown output -> Zod runtime parse -> one entry
+                              |
+                              v
+           entry exactly matches selected name,
+             canonical destination and direct-child path
+                              |
+                              v
+            rediscover through injected SkillService
+       canonical non-symlink directory + lstat regular SKILL.md
+      + matching frontmatter name + resolve identity + validate
+                              |
+                              v
+              workspaceId + local SkillId per verified write
+                              |
+                              `--> Creator review deep link
 
 session missing/evicted --> reject --> scan again
 
@@ -245,7 +300,7 @@ daemon stop --> terminal gate --> abort pending clone --> reject late retain
                                                 `-----> delete unowned snapshot
 ```
 
-扫描会话最多保留有限数量。淘汰先撤销 session capability；正在使用的 clone 必须等已接受操作释放后再删除。重复 skill name、非法 frontmatter 或不安全目录名必须在安装前变为不可安装状态。
+扫描会话最多保留有限数量。淘汰先撤销 session capability；正在使用的 clone 必须等已接受操作释放后再删除。重复 skill name、非法 frontmatter 或不安全目录名必须在安装前变为不可安装状态。实际安装按 selected skill 逐项调用 installer 并逐项捕获失败；ccski output 先经 Zod runtime parse，不可信 output 被投影为该 selected identity 的 identity-free `failed`，后项失败不能抹掉前项成功。安装汇总的计数只由最终逐项状态重算；只有 `installed` / `overwritten` 项完成 ExpectedInstallTarget 全链验证后才能获得本地 Skill ID。
 
 ## 4. 目录与模块意图
 
@@ -291,7 +346,7 @@ src/
     |-- config/daemon-dev.ts -------- Vite-owned Bun daemon + HTTP/WS proxy
     `-- src/
         |-- routes/ ------------ product surfaces and app shell
-        |-- lib/stores/ -------- connection / workspace / skills / creator / repository
+        |-- lib/stores/ -------- connection / request generation / workspace / skills / creator / repository
         |-- lib/components/ ---- product composition
         `-- lib/components/ui/ - shadcn-svelte generated primitives
 ```
@@ -331,6 +386,7 @@ Creator directoryName ---------> lowercase safe name + direct child -> SKILL.md
 Creator update/delete ---------> expected SHA-256 revision ----------> write/remove
 Git source/ref ----------------> git clone + pinned HEAD ------------> scan session
 Remote skill selection --------> session-owned opaque IDs ----------> install
+Install output path -----------> Workspace direct child + SKILL.md -> local Skill ID
 static request path -----------> resolved-root containment ----------> read asset
 IPC bytes ---------------------> frame size + schema + protocol ------> CLI command
 ```
@@ -343,7 +399,7 @@ IPC bytes ---------------------> frame size + schema + protocol ------> CLI comm
 4. 文件 mutation 必须由 server-owned Workspace root 派生，不能信任调用方组合的路径。
 5. 创建目标必须是 Workspace direct child；编辑、删除、预览必须通过 containment check。
 6. 文档写入使用同目录临时文件加 rename；并发编辑由 revision 拒绝，不做 last-write-wins。
-7. Repository preview/install 必须绑定同一个 commit 和 session；session 淘汰立即拒绝新操作，但不得删除已接受安装仍在使用的 clone。
+7. Repository preview/install 必须绑定同一个 commit 和 session；session 淘汰立即拒绝新操作，但不得删除已接受安装仍在使用的 clone。每个 selected skill 必须绑定预期 Workspace、名称和直属路径；installer output 必须先 runtime parse，逐字段匹配后，还需通过 canonical path、非符号链接的普通 `SKILL.md`、frontmatter name、`SkillService.resolve` 与 validate 的重新发现链。安装汇总携带提交时的 Workspace ID；部分失败必须保留已完成项，只有完整验证的 `installed` / `overwritten` 项能签发本地 Skill ID。
 8. 启用/禁用发生冲突时返回 conflict，不以破坏性 force 掩盖目标状态。
 9. Workspace Registry mutation 必须先原子持久化完整 next state，成功后才替换内存真相；动态计数不得写回持久态。
 10. daemon stop coordinator 与 signal listeners 必须先于 tray mount 发布；stop 先关闭 transport admission，再关停 domain，迟到的 native handles 不得重新挂载；非协作连接在 grace deadline 后强制回收，所有 stop 来源共享完成态与退出意图。
@@ -417,6 +473,7 @@ information hierarchy -> dense predictable layout -> domain store -> RPC
 - Creator 的 dirty、saving、revision conflict、delete 和 validation 状态必须可区分。
 - Repository 的 scanning、pinned commit、selection、preview、dry-run、overwrite、install result 必须可区分。
 - 折叠/窄屏导航不能吞掉恢复性操作；Remove Workspace 必须在 workspace 索引仍可达。
+- 窄屏使用单屏列表/详情切换；进入详情后聚焦语义标题，返回后恢复触发控件。可见移动操作或其关联 label 命中区至少为 `44px`。
 - mutation 反馈必须区分 succeeded、skipped、conflict 与 failed；禁止把 skipped-only 写成成功 0 项。
 - 延迟回调可能跨 HMR 模块代次存活；toast 等短生命周期实体使用不可复用 ID，禁止热替换后重置的 module counter。
 

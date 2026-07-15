@@ -2,12 +2,13 @@
   /**
    * 原始需求 [2026-07-14]：「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace」。
    * 正交意图：
-   * 1. 按路由和连接代次加载、筛选与选择技能。
+   * 1. 按路由和连接代次加载、筛选、选择技能并维持窄屏焦点往返。
    * 2. 编排技能校验和启停操作。
    * 3. 将可写技能衔接到 Creator，将安装需求衔接到 Repository。
    */
   import type { PageData } from "./$types";
   import { goto } from "$app/navigation";
+  import { tick } from "svelte";
   import SkillCard from "$lib/components/skill-card.svelte";
   import SkillDetail from "$lib/components/skill-detail.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -15,6 +16,7 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
   import {
     connectionState,
+    clearSelection,
     filteredSkills,
     loadSkills,
     loadWorkspaces,
@@ -39,10 +41,13 @@
   let { data }: { data: PageData } = $props();
   let id = $derived(data.workspaceId);
   let selectedId = $state<SkillId | null>(null);
+  let mobileDetailOpen = $state(false);
   let showDisabled = $state(false);
   let provider = $state<string | null>(null);
   let toggling = $state(false);
   let loadedKey = "";
+  let skillList = $state<HTMLElement | null>(null);
+  let detailHeading = $state<HTMLHeadingElement | null>(null);
 
   $effect(() => {
     const routeId = id;
@@ -54,12 +59,15 @@
 
     let cancelled = false;
     loadedKey = routeId;
+    selectedId = null;
+    mobileDetailOpen = false;
+    clearSelection();
     void (async () => {
       try {
         await loadWorkspaces();
         if (cancelled) return;
-        await setActiveWorkspace(routeId);
-        if (cancelled) return;
+        const activated = await setActiveWorkspace(routeId);
+        if (cancelled || !activated) return;
         await loadSkills(routeId);
       } catch (error) {
         if (cancelled) return;
@@ -85,8 +93,26 @@
   );
 
   async function choose(skillId: SkillId): Promise<void> {
-    selectedId = skillId;
     await selectSkill(skillId);
+    if (skillsState.selected?.id !== skillId) return;
+    selectedId = skillId;
+    mobileDetailOpen = true;
+    await tick();
+    if (
+      selectedId === skillId &&
+      skillsState.selected?.id === skillId &&
+      skillList?.offsetParent === null &&
+      detailHeading?.offsetParent
+    ) {
+      detailHeading.focus();
+    }
+  }
+
+  async function closeDetail(): Promise<void> {
+    const trigger = skillList?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]');
+    mobileDetailOpen = false;
+    await tick();
+    if (trigger?.isConnected && trigger.offsetParent) trigger.focus();
   }
 
   async function toggle(mode: "enable" | "disable"): Promise<void> {
@@ -94,6 +120,7 @@
     toggling = true;
     try {
       const result = await toggleSkills([selectedId], mode);
+      if (!result) return;
       const issues = result.results
         .filter((entry) => entry.status === "conflict" || entry.status === "failed")
         .map((entry) => entry.error ?? `${entry.name} could not be updated.`);
@@ -122,7 +149,10 @@
   }
 </script>
 
-<div class="workspace-surface flex h-full min-w-0 flex-col" data-selected={selectedId !== null}>
+<div
+  class="workspace-surface flex h-full min-w-0 flex-col"
+  data-mobile-detail={mobileDetailOpen && selectedId !== null}
+>
   <header class="flex min-h-12 shrink-0 items-center gap-3 border-b border-border px-4">
     <div class="min-w-0 flex-1">
       <div class="flex items-center gap-2">
@@ -137,7 +167,7 @@
       <Button
         variant="ghost"
         size="icon"
-        class="h-8 w-8"
+        class="workspace-refresh-command h-8 w-8"
         aria-label="Refresh skills"
         title="Refresh skills"
         onclick={() => loadSkills(id)}
@@ -182,6 +212,7 @@
 
   <div class="min-h-0 flex-1">
     <aside
+      bind:this={skillList}
       class="skill-list flex h-full w-[310px] shrink-0 flex-col border-r border-border"
       data-has-selection={selectedId !== null}
     >
@@ -194,10 +225,10 @@
             bind:value={skillsState.query}
             placeholder="Search skills"
             aria-label="Search skills"
-            class="h-8 pl-8 pr-8 text-xs"
+            class="workspace-search-control h-8 pl-8 pr-11 text-xs"
           />
           {#if skillsState.query}<button
-              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+              class="workspace-clear-search absolute right-0 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center text-muted-foreground"
               aria-label="Clear search"
               onclick={() => (skillsState.query = "")}><IconX class="h-3.5 w-3.5" /></button
             >{/if}
@@ -209,7 +240,7 @@
                   {...props}
                   variant="outline"
                   size="sm"
-                  class="h-7 gap-1.5 px-2 text-[11px]"
+                  class="workspace-filter-control h-7 gap-1.5 px-2 text-[11px]"
                   ><IconFilter class="h-3 w-3" />{provider ?? "All providers"}</Button
                 >{/snippet}
             </DropdownMenu.Trigger>
@@ -224,7 +255,7 @@
           <Button
             variant={showDisabled ? "secondary" : "ghost"}
             size="sm"
-            class="h-7 px-2 text-[11px]"
+            class="workspace-filter-control h-7 px-2 text-[11px]"
             aria-pressed={showDisabled}
             onclick={() => (showDisabled = !showDisabled)}>Disabled {counts.disabled}</Button
           >
@@ -254,15 +285,13 @@
 
     <main class="skill-detail h-full min-w-0 flex-1" data-active={selectedId !== null}>
       <SkillDetail
+        bind:headingRef={detailHeading}
         skill={skillsState.selected}
         busy={toggling}
         editable={workspace?.kind === "directory"}
         onToggle={toggle}
         onEdit={() => goto(creatorUrl())}
-        onBack={() => {
-          selectedId = null;
-          skillsState.selected = null;
-        }}
+        onBack={() => void closeDetail()}
         onValidate={() =>
           selectedId ? validateSkill(selectedId) : Promise.reject(new Error("No skill selected."))}
       />
@@ -278,9 +307,20 @@
     display: flex;
   }
   @container (max-width: 680px) {
+    :global(.workspace-refresh-command),
+    :global(.workspace-compact-command),
+    :global(.workspace-filter-control),
+    :global(.workspace-search-control),
+    .workspace-clear-search {
+      min-height: 2.75rem;
+    }
+    :global(.workspace-refresh-command),
     :global(.workspace-compact-command) {
-      width: 2rem;
+      width: 2.75rem;
       padding-inline: 0;
+    }
+    .workspace-clear-search {
+      width: 2.75rem;
     }
     .workspace-command-label {
       display: none;
@@ -292,10 +332,10 @@
     .skill-detail {
       display: none;
     }
-    .workspace-surface[data-selected="true"] .skill-list {
+    .workspace-surface[data-mobile-detail="true"] .skill-list {
       display: none;
     }
-    .workspace-surface[data-selected="true"] .skill-detail {
+    .workspace-surface[data-mobile-detail="true"] .skill-detail {
       display: block;
     }
     :global(.detail-back) {

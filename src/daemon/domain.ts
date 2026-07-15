@@ -31,6 +31,6 @@ export function createDaemonDomain(
     workspaces,
     skills,
     creator: createCreatorService(workspaces, skills),
-    repository: createRepositoryService(workspaces),
+    repository: createRepositoryService(workspaces, skills),
   };
 }
