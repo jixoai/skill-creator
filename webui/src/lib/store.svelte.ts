@@ -6,4 +6,5 @@ export * from "./stores/connection.svelte";
 export * from "./stores/creator";
 export * from "./stores/repository.svelte";
 export * from "./stores/skills.svelte";
+export * from "./stores/tray.svelte";
 export * from "./stores/workspaces.svelte";

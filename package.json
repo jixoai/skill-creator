@@ -11,8 +11,16 @@
     "tray",
     "webui"
   ],
+  "homepage": "https://github.com/jixoai/skill-creator#readme",
+  "bugs": {
+    "url": "https://github.com/jixoai/skill-creator/issues"
+  },
   "license": "MIT",
   "author": "Gaubee",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jixoai/skill-creator.git"
+  },
   "bin": {
     "skill-creator": "./dist/cli.js"
   },
@@ -46,13 +54,13 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@opentray/ext-webview": "^0.12.0",
+    "@opentray/ext-webview": "^0.14.4",
     "@orpc/contract": "1.14.6",
     "@orpc/server": "1.14.6",
     "ccski": "^2.4.0",
     "execa": "^9.6.1",
     "gray-matter": "^4.0.3",
-    "opentray": "^0.12.0",
+    "opentray": "^0.14.4",
     "ws": "^8.18.1",
     "zod": "^4.4.3"
   },
@@ -60,6 +68,7 @@
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.1",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.2",
     "vite-plus": "^0.2.4",
     "vitest": "^4.1.10"

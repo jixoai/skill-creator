@@ -9,7 +9,7 @@
  *   [1] Workspace-scoped skill reads and mutations.
  *   [2] Workspace registry and revision-safe Creator operations.
  *   [3] Immutable repository session operations.
- *   [4] Daemon status projection.
+ *   [4] Daemon status + tray/preferences projection and the server→client stream.
  *   [5] Convert DomainError only at the root RPC boundary.
  * Compromise: oRPC router-wide middleware must be attached at this central
  * contract-composition root, so extracting the fifth intent would duplicate
@@ -19,11 +19,34 @@ import { implement, ORPCError } from "@orpc/server";
 import { RpcErrorDefinitions } from "../shared/contracts/errors.js";
 import { rpcContract } from "../shared/rpc-contract.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
+import type { Preferences } from "../shared/contracts/tray.js";
+import type { WsServerMessage } from "../shared/rpc-contract.js";
 import type { DaemonDomain } from "./domain.js";
 import { DomainError } from "./domain-error.js";
+import type { PreferencesStore } from "./preferences-store.js";
+import type { TrayHost } from "./tray-host.js";
+
+/** 可变 tray host 引用；WebServer 在 attachTray 之前构造 router，故用间接引用。 */
+export interface TrayHostRef {
+  host: TrayHost | null;
+}
+
+/** daemon→WebUI 投影帧订阅源；由 WebServer 持有并广播。 */
+export interface BroadcastEmitter {
+  subscribe: () => AsyncGenerator<WsServerMessage, void, void>;
+}
+
+export interface RpcRouterDeps {
+  status: () => DaemonStatus;
+  domain: DaemonDomain;
+  trayHostRef: TrayHostRef;
+  preferencesStore: PreferencesStore;
+  broadcast: BroadcastEmitter;
+}
 
 /** Bind daemon domain modules to the shared contract behind one error boundary. */
-export function createRpcRouter(status: () => DaemonStatus, domain: DaemonDomain) {
+export function createRpcRouter(deps: RpcRouterDeps) {
+  const { status, domain, trayHostRef, preferencesStore, broadcast } = deps;
   const rpc = implement(rpcContract);
   const domainErrorBoundary = rpc.middleware(async ({ next }) => {
     try {
@@ -90,6 +113,26 @@ export function createRpcRouter(status: () => DaemonStatus, domain: DaemonDomain
     },
     daemon: {
       status: rpc.daemon.status.handler(() => status()),
+    },
+    tray: {
+      completeAutoClose: rpc.tray.completeAutoClose.handler(async () => {
+        await trayHostRef.host?.completeAutoClose();
+        return { ok: true };
+      }),
+      routeChanged: rpc.tray.routeChanged.handler(({ input }) => {
+        trayHostRef.host?.setRoute(input.pathname);
+        return { ok: true };
+      }),
+    },
+    preferences: {
+      set: rpc.preferences.set.handler(({ input }) => {
+        // 单一写入路径：store 合并 + emit 同时驱动 broadcast 与 TrayHost 的自动隐藏重算。
+        preferencesStore.setPreferences(input.patch as Preferences);
+        return { ok: true };
+      }),
+    },
+    state: {
+      subscribe: rpc.state.subscribe.handler(() => broadcast.subscribe()),
     },
   });
 }

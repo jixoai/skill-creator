@@ -1,15 +1,29 @@
 /**
- * 原始需求 [2026-07-14]：「opentray 的一些适配没做好，好好学习 pnpm-pub」。
+ * 原始需求 [2026-07-18]：「全面升级 skill-creator-v2 对于 opentray 的适配」。
  * 正交意图：
- * 1. 创建强类型 tray 与 WebView window，并处理菜单事件。
- * 2. 将所有打开入口收敛为同一窗口句柄上的幂等 show/focus。
- * 3. 根据屏幕和 tray 几何锚定窗口。
- * 4. 将原生能力失败隔离为可诊断的 headless 降级。
- * 妥协声明：OpenTray 的 tray、window 与 placement 能力只能在同一原生
- * capability adapter 中协调；产品路由和 daemon 生命周期不放在本文件。
+ *   [1] 创建强类型 tray 与 retained WebView window，处理菜单、原生可见性事件与品牌图标
+ *       （icon 是 createTray 的输入之一，与 menu/tooltip 同层；monochrome-mini 经
+ *       resolveTrayIconPath 解析为跨平台 file Icon，macOS 走 template 自适应）。
+ *   [2] 保留单一 WebView session：show() 仅 bootstrap 一次，之后用 toVisible()/close()
+ *       复用 session；以 isVisible()/visibleChange 作为原生可见性真相（含最小化）。
+ *   [3] 按屏幕与 tray 几何锚定窗口，并把原生失败隔离为可诊断的 headless 降级。
+ *   [4] 把 tray 窗口投影（pin frame）与 keep-onTop 偏好驱动给已授权 WebUI 客户端。
+ * 妥协声明：OpenTray 的 tray、retained window、placement 与可见性真相只能在同一
+ * 原生 capability adapter 中协调；产品路由与 daemon 生命周期不放在本文件。
  */
-import type { EventfulTrayHandle, CreateTrayOptions, TrayIcon } from "opentray";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type {
+  CreateTrayHandle,
+  CreateTrayMenu,
+  CreateTrayOptions,
+  EventfulTrayHandle,
+  Icon,
+  TrayIcon,
+} from "opentray";
 import type { WebviewTrayCapability, WebviewWindowHandle } from "@opentray/ext-webview";
+export type { TrayIcon };
 import {
   APP_ID,
   APP_TITLE,
@@ -18,56 +32,116 @@ import {
   WINDOW_HEIGHT,
   WINDOW_WIDTH,
 } from "../shared/index.js";
+import { WINDOW_ENTER_SEED_OPACITY } from "../shared/window-opacity.js";
+import type { TrayPinFrame } from "../shared/contracts/tray.js";
+import type { PreferencesStore } from "./preferences-store.js";
+import { configureOpenTrayWindowsHostTopology } from "./opentray-windows-host.js";
 import { log } from "./log.js";
 
-/** 已扩展 WebView 能力的 OpenTray 句柄。 */
-export type OpentrayTray = EventfulTrayHandle & WebviewTrayCapability;
-/** OpenTray 承载的 WebView 窗口句柄。 */
+/** 已扩展 WebView 能力的 OpenTray 句柄（保留 createTray 的易用 setMenu 输入）。 */
+export type OpentrayTray = CreateTrayHandle & WebviewTrayCapability;
+/** OpenTray 承载的 retained WebView 窗口句柄。 */
 export type OpentrayWindow = WebviewWindowHandle;
+/** tray 挂载失败的可诊断分类。 */
+export interface TrayMountFailure {
+  kind:
+    | "unsupported-platform"
+    | "missing-native-package"
+    | "missing-webview-package"
+    | "tray-mount-failed"
+    | "window-show-failed";
+  stage: TrayMountFailureStage;
+  cause: unknown;
+}
+export type TrayMountFailureStage =
+  | "runtime-binding"
+  | "tray-extend"
+  | "window-create"
+  | "window-show";
 
-/** 窗口进入动画的 seed opacity（避免 restore 时闪一下 1.0）。 */
-const WINDOW_ENTER_SEED_OPACITY = 0.92;
-
-/** tray 挂载结果；失败时携带可诊断阶段并退化为空句柄。 */
+/** tray 挂载结果；失败时携带可诊断分类并退化为空句柄。 */
 export interface TrayMountResult {
   tray: OpentrayTray | null;
   window: OpentrayWindow | null;
   stopPlacement: () => void;
-  failure?: { kind: string; stage: string; cause: unknown };
+  failure?: TrayMountFailure;
 }
 
-/** tray 窗口的创建参数与退出回调。 */
+/** tray 窗口的创建参数与退出/投影回调。 */
 export interface TrayHostOptions {
-  url: string;
-  packageVersion: string;
-  enableDevtools?: boolean;
-  onQuit: () => Promise<void>;
+  /** 日志输出（dev/test 可观测）。 */
+  log?: (line: string) => void;
+  /** 打开窗口的菜单项 id（primaryEvent）。 */
+  openItemId?: number;
+  /** 退出菜单项 id。 */
+  quitItemId?: number;
+  /** 窗口隐藏时主菜单项文案。 */
+  showLabel?: string;
+  /** 窗口可见时主菜单项文案。 */
+  hideLabel?: string;
+  /** 退出菜单项文案。 */
+  quitLabel?: string;
+  /** 一次性 bootstrap show() 之后初始原生可见性。 */
+  initialVisible?: boolean;
+  /** 把 tray 窗口投影广播给已授权 WebUI 客户端。 */
+  onPinFrame?: (frame: TrayPinFrame) => void;
+  /** 把退出意图委托给 daemon 拥有者做优雅关停。 */
+  onQuit?: () => void;
 }
 
-type TrayHostTray = Pick<OpentrayTray, "destroy" | "onMenuClick">;
-type TrayHostWindow = Pick<OpentrayWindow, "destroy" | "setStyle" | "show">;
+type TrayHostTray = Pick<OpentrayTray, "destroy" | "onMenuClick" | "setMenu">;
+type TrayHostWindow = Pick<
+  OpentrayWindow,
+  "destroy" | "setStyle" | "show" | "toVisible" | "close" | "isVisible" | "listen"
+>;
+
+type Visibility = "hidden" | "shown";
 
 /**
- * 创建 tray 与 window，并返回有状态的 `TrayHost` 管理器。
+ * 创建 tray 与 retained window，并返回有状态的 `TrayHost` 管理器。
  *
- * 失败时返回 null handles（headless 降级），不抛错 —— tray mount 是 UX 加成，绝不致命。
+ * 失败时返回 null handles（headless 降级），不抛错 —— tray mount 是 UX 加成，
+ * 绝不致命；WebUI 始终可用浏览器访问。
  */
-export async function mountTray(opts: TrayHostOptions): Promise<{
-  result: TrayMountResult;
-  host: TrayHost | null;
-}> {
+export async function mountTray(
+  store: PreferencesStore,
+  opts: {
+    url: string;
+    packageVersion: string;
+    enableDevtools?: boolean;
+    webuiDir?: string;
+    onQuit: () => Promise<void>;
+    onPinFrame: (frame: TrayPinFrame) => void;
+  },
+): Promise<{ result: TrayMountResult; host: TrayHost }> {
   let baseTray: EventfulTrayHandle | null = null;
   let tray: OpentrayTray | null = null;
   let panel: OpentrayWindow | null = null;
   let stopPlacement: () => void = () => {};
 
   try {
+    const windowsHostTopology = configureOpenTrayWindowsHostTopology(process.env, process.platform);
+    if (process.platform === "win32") {
+      log(`OpenTray Windows host topology: ${windowsHostTopology}`);
+    }
+
     const opentray = await import("opentray");
     const ext = await import("@opentray/ext-webview");
 
+    // tray 通知栏小图标（resources/README.md §4 Monochrome Mini）：极小容器专用。
+    const iconPath = resolveTrayIconPath(opts.webuiDir);
+    const icon: Icon | undefined = iconPath
+      ? {
+          // macOS template icon：透明背景单色图，系统按深浅色自适应反相。
+          "darwin-icon-only": { type: "file", path: iconPath, isTemplate: true },
+          "win32-icon-only": { type: "file", path: iconPath },
+          "linux-icon-only": { type: "file", path: iconPath },
+        }
+      : undefined;
+
     const trayOptions: CreateTrayOptions = {
       id: APP_ID,
-      tooltip: { title: APP_TITLE, description: "Skills manager" },
+      tooltip: { title: APP_TITLE, description: "Skills workbench" },
       menu: {
         items: [
           { type: "item", id: MENU_OPEN_ID, title: "Open Skill Creator", primaryEvent: true },
@@ -75,6 +149,7 @@ export async function mountTray(opts: TrayHostOptions): Promise<{
           { type: "item", id: MENU_QUIT_ID, title: "Quit" },
         ],
       },
+      ...(icon ? { icon } : {}),
     };
 
     baseTray = await opentray.createTray(trayOptions, {
@@ -84,21 +159,30 @@ export async function mountTray(opts: TrayHostOptions): Promise<{
     });
     tray = baseTray.extend(ext.WebviewExt);
 
+    // 平台分帧：macOS 保留原生 overlay 控件；Windows 走 frameless 自绘控件。
+    const usesWindowsFramelessControls = process.platform === "win32";
     panel = tray.createWebviewWindow({
       url: opts.url,
       width: WINDOW_WIDTH,
       height: WINDOW_HEIGHT,
       title: APP_TITLE,
       nativeWindowApi: true,
-      windowControlsOverlay: true,
+      windowControlsOverlay: !usesWindowsFramelessControls,
       ...(opts.enableDevtools ? { devtools: true } : {}),
       style: {
+        frameless: usesWindowsFramelessControls,
+        resizable: true,
         keepOnTop: true,
+        // skill-creator 拥有页面驱动的退出动画，原生 blur 不得提前隐藏窗口；
+        // TrayHost 在动画结束后调用 close()。
+        autoHide: false,
+        platform: { windows: { showInSwitchers: false } },
         opacity: WINDOW_ENTER_SEED_OPACITY,
         background: { kind: "semantic", token: "blur", state: "active" },
       },
     });
 
+    // 首次 show() 真正加载原生扩展并创建 native window session。
     await panel.show();
     log("tray window shown on mount");
 
@@ -108,8 +192,16 @@ export async function mountTray(opts: TrayHostOptions): Promise<{
 
     stopPlacement = await startPlacement(tray, panel, ext);
 
-    const host = new TrayHost({ tray, window: panel }, { onQuit: opts.onQuit });
-    host.install();
+    const host = new TrayHost(store, tray, panel, {
+      openItemId: MENU_OPEN_ID,
+      quitItemId: MENU_QUIT_ID,
+      showLabel: "Open Skill Creator",
+      hideLabel: "Hide window",
+      quitLabel: "Quit",
+      initialVisible: true,
+      onPinFrame: opts.onPinFrame,
+      onQuit: () => void opts.onQuit(),
+    });
 
     log("opentray webview window mounted");
     return {
@@ -117,72 +209,379 @@ export async function mountTray(opts: TrayHostOptions): Promise<{
       host,
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const stage = panel
-      ? "window-show"
-      : tray
-        ? "window-create"
-        : baseTray
-          ? "tray-extend"
-          : "runtime-binding";
+    const failure = classifyTrayMountFailure(err, {
+      baseTray,
+      tray,
+      panel,
+      stage: inferTrayMountFailureStage({ baseTray, tray, panel }),
+    });
     await destroyMounted({ baseTray, tray, panel, stopPlacement });
-    log(`opentray mount failed (${message} @ ${stage}) — running headless`);
+    log(`opentray mount failed (${formatTrayMountFailure(failure)}) — running headless`);
+    const host = new TrayHost(store, null, null, {
+      openItemId: MENU_OPEN_ID,
+      quitItemId: MENU_QUIT_ID,
+      initialVisible: false,
+      onPinFrame: opts.onPinFrame,
+      onQuit: () => void opts.onQuit(),
+    });
     return {
-      result: {
-        tray: null,
-        window: null,
-        stopPlacement: () => {},
-        failure: { kind: "mount-failed", stage, cause: err },
-      },
-      host: null,
+      result: { tray: null, window: null, stopPlacement: () => {}, failure },
+      host,
     };
   }
 }
 
 /**
- * 单窗口 tray 管理器。Open 动作始终恢复同一窗口，不维护无法从 OS 关闭按钮同步的镜像状态。
+ * 单 retained-session tray 管理器。
+ *
+ * - `show()` bootstrap 一次创建原生 session；之后所有激活用 `toVisible()`，隐藏用 `close()`，
+ *   绝不重放 startup 宽高/style/native flags（OpenTray 0.14 session 法则）。
+ * - `isVisible()` / `visibleChange` 是原生操作可见性的唯一真相（含最小化）。
+ * - 操作经 `enqueueWindowOperation` 串行化，快速 tray 点击不会反转 stale 状态。
  */
 export class TrayHost {
-  private detachMenu: (() => void) | null = null;
+  private visibility: Visibility = "hidden";
+  private pinned = false;
+  private routePathname = "/";
+  private exitRequested = false;
+  private focused = false;
+  private unsubs: Array<() => void> = [];
+  /** 串行化 query + transition 对，快速 tray 点击不得反转 stale 状态。 */
+  private windowOperation: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly refs: { tray: TrayHostTray; window: TrayHostWindow },
-    private readonly opts: { onQuit: () => Promise<void> },
-  ) {}
+    private readonly store: PreferencesStore,
+    private readonly tray: TrayHostTray | null,
+    private readonly window: TrayHostWindow | null,
+    private readonly opts: TrayHostOptions = {},
+  ) {
+    this.visibility = opts.initialVisible ? "shown" : "hidden";
+    this.focused = opts.initialVisible ?? false;
+    this.pinned = store.getPreferences().keepOnTop;
 
-  /** 安装 Open/Quit 菜单事件监听。 */
-  install(): void {
-    const off = this.refs.tray.onMenuClick(({ itemId }) => {
-      if (itemId === MENU_OPEN_ID) {
-        void this.show().catch((error: unknown) => {
-          log(`tray show failed: ${error instanceof Error ? error.message : String(error)}`);
-        });
-      } else if (itemId === MENU_QUIT_ID) {
-        void this.opts.onQuit().catch((e) => log(`onQuit failed: ${e}`));
-      }
-    });
-    this.detachMenu = typeof off === "function" ? off : null;
+    const onPreferences = (preferences: { keepOnTop: boolean }): void =>
+      this.onPreferences(preferences);
+    this.store.on("preferences", onPreferences);
+    this.unsubs.push(() => this.store.off("preferences", onPreferences));
+
+    this.wireUp();
+    this.pushMenu();
   }
 
-  /** 恢复并聚焦同一窗口；show 失败必须由 IPC open 调用方看见。 */
-  async show(): Promise<void> {
-    await safeCall(
-      "setStyle(opacity)",
-      this.refs.window.setStyle?.({ opacity: WINDOW_ENTER_SEED_OPACITY }),
+  private logger(line: string): void {
+    this.opts.log?.(line);
+    log(`[tray] ${line}`);
+  }
+
+  /** 技能工作台当前没有需要保持窗口前台的事件源。 */
+  private get hasActiveEvents(): boolean {
+    return false;
+  }
+
+  private get canAutoClose(): boolean {
+    return !this.pinned && !this.hasActiveEvents && !this.isRouteVisibilityProtected;
+  }
+
+  /** Creator 编辑路由拥有表单输入，blur 时禁止自动隐藏。 */
+  private get isRouteVisibilityProtected(): boolean {
+    return this.routePathname.startsWith("/creator");
+  }
+
+  /** 包裹原生 promise，rejection 被 log 吞掉，绝不连锁失败。 */
+  private safeCall(label: string, operation: Promise<unknown> | undefined): void {
+    if (!operation) return;
+    operation.catch((error: unknown) =>
+      this.logger(`${label} failed: ${errorToLogMessage(error)}`),
     );
-    await this.refs.window.show();
-    await safeCall("setStyle(keepOnTop)", this.refs.window.setStyle?.({ keepOnTop: true }));
   }
 
-  /** 清理菜单监听 + 销毁窗口/tray。 */
+  /** 排队一个复合可见性操作并隔离所有原生失败。 */
+  private enqueueWindowOperation(label: string, operation: () => Promise<void>): Promise<void> {
+    const run = async (): Promise<void> => {
+      try {
+        await operation();
+      } catch (error) {
+        this.logger(`${label} failed: ${errorToLogMessage(error)}`);
+      }
+    };
+    this.windowOperation = this.windowOperation.then(run, run);
+    return this.windowOperation;
+  }
+
+  private emitPinFrame(): void {
+    try {
+      this.opts.onPinFrame?.({
+        exitRequested: this.exitRequested,
+        visibility: this.visibility,
+        hasActiveEvents: this.hasActiveEvents,
+      });
+    } catch {
+      /* 投影失败不得影响原生生命周期。 */
+    }
+  }
+
+  private wireUp(): void {
+    const openId = this.opts.openItemId ?? MENU_OPEN_ID;
+    const quitId = this.opts.quitItemId ?? MENU_QUIT_ID;
+
+    if (this.tray) {
+      const offMenu = this.tray.onMenuClick(({ itemId }) => {
+        this.logger(`menu click received: itemId=${itemId}`);
+        if (itemId === openId) {
+          void this.toggle();
+          return;
+        }
+        if (itemId === quitId) {
+          this.logger("quit requested");
+          try {
+            this.opts.onQuit?.();
+          } catch (error) {
+            this.logger(`onQuit failed: ${errorToLogMessage(error)}`);
+          }
+        }
+      });
+      this.unsubs.push(offMenu);
+    }
+
+    if (!this.window) return;
+    this.unsubs.push(
+      this.window.listen("visibleChange", ({ payload }) => {
+        this.applyNativeVisibility(payload.visible, "visibleChange");
+      }),
+      this.window.listen("blur", () => {
+        this.logger("window blur");
+        this.focused = false;
+        this.reevaluateAutoClose();
+      }),
+      this.window.listen("focus", () => {
+        this.logger("window focus");
+        this.focused = true;
+        this.cancelAutoClose();
+      }),
+    );
+  }
+
+  /** 切换原生 tray 图标投影（best-effort；技能工作台目前不使用动态图标）。 */
+  setIcon(icon: TrayIcon | undefined): void {
+    if (!icon || !this.tray) return;
+    // CreateTrayHandle 暴露的 setIcon 接受易用 Icon 输入；此处保留接口便于将来扩展。
+    this.safeCall(
+      "setIcon",
+      (this.tray as { setIcon?: (icon: TrayIcon) => Promise<void> }).setIcon?.(icon),
+    );
+  }
+
+  private reevaluateAutoClose(): void {
+    if (this.visibility !== "shown" || this.focused) {
+      this.cancelAutoClose();
+      return;
+    }
+    if (this.canAutoClose) this.requestAutoClose();
+    else this.cancelAutoClose();
+  }
+
+  private requestAutoClose(): void {
+    if (!this.canAutoClose) {
+      this.cancelAutoClose();
+      return;
+    }
+    if (!this.exitRequested) this.exitRequested = true;
+    this.emitPinFrame();
+  }
+
+  private cancelAutoClose(): void {
+    if (this.exitRequested) this.exitRequested = false;
+    this.emitPinFrame();
+  }
+
+  /** 读原生操作可见性；缓存态仅作失败 fallback。 */
+  private async queryNativeVisibility(fallback: boolean): Promise<boolean> {
+    if (!this.window) return fallback;
+    try {
+      return await this.window.isVisible();
+    } catch (error) {
+      this.logger(`isVisible failed: ${errorToLogMessage(error)}`);
+      return fallback;
+    }
+  }
+
+  /** 把一条原生可见性事实应用到菜单状态与 WebUI 投影。 */
+  private applyNativeVisibility(visible: boolean, source: string): void {
+    const next: Visibility = visible ? "shown" : "hidden";
+    const changed = this.visibility !== next;
+    this.visibility = next;
+    if (!visible) {
+      this.exitRequested = false;
+      this.focused = false;
+    }
+    if (changed) {
+      this.pushMenu();
+      this.logger(`${source}: ${next}`);
+    }
+    this.emitPinFrame();
+  }
+
+  /** bootstrap show() 之后，恢复或重新激活 retained session。 */
+  private async revealRetainedWindow(): Promise<void> {
+    this.exitRequested = false;
+    this.focused = true;
+    if (!this.window) {
+      this.applyNativeVisibility(true, "headless reveal");
+      return;
+    }
+    try {
+      await this.window.setStyle({ opacity: WINDOW_ENTER_SEED_OPACITY });
+    } catch (error) {
+      this.logger(`setStyle(opacity) failed: ${errorToLogMessage(error)}`);
+    }
+    await this.window.toVisible();
+    try {
+      await this.window.setStyle({ keepOnTop: true });
+    } catch (error) {
+      this.logger(`setStyle(keepOnTop) failed: ${errorToLogMessage(error)}`);
+    }
+    this.applyNativeVisibility(await this.queryNativeVisibility(true), "toVisible");
+  }
+
+  /** 隐藏 retained session，但保留其页面运行时（不销毁）。 */
+  private async closeRetainedWindow(): Promise<void> {
+    this.exitRequested = false;
+    this.focused = false;
+    if (!this.window) {
+      this.applyNativeVisibility(false, "headless close");
+      return;
+    }
+    await this.window.close();
+    this.applyNativeVisibility(await this.queryNativeVisibility(false), "close");
+  }
+
+  /** 恢复一个隐藏或最小化的 retained 窗口。 */
+  show(): Promise<void> {
+    return this.enqueueWindowOperation("toVisible", () => this.revealRetainedWindow());
+  }
+
+  /** 隐藏 retained 窗口但保留其 WebView session。 */
+  hide(): Promise<void> {
+    return this.enqueueWindowOperation("close", () => this.closeRetainedWindow());
+  }
+
+  /** 主 tray 动作：立即查询原生真相后再决定切换方向。 */
+  toggle(): Promise<void> {
+    return this.enqueueWindowOperation("toggle visibility", async () => {
+      const visible = await this.queryNativeVisibility(this.visibility === "shown");
+      this.applyNativeVisibility(visible, "isVisible");
+      if (visible) await this.closeRetainedWindow();
+      else await this.revealRetainedWindow();
+    });
+  }
+
+  /** 仅当自动隐藏仍被授权时，完成一次 WebUI 拥有的退出动画。 */
+  async completeAutoClose(): Promise<void> {
+    if (!this.exitRequested || !this.canAutoClose) {
+      this.cancelAutoClose();
+      return;
+    }
+    await this.hide();
+  }
+
+  /** 更新路由拥有的可见性护栏。 */
+  setRoute(pathname: string): void {
+    if (this.routePathname === pathname) return;
+    this.routePathname = pathname;
+    this.logger(`route changed: ${pathname}`);
+    this.reevaluateAutoClose();
+  }
+
+  private onPreferences(preferences: { keepOnTop: boolean }): void {
+    if (this.pinned === preferences.keepOnTop) return;
+    this.pinned = preferences.keepOnTop;
+    this.logger(`keep-open pin set to ${preferences.keepOnTop}`);
+    this.reevaluateAutoClose();
+  }
+
+  /** 当前原生窗口投影，用于 WebUI 初始状态。 */
+  getPinState(): TrayPinFrame {
+    return {
+      exitRequested: this.exitRequested,
+      visibility: this.visibility,
+      hasActiveEvents: this.hasActiveEvents,
+    };
+  }
+
+  /** 暴露给诊断与聚焦的单元覆盖。 */
+  getVisibility(): Visibility {
+    return this.visibility;
+  }
+
+  private buildMenu(): CreateTrayMenu {
+    const openId = this.opts.openItemId ?? MENU_OPEN_ID;
+    const quitId = this.opts.quitItemId ?? MENU_QUIT_ID;
+    const actionTitle =
+      this.visibility === "shown"
+        ? (this.opts.hideLabel ?? "Hide window")
+        : (this.opts.showLabel ?? "Open Skill Creator");
+    return {
+      items: [
+        { type: "item", id: openId, title: actionTitle, primaryEvent: true },
+        { type: "separator" },
+        { type: "item", id: quitId, title: this.opts.quitLabel ?? "Quit" },
+      ],
+    };
+  }
+
+  private pushMenu(): void {
+    if (!this.tray?.setMenu) return;
+    this.safeCall("setMenu", this.tray.setMenu(this.buildMenu()));
+  }
+
+  /** 解绑监听 → 等排队操作完成 → 销毁窗口/tray。 */
   async destroy(): Promise<void> {
-    this.detachMenu?.();
-    await safeCall("panel.destroy", this.refs.window.destroy?.());
-    await safeCall("tray.destroy", this.refs.tray.destroy?.());
+    for (const off of this.unsubs) {
+      try {
+        off();
+      } catch {
+        /* 忽略监听器回收缺口。 */
+      }
+    }
+    this.unsubs = [];
+    await this.windowOperation;
+    try {
+      await this.window?.destroy();
+    } catch {
+      /* 忽略原生回收缺口。 */
+    }
+    try {
+      await this.tray?.destroy();
+    } catch {
+      /* 忽略原生回收缺口。 */
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * 解析 tray 通知栏图标的绝对文件路径。
+ *
+ * 候选覆盖：production（已解析的 webuiDir，即 dist/webui）、bundled（dist/webui 同目录）、
+ * dev（repo 的 webui/static 与 webui/build）。找不到返回 null —— tray 是 UX 加成，
+ * 图标缺失不致命，回落到 opentray 默认图标（headless 降级原则）。
+ */
+function resolveTrayIconPath(webuiDir: string | undefined): string | null {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    webuiDir ? path.join(webuiDir, "icons", "monochrome-mini.png") : null,
+    path.join(here, "webui", "icons", "monochrome-mini.png"),
+    path.join(here, "..", "..", "webui", "build", "icons", "monochrome-mini.png"),
+    path.join(here, "..", "..", "webui", "static", "icons", "monochrome-mini.png"),
+    path.join(process.cwd(), "webui", "build", "icons", "monochrome-mini.png"),
+    path.join(process.cwd(), "webui", "static", "icons", "monochrome-mini.png"),
+  ];
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 /** 启动 tray placement 锚定（best-effort）。 */
 async function startPlacement(
@@ -205,10 +604,11 @@ async function startPlacement(
       try {
         watch.stop();
       } catch {
-        /* ignore */
+        /* placement 回收绝不能崩溃关停。 */
       }
     };
-  } catch {
+  } catch (err) {
+    log(`placement watch failed (${errorToLogMessage(err)}) — window unanchored`);
     return () => {};
   }
 }
@@ -229,6 +629,102 @@ async function destroyMounted(handles: {
   await safeCall("tray.destroy", (handles.tray ?? handles.baseTray)?.destroy?.());
 }
 
+function inferTrayMountFailureStage({
+  baseTray,
+  tray,
+  panel,
+}: {
+  baseTray: EventfulTrayHandle | null;
+  tray: OpentrayTray | null;
+  panel: OpentrayWindow | null;
+}): TrayMountFailureStage {
+  if (panel !== null) return "window-show";
+  if (tray !== null) return "window-create";
+  if (baseTray !== null) return "tray-extend";
+  return "runtime-binding";
+}
+
+type TrayMountContext = {
+  baseTray: EventfulTrayHandle | null;
+  tray: OpentrayTray | null;
+  panel: OpentrayWindow | null;
+  stage: TrayMountFailureStage;
+};
+
+function classifyTrayMountFailure(error: unknown, context: TrayMountContext): TrayMountFailure {
+  const stage = context.stage;
+  if (isMissingPlatformRuntimeBindingError(error)) {
+    return {
+      kind: isUnsupportedPlatformMessage(error.message)
+        ? "unsupported-platform"
+        : "missing-native-package",
+      stage,
+      cause: error,
+    };
+  }
+  if (isWebviewExtensionLoadError(error)) {
+    return {
+      kind: isUnsupportedPlatformMessage(error.message)
+        ? "unsupported-platform"
+        : "missing-webview-package",
+      stage,
+      cause: error,
+    };
+  }
+  if (stage === "window-show") return { kind: "window-show-failed", stage, cause: error };
+  if (stage === "window-create") return { kind: "missing-webview-package", stage, cause: error };
+  if (stage === "tray-extend") return { kind: "tray-mount-failed", stage, cause: error };
+  return { kind: "missing-native-package", stage, cause: error };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isMissingPlatformRuntimeBindingError(
+  error: unknown,
+): error is { message: string; code?: string } {
+  return (
+    isRecord(error) &&
+    error.code === "OPENTRAY_MISSING_PLATFORM_RUNTIME_BINDING" &&
+    typeof error.message === "string"
+  );
+}
+
+function isWebviewExtensionLoadError(error: unknown): error is { message: string; code?: string } {
+  return (
+    isRecord(error) &&
+    error.code === "webview_extension_load_failed" &&
+    typeof error.message === "string"
+  );
+}
+
+function isUnsupportedPlatformMessage(message: string): boolean {
+  return (
+    message.includes("unsupported OpenTray runtime platform") ||
+    message.includes("unsupported OpenTray runtime architecture") ||
+    message.includes("Linux is unsupported for this extension")
+  );
+}
+
+function formatTrayMountFailure(failure: TrayMountFailure): string {
+  return `[${failure.kind}@${failure.stage}] ${errorToLogMessage(failure.cause)}`;
+}
+
+function errorToLogMessage(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  // opentray 会把原生解析错误（列出候选路径）层层包装，递归 cause 链展开。
+  const parts: string[] = [error.message];
+  let cause = error.cause;
+  let guard = 0;
+  while (cause instanceof Error && guard < 5) {
+    parts.push(`↳ ${cause.message}`);
+    cause = (cause as Error).cause;
+    guard++;
+  }
+  return parts.join(" ");
+}
+
 /** 包裹 opentray promise，rejection 被 log 吞掉。 */
 async function safeCall(
   label: string,
@@ -238,6 +734,6 @@ async function safeCall(
   try {
     await operation;
   } catch (e) {
-    log(`tray ${label} failed: ${e instanceof Error ? e.message : String(e)}`);
+    log(`tray ${label} failed: ${errorToLogMessage(e)}`);
   }
 }

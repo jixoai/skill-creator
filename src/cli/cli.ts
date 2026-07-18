@@ -173,18 +173,19 @@ async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<boolean> {
           `Daemon ${status.version} still owns the socket; expected ${CLI_VERSION}.`,
         );
       }
-      if (status.tray === "headless") {
-        throw new DaemonResponseError(
-          status.trayError ? `Tray is unavailable: ${status.trayError}` : "Tray is unavailable.",
-        );
-      }
       if (isDaemonReady(status)) {
-        try {
-          await ipcRequest({ type: "open" }, 500);
+        // opentray 是 Dashboard 模式：tray 挂载时聚焦原生窗口，否则打开系统浏览器。
+        if (status.tray === "mounted") {
+          try {
+            await ipcRequest({ type: "open" }, 500);
+            return true;
+          } catch (error) {
+            if (!(error instanceof Error)) throw new Error(String(error));
+            lastOpenError = error;
+          }
+        } else {
+          openUrlInBrowser(status.webUrl ?? `http://127.0.0.1:${status.port}/`);
           return true;
-        } catch (error) {
-          if (!(error instanceof Error)) throw new Error(String(error));
-          lastOpenError = error;
         }
       }
     } catch (error) {
@@ -199,7 +200,31 @@ async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<boolean> {
 }
 
 function isDaemonReady(status: DaemonStatus): boolean {
-  return status.active && status.port > 0 && status.tray === "mounted";
+  // tray 是否 mounted 不再阻断 ready：headless/任何平台都允许浏览器访问 WebUI。
+  return status.active && status.port > 0;
+}
+
+/** 在系统默认浏览器中打开一个 URL；失败只记录，不阻断主流程。 */
+function openUrlInBrowser(url: string): void {
+  let binary: string;
+  let args: string[];
+  if (process.platform === "win32") {
+    binary = "cmd";
+    args = ["/c", "start", "", url];
+  } else if (process.platform === "darwin") {
+    binary = "open";
+    args = [url];
+  } else {
+    binary = "xdg-open";
+    args = [url];
+  }
+  try {
+    spawn(binary, args, { stdio: "ignore", detached: true }).unref();
+    console.log(`Opening browser: ${url}`);
+  } catch (err) {
+    console.log(`Open this URL in your browser: ${url}`);
+    if (err instanceof Error) console.error(`Failed to launch browser: ${err.message}`);
+  }
 }
 
 /** Wait until graceful shutdown has removed the socket from the runtime namespace. */
@@ -279,13 +304,16 @@ async function runStart(): Promise<number> {
 async function runStatus(): Promise<number> {
   try {
     const status = await requestStatus();
+    const url = status.webUrl ?? `http://127.0.0.1:${status.port}/`;
     console.log("skill-creator daemon is running:");
     console.log(`  pid:     ${status.pid}`);
     console.log(`  version: ${status.version}`);
     console.log(`  port:    ${status.port}`);
-    console.log(`  tray:    ${status.tray}`);
+    console.log(
+      `  tray:    ${status.tray === "headless" ? "headless (browser mode)" : status.tray}`,
+    );
     if (status.trayError) console.log(`  tray error: ${status.trayError}`);
-    console.log(`  url:     http://127.0.0.1:${status.port}/`);
+    console.log(`  url:     ${url}`);
     return 0;
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
@@ -310,8 +338,14 @@ async function runStop(): Promise<number> {
 
 async function runOpen(): Promise<number> {
   try {
-    await ipcRequest({ type: "open" });
-    console.log("Opening the tray window…");
+    const status = await requestStatus();
+    if (status.tray === "mounted") {
+      await ipcRequest({ type: "open" });
+      console.log("Opening the tray window…");
+      return 0;
+    }
+    // Dashboard 模式：tray 不可用时打开系统浏览器访问 WebUI。
+    openUrlInBrowser(status.webUrl ?? `http://127.0.0.1:${status.port}/`);
     return 0;
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));

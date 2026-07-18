@@ -7,10 +7,20 @@
    * 3. 组合工作台导航与全局浮层。
    */
   import "./layout.css";
-  import favicon from "$lib/assets/favicon.svg";
   import { onMount } from "svelte";
   import { page } from "$app/state";
-  import { connect, connectionState, disconnect, loadWorkspaces } from "$lib/store.svelte";
+  import {
+    completeAutoClose,
+    connect,
+    connectionState,
+    disconnect,
+    ensureTraySubscription,
+    loadWorkspaces,
+    setTrayRoute,
+    setWindowAutoCloseCountdown,
+    trayState,
+  } from "$lib/store.svelte";
+  import { initWindowVisibility } from "$lib/window-visibility";
   import type { ImportedWorkspace } from "$lib/types";
   import { confirmRemoveWorkspace } from "$lib/workspace-removal";
   import { goto } from "$app/navigation";
@@ -34,11 +44,23 @@
   }
 
   onMount(() => {
+    // 页面拥有的退出/进入动画：镜像原生窗口 opacity，并在动画完成后回调 daemon 关窗。
+    const stopWindowVisibility = initWindowVisibility({
+      getState: () => ({
+        visibility: trayState.windowVisibility,
+        exitRequested: trayState.exitRequested,
+      }),
+      setCountdown: (countdown) => setWindowAutoCloseCountdown(countdown),
+      completeAutoClose: () => void completeAutoClose(),
+    });
     connect();
-    return () => disconnect();
+    return () => {
+      stopWindowVisibility();
+      disconnect();
+    };
   });
 
-  // 路由变化时调整窗口尺寸。
+  // 路由变化时调整窗口尺寸，并上报给 daemon（Creator 路由禁止 blur 自动隐藏）。
   let pathname = $derived(page.url.pathname);
   $effect(() => {
     if (pathname.startsWith("/creator")) {
@@ -47,22 +69,33 @@
       void resizeWindow(HOME_WINDOW_SIZE);
     }
   });
+  $effect(() => {
+    const connected = connectionState.status === "connected";
+    const current = page.url.pathname;
+    if (!connected) return;
+    void setTrayRoute(current);
+  });
 
-  // WS 连接后加载 workspaces。
+  // WS 连接后加载 workspaces，并订阅 daemon→WebUI 投影流（重连时自动重建）。
   let connected = $derived(connectionState.status === "connected");
   $effect(() => {
     if (connected) {
       void loadWorkspaces();
+      void ensureTraySubscription();
     }
   });
 </script>
 
-<svelte:head><link rel="icon" href={favicon} /></svelte:head>
+<!-- 品牌极小容器图标（resources/README.md §4 Monochrome Mini）：浏览器标签与原生窗口标题。 -->
+<svelte:head>
+  <link rel="icon" href="/icons/monochrome-mini.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icons/monochrome-mini.png" />
+</svelte:head>
 
 <TooltipProvider>
   <div class="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-    <!-- 顶部栏（原生拖拽区域 + 工具栏） -->
-    <WindowDragRegion variant="main">
+    <!-- 顶部栏（原生拖拽区域 + keep-open pin + 工具栏） -->
+    <WindowDragRegion variant="main" showPin>
       {#snippet left()}
         <span class="px-1 text-xs font-medium text-muted-foreground">Skill Creator</span>
       {/snippet}

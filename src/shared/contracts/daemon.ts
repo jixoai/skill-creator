@@ -13,6 +13,8 @@ export const DaemonStatusSchema = z.object({
   startedAt: z.number().int().nonnegative(),
   tray: z.enum(["starting", "mounted", "headless"]),
   trayError: z.string().optional(),
+  /** 浏览器可达的 WebUI 入口（headless/任何平台 dashboard 模式共用）。 */
+  webUrl: z.string().optional(),
 });
 /** CLI 与 WebUI 共享的 daemon 状态快照。 */
 export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;

@@ -17,6 +17,7 @@ import { ORPCError, createActionableClient, createRouterClient } from "@orpc/ser
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { DomainError } from "../src/daemon/domain-error.js";
+import { PreferencesStore } from "../src/daemon/preferences-store.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import { setHomeOverride } from "../src/shared/paths.js";
@@ -40,8 +41,8 @@ afterEach(() => {
 
 function createClient(domain: DaemonDomain = createDaemonDomain()) {
   return createRouterClient(
-    createRpcRouter(
-      () => ({
+    createRpcRouter({
+      status: () => ({
         active: true,
         pid: process.pid,
         version: "test",
@@ -50,7 +51,15 @@ function createClient(domain: DaemonDomain = createDaemonDomain()) {
         tray: "headless",
       }),
       domain,
-    ),
+      trayHostRef: { host: null },
+      preferencesStore: new PreferencesStore(),
+      // 测试只关心错误边界；投影帧订阅走最小可迭代生成器。
+      broadcast: {
+        subscribe: async function* () {
+          /* no frames in error-boundary tests */
+        },
+      },
+    }),
   );
 }
 

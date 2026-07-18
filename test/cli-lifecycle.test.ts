@@ -130,7 +130,7 @@ describe("CLI daemon lifecycle", () => {
     }
   });
 
-  it("prints headless tray state and its failure", async () => {
+  it("prints headless tray state (browser mode) and its failure", async () => {
     const home = await createTemporaryHome();
     setHomeOverride(home);
     const daemon = createDaemon({
@@ -143,7 +143,8 @@ describe("CLI daemon lifecycle", () => {
     try {
       const result = await runCli(home, ["status"]);
       expect(result.stderr).toBe("");
-      expect(result.stdout).toContain("tray:    headless");
+      // opentray 是 Dashboard 模式：headless 不再是不可用，而是浏览器可达。
+      expect(result.stdout).toContain("tray:    headless (browser mode)");
       expect(result.stdout).toContain("tray error: runtime-binding: native package unavailable");
     } finally {
       await daemon.stop();

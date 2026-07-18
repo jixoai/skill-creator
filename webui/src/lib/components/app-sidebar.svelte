@@ -62,21 +62,22 @@
 >
   <div class={cn("no-drag flex h-12 items-center gap-2 px-3", collapsed && "justify-center")}>
     {#if !collapsed}
-      <div
-        class="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground"
+      <!-- 品牌扁平纯色图标（resources/README.md §2 Flat Symbol）：侧栏门面位。 -->
+      <img
+        src="/icons/flat-symbol.png"
+        alt=""
         aria-hidden="true"
-      >
-        <IconBoxes class="h-3.5 w-3.5" />
-      </div>
+        class="h-6 w-6 shrink-0 rounded-md object-contain"
+        draggable="false"
+      />
       <span class="min-w-0 flex-1 truncate text-sm font-semibold">Skill Creator</span>
     {:else if narrowViewport.current}
-      <div
-        class="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground"
-        aria-label="Skill Creator"
-        title="Skill Creator"
-      >
-        <IconBoxes class="h-3.5 w-3.5" />
-      </div>
+      <img
+        src="/icons/flat-symbol.png"
+        alt="Skill Creator"
+        class="h-6 w-6 shrink-0 rounded-md object-contain"
+        draggable="false"
+      />
     {/if}
     {#if !narrowViewport.current}
       <Button

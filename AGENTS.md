@@ -80,6 +80,7 @@ Repository         = clone + pin commit + scan + preview + install
 4. WebUI 不拼接 mutation 输出路径；server 解析 opaque ID 到真实根目录。
 5. UI 服务于人的直觉与操作密度，允许场景聚合，但不能绕过协议和文件系统边界。
 6. Creator 允许无 query、workspace-only 新建上下文、workspace+skill 编辑上下文；skill-only 或非法身份必须在渲染前清理。
+7. OpenTray 是 Dashboard 模式：原生 tray 是 macOS/Windows 的 UX 加成，WebUI 必须在任何平台（含 Linux/CI/headless）经系统浏览器可达；`status.tray === "headless"` 不是不可用，而是浏览器模式。
 
 ## 3. 系统拓扑
 
@@ -151,9 +152,23 @@ stop during tray mount --> bounded teardown --> late native handles arrive
                                                 `--> destroy; never retain
 ```
 
-`open` 是 show/focus，不是 visibility toggle。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
+`open` 在 tray 挂载时是 retained-session 恢复（show/focus），在 headless/任何平台降级为打开系统浏览器。OpenTray 是 Dashboard 模式：原生 tray 是 UX 加成，WebUI 始终浏览器可达。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
 
-WebUI 的 Workspace、Skill、Repository 读取与 mutation 分别使用独立 latest-request-wins 代次门；新请求、主动清理、路由变化或断线会撤销旧响应的提交资格。每次替换 RPC client 都递增 connection owner generation；请求令牌的 `isLatest` 只允许当前请求清理自身 loading，`isCurrent` 还要求 owner generation 未变化，只有它能提交数据、错误或后续 RPC。失效 mutation 的成功和 rejection 都投影为无结果，不能 toast、导航、刷新或调用新 client。Creator 额外把 query route key 与初始化代次绑定；旧连接的 await 尾部不得调用新连接的 RPC client。
+Tray 采用 retained-session 模型：`createWebviewWindow` 仅 bootstrap 一次创建原生 session，之后所有激活用 `toVisible()`、隐藏用 `close()`，绝不重放 startup 宽高/style/native flags（OpenTray 0.14 session 法则）。`isVisible()`/`visibleChange` 是原生操作可见性真相（含最小化），客户端不维护镜像猜测。tray 菜单主项按可见性切换 Show/Hide 文案；blur 触发的自动隐藏由页面拥有的 WAAPI 退出动画收口，动画完成回调 `tray.completeAutoClose`，daemon 复核仍可关闭才真正 `hide()`。Creator 路由（`/creator`）拥有表单输入，blur 时禁止自动隐藏。keep-onTop 偏好是 app 级单一读写源（`PreferencesStore`），WebUI 与 TrayHost 都订阅同一真相。daemon→WebUI 投影帧（`pin`/`preferences`）经 `state.subscribe` 异步生成器推送，首帧带 hello + 当前 preferences + 若 tray 已挂载则带初始 pin；连接世代更替时旧订阅不得提交新状态。
+
+```text
+tray click/menu --> toggle() --> query isVisible() truth --> toVisible()/close()
+       |
+window blur --> reevaluate auto-close --> exitRequested pin frame broadcast
+       |                                              |
+       |                             keep-onTop pin / Creator route / focus --> cancel
+       v
+page WAAPI exit animation (6s, mirror native opacity) --> completeAutoClose RPC
+       |
+       `--> daemon re-checks canAutoClose --> hide() (close retained session) : cancel
+```
+
+WebUI 的 Workspace、Skill、Repository 读取与 mutation 分别使用独立 latest-request-wins 代次门；新请求、主动清理、路由变化或断线会撤销旧响应的提交资格。每次替换 RPC client 都递增 connection owner generation；请求令牌的 `isLatest` 只允许当前请求清理自身 loading，`isCurrent` 还要求 owner generation 未变化，只有它能提交数据、错误或后续 RPC。失效 mutation 的成功和 rejection 都投影为无结果，不能 toast、导航、刷新或调用新 client。Creator 额外把 query route key 与初始化代次绑定；旧连接的 await 尾部不得调用新连接的 RPC client。tray 投影流订阅同样绑定 connection generation：重连时撤销旧 `state.subscribe` 迭代器的提交资格。
 
 ```text
 issue request N --> capture request generation + connection owner generation
@@ -314,21 +329,23 @@ src/
 |   `-- cli.ts ---------------- [4] command route / IPC client / daemon replace / status
 |
 |-- shared/
-|   |-- contracts/ ------------ [5 physical modules]
+|   |-- contracts/ ------------ [6 physical modules]
 |   |   |-- skills.ts --------- identity / metadata / toggle / validation
 |   |   |-- workspaces.ts ----- home/imported IDs / workspace projection
 |   |   |-- creator.ts -------- document / create-update union / revision
 |   |   |-- repository.ts ----- session / remote skill / install result union
-|   |   `-- daemon.ts --------- lifecycle status
-|   |-- rpc-contract.ts ------- [1] compose browser-safe procedures
+|   |   |-- daemon.ts --------- lifecycle status
+|   |   `-- tray.ts ----------- pin frame / preferences / ok response
+|   |-- rpc-contract.ts ------- [1] compose browser-safe procedures + state.subscribe stream
 |   |-- frame.ts -------------- [3] IPC envelope / codec / parser
 |   |-- package-version.ts ---- [2] source/bundle package version lookup
-|   `-- paths.ts -------------- [3] app dirs / logs / IPC endpoint
+|   |-- paths.ts -------------- [3] app dirs / logs / IPC endpoint / preferences path
+|   `-- window-opacity.ts ------ [1] shared enter-seed opacity (host + page)
 |
 |-- daemon/
-|   |-- index.ts -------------- [4] lock / HTTP / tray / teardown
+|   |-- index.ts -------------- [4] lock / HTTP / retained tray / preferences / teardown
 |   |-- domain.ts ------------- [2] domain module composition / dependency wiring
-|   |-- rpc-router.ts ---------- [5] skill / workspace+creator / repository / status / error boundary
+|   |-- rpc-router.ts ---------- [5] skill / workspace+creator / repository / status / tray / preferences / state / error boundary
 |   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
 |   |-- creator-service.ts ----- [3] create / round-trip update / revision delete
 |   |-- repository-service.ts -- [3] pinned lifecycle / inspect / preview-install
@@ -338,15 +355,19 @@ src/
 |   |   |-- persistence.ts ---- [2] strict load / atomic commit
 |   |   `-- projection.ts ----- [2] dynamic counts / availability projection
 |   |-- path-safety.ts --------- [3] identity / containment / atomic revision write
-|   |-- web-server.ts ---------- [3] SPA / auth upgrade / bounded oRPC lifecycle
+|   |-- preferences-store.ts --- [1] keep-onTop truth / atomic persist / preferences event
+|   |-- opentray-windows-host.ts [1] win32 native material comparator bridge
+|   |-- web-server.ts ---------- [3] SPA / auth upgrade / bounded oRPC lifecycle / broadcast + attachTray
 |   |-- ipc-server.ts ---------- [4] lock / protocol / dispatch / bounded acknowledged stop
-|   `-- tray-host.ts ----------- native capability adapter
+|   `-- tray-host.ts ----------- retained session / visibility truth / auto-close / failure classification
 |
 `-- webui/
     |-- config/daemon-dev.ts -------- Vite-owned Bun daemon + HTTP/WS proxy
     `-- src/
         |-- routes/ ------------ product surfaces and app shell
-        |-- lib/stores/ -------- connection / request generation / workspace / skills / creator / repository
+        |-- lib/stores/ -------- connection / request generation / workspace / skills / creator / repository / tray
+        |-- lib/window-visibility.ts - page-owned WAAPI enter/exit animation + native opacity mirror
+        |-- lib/window-opacity-timeline.ts - exit keyframes / countdown
         |-- lib/components/ ---- product composition
         `-- lib/components/ui/ - shadcn-svelte generated primitives
 ```
@@ -389,6 +410,8 @@ Remote skill selection --------> session-owned opaque IDs ----------> install
 Install output path -----------> Workspace direct child + SKILL.md -> local Skill ID
 static request path -----------> resolved-root containment ----------> read asset
 IPC bytes ---------------------> frame size + schema + protocol ------> CLI command
+tray/preferences RPC ----------> shared Zod schema + OkResponse -----> tray host / store
+state.subscribe stream --------> authenticated WS upgrade only -------> broadcast frames
 ```
 
 不可破坏的安全不变量：
@@ -403,6 +426,7 @@ IPC bytes ---------------------> frame size + schema + protocol ------> CLI comm
 8. 启用/禁用发生冲突时返回 conflict，不以破坏性 force 掩盖目标状态。
 9. Workspace Registry mutation 必须先原子持久化完整 next state，成功后才替换内存真相；动态计数不得写回持久态。
 10. daemon stop coordinator 与 signal listeners 必须先于 tray mount 发布；stop 先关闭 transport admission，再关停 domain，迟到的 native handles 不得重新挂载；非协作连接在 grace deadline 后强制回收，所有 stop 来源共享完成态与退出意图。
+11. daemon→WebUI 投影帧（`pin`/`preferences`）只经已通过 token 鉴权的 `/ws/rpc` 升级连接推送；tray 自动隐藏意图与 keep-onTop 偏好属于 daemon 拥有的投影真相，WebUI 不得本地伪造后写入。
 
 ## 6. 文件意图法
 

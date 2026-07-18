@@ -5,11 +5,15 @@
 - 「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。」
 - 「继续迭代，大胆创新……以人为本，要让小白到各行各业到专业工程师用起来都舒心。」
 - [2026-07-15]「按照你自己的节奏去推进开发迭代。」
-正交意图：1. 定义产品边界；2. 给出真实安装与运行方式；3. 说明协议和安全模型；4. 提供开发验证入口。
-妥协声明：README 是包发布后唯一随包分发的公开入口，安装、运行、边界与安全事实必须同处一份文件，拆分会使发布包缺失必要上下文。
+正交意图：1. 定义产品边界；2. 给出真实安装与运行方式；3. 说明协议和安全模型；4. 提供开发验证入口；5. 承载品牌门面图（color-symbol）。
+妥协声明：README 是包发布后唯一随包分发的公开入口，安装、运行、边界与安全事实必须同处一份文件，拆分会使发布包缺失必要上下文。品牌图经项目相对路径 `./resources/color-symbol.png` 引用，GitHub 自动渲染为 raw 链接；resources 不进 npm 包，npm 端图片缺失不影响文本可读性，repository 字段引导读者到 GitHub。
 -->
 
-# Skill Creator
+<p align="center">
+  <img src="./resources/color-symbol.png" alt="Skill Creator" width="180" />
+</p>
+
+<h1 align="center">Skill Creator</h1>
 
 Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 daemon，daemon 通过 OpenTray 承载 Svelte WebUI，并以 ccski 发现、校验和安装 `SKILL.md` 技能。
 

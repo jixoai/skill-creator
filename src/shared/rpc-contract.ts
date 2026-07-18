@@ -8,7 +8,7 @@
  *   [1] Compose browser-safe workspace, skill, Creator, and repository procedures.
  *   [2] Apply one finite, strongly typed business-error vocabulary.
  */
-import { oc } from "@orpc/contract";
+import { eventIterator, oc } from "@orpc/contract";
 import { z } from "zod";
 import {
   SaveSkillInputSchema,
@@ -32,6 +32,7 @@ import {
   ToggleSummarySchema,
   ValidateResultSchema,
 } from "./contracts/skills.js";
+import { OkResponseSchema, PreferencesSchema, TrayPinFrameSchema } from "./contracts/tray.js";
 import {
   ImportedWorkspaceIdSchema,
   WorkspaceIdSchema,
@@ -41,6 +42,24 @@ import {
 const WorkspaceReadInputSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   includeDisabled: z.boolean().optional(),
+});
+
+/**
+ * daemon → WebUI 的单向投影帧。
+ *
+ * [1] `hello`：连接首帧，标记本协议需要 token 鉴权。
+ * [2] `pin`：tray 窗口的操作可见性真相 + 自动隐藏意图；页面据此驱动退出动画。
+ * [3] `preferences`：keep-onTop 偏好的当前快照；标题栏 pin 与原生自动隐藏共用。
+ */
+export const WsServerMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("hello") }),
+  z.object({ type: z.literal("pin") }).extend(TrayPinFrameSchema.shape),
+  z.object({ type: z.literal("preferences") }).extend({ preferences: PreferencesSchema }),
+]);
+export type WsServerMessage = z.infer<typeof WsServerMessageSchema>;
+
+const TrayRouteChangedInputSchema = z.object({
+  pathname: z.string().startsWith("/").max(2_048),
 });
 
 /** Complete browser-safe contract shared by the WebUI and daemon. */
@@ -122,6 +141,20 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
   daemon: {
     /** Read the live daemon and tray status. */
     status: oc.input(z.object({})).output(DaemonStatusSchema),
+  },
+  tray: {
+    /** Complete the page-owned exit animation only while auto-close is still authorized. */
+    completeAutoClose: oc.input(z.object({})).output(OkResponseSchema),
+    /** Report the WebUI route that currently owns the tray window surface. */
+    routeChanged: oc.input(TrayRouteChangedInputSchema).output(OkResponseSchema),
+  },
+  preferences: {
+    /** Single write path for app-wide preferences (keep-onTop pin). */
+    set: oc.input(z.object({ patch: PreferencesSchema.partial() })).output(OkResponseSchema),
+  },
+  state: {
+    /** Subscribe to daemon→WebUI projection frames (pin / preferences / hello). */
+    subscribe: oc.input(z.object({})).output(eventIterator(WsServerMessageSchema)),
   },
 });
 

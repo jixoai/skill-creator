@@ -46,6 +46,20 @@ declare global {
     show?(): Promise<void> | void;
     /** 隐藏窗口。 */
     hide?(): Promise<void> | void;
+    /** 关闭窗口（retained session 隐藏，不销毁页面运行时）。 */
+    close?(): Promise<void> | void;
+    /** 恢复 retained session。 */
+    toVisible?(): Promise<void> | void;
+    /** 最小化窗口。 */
+    minimize?(): Promise<void> | void;
+    /** 最大化窗口。 */
+    maximize?(): Promise<void> | void;
+    /** 从最大化/最小化恢复。 */
+    restore?(): Promise<void> | void;
+    /** 查询窗口状态。 */
+    getWindowState?():
+      | Promise<{ state: "normal" | "minimized" | "maximized" }>
+      | { state: "normal" | "minimized" | "maximized" };
   }
 
   /** 兼容 OpenTray namespace 形态的窗口入口。 */
