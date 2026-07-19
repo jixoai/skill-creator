@@ -1,5 +1,5 @@
 /**
- * 原始需求 [2026-07-18]：「全面升级 skill-creator-v2 对于 opentray 的适配」。
+ * 用户原始需求 [2026-07-19]：「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。」
  * 正交意图：
  *   [1] 创建强类型 tray 与 retained WebView window，处理菜单、原生可见性事件与品牌图标
  *       （icon 是 createTray 的输入之一，与 menu/tooltip 同层；monochrome-mini 经
@@ -7,7 +7,7 @@
  *   [2] 保留单一 WebView session：show() 仅 bootstrap 一次，之后用 toVisible()/close()
  *       复用 session；以 isVisible()/visibleChange 作为原生可见性真相（含最小化）。
  *   [3] 按屏幕与 tray 几何锚定窗口，并把原生失败隔离为可诊断的 headless 降级。
- *   [4] 把 tray 窗口投影（pin frame）与 keep-onTop 偏好驱动给已授权 WebUI 客户端。
+ *   [4] 以 app mode 交还窗口层级、焦点与关闭行为给原生窗口管理器。
  * 妥协声明：OpenTray 的 tray、retained window、placement 与可见性真相只能在同一
  * 原生 capability adapter 中协调；产品路由与 daemon 生命周期不放在本文件。
  */
@@ -32,9 +32,6 @@ import {
   WINDOW_HEIGHT,
   WINDOW_WIDTH,
 } from "../shared/index.js";
-import { WINDOW_ENTER_SEED_OPACITY } from "../shared/window-opacity.js";
-import type { TrayPinFrame } from "../shared/contracts/tray.js";
-import type { PreferencesStore } from "./preferences-store.js";
 import { configureOpenTrayWindowsHostTopology } from "./opentray-windows-host.js";
 import { log } from "./log.js";
 
@@ -67,7 +64,7 @@ export interface TrayMountResult {
   failure?: TrayMountFailure;
 }
 
-/** tray 窗口的创建参数与退出/投影回调。 */
+/** tray 窗口的创建参数与退出回调。 */
 export interface TrayHostOptions {
   /** 日志输出（dev/test 可观测）。 */
   log?: (line: string) => void;
@@ -83,8 +80,6 @@ export interface TrayHostOptions {
   quitLabel?: string;
   /** 一次性 bootstrap show() 之后初始原生可见性。 */
   initialVisible?: boolean;
-  /** 把 tray 窗口投影广播给已授权 WebUI 客户端。 */
-  onPinFrame?: (frame: TrayPinFrame) => void;
   /** 把退出意图委托给 daemon 拥有者做优雅关停。 */
   onQuit?: () => void;
 }
@@ -92,7 +87,7 @@ export interface TrayHostOptions {
 type TrayHostTray = Pick<OpentrayTray, "destroy" | "onMenuClick" | "setMenu">;
 type TrayHostWindow = Pick<
   OpentrayWindow,
-  "destroy" | "setStyle" | "show" | "toVisible" | "close" | "isVisible" | "listen"
+  "destroy" | "show" | "toVisible" | "close" | "isVisible" | "listen"
 >;
 
 type Visibility = "hidden" | "shown";
@@ -103,17 +98,13 @@ type Visibility = "hidden" | "shown";
  * 失败时返回 null handles（headless 降级），不抛错 —— tray mount 是 UX 加成，
  * 绝不致命；WebUI 始终可用浏览器访问。
  */
-export async function mountTray(
-  store: PreferencesStore,
-  opts: {
-    url: string;
-    packageVersion: string;
-    enableDevtools?: boolean;
-    webuiDir?: string;
-    onQuit: () => Promise<void>;
-    onPinFrame: (frame: TrayPinFrame) => void;
-  },
-): Promise<{ result: TrayMountResult; host: TrayHost }> {
+export async function mountTray(opts: {
+  url: string;
+  packageVersion: string;
+  enableDevtools?: boolean;
+  webuiDir?: string;
+  onQuit: () => Promise<void>;
+}): Promise<{ result: TrayMountResult; host: TrayHost }> {
   let baseTray: EventfulTrayHandle | null = null;
   let tray: OpentrayTray | null = null;
   let panel: OpentrayWindow | null = null;
@@ -159,26 +150,23 @@ export async function mountTray(
     });
     tray = baseTray.extend(ext.WebviewExt);
 
-    // 平台分帧：macOS 保留原生 overlay 控件；Windows 走 frameless 自绘控件。
-    const usesWindowsFramelessControls = process.platform === "win32";
+    // macOS overlays its native controls in the WebUI titlebar; Windows keeps its native frame.
+    const usesWindowControlsOverlay = process.platform !== "win32";
     panel = tray.createWebviewWindow({
       url: opts.url,
       width: WINDOW_WIDTH,
       height: WINDOW_HEIGHT,
       title: APP_TITLE,
       nativeWindowApi: true,
-      windowControlsOverlay: !usesWindowsFramelessControls,
+      windowControlsOverlay: usesWindowControlsOverlay,
       ...(opts.enableDevtools ? { devtools: true } : {}),
       style: {
-        frameless: usesWindowsFramelessControls,
+        // Application mode supplies normal taskbar/Dock discoverability and native z-order.
+        appMode: true,
+        frameless: false,
         resizable: true,
-        keepOnTop: true,
-        // skill-creator 拥有页面驱动的退出动画，原生 blur 不得提前隐藏窗口；
-        // TrayHost 在动画结束后调用 close()。
+        // A normal application window must remain visible after focus moves elsewhere.
         autoHide: false,
-        platform: { windows: { showInSwitchers: false } },
-        opacity: WINDOW_ENTER_SEED_OPACITY,
-        background: { kind: "semantic", token: "blur", state: "active" },
       },
     });
 
@@ -192,14 +180,13 @@ export async function mountTray(
 
     stopPlacement = await startPlacement(tray, panel, ext);
 
-    const host = new TrayHost(store, tray, panel, {
+    const host = new TrayHost(tray, panel, {
       openItemId: MENU_OPEN_ID,
       quitItemId: MENU_QUIT_ID,
       showLabel: "Open Skill Creator",
       hideLabel: "Hide window",
       quitLabel: "Quit",
       initialVisible: true,
-      onPinFrame: opts.onPinFrame,
       onQuit: () => void opts.onQuit(),
     });
 
@@ -217,11 +204,10 @@ export async function mountTray(
     });
     await destroyMounted({ baseTray, tray, panel, stopPlacement });
     log(`opentray mount failed (${formatTrayMountFailure(failure)}) — running headless`);
-    const host = new TrayHost(store, null, null, {
+    const host = new TrayHost(null, null, {
       openItemId: MENU_OPEN_ID,
       quitItemId: MENU_QUIT_ID,
       initialVisible: false,
-      onPinFrame: opts.onPinFrame,
       onQuit: () => void opts.onQuit(),
     });
     return {
@@ -235,35 +221,22 @@ export async function mountTray(
  * 单 retained-session tray 管理器。
  *
  * - `show()` bootstrap 一次创建原生 session；之后所有激活用 `toVisible()`，隐藏用 `close()`，
- *   绝不重放 startup 宽高/style/native flags（OpenTray 0.14 session 法则）。
+ *   绝不重放 startup 宽高/style/native flags（OpenTray 0.16 session 法则）。
  * - `isVisible()` / `visibleChange` 是原生操作可见性的唯一真相（含最小化）。
  * - 操作经 `enqueueWindowOperation` 串行化，快速 tray 点击不会反转 stale 状态。
  */
 export class TrayHost {
   private visibility: Visibility = "hidden";
-  private pinned = false;
-  private routePathname = "/";
-  private exitRequested = false;
-  private focused = false;
   private unsubs: Array<() => void> = [];
   /** 串行化 query + transition 对，快速 tray 点击不得反转 stale 状态。 */
   private windowOperation: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly store: PreferencesStore,
     private readonly tray: TrayHostTray | null,
     private readonly window: TrayHostWindow | null,
     private readonly opts: TrayHostOptions = {},
   ) {
     this.visibility = opts.initialVisible ? "shown" : "hidden";
-    this.focused = opts.initialVisible ?? false;
-    this.pinned = store.getPreferences().keepOnTop;
-
-    const onPreferences = (preferences: { keepOnTop: boolean }): void =>
-      this.onPreferences(preferences);
-    this.store.on("preferences", onPreferences);
-    this.unsubs.push(() => this.store.off("preferences", onPreferences));
-
     this.wireUp();
     this.pushMenu();
   }
@@ -271,20 +244,6 @@ export class TrayHost {
   private logger(line: string): void {
     this.opts.log?.(line);
     log(`[tray] ${line}`);
-  }
-
-  /** 技能工作台当前没有需要保持窗口前台的事件源。 */
-  private get hasActiveEvents(): boolean {
-    return false;
-  }
-
-  private get canAutoClose(): boolean {
-    return !this.pinned && !this.hasActiveEvents && !this.isRouteVisibilityProtected;
-  }
-
-  /** Creator 编辑路由拥有表单输入，blur 时禁止自动隐藏。 */
-  private get isRouteVisibilityProtected(): boolean {
-    return this.routePathname.startsWith("/creator");
   }
 
   /** 包裹原生 promise，rejection 被 log 吞掉，绝不连锁失败。 */
@@ -306,18 +265,6 @@ export class TrayHost {
     };
     this.windowOperation = this.windowOperation.then(run, run);
     return this.windowOperation;
-  }
-
-  private emitPinFrame(): void {
-    try {
-      this.opts.onPinFrame?.({
-        exitRequested: this.exitRequested,
-        visibility: this.visibility,
-        hasActiveEvents: this.hasActiveEvents,
-      });
-    } catch {
-      /* 投影失败不得影响原生生命周期。 */
-    }
   }
 
   private wireUp(): void {
@@ -348,16 +295,6 @@ export class TrayHost {
       this.window.listen("visibleChange", ({ payload }) => {
         this.applyNativeVisibility(payload.visible, "visibleChange");
       }),
-      this.window.listen("blur", () => {
-        this.logger("window blur");
-        this.focused = false;
-        this.reevaluateAutoClose();
-      }),
-      this.window.listen("focus", () => {
-        this.logger("window focus");
-        this.focused = true;
-        this.cancelAutoClose();
-      }),
     );
   }
 
@@ -371,29 +308,6 @@ export class TrayHost {
     );
   }
 
-  private reevaluateAutoClose(): void {
-    if (this.visibility !== "shown" || this.focused) {
-      this.cancelAutoClose();
-      return;
-    }
-    if (this.canAutoClose) this.requestAutoClose();
-    else this.cancelAutoClose();
-  }
-
-  private requestAutoClose(): void {
-    if (!this.canAutoClose) {
-      this.cancelAutoClose();
-      return;
-    }
-    if (!this.exitRequested) this.exitRequested = true;
-    this.emitPinFrame();
-  }
-
-  private cancelAutoClose(): void {
-    if (this.exitRequested) this.exitRequested = false;
-    this.emitPinFrame();
-  }
-
   /** 读原生操作可见性；缓存态仅作失败 fallback。 */
   private async queryNativeVisibility(fallback: boolean): Promise<boolean> {
     if (!this.window) return fallback;
@@ -405,48 +319,29 @@ export class TrayHost {
     }
   }
 
-  /** 把一条原生可见性事实应用到菜单状态与 WebUI 投影。 */
+  /** 把一条原生可见性事实应用到菜单状态。 */
   private applyNativeVisibility(visible: boolean, source: string): void {
     const next: Visibility = visible ? "shown" : "hidden";
     const changed = this.visibility !== next;
     this.visibility = next;
-    if (!visible) {
-      this.exitRequested = false;
-      this.focused = false;
-    }
     if (changed) {
       this.pushMenu();
       this.logger(`${source}: ${next}`);
     }
-    this.emitPinFrame();
   }
 
   /** bootstrap show() 之后，恢复或重新激活 retained session。 */
   private async revealRetainedWindow(): Promise<void> {
-    this.exitRequested = false;
-    this.focused = true;
     if (!this.window) {
       this.applyNativeVisibility(true, "headless reveal");
       return;
     }
-    try {
-      await this.window.setStyle({ opacity: WINDOW_ENTER_SEED_OPACITY });
-    } catch (error) {
-      this.logger(`setStyle(opacity) failed: ${errorToLogMessage(error)}`);
-    }
     await this.window.toVisible();
-    try {
-      await this.window.setStyle({ keepOnTop: true });
-    } catch (error) {
-      this.logger(`setStyle(keepOnTop) failed: ${errorToLogMessage(error)}`);
-    }
     this.applyNativeVisibility(await this.queryNativeVisibility(true), "toVisible");
   }
 
   /** 隐藏 retained session，但保留其页面运行时（不销毁）。 */
   private async closeRetainedWindow(): Promise<void> {
-    this.exitRequested = false;
-    this.focused = false;
     if (!this.window) {
       this.applyNativeVisibility(false, "headless close");
       return;
@@ -473,39 +368,6 @@ export class TrayHost {
       if (visible) await this.closeRetainedWindow();
       else await this.revealRetainedWindow();
     });
-  }
-
-  /** 仅当自动隐藏仍被授权时，完成一次 WebUI 拥有的退出动画。 */
-  async completeAutoClose(): Promise<void> {
-    if (!this.exitRequested || !this.canAutoClose) {
-      this.cancelAutoClose();
-      return;
-    }
-    await this.hide();
-  }
-
-  /** 更新路由拥有的可见性护栏。 */
-  setRoute(pathname: string): void {
-    if (this.routePathname === pathname) return;
-    this.routePathname = pathname;
-    this.logger(`route changed: ${pathname}`);
-    this.reevaluateAutoClose();
-  }
-
-  private onPreferences(preferences: { keepOnTop: boolean }): void {
-    if (this.pinned === preferences.keepOnTop) return;
-    this.pinned = preferences.keepOnTop;
-    this.logger(`keep-open pin set to ${preferences.keepOnTop}`);
-    this.reevaluateAutoClose();
-  }
-
-  /** 当前原生窗口投影，用于 WebUI 初始状态。 */
-  getPinState(): TrayPinFrame {
-    return {
-      exitRequested: this.exitRequested,
-      visibility: this.visibility,
-      hasActiveEvents: this.hasActiveEvents,
-    };
   }
 
   /** 暴露给诊断与聚焦的单元覆盖。 */

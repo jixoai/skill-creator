@@ -14,12 +14,10 @@ import { randomBytes } from "node:crypto";
 import { ensureAppDirs } from "../shared/paths.js";
 import { WEB_TOKEN_PLACEHOLDER } from "../shared/index.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
-import type { TrayPinFrame } from "../shared/contracts/tray.js";
 import { createDaemonDomain, type DaemonDomain } from "./domain.js";
 import { IpcServer } from "./ipc-server.js";
 import { WebServer } from "./web-server.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
-import { PreferencesStore } from "./preferences-store.js";
 import { log } from "./log.js";
 
 /** 生产与开发 daemon 入口共享的启动配置。 */
@@ -48,7 +46,6 @@ export interface DaemonHandles {
   webToken: string;
   status: DaemonStatus;
   trayHost: TrayHost | null;
-  preferencesStore: PreferencesStore;
   stop: (opts?: { exit?: boolean }) => Promise<void>;
 }
 
@@ -119,8 +116,6 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
 
   // Single-instance lock: the IPC socket bind is the source of truth.
   const webToken = opts.webToken ?? randomBytes(32).toString("hex");
-  const preferencesStore = new PreferencesStore();
-
   const status: DaemonStatus = {
     active: true,
     pid: process.pid,
@@ -185,7 +180,6 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
       webuiDir,
       status: () => status,
       domain,
-      preferencesStore,
     });
     port = await web.start(opts.port ?? 0);
   } catch (error) {
@@ -203,10 +197,8 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
         settleTeardown("tray placement", () => handlesRef.stopPlacement()),
         settleTeardown("tray host", async () => handlesRef.trayHost?.destroy()),
         settleTeardown("web server", () => web.stop({ graceMs: SHUTDOWN_GRACE_MS })),
-        settleTeardown("web subscriptions", () => web.dispose()),
         settleTeardown("IPC server", () => ipc.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("repository sessions", () => domain.repository.dispose()),
-        settleTeardown("preferences store", () => preferencesStore.close()),
       ];
       await Promise.allSettled(tasks);
     } finally {
@@ -245,8 +237,7 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
   // Tray mount (best-effort). Headless when unavailable — WebUI stays browser-reachable.
   if (opts.withTray !== false) {
     const url = resolveWebviewUrl(opts.webviewUrl, web.webUiUrl(port), webToken);
-    const onPinFrame = (frame: TrayPinFrame): void => web.broadcast({ type: "pin", ...frame });
-    const { result, host } = await (opts.trayMounter ?? mountTray)(preferencesStore, {
+    const { result, host } = await (opts.trayMounter ?? mountTray)({
       url,
       packageVersion: opts.cliVersion,
       enableDevtools: opts.enableDevtools ?? false,
@@ -255,7 +246,6 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
         const stop = await stopReady;
         await stop({ exit: true });
       },
-      onPinFrame,
     });
     if (stopPromise) {
       // stop 已在进行 —— mount 迟到，立即销毁，绝不保留迟到 native handle。
@@ -274,10 +264,6 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
             : String(result.failure.cause)
         }`;
       }
-      // 后置注入 tray host，使 WebUI 投影首帧与 tray RPC 可访问其状态。
-      web.attachTray(host);
-      // 迟到的首帧：mount 完成后立刻广播当前 pin 状态，补齐先于 attachTray 连接的客户端。
-      if (host) onPinFrame(host.getPinState());
     }
   }
   status.webUrl = web.webUiUrl(port);
@@ -290,7 +276,6 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     webToken,
     status,
     trayHost: handlesRef.trayHost,
-    preferencesStore,
     stop,
   };
 }

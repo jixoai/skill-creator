@@ -38,8 +38,6 @@ declare global {
     stopAppRegionDrag?(opts: { pointerId: number }): Promise<void> | void;
     /** 调整原生窗口尺寸。 */
     resizeTo?(width: number, height: number): Promise<void> | void;
-    /** 设置窗口样式（opacity / keepOnTop 等）。 */
-    setStyle?(style: Record<string, unknown>): Promise<void> | void;
     /** 查询窗口可见性。 */
     isVisible?(): Promise<boolean> | boolean;
     /** 显示窗口。 */

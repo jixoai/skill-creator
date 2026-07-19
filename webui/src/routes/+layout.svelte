@@ -3,24 +3,13 @@
    * 原始需求 [2026-07-14]：「导航栏、顶部栏，都参考 pnpm-pub 进行创作」。
    * 正交意图：
    * 1. 管理 daemon 连接生命周期。
-   * 2. 按路由同步原生窗口尺寸。
+   * 2. 按路由同步 app mode 原生窗口尺寸。
    * 3. 组合工作台导航与全局浮层。
    */
   import "./layout.css";
   import { onMount } from "svelte";
   import { page } from "$app/state";
-  import {
-    completeAutoClose,
-    connect,
-    connectionState,
-    disconnect,
-    ensureTraySubscription,
-    loadWorkspaces,
-    setTrayRoute,
-    setWindowAutoCloseCountdown,
-    trayState,
-  } from "$lib/store.svelte";
-  import { initWindowVisibility } from "$lib/window-visibility";
+  import { connect, connectionState, disconnect, loadWorkspaces } from "$lib/store.svelte";
   import type { ImportedWorkspace } from "$lib/types";
   import { confirmRemoveWorkspace } from "$lib/workspace-removal";
   import { goto } from "$app/navigation";
@@ -44,23 +33,11 @@
   }
 
   onMount(() => {
-    // 页面拥有的退出/进入动画：镜像原生窗口 opacity，并在动画完成后回调 daemon 关窗。
-    const stopWindowVisibility = initWindowVisibility({
-      getState: () => ({
-        visibility: trayState.windowVisibility,
-        exitRequested: trayState.exitRequested,
-      }),
-      setCountdown: (countdown) => setWindowAutoCloseCountdown(countdown),
-      completeAutoClose: () => void completeAutoClose(),
-    });
     connect();
-    return () => {
-      stopWindowVisibility();
-      disconnect();
-    };
+    return disconnect;
   });
 
-  // 路由变化时调整窗口尺寸，并上报给 daemon（Creator 路由禁止 blur 自动隐藏）。
+  // 路由变化时只调整原生 app window 尺寸；焦点与关闭生命周期由系统管理。
   let pathname = $derived(page.url.pathname);
   $effect(() => {
     if (pathname.startsWith("/creator")) {
@@ -69,19 +46,11 @@
       void resizeWindow(HOME_WINDOW_SIZE);
     }
   });
-  $effect(() => {
-    const connected = connectionState.status === "connected";
-    const current = page.url.pathname;
-    if (!connected) return;
-    void setTrayRoute(current);
-  });
-
-  // WS 连接后加载 workspaces，并订阅 daemon→WebUI 投影流（重连时自动重建）。
+  // WS 连接后加载 workspaces。
   let connected = $derived(connectionState.status === "connected");
   $effect(() => {
     if (connected) {
       void loadWorkspaces();
-      void ensureTraySubscription();
     }
   });
 </script>
@@ -94,8 +63,8 @@
 
 <TooltipProvider>
   <div class="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-    <!-- 顶部栏（原生拖拽区域 + keep-open pin + 工具栏） -->
-    <WindowDragRegion variant="main" showPin>
+    <!-- 顶部栏（原生拖拽区域 + 工具栏） -->
+    <WindowDragRegion variant="main">
       {#snippet left()}
         <span class="px-1 text-xs font-medium text-muted-foreground">Skill Creator</span>
       {/snippet}

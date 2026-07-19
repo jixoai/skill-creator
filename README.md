@@ -1,10 +1,11 @@
 <!--
-文件意图（2026-07-14）
+文件意图（2026-07-19）
 用户原始需求摘录：
 - 「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)，基于 ../ccski 这个 sdk 来快速搭建一个 skills 管理器。」
 - 「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。」
 - 「继续迭代，大胆创新……以人为本，要让小白到各行各业到专业工程师用起来都舒心。」
 - [2026-07-15]「按照你自己的节奏去推进开发迭代。」
+- [2026-07-19]「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
 正交意图：1. 定义产品边界；2. 给出真实安装与运行方式；3. 说明协议和安全模型；4. 提供开发验证入口；5. 承载品牌门面图（color-symbol）。
 妥协声明：README 是包发布后唯一随包分发的公开入口，安装、运行、边界与安全事实必须同处一份文件，拆分会使发布包缺失必要上下文。品牌图经项目相对路径 `./resources/color-symbol.png` 引用，GitHub 自动渲染为 raw 链接；resources 不进 npm 包，npm 端图片缺失不影响文本可读性，repository 字段引导读者到 GitHub。
 -->
@@ -66,7 +67,7 @@ Repository install
 - Git，可被当前进程通过 `git` 命令调用
 - macOS 或 Windows，`arm64` / `x64`
 
-桌面窗口依赖 `@opentray/ext-webview`，当前发布目标是 macOS 与 Windows。包元数据也仅声明这两个系统；Linux 不是当前发布目标。
+桌面窗口依赖 `@opentray/ext-webview`，当前发布目标是 macOS 与 Windows。包元数据也仅声明这两个系统；Linux 不是当前发布目标。窗口使用 `appMode: true` 进入系统任务栏/Dock 与应用切换器；窗口焦点、层级和关闭由系统管理，不提供 keep-on-top 或 blur 倒计时关闭模式。
 
 ## 安装与开发
 

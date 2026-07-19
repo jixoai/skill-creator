@@ -16,7 +16,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootDaemon, type DaemonHandles } from "../src/daemon/index.js";
-import { PreferencesStore } from "../src/daemon/preferences-store.js";
 import { TrayHost } from "../src/daemon/tray-host.js";
 import {
   createIpcRequest,
@@ -95,9 +94,7 @@ describe("daemon shutdown orchestration", () => {
       const stopPlacement = vi.fn();
       const destroyTray = vi.fn(async () => {});
       const destroyWindow = vi.fn(async () => {});
-      const latePreferencesStore = new PreferencesStore();
       const lateHost = new TrayHost(
-        latePreferencesStore,
         {
           destroy: destroyTray,
           onMenuClick: () => () => {},

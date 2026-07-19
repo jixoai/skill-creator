@@ -16,7 +16,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
-import { PreferencesStore } from "../src/daemon/preferences-store.js";
 import { WebServer } from "../src/daemon/web-server.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
@@ -56,7 +55,6 @@ describe("Web server shutdown", () => {
       webToken,
       webuiDir,
       domain,
-      preferencesStore: new PreferencesStore(),
       status: () => ({
         active: true,
         pid: process.pid,

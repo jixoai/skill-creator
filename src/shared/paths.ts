@@ -18,9 +18,6 @@ export const SOCKET_FILE = "skill-creator.sock";
 /** daemon 日志文件名。 */
 export const DAEMON_LOG_FILE = "daemon.log";
 
-/** 持久化 app 级偏好的文件名。 */
-export const PREFERENCES_FILE = "preferences.json";
-
 let homeOverride: string | null = null;
 
 /** 覆盖 home，用于隔离测试与开发状态。 */
@@ -62,16 +59,6 @@ export function daemonLogPath(): string {
   return path.join(logsDir(), DAEMON_LOG_FILE);
 }
 
-/** 返回持久化状态目录（preferences 等）。 */
-export function stateDir(): string {
-  return path.join(appDir(), "state");
-}
-
-/** 返回 app 级偏好的持久化路径。 */
-export function preferencesPath(): string {
-  return path.join(stateDir(), PREFERENCES_FILE);
-}
-
 /**
  * 返回当前平台的 IPC socket 路径。
  *  - macOS / linux: Unix Domain Socket at ~/.skill-creator/run/skill-creator.sock
@@ -86,7 +73,7 @@ export function socketPath(): string {
 
 /** 确保应用状态目录树存在。 */
 export function ensureAppDirs(): void {
-  for (const dir of [appDir(), runDir(), logsDir(), stateDir()]) {
+  for (const dir of [appDir(), runDir(), logsDir()]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
