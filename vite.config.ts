@@ -6,7 +6,7 @@
  *
  * Orthogonal intents:
  *   [1] Resolve source-style `.js` imports to TypeScript during tests.
- *   [2] Keep daemon unit tests isolated in a Node environment.
+ *   [2] Keep daemon and build-tool unit tests isolated in a Node environment.
  *   [3] Format TypeScript and Svelte through one toolchain.
  */
 import fs from "node:fs";
@@ -30,7 +30,7 @@ export default defineConfig({
   test: {
     plugins: [resolveTypeScriptSources()],
     environment: "node",
-    include: ["test/**/*.test.ts"],
+    include: ["test/**/*.test.ts", "webui/config/**/*.test.ts"],
     globals: false,
     fileParallelism: false,
     testTimeout: 20_000,

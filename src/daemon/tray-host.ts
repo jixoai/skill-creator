@@ -1,5 +1,6 @@
 /**
  * 用户原始需求 [2026-07-19]：「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。」
+ * 用户原始需求 [2026-07-20]：「预构建基于 color-symbol 的 appIcon：背景白色+合理的留白边界。」
  * 正交意图：
  *   [1] 创建强类型 tray 与 retained WebView window，处理菜单、原生可见性事件与品牌图标
  *       （icon 是 createTray 的输入之一，与 menu/tooltip 同层；monochrome-mini 经
@@ -121,6 +122,7 @@ export async function mountTray(opts: {
 
     // tray 通知栏小图标（resources/README.md §4 Monochrome Mini）：极小容器专用。
     const iconPath = resolveTrayIconPath(opts.webuiDir);
+    const appIconPath = resolveAppIconPath(opts.webuiDir);
     const icon: Icon | undefined = iconPath
       ? {
           // macOS template icon：透明背景单色图，系统按深浅色自适应反相。
@@ -147,6 +149,9 @@ export async function mountTray(opts: {
       packageVersion: opts.packageVersion,
       appId: `com.${APP_ID}`,
       appName: APP_TITLE,
+      ...(appIconPath === null
+        ? {}
+        : { appIcon: { "icon-only": { type: "file", path: appIconPath } } }),
     });
     tray = baseTray.extend(ext.WebviewExt);
 
@@ -430,14 +435,23 @@ export class TrayHost {
  * 图标缺失不致命，回落到 opentray 默认图标（headless 降级原则）。
  */
 function resolveTrayIconPath(webuiDir: string | undefined): string | null {
+  return resolvePackagedIconPath("monochrome-mini.png", webuiDir);
+}
+
+/** 解析应用级 Dock/taskbar 图标；使用 Vite 预构建的高可读性品牌图标。 */
+function resolveAppIconPath(webuiDir: string | undefined): string | null {
+  return resolvePackagedIconPath("app-icon.png", webuiDir);
+}
+
+function resolvePackagedIconPath(fileName: string, webuiDir: string | undefined): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    webuiDir ? path.join(webuiDir, "icons", "monochrome-mini.png") : null,
-    path.join(here, "webui", "icons", "monochrome-mini.png"),
-    path.join(here, "..", "..", "webui", "build", "icons", "monochrome-mini.png"),
-    path.join(here, "..", "..", "webui", "static", "icons", "monochrome-mini.png"),
-    path.join(process.cwd(), "webui", "build", "icons", "monochrome-mini.png"),
-    path.join(process.cwd(), "webui", "static", "icons", "monochrome-mini.png"),
+    webuiDir ? path.join(webuiDir, "icons", fileName) : null,
+    path.join(here, "webui", "icons", fileName),
+    path.join(here, "..", "..", "webui", "build", "icons", fileName),
+    path.join(here, "..", "..", "webui", "static", "icons", fileName),
+    path.join(process.cwd(), "webui", "build", "icons", fileName),
+    path.join(process.cwd(), "webui", "static", "icons", fileName),
   ];
   for (const candidate of candidates) {
     if (candidate && fs.existsSync(candidate)) return candidate;
