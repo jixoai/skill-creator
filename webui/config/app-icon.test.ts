@@ -40,9 +40,56 @@ describe("Skill Creator app icon build", () => {
     expect(pixelAt(data, info.channels, info.width, 96, 512)).toEqual([255, 255, 255, 255]);
     expect(pixelAt(data, info.channels, info.width, 512, 96)).toEqual([255, 255, 255, 255]);
     expect(pixelAt(data, info.channels, info.width, 512, 512)).not.toEqual([255, 255, 255, 255]);
+    const icnsPath = path.join(sandbox, "nested", "app-icon.icns");
+    const icns = await fs.readFile(icnsPath);
+    expect(icns.subarray(0, 4).toString("ascii")).toBe("icns");
+    expect(readIcnsTags(icns)).toEqual(
+      expect.arrayContaining([
+        "ic07",
+        "ic08",
+        "ic09",
+        "ic10",
+        "ic11",
+        "ic12",
+        "ic13",
+        "ic14",
+        "is32",
+        "il32",
+        "s8mk",
+        "l8mk",
+      ]),
+    );
+    const firstPngStat = await fs.stat(outputPath, { bigint: true });
+    const firstIcnsStat = await fs.stat(icnsPath, { bigint: true });
+    const cache = JSON.parse(
+      await fs.readFile(path.join(sandbox, ".cache", "app-icon.json"), "utf8"),
+    ) as { sourceSha256: string; recipeVersion: string; encoderVersion: string };
+    expect(cache.sourceSha256).toBe(sourceHashBefore);
+    expect(cache.recipeVersion).toContain("figma-squircle@1.1.0");
+    expect(cache.encoderVersion).toBe("5.0.0");
+
+    await generateSkillCreatorAppIcon(sourcePath, outputPath);
+    await expect(fs.stat(outputPath, { bigint: true })).resolves.toMatchObject({
+      mtimeNs: firstPngStat.mtimeNs,
+    });
+    await expect(fs.stat(icnsPath, { bigint: true })).resolves.toMatchObject({
+      mtimeNs: firstIcnsStat.mtimeNs,
+    });
     await expect(sha256(sourcePath)).resolves.toBe(sourceHashBefore);
   });
 });
+
+function readIcnsTags(data: Buffer): string[] {
+  const tags: string[] = [];
+  for (let offset = 8; offset + 8 <= data.length; ) {
+    const type = data.subarray(offset, offset + 4).toString("ascii");
+    const size = data.readUInt32BE(offset + 4);
+    if (size < 8 || offset + size > data.length) break;
+    if (type !== "TOC ") tags.push(type);
+    offset += size;
+  }
+  return tags;
+}
 
 function pixelAt(data: Buffer, channels: number, width: number, x: number, y: number): number[] {
   const offset = (y * width + x) * channels;

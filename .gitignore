@@ -2,7 +2,9 @@ node_modules
 dist
 webui/build
 webui/.svelte-kit
+webui/.cache
 /webui/static/icons/app-icon.png
+/webui/static/icons/app-icon.icns
 *.log
 .DS_Store
 .zcode/
