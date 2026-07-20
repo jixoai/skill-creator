@@ -6,6 +6,7 @@
 - 「Chat 针对人（澄清意图），Spec 针对意图（形成规范），Style 针对代码（约束产出）。」
 - 「单个物理文件的正交意图上限为 5 个。达到 3 个即需触发警报，考虑重构拆分。」
 - 「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
+- 「默认的变体名是 `default`，不填写就是默认；变体也可以表达垃圾篓 `empty/files`。」
 正交意图：1. 固化产品真相；2. 固化模块与安全边界；3. 固化工程风格；4. 固化验证标准；5. 固化演进与无兼容策略。
 妥协声明：根级 `AGENTS.md` 是当前全仓共享的自动发现入口；五项是安全交付不可分离的治理上下文，具体领域定义已物理拆分到 `i18n.zh.md` 与源码契约。
 -->
@@ -82,6 +83,8 @@ Repository         = clone + pin commit + scan + preview + install
 5. UI 服务于人的直觉与操作密度，允许场景聚合，但不能绕过协议和文件系统边界。
 6. Creator 允许无 query、workspace-only 新建上下文、workspace+skill 编辑上下文；skill-only 或非法身份必须在渲染前清理。
 7. OpenTray 以 `appMode: true` 承载正常应用窗口：窗口层级、焦点、最小化/最大化与关闭交给系统管理；tray 是 macOS/Windows 的 UX 加成，WebUI 在任何平台（含 Linux/CI/headless）仍须经系统浏览器可达，`status.tray === "headless"` 不是不可用。
+8. App identity 只使用当前平台标准资产：macOS/Windows 优先使用 `resources/app-icon` 中手工生成的 light/dark ICNS/ICO，Linux 使用 Vite 从 `resources/color-symbol.png` 预构建的带尺寸 72 DPI PNG；tray template PNG 不得提升为 `appIcon`。
+9. light 资产同时声明 `default/light`，dark 资产声明 `dark`。Core 只管理目录和当前变体；本项目暂不增加主题 IPC，WebView 不拥有 App identity 切换权。
 
 ## 3. 系统拓扑
 

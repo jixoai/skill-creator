@@ -1,5 +1,6 @@
 /**
  * 原始需求 [2026-07-14]：「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)」。
+ * 用户原始需求 [2026-07-20]：「将 Vite 生成的 appIcon 用于 dev/build 的 daemon 运行时」。
  * 正交意图：
  * 1. 先取得单实例 IPC 所有权，再暴露运行时服务。
  * 2. 启动受权的 HTTP/WebSocket 服务。
@@ -85,8 +86,10 @@ function resolveWebuiDir(override?: string): string {
   if (override) return path.resolve(override);
   const candidates = [
     path.join(__dirname, "webui"), // dist/webui (bundled)
-    path.join(__dirname, "..", "..", "webui", "build"), // dev: webui/build
+    path.join(__dirname, "..", "..", "webui", "static"), // source dev: Vite static assets
+    path.join(__dirname, "..", "..", "webui", "build"), // source production build
     path.join(process.cwd(), "dist", "webui"),
+    path.join(process.cwd(), "webui", "static"),
     path.join(process.cwd(), "webui", "build"),
   ];
   for (const c of candidates) {

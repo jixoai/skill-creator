@@ -1,0 +1,94 @@
+{
+  "fill": {
+    "linear-gradient": ["gray:0.94645,1.00000", "gray:1.00000,1.00000"],
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 1
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 0
+      }
+    }
+  },
+  "groups": [
+    {
+      "hidden": false,
+      "layers": [
+        {
+          "blend-mode-specializations": [
+            {
+              "appearance": "tinted",
+              "value": "normal"
+            }
+          ],
+          "fill-specializations": [
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "display-p3:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": false
+            }
+          ],
+          "hidden-specializations": [
+            {
+              "appearance": "tinted",
+              "value": false
+            }
+          ],
+          "image-name-specializations": [
+            {
+              "value": "icon.png"
+            },
+            {
+              "appearance": "tinted",
+              "value": "monochrome.png"
+            }
+          ],
+          "name": "monochrome",
+          "position-specializations": [
+            {
+              "value": {
+                "scale": 1,
+                "translation-in-points": [-0.5, 34.08694871117564]
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "scale": 1.36,
+                "translation-in-points": [13.5, 37.1]
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": ["watchOS"],
+    "squares": "shared"
+  }
+}

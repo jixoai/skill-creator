@@ -5,6 +5,9 @@ webui/.svelte-kit
 webui/.cache
 /webui/static/icons/app-icon.png
 /webui/static/icons/app-icon.icns
+/webui/static/icons/app-icon.ico
+/webui/static/icons/app-icon.json
+/webui/static/icons/linux/
 *.log
 .DS_Store
 .zcode/

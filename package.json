@@ -43,7 +43,6 @@
     "build:core": "bun scripts/build-core.sh.ts",
     "build": "pnpm run build:core && pnpm run build:webui && pnpm run stage:webui",
     "stage:webui": "bun scripts/stage-webui.sh.ts",
-    "predev": "pnpm --dir ../opentray run prepare:linked-consumer",
     "dev": "pnpm --dir webui dev",
     "dev:cli": "bun src/cli/cli.ts",
     "dev:daemon": "bun src/daemon/main.ts",
@@ -55,13 +54,14 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@opentray/ext-webview": "link:../opentray/packages/ext-webview",
+    "@opentray/ext-webview": "0.17.0",
+    "@opentray/vite-plugin": "0.17.0",
     "@orpc/contract": "1.14.6",
     "@orpc/server": "1.14.6",
     "ccski": "^2.4.0",
     "execa": "^9.6.1",
     "gray-matter": "^4.0.3",
-    "opentray": "link:../opentray/packages/cli",
+    "opentray": "0.17.0",
     "ws": "^8.18.1",
     "zod": "^4.4.3"
   },

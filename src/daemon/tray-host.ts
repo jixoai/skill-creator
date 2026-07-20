@@ -1,6 +1,7 @@
 /**
  * 用户原始需求 [2026-07-19]：「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。」
  * 用户原始需求 [2026-07-20]：「预构建基于 color-symbol 的 appIcon：背景白色+合理的留白边界。」
+ * 用户原始需求 [2026-07-20]：「appIcon 必须跟随操作系统平台的标准来。」
  * 正交意图：
  *   [1] 创建强类型 tray 与 retained WebView window，处理菜单、原生可见性事件与品牌图标
  *       （icon 是 createTray 的输入之一，与 menu/tooltip 同层；monochrome-mini 经
@@ -33,6 +34,7 @@ import {
   WINDOW_HEIGHT,
   WINDOW_WIDTH,
 } from "../shared/index.js";
+import { resolveAppIcon } from "./app-icon.js";
 import { configureOpenTrayWindowsHostTopology } from "./opentray-windows-host.js";
 import { log } from "./log.js";
 
@@ -122,7 +124,7 @@ export async function mountTray(opts: {
 
     // tray 通知栏小图标（resources/README.md §4 Monochrome Mini）：极小容器专用。
     const iconPath = resolveTrayIconPath(opts.webuiDir);
-    const appIconPath = resolveAppIconPath(opts.webuiDir);
+    const appIcon = resolveAppIcon(opts.webuiDir);
     const icon: Icon | undefined = iconPath
       ? {
           // macOS template icon：透明背景单色图，系统按深浅色自适应反相。
@@ -149,9 +151,7 @@ export async function mountTray(opts: {
       packageVersion: opts.packageVersion,
       appId: `com.${APP_ID}`,
       appName: APP_TITLE,
-      ...(appIconPath === null
-        ? {}
-        : { appIcon: { "icon-only": { type: "file", path: appIconPath } } }),
+      ...(appIcon === null ? {} : { appIcon }),
     });
     tray = baseTray.extend(ext.WebviewExt);
 
@@ -436,11 +436,6 @@ export class TrayHost {
  */
 function resolveTrayIconPath(webuiDir: string | undefined): string | null {
   return resolvePackagedIconPath("monochrome-mini.png", webuiDir);
-}
-
-/** 解析应用级 Dock/taskbar 图标；使用 Vite 预构建的高可读性品牌图标。 */
-function resolveAppIconPath(webuiDir: string | undefined): string | null {
-  return resolvePackagedIconPath("app-icon.png", webuiDir);
 }
 
 function resolvePackagedIconPath(fileName: string, webuiDir: string | undefined): string | null {

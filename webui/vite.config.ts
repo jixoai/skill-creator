@@ -9,9 +9,9 @@
 import tailwindcss from "@tailwindcss/vite";
 import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
+import { openTrayAppIconPlugin } from "@opentray/vite-plugin";
 import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
-import { skillCreatorAppIcon } from "./config/app-icon";
 import { skillCreatorDaemonDev } from "./config/daemon-dev";
 
 export default defineConfig({
@@ -22,7 +22,9 @@ export default defineConfig({
     },
   },
   plugins: [
-    skillCreatorAppIcon(),
+    openTrayAppIconPlugin({
+      sourcePath: fileURLToPath(new URL("../resources/color-symbol.png", import.meta.url)),
+    }),
     tailwindcss(),
     sveltekit({
       // 让 webui 能 import repo root 的 browser-safe shared 契约。
