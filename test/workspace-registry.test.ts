@@ -4,10 +4,11 @@
  * User input [2026-07-15]: "按照你自己的节奏去推进开发迭代。"
  * Architecture decision [2026-07-15]: concurrent projections and mutations must
  * preserve every authoritative imported Workspace transition.
+ * User input [2026-07-21]: "我们默认是破坏性更新的……遇到不兼容的就当是空值。"
  *
  * Orthogonal intents:
  *   [1] Prove collision-resistant identity and isolated discovery scopes.
- *   [2] Prove non-destructive persistence, restart recovery, and strict lookup.
+ *   [2] Prove non-destructive persistence and recovery from incompatible stale state.
  *   [3] Prove asynchronous projections cannot overwrite or hide newer mutations.
  */
 import { createHash } from "node:crypto";
@@ -163,6 +164,33 @@ describe("Workspace Registry", () => {
     expect(persisted).toContain('"schemaVersion": 1');
   });
 
+  it("treats an incompatible persisted Registry as empty until a mutation commits v1", async () => {
+    const legacySource = JSON.stringify({ activeId: null, workspaces: [] });
+    fs.mkdirSync(appDir(), { recursive: true });
+    const registryFile = path.join(appDir(), "workspaces.json");
+    fs.writeFileSync(registryFile, legacySource, "utf8");
+
+    const registry = createWorkspaceRegistry({ countSkills: zeroCount });
+    expect((await registry.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
+    expect(fs.readFileSync(registryFile, "utf8")).toBe(legacySource);
+
+    const imported = registry.import(directory("current"));
+    expect(JSON.parse(fs.readFileSync(registryFile, "utf8"))).toMatchObject({
+      schemaVersion: 1,
+      activeId: imported.id,
+      workspaces: [expect.objectContaining({ id: imported.id })],
+    });
+  });
+
+  it("rejects a Registry file that is not valid JSON", () => {
+    fs.mkdirSync(appDir(), { recursive: true });
+    fs.writeFileSync(path.join(appDir(), "workspaces.json"), "{", "utf8");
+
+    expect(() => createWorkspaceRegistry({ countSkills: zeroCount })).toThrow(
+      "Cannot read workspace registry",
+    );
+  });
+
   it("rejects unknown IDs without changing the active Workspace", async () => {
     const registry = createWorkspaceRegistry({ countSkills: zeroCount });
     const known = registry.import(directory("known"));
@@ -174,7 +202,7 @@ describe("Workspace Registry", () => {
     expect(activeId(await registry.list())).toBe(known.id);
   });
 
-  it("rejects a persisted Workspace ID that does not belong to its path", () => {
+  it("discards a persisted Workspace ID that does not belong to its path", async () => {
     const registry = createWorkspaceRegistry({ countSkills: zeroCount });
     const known = registry.import(directory("known"));
     const forgedId = ImportedWorkspaceIdSchema.parse("ws_000000000000000000000000");
@@ -188,12 +216,11 @@ describe("Workspace Registry", () => {
       "utf8",
     );
 
-    expect(() => createWorkspaceRegistry({ countSkills: zeroCount })).toThrow(
-      "Workspace ID does not match its path",
-    );
+    const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
+    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
   });
 
-  it("rejects a relative persisted Workspace path", () => {
+  it("discards a relative persisted Workspace path", async () => {
     const relativeId = ImportedWorkspaceIdSchema.parse("ws_2cf26298d998c2a65f9bc237");
     fs.mkdirSync(appDir(), { recursive: true });
     fs.writeFileSync(
@@ -206,12 +233,11 @@ describe("Workspace Registry", () => {
       "utf8",
     );
 
-    expect(() => createWorkspaceRegistry({ countSkills: zeroCount })).toThrow(
-      "Workspace path must be absolute",
-    );
+    const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
+    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
   });
 
-  it("rejects a non-normalized persisted Workspace path", () => {
+  it("discards a non-normalized persisted Workspace path", async () => {
     const canonicalPath = directory("normalized");
     const storedPath = `${canonicalPath}${path.sep}..${path.sep}${path.basename(canonicalPath)}`;
     const storedId = ImportedWorkspaceIdSchema.parse(
@@ -228,9 +254,8 @@ describe("Workspace Registry", () => {
       "utf8",
     );
 
-    expect(() => createWorkspaceRegistry({ countSkills: zeroCount })).toThrow(
-      "Workspace path must be normalized",
-    );
+    const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
+    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
   });
 
   it("restarts a projection when a Workspace is imported while counts are pending", async () => {

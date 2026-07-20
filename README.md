@@ -1,11 +1,12 @@
 <!--
-文件意图（2026-07-19）
+文件意图（2026-07-21）
 用户原始需求摘录：
 - 「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)，基于 ../ccski 这个 sdk 来快速搭建一个 skills 管理器。」
 - 「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。」
 - 「继续迭代，大胆创新……以人为本，要让小白到各行各业到专业工程师用起来都舒心。」
 - [2026-07-15]「按照你自己的节奏去推进开发迭代。」
 - [2026-07-19]「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
+- [2026-07-21]「我们默认是破坏性更新的……使用 zod 的 safeParse 来统一解决这个问题，遇到不兼容的就当是空值。」
 正交意图：1. 定义产品边界；2. 给出真实安装与运行方式；3. 说明协议和安全模型；4. 提供开发验证入口；5. 承载品牌门面图（color-symbol）。
 妥协声明：README 是包发布后唯一随包分发的公开入口，安装、运行、边界与安全事实必须同处一份文件，拆分会使发布包缺失必要上下文。品牌图经项目相对路径 `./resources/color-symbol.png` 引用，GitHub 自动渲染为 raw 链接；resources 不进 npm 包，npm 端图片缺失不影响文本可读性，repository 字段引导读者到 GitHub。
 -->
@@ -192,7 +193,7 @@ Git source + ref --> temporary clone --> commit SHA --> repo_<session>
 - Repository 安装不能指向 `~`；目标必须是存在且可写的 Imported Workspace。
 - Repository 安装汇总携带提交时的 Workspace ID；ccski installer output 先经 runtime schema 收窄，只有实际 `installed` / `overwritten` 且重新验证为 Workspace 直属、非符号链接 `SKILL.md` 目录的结果项会获得本地 Skill ID，供 Creator 复核。
 - daemon 在 tray mount 前发布 stop coordinator 与 signal listeners。stop 先关闭 HTTP/WebSocket 与 IPC admission，再并行回收 Repository、tray 与连接；mount 期间迟到的 native handles 会被立即销毁，非协作 socket 在 grace deadline 后强制关闭，并发 stop 合并为同一完成态。
-- 当前 v2 registry 没有旧 schema 的迁移层。格式不合法时拒绝启动、保留原文件，并把具体原因写入当前 home 下的 `.skill-creator/logs/daemon.log`；迁移由发布阶段决定。
+- 当前 v2 registry 没有旧 schema 的迁移层。可解析但不符合当前 Zod schema 的旧状态整体按空值加载：不读取、不转换、不在加载时写回；下一次正常 workspace mutation 才原子提交当前 v1 状态。无法解析的 JSON 或文件 IO 错误仍拒绝启动并写入当前 home 下的 `.skill-creator/logs/daemon.log`。
 
 ## 状态路径
 

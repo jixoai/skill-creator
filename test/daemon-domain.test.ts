@@ -2,12 +2,13 @@
  * Daemon domain startup boundary tests.
  *
  * User input [2026-07-15]: "按照你自己的节奏去推进开发迭代。"
- * Architecture decision [2026-07-15]: invalid strict Registry state must not
- * leave the daemon half-started after it acquires IPC ownership.
+ * User input [2026-07-21]: "遇到不兼容的就当是空值。"
+ * Architecture decision [2026-07-21]: an incompatible persisted Registry must
+ * start as empty instead of leaving the daemon half-started.
  *
  * Orthogonal intents:
- *   [1] Reject incompatible private registry state during daemon startup.
- *   [2] Release the acquired IPC singleton lock after composition failure.
+ *   [1] Start a daemon with an incompatible private Registry state.
+ *   [2] Release the acquired IPC singleton lock after normal shutdown.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -37,17 +38,17 @@ afterEach(() => {
 });
 
 describe("daemon domain startup", () => {
-  it("releases IPC ownership when the Workspace Registry cannot load", async () => {
+  it("starts and releases IPC ownership when the Workspace Registry is incompatible", async () => {
     fs.mkdirSync(appDir(), { recursive: true });
     fs.writeFileSync(
       path.join(appDir(), "workspaces.json"),
-      JSON.stringify({ activeId: "~", workspaces: [] }),
+      JSON.stringify({ activeId: null, workspaces: [] }),
       "utf8",
     );
 
-    await expect(
-      bootDaemon({ cliVersion: "test", withTray: false, exitProcess: () => {} }),
-    ).rejects.toThrow("Invalid workspace registry");
+    const daemon = await bootDaemon({ cliVersion: "test", withTray: false, exitProcess: () => {} });
+    if (!daemon) throw new Error("Expected the daemon to acquire its isolated IPC endpoint.");
+    await daemon.stop();
 
     const probe = new IpcServer({
       onStatus: () => ({

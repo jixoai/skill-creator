@@ -4,14 +4,15 @@
  * User input [2026-07-15]: "按照你自己的节奏去推进开发迭代。"
  * Architecture decision [2026-07-15]: commit one authoritative mutation state
  * atomically and never persist asynchronous observations.
+ * User input [2026-07-21]: "我们默认是破坏性更新的……使用 zod 的 safeParse
+ * 来统一解决这个问题，遇到不兼容的就当是空值。"
  *
  * Orthogonal intents:
- *   [1] Load and strictly validate the private registry file.
+ *   [1] Load the current private Registry shape or discard incompatible stale state.
  *   [2] Atomically commit a complete next state.
  */
 import fs from "node:fs";
 import path from "node:path";
-import { z } from "zod";
 import { appDir } from "../../shared/paths.js";
 import { atomicWriteUtf8 } from "../path-safety.js";
 import {
@@ -22,7 +23,7 @@ import {
 
 const WORKSPACES_FILE = "workspaces.json";
 
-/** Strict load and atomic commit adapter for the private Registry file. */
+/** Load only the current Registry shape and atomically commit authoritative state. */
 export interface WorkspaceRegistryPersistence {
   load: () => WorkspaceRegistryState;
   commit: (state: WorkspaceRegistryState) => void;
@@ -48,10 +49,7 @@ function loadState(file: string): WorkspaceRegistryState {
     );
   }
   const result = WorkspaceRegistryStateSchema.safeParse(parsed);
-  if (!result.success) {
-    throw new Error(`Invalid workspace registry ${file}: ${z.prettifyError(result.error)}`);
-  }
-  return result.data;
+  return result.success ? result.data : emptyRegistryState();
 }
 
 function commitState(file: string, state: WorkspaceRegistryState): void {

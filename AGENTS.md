@@ -1,5 +1,5 @@
 <!--
-文件意图（2026-07-19）
+文件意图（2026-07-21）
 用户原始需求摘录：
 - 「现在你将作为总负责人，接手这个项目，研究 claude-code 的代码……进行大胆的开发。」
 - 「按照你自己的节奏去推进开发迭代。」
@@ -7,13 +7,14 @@
 - 「单个物理文件的正交意图上限为 5 个。达到 3 个即需触发警报，考虑重构拆分。」
 - 「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
 - 「默认的变体名是 `default`，不填写就是默认；变体也可以表达垃圾篓 `empty/files`。」
+- 「我们默认是破坏性更新的……使用 zod 的 safeParse 来统一解决这个问题，遇到不兼容的就当是空值。」
 正交意图：1. 固化产品真相；2. 固化模块与安全边界；3. 固化工程风格；4. 固化验证标准；5. 固化演进与无兼容策略。
 妥协声明：根级 `AGENTS.md` 是当前全仓共享的自动发现入口；五项是安全交付不可分离的治理上下文，具体领域定义已物理拆分到 `i18n.zh.md` 与源码契约。
 -->
 
 # AGENTS.md
 
-本文件是 2026-07-19 架构诊断后的覆盖性事实源。每次架构诊断都应根据真实代码覆盖更新本文件，不追加失效历史；领域词汇同步到 `i18n.zh.md`。
+本文件是 2026-07-21 架构诊断后的覆盖性事实源。每次架构诊断都应根据真实代码覆盖更新本文件，不追加失效历史；领域词汇同步到 `i18n.zh.md`。
 
 ## 1. 决策闭环
 
@@ -190,9 +191,11 @@ Vite config restart 必须 await 旧 plugin 的 `closeBundle`：先向旧 daemon
 ### 3.2 Workspace 数据流
 
 ```text
-daemon boot -> strict schemaVersion=1 load -> one in-memory Registry
-              absolute + normalized path
-              id = digest(path), unique IDs/paths, registered activeId
+daemon boot -> safeParse schemaVersion=1
+              | valid --------> one in-memory Registry
+              |                 absolute + normalized path
+              |                 id = digest(path), unique IDs/paths, registered activeId
+              ` incompatible --> empty current Registry (no migration or write)
                                             |
 workspace.add(path, label?)                  |
           |                                  |
@@ -396,7 +399,8 @@ UNTRUSTED                         VALIDATION / AUTHORITY                 EFFECT
 
 WebSocket upgrade token -------> exact startup token -----------------> oRPC
 RPC JSON ----------------------> shared Zod schema -------------------> router
-workspaces.json ---------------> strict schema + path/ID identity ----> registry state
+workspaces.json ---------------> JSON parse + v1 safeParse -----------> registry state
+                                    | incompatible -------------------> empty current state
 workspace import path ---------> realpath + directory ----------------> registry
 workspaceId / skillId ---------> server registry + opaque ID --------> scoped root
 Creator directoryName ---------> lowercase safe name + direct child -> SKILL.md
@@ -516,7 +520,7 @@ code/data shape change
          `--> release/deploy boundary: human decides migration
 ```
 
-- 默认不保留旧的未发布 workspace registry schema，不添加 alias、fallback naming 或胶水 parser。
+- 默认不保留旧的未发布 workspace registry schema，不添加 alias、fallback naming 或胶水 parser。旧持久态 `safeParse` 失败时整份视为空值；不读取、不转换旧字段，也不在 load 时写回。
 - CLI 与 daemon 包版本不同时替换 daemon，不伪装为兼容。
 - 协议若必须同时支持新旧版本，必须按版本物理拆分文件与解析入口；禁止在同一 schema 内放宽成模糊 union。
 - 升级、迁移和数据备份推迟到发布/部署决策，不能偷渡进功能代码。

@@ -1,5 +1,6 @@
 /**
  * User input [2026-07-14]: "参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)"
+ * User input [2026-07-21]: "我们默认是破坏性更新的……遇到不兼容的就当是空值。"
  * Architecture decision [2026-07-14]: lifecycle behavior is verified through
  * the public CLI and framed IPC boundary.
  *
@@ -19,7 +20,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { IpcServer } from "../src/daemon/ipc-server.js";
 import { readCliVersion } from "../src/cli/package-version.js";
-import { appDir, daemonLogPath, setHomeOverride, socketPath } from "../src/shared/paths.js";
+import { appDir, setHomeOverride, socketPath } from "../src/shared/paths.js";
 import { socketAcceptsConnections } from "../src/shared/socket-liveness.js";
 
 const execFileAsync = promisify(execFile);
@@ -178,32 +179,26 @@ describe("CLI daemon lifecycle", () => {
     }
   });
 
-  it("records a strict Registry startup failure before the detached daemon exits", async () => {
+  it("starts a detached daemon when its Registry file is incompatible", async () => {
     const home = await createTemporaryHome();
     setHomeOverride(home);
     fs.mkdirSync(appDir(), { recursive: true });
     const registryFile = path.join(appDir(), "workspaces.json");
-    const registrySource = JSON.stringify({ activeId: "~", workspaces: [] });
+    const registrySource = JSON.stringify({ activeId: null, workspaces: [] });
     fs.writeFileSync(registryFile, registrySource, "utf8");
 
-    let failure: unknown = null;
     try {
-      await runCli(home, ["start"]);
-    } catch (error) {
-      failure = error;
+      const result = await runCli(home, ["start"]);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("skill-creator daemon started.");
+      expect(await fs.promises.readFile(registryFile, "utf8")).toBe(registrySource);
+      expect(await socketAcceptsConnections(socketPath(), 50)).toBe(true);
+    } finally {
+      if (await socketAcceptsConnections(socketPath(), 50)) {
+        const result = await runCli(home, ["stop"]);
+        expect(result.stdout).toContain("skill-creator daemon stopped.");
+      }
     }
-
-    if (!isCliExecutionFailure(failure)) {
-      throw new Error(`Expected CLI execution to fail, received: ${String(failure)}`);
-    }
-    expect(failure.code).toBe(1);
-    expect(failure.stderr).toContain(daemonLogPath());
-    expect(await fs.promises.readFile(daemonLogPath(), "utf8")).toContain(
-      "Invalid workspace registry",
-    );
-    expect(await fs.promises.readFile(registryFile, "utf8")).toBe(registrySource);
-    expect(await socketAcceptsConnections(socketPath(), 50)).toBe(false);
-    if (process.platform !== "win32") expect(fs.existsSync(socketPath())).toBe(false);
   }, 15_000);
 });
 
@@ -305,20 +300,4 @@ void main();
 `;
   await fs.promises.writeFile(entry, source, "utf8");
   return entry;
-}
-
-interface CliExecutionFailure {
-  code: number;
-  stderr: string;
-}
-
-function isCliExecutionFailure(value: unknown): value is CliExecutionFailure {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "code" in value &&
-    typeof value.code === "number" &&
-    "stderr" in value &&
-    typeof value.stderr === "string"
-  );
 }
