@@ -4,8 +4,7 @@
  * User input [2026-07-15]: "按照你自己的节奏去推进开发迭代。"
  * Architecture decision [2026-07-15]: commit one authoritative mutation state
  * atomically and never persist asynchronous observations.
- * User input [2026-07-21]: "我们默认是破坏性更新的……使用 zod 的 safeParse
- * 来统一解决这个问题，遇到不兼容的就当是空值。"
+ * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  *
  * Orthogonal intents:
  *   [1] Load the current private Registry shape or discard incompatible stale state.
@@ -13,6 +12,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { safeParseJson } from "../../shared/external-input.js";
 import { appDir } from "../../shared/paths.js";
 import { atomicWriteUtf8 } from "../path-safety.js";
 import {
@@ -40,16 +40,15 @@ export function createWorkspaceRegistryPersistence(): WorkspaceRegistryPersisten
 
 function loadState(file: string): WorkspaceRegistryState {
   if (!fs.existsSync(file)) return emptyRegistryState();
-  let parsed: unknown;
+  let source: string;
   try {
-    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    source = fs.readFileSync(file, "utf8");
   } catch (error) {
     throw new Error(
       `Cannot read workspace registry ${file}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const result = WorkspaceRegistryStateSchema.safeParse(parsed);
-  return result.success ? result.data : emptyRegistryState();
+  return safeParseJson(source, WorkspaceRegistryStateSchema) ?? emptyRegistryState();
 }
 
 function commitState(file: string, state: WorkspaceRegistryState): void {

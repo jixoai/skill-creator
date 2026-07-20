@@ -182,13 +182,12 @@ describe("Workspace Registry", () => {
     });
   });
 
-  it("rejects a Registry file that is not valid JSON", () => {
+  it("treats a Registry file that is not valid JSON as empty state", async () => {
     fs.mkdirSync(appDir(), { recursive: true });
     fs.writeFileSync(path.join(appDir(), "workspaces.json"), "{", "utf8");
 
-    expect(() => createWorkspaceRegistry({ countSkills: zeroCount })).toThrow(
-      "Cannot read workspace registry",
-    );
+    const registry = createWorkspaceRegistry({ countSkills: zeroCount });
+    expect((await registry.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
   });
 
   it("rejects unknown IDs without changing the active Workspace", async () => {

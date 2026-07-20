@@ -2,6 +2,7 @@
  * Creator service contract tests.
  *
  * User input [2026-07-14]: "我们还需要有一个 创造、编辑 技能的路由(/creator)。二者是有机互联的"
+ * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  * Architecture decision [2026-07-14]: verify containment, frontmatter round-trip,
  * revision conflicts, and bounded deletion at the Creator service boundary.
  *
@@ -14,7 +15,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createCreatorService } from "../src/daemon/creator-service.js";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
+import type { SkillService } from "../src/daemon/skill-service.js";
+import { SkillIdSchema, type SkillMetadata } from "../src/shared/contracts/skills.js";
 import type { ImportedWorkspace } from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
@@ -46,6 +50,35 @@ function importWorkspace(name: string): ImportedWorkspace {
 
 function directoryPath(workspace: ImportedWorkspace): string {
   return workspace.path;
+}
+
+function skillServiceForFile(skill: SkillMetadata, file: string): SkillService {
+  return {
+    list: async () => [skill],
+    resolve: async () => skill,
+    skillFile: () => file,
+    info: async () => ({
+      ...skill,
+      size: 0,
+      content: "",
+      revision: `sha256:${"0".repeat(64)}`,
+    }),
+    toggle: async () => ({
+      mode: "enable",
+      results: [],
+      succeeded: 0,
+      skipped: 0,
+      conflicts: 0,
+      failed: 0,
+    }),
+    validate: async () => ({
+      skillId: skill.id,
+      name: skill.name,
+      success: true,
+      errors: [],
+      warnings: [],
+    }),
+  };
 }
 
 describe("creator service", () => {
@@ -109,6 +142,34 @@ describe("creator service", () => {
       metadata: { audience: ["release-engineering"], maturity: "stable" },
     });
     expect(updated.document.body).toBe("# Release\n\nShip only the verified artifact.\n");
+  });
+
+  it("projects incompatible disk frontmatter as an invalid Creator operation", async () => {
+    const workspace = importWorkspace("invalid-document-root");
+    const skillDirectory = path.join(directoryPath(workspace), "invalid-document");
+    const skillFile = path.join(skillDirectory, "SKILL.md");
+    fs.mkdirSync(skillDirectory);
+    fs.writeFileSync(skillFile, "---\nname: 42\ndescription: null\n---\n# Invalid\n", "utf8");
+    const skill: SkillMetadata = {
+      id: SkillIdSchema.parse("sk_000000000000000000000000"),
+      name: "invalid-document",
+      description: "An invalid document fixture.",
+      directoryName: "invalid-document",
+      disabled: false,
+      provider: "fixture",
+      location: "project",
+      path: skillDirectory,
+      hasReferences: false,
+      hasScripts: false,
+      hasAssets: false,
+      pluginInfo: null,
+    };
+    const creator = createCreatorService(domain.workspaces, skillServiceForFile(skill, skillFile));
+
+    await expect(creator.load(workspace.id, skill.id)).rejects.toMatchObject({
+      code: "INVALID_OPERATION",
+      message: "The skill document frontmatter is incompatible with the current format.",
+    });
   });
 
   it("rejects an update based on a stale revision", async () => {

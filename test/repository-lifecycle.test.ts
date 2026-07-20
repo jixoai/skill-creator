@@ -2,6 +2,7 @@
  * Repository service lifecycle contract tests.
  *
  * User input [2026-07-15]: "按照你自己的节奏去推进开发迭代。"
+ * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  * Architecture decision [2026-07-15]: shutdown and eviction must not delete a
  * snapshot while an accepted Repository operation still owns it.
  *
@@ -14,7 +15,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ZodError } from "zod";
 import {
   createRepositoryService,
   type RepositoryInstaller,
@@ -97,7 +97,10 @@ describe("repository service lifecycle", () => {
       clone: async () => ({ directory: snapshot, commit: "not-a-commit" }),
     });
 
-    await expect(repository.scan("fixture://invalid-commit")).rejects.toBeInstanceOf(ZodError);
+    await expect(repository.scan("fixture://invalid-commit")).rejects.toMatchObject({
+      code: "UNAVAILABLE",
+      message: "Repository returned an invalid commit identity.",
+    });
     expect(fs.existsSync(snapshot)).toBe(false);
   });
 

@@ -8,6 +8,7 @@
 - 「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
 - 「默认的变体名是 `default`，不填写就是默认；变体也可以表达垃圾篓 `empty/files`。」
 - 「我们默认是破坏性更新的……使用 zod 的 safeParse 来统一解决这个问题，遇到不兼容的就当是空值。」
+- 「任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等。」
 正交意图：1. 固化产品真相；2. 固化模块与安全边界；3. 固化工程风格；4. 固化验证标准；5. 固化演进与无兼容策略。
 妥协声明：根级 `AGENTS.md` 是当前全仓共享的自动发现入口；五项是安全交付不可分离的治理上下文，具体领域定义已物理拆分到 `i18n.zh.md` 与源码契约。
 -->
@@ -229,6 +230,22 @@ Creator initialization
 workspaceId + skillId -> resolve scope -> allowed root -> containment -> action
 ```
 
+持久化载入必须区分“数据不兼容”和“文件系统故障”，不得用一个宽泛的 `catch` 把所有异常都降级为空值：
+
+```text
+读取 workspaces.json
+  |
+  +-- 文件不存在 / JSON 解析失败 / Zod.safeParse 失败
+  |      `--> empty current state
+  |           不迁移、不删除、不自动覆盖，不产生成功写入副作用
+  |
+  `-- 权限拒绝 / 目录不可读 / 磁盘 I/O 失败 / atomic rename 失败
+         `--> hard error
+              停止本次 load 或 mutation，保留原文件，不伪装成空 Registry
+```
+
+`safeParse` 只负责识别当前版本无法接受的持久化数据；它不负责迁移旧字段，也不能吞掉权限、磁盘或原子写入错误。破坏性 schema 更新默认延迟到发布/部署阶段处理。
+
 `~` 是保留 Workspace ID，不是由 WebUI 展开的文件系统路径。Imported Workspace ID 使用 canonical path 的 digest，Skill ID 使用 server 发现到的 canonical skill path digest。`skillCount` 和 `available` 是动态观察值，不属于持久态；同一 daemon 内不得出现第二个 Registry 实例。
 
 ### 3.3 Creator 状态机
@@ -342,6 +359,7 @@ src/
 |   |-- rpc-contract.ts ------- [1] compose browser-safe procedures
 |   |-- frame.ts -------------- [3] IPC envelope / codec / parser
 |   |-- package-version.ts ---- [2] source/bundle package version lookup
+|   |-- external-input.ts ----- [2] external JSON decode / schema-safe projection
 |   `-- paths.ts -------------- [3] app dirs / logs / IPC endpoint
 |
 |-- daemon/
@@ -401,6 +419,9 @@ WebSocket upgrade token -------> exact startup token -----------------> oRPC
 RPC JSON ----------------------> shared Zod schema -------------------> router
 workspaces.json ---------------> JSON parse + v1 safeParse -----------> registry state
                                     | incompatible -------------------> empty current state
+package JSON ------------------> JSON parse + current safeParse ------> runtime `unknown` / build rejection
+ccski / Git / installer result -> current safeParse ------------------> discard entry / typed domain result
+existing SKILL.md -------------> gray-matter + current safeParse -----> typed invalid-document rejection
 workspace import path ---------> realpath + directory ----------------> registry
 workspaceId / skillId ---------> server registry + opaque ID --------> scoped root
 Creator directoryName ---------> lowercase safe name + direct child -> SKILL.md
@@ -472,7 +493,9 @@ webui/src/lib/components/ui/**
 ### 7.1 TypeScript 与 runtime
 
 - 默认 strict TypeScript。原则上禁止 `any`、`as any`、`@ts-nocheck`。
-- 外部输入必须先作为 `unknown`，再经 Zod v4 或明确 parser 收窄。
+- 外部输入必须先作为 `unknown`，再经 Zod v4 `safeParse` 或明确 parser 收窄。适用所有配置文件、当前或未来数据库记录、网络返回、子进程/第三方库输出与磁盘文档；不得因 TypeScript 声明而跳过 runtime 边界。
+- 读取完整快照时，语法或 schema 不兼容可投影为该领域的空值；集合读取时丢弃不兼容条目；外部结果无法安全表达为领域空值时返回类型化失败。不得记录、迁移或用旧字段重建当前状态。
+- RPC/IPC、鉴权、opaque ID、路径、mutation 及写入前置条件仍必须明确拒绝。`safeParse` 不是放宽安全边界的理由，禁止把命令或权限错误伪装成空值。
 - `type-safe` 必须落实为跨进程和文件边界的 runtime-safe；仅有静态类型不算完成。
 - 契约类型从 `src/shared/contracts/` 推导；WebUI 禁止维护第二份手写 RPC 类型。
 - 分支会随 domain variant 增长时优先使用 discriminated union 与 `ts-pattern`；固定、封闭的过程分派保持穷尽。
@@ -520,7 +543,7 @@ code/data shape change
          `--> release/deploy boundary: human decides migration
 ```
 
-- 默认不保留旧的未发布 workspace registry schema，不添加 alias、fallback naming 或胶水 parser。旧持久态 `safeParse` 失败时整份视为空值；不读取、不转换旧字段，也不在 load 时写回。
+- 默认不保留旧的未发布 schema，不添加 alias、fallback naming 或胶水 parser。配置文件、当前或未来数据库快照和网络读取的 `safeParse` 失败按其领域投影为空/丢弃无效条目；不读取、不转换旧字段，也不在 load 时写回。不能安全降级的结果以类型化失败返回。
 - CLI 与 daemon 包版本不同时替换 daemon，不伪装为兼容。
 - 协议若必须同时支持新旧版本，必须按版本物理拆分文件与解析入口；禁止在同一 schema 内放宽成模糊 union。
 - 升级、迁移和数据备份推迟到发布/部署决策，不能偷渡进功能代码。

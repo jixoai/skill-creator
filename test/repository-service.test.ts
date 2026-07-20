@@ -7,6 +7,8 @@
  *   invalid-skill rejection against a real local Git repository.
  * - [2026-07-15] Successful installs return the same local Skill identity that
  *   Workspace discovery exposes.
+ * - [2026-07-21] Incompatible external installer results become domain-empty
+ *   previews or per-skill failures instead of transport exceptions.
  *
  * Orthogonal intents:
  *   [1] A scan session pins preview and install to one immutable commit.
@@ -196,6 +198,39 @@ describe("repository service", () => {
       totalInstalls: 2,
     });
     expect(fs.readdirSync(destinationPath)).toEqual([]);
+  });
+
+  it("treats an incompatible installer dry-run result as an empty preview", async () => {
+    writeSkill("previewed", "previewed", "Preview this skill.", "# Previewed\n");
+    commit("add preview fixture");
+    const destination = importDestination();
+    const installer: RepositoryInstaller = async () => ({
+      results: [],
+      installed: 0,
+      skipped: 0,
+      overwritten: 0,
+      failed: 0,
+    });
+    const service = createRepositoryService(domain.workspaces, domain.skills, {
+      installSkills: installer,
+    });
+
+    try {
+      const scan = await service.scan(repository);
+      const [selected] = scan.skills;
+      if (!selected) throw new Error("Expected the preview fixture.");
+
+      await expect(
+        service.install({
+          sessionId: scan.sessionId,
+          skillIds: [selected.id],
+          workspaceId: destination.id,
+          dryRun: true,
+        }),
+      ).resolves.toEqual({ kind: "preview", skills: [], destinations: [], totalInstalls: 0 });
+    } finally {
+      await service.dispose();
+    }
   });
 
   it("preserves the workspace-scoped local identity when overwriting a skill", async () => {

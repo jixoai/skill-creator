@@ -7,6 +7,7 @@
 - [2026-07-15]「按照你自己的节奏去推进开发迭代。」
 - [2026-07-19]「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
 - [2026-07-21]「我们默认是破坏性更新的……使用 zod 的 safeParse 来统一解决这个问题，遇到不兼容的就当是空值。」
+- [2026-07-21]「任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等。」
 正交意图：1. 定义产品边界；2. 给出真实安装与运行方式；3. 说明协议和安全模型；4. 提供开发验证入口；5. 承载品牌门面图（color-symbol）。
 妥协声明：README 是包发布后唯一随包分发的公开入口，安装、运行、边界与安全事实必须同处一份文件，拆分会使发布包缺失必要上下文。品牌图经项目相对路径 `./resources/color-symbol.png` 引用，GitHub 自动渲染为 raw 链接；resources 不进 npm 包，npm 端图片缺失不影响文本可读性，repository 字段引导读者到 GitHub。
 -->
@@ -193,7 +194,8 @@ Git source + ref --> temporary clone --> commit SHA --> repo_<session>
 - Repository 安装不能指向 `~`；目标必须是存在且可写的 Imported Workspace。
 - Repository 安装汇总携带提交时的 Workspace ID；ccski installer output 先经 runtime schema 收窄，只有实际 `installed` / `overwritten` 且重新验证为 Workspace 直属、非符号链接 `SKILL.md` 目录的结果项会获得本地 Skill ID，供 Creator 复核。
 - daemon 在 tray mount 前发布 stop coordinator 与 signal listeners。stop 先关闭 HTTP/WebSocket 与 IPC admission，再并行回收 Repository、tray 与连接；mount 期间迟到的 native handles 会被立即销毁，非协作 socket 在 grace deadline 后强制关闭，并发 stop 合并为同一完成态。
-- 当前 v2 registry 没有旧 schema 的迁移层。可解析但不符合当前 Zod schema 的旧状态整体按空值加载：不读取、不转换、不在加载时写回；下一次正常 workspace mutation 才原子提交当前 v1 状态。无法解析的 JSON 或文件 IO 错误仍拒绝启动并写入当前 home 下的 `.skill-creator/logs/daemon.log`。
+- 所有外部读取先解码为 `unknown`，再用当前 Zod schema `safeParse`。配置文件、未来数据库记录和第三方/网络返回中不兼容的快照按其领域投影为空，集合丢弃无效项，不能读取为安全空值的结果返回类型化失败；RPC/IPC、鉴权、路径和 mutation 输入仍明确拒绝，绝不降级为空。
+- 当前 v2 registry 没有旧 schema 的迁移层。JSON 语法错误或不符合当前 Zod schema 的旧状态整体按空值加载：不读取、不转换、不在加载时写回；下一次正常 workspace mutation 才原子提交当前 v1 状态。文件 I/O 错误仍拒绝启动并写入当前 home 下的 `.skill-creator/logs/daemon.log`。当前没有数据库实现；引入后数据库读取必须遵循同一投影法则。
 
 ## 状态路径
 

@@ -2,6 +2,7 @@
  * Immutable repository scan, preview, and install sessions.
  *
  * User input [2026-07-14]: "我们还需要一个 `/repository/`，来支持远程仓库预览 skills 并安装 它们"
+ * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  * Architecture decisions [2026-07-14]: preview/install share one pinned clone;
  * expected failures are actionable without exposing credential-bearing Git output.
  *
@@ -85,7 +86,9 @@ export type RepositoryCloner = (
 ) => Promise<{ directory: string; commit: string }>;
 
 /** ccski install adapter retained behind the Repository module boundary. */
-export type RepositoryInstaller = typeof installSkills;
+export type RepositoryInstaller = (
+  options: Parameters<typeof installSkills>[0],
+) => Promise<unknown>;
 
 /** Repository service dependencies that may be replaced at the module boundary. */
 export interface RepositoryServiceOptions {
@@ -194,7 +197,9 @@ async function cloneRepository(
       cancelSignal,
       forceKillAfterDelay: 1_000,
     });
-    return { directory, commit: PinnedCommitSchema.parse(result.stdout.trim()) };
+    const commit = PinnedCommitSchema.safeParse(result.stdout.trim());
+    if (!commit.success) throw new Error("Git returned an invalid commit identity.");
+    return { directory, commit: commit.data };
   } catch (error) {
     fs.rmSync(directory, { recursive: true, force: true });
     if (cancelSignal.aborted) {
@@ -231,11 +236,16 @@ function inspectSkill(repositoryRoot: string, file: string): RemoteSkill {
   let description = "";
   try {
     const parsed = matter(fs.readFileSync(file, "utf8"));
-    const frontmatter = SkillFrontmatterSchema.parse(parsed.data);
-    name = frontmatter.name;
-    description = frontmatter.description;
-    const safeName = SkillDirectoryNameSchema.safeParse(name);
-    if (!safeName.success) issues.push("The frontmatter name is not a safe skill directory name.");
+    const frontmatter = SkillFrontmatterSchema.safeParse(parsed.data);
+    if (!frontmatter.success) {
+      issues.push(formatSkillIssue(frontmatter.error));
+    } else {
+      name = frontmatter.data.name;
+      description = frontmatter.data.description;
+      const safeName = SkillDirectoryNameSchema.safeParse(name);
+      if (!safeName.success)
+        issues.push("The frontmatter name is not a safe skill directory name.");
+    }
   } catch (error) {
     issues.push(formatSkillIssue(error));
   }
@@ -328,7 +338,11 @@ async function scan(
   let retained = false;
   try {
     assertOpen();
-    const commit = PinnedCommitSchema.parse(snapshot.commit);
+    const parsedCommit = PinnedCommitSchema.safeParse(snapshot.commit);
+    if (!parsedCommit.success) {
+      throw new DomainError("UNAVAILABLE", "Repository returned an invalid commit identity.");
+    }
+    const commit = parsedCommit.data;
     const skills = findSkillFiles(snapshot.directory).map((file) =>
       inspectSkill(snapshot.directory, file),
     );
@@ -480,9 +494,11 @@ async function installedSkillId(
   }
   let frontmatterName = "";
   try {
-    frontmatterName = SkillFrontmatterSchema.parse(
+    const frontmatter = SkillFrontmatterSchema.safeParse(
       matter(fs.readFileSync(skillFile, "utf8")).data,
-    ).name;
+    );
+    if (!frontmatter.success) throw frontmatter.error;
+    frontmatterName = frontmatter.data.name;
   } catch (error) {
     throw new Error(`Installed skill frontmatter is invalid: ${formatSkillIssue(error)}`);
   }
@@ -627,9 +643,7 @@ async function install(
           dryRun: true,
         });
         const parsedPreview = InstallerPreviewSchema.safeParse(result);
-        if (!parsedPreview.success) {
-          throw new Error("ccski returned an unexpected install result for dry-run.");
-        }
+        if (!parsedPreview.success) continue;
         appendPreview(installPreview, parsedPreview.data);
       }
       return installPreview;
@@ -647,7 +661,7 @@ async function install(
           force: input.force,
           yes: true,
         });
-        if ("dryRun" in result) {
+        if (InstallerPreviewSchema.safeParse(result).success) {
           appendInstallEntry(
             summary,
             failedInstallEntry(expected, "Installer returned an unexpected dry-run result."),

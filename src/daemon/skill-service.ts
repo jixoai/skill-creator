@@ -2,6 +2,7 @@
  * ccski discovery adapter with server-owned skill identity.
  *
  * User input [2026-07-14]: "基于 ../ccski 这个 sdk 来快速搭建一个 ‘skills 管理器’。"
+ * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  * Architecture decisions [2026-07-14]: bind operations to explicit Workspace
  * identity and expose expected lookup failures without leaking infrastructure.
  *
@@ -12,7 +13,13 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { listSkills, validateSkill as validateCcskiSkill } from "ccski";
+import {
+  listSkills,
+  validateSkill as validateCcskiSkill,
+  type ListOptions,
+  type ValidateOptions,
+} from "ccski";
+import { z } from "zod";
 import type { WorkspaceId } from "../shared/contracts/workspaces.js";
 import type {
   SkillId,
@@ -21,7 +28,13 @@ import type {
   ToggleSummary,
   ValidateResult,
 } from "../shared/contracts/skills.js";
-import { SkillIdSchema } from "../shared/contracts/skills.js";
+import {
+  PluginInfoSchema,
+  SkillIdSchema,
+  SkillLocationSchema,
+  SkillMetadataSchema,
+} from "../shared/contracts/skills.js";
+import { safeParseExternal } from "../shared/external-input.js";
 import { DomainError } from "./domain-error.js";
 import {
   assertPathInside,
@@ -35,39 +48,85 @@ function metadataId(skillPath: string): SkillId {
   return SkillIdSchema.parse(opaquePathId("sk", canonicalDirectory(skillPath)));
 }
 
-function projectMetadata(skill: Awaited<ReturnType<typeof listSkills>>[number]): SkillMetadata {
-  const canonicalPath = canonicalDirectory(skill.path);
-  return {
-    id: metadataId(canonicalPath),
-    name: skill.name,
-    description: skill.description,
-    directoryName: path.basename(canonicalPath),
-    disabled: skill.disabled ?? false,
-    provider: skill.provider,
-    location: skill.location,
-    sourcePriority: skill.sourcePriority,
-    sourceKind: skill.sourceKind,
-    path: canonicalPath,
-    hasReferences: skill.hasReferences,
-    hasScripts: skill.hasScripts,
-    hasAssets: skill.hasAssets,
-    pluginInfo: skill.pluginInfo ?? null,
-  };
+const CcskiSkillMetadataSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  disabled: z.boolean().optional(),
+  provider: z.string(),
+  location: SkillLocationSchema,
+  sourcePriority: z.number().optional(),
+  sourceKind: z.string().optional(),
+  path: z.string().min(1),
+  hasReferences: z.boolean(),
+  hasScripts: z.boolean(),
+  hasAssets: z.boolean(),
+  pluginInfo: PluginInfoSchema.optional(),
+});
+
+const CcskiValidateResultSchema = z.object({
+  success: z.boolean(),
+  errors: z.array(z.string()),
+  warnings: z.array(z.string()),
+});
+
+/** Third-party discovery boundary; results are untrusted until projected locally. */
+export type SkillDiscoverer = (options: ListOptions) => Promise<ReadonlyArray<unknown>>;
+
+/** Third-party validation boundary; results are untrusted until projected locally. */
+export type SkillValidator = (options: ValidateOptions) => Promise<unknown>;
+
+/** Replace external ccski adapters at the service boundary. */
+export interface SkillServiceOptions {
+  discoverSkills?: SkillDiscoverer;
+  validateSkill?: SkillValidator;
+}
+
+function projectMetadata(source: unknown): SkillMetadata | null {
+  const skill = safeParseExternal(CcskiSkillMetadataSchema, source);
+  if (!skill) return null;
+
+  try {
+    const canonicalPath = canonicalDirectory(skill.path);
+    return safeParseExternal(SkillMetadataSchema, {
+      id: metadataId(canonicalPath),
+      name: skill.name,
+      description: skill.description,
+      directoryName: path.basename(canonicalPath),
+      disabled: skill.disabled ?? false,
+      provider: skill.provider,
+      location: skill.location,
+      sourcePriority: skill.sourcePriority,
+      sourceKind: skill.sourceKind,
+      path: canonicalPath,
+      hasReferences: skill.hasReferences,
+      hasScripts: skill.hasScripts,
+      hasAssets: skill.hasAssets,
+      pluginInfo: skill.pluginInfo ?? null,
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** Bind skill operations to one daemon-owned Workspace Registry. */
-export function createSkillService(workspaces: WorkspaceRegistry) {
+export function createSkillService(
+  workspaces: WorkspaceRegistry,
+  options: SkillServiceOptions = {},
+) {
+  const discoverSkills = options.discoverSkills ?? listSkills;
+  const validateSkill = options.validateSkill ?? validateCcskiSkill;
   return {
     list: (workspaceId: WorkspaceId, includeDisabled = true) =>
-      list(workspaces, workspaceId, includeDisabled),
+      list(workspaces, discoverSkills, workspaceId, includeDisabled),
     resolve: (workspaceId: WorkspaceId, skillId: SkillId) =>
-      resolveSkill(workspaces, workspaceId, skillId),
+      resolveSkill(workspaces, discoverSkills, workspaceId, skillId),
     skillFile,
-    info: (workspaceId: WorkspaceId, skillId: SkillId) => info(workspaces, workspaceId, skillId),
+    info: (workspaceId: WorkspaceId, skillId: SkillId) =>
+      info(workspaces, discoverSkills, workspaceId, skillId),
     toggle: (workspaceId: WorkspaceId, skillIds: SkillId[], mode: "enable" | "disable") =>
-      toggle(workspaces, workspaceId, skillIds, mode),
+      toggle(workspaces, discoverSkills, workspaceId, skillIds, mode),
     validate: (workspaceId: WorkspaceId, skillId: SkillId) =>
-      validate(workspaces, workspaceId, skillId),
+      validate(workspaces, discoverSkills, validateSkill, workspaceId, skillId),
   };
 }
 
@@ -77,13 +136,15 @@ export type SkillService = ReturnType<typeof createSkillService>;
 /** Discover unique skill metadata within one server-owned workspace scope. */
 async function list(
   workspaces: WorkspaceRegistry,
+  discoverSkills: SkillDiscoverer,
   workspaceId: WorkspaceId,
   includeDisabled = true,
 ): Promise<SkillMetadata[]> {
-  const skills = await listSkills(workspaces.resolve(workspaceId, includeDisabled).options);
+  const skills = await discoverSkills(workspaces.resolve(workspaceId, includeDisabled).options);
   const byId = new Map<SkillId, SkillMetadata>();
   for (const skill of skills) {
     const projected = projectMetadata(skill);
+    if (!projected) continue;
     const existing = byId.get(projected.id);
     if (!existing || (existing.disabled && !projected.disabled)) byId.set(projected.id, projected);
   }
@@ -93,10 +154,11 @@ async function list(
 /** Resolve an opaque skill ID only within its requested workspace. */
 async function resolveSkill(
   workspaces: WorkspaceRegistry,
+  discoverSkills: SkillDiscoverer,
   workspaceId: WorkspaceId,
   skillId: SkillId,
 ): Promise<SkillMetadata> {
-  const skill = (await list(workspaces, workspaceId, true)).find(
+  const skill = (await list(workspaces, discoverSkills, workspaceId, true)).find(
     (candidate) => candidate.id === skillId,
   );
   if (!skill) throw new DomainError("NOT_FOUND", `Skill not found in workspace: ${skillId}`);
@@ -117,10 +179,11 @@ function skillFile(skill: SkillMetadata): string {
 /** Read one skill document and its current content revision. */
 async function info(
   workspaces: WorkspaceRegistry,
+  discoverSkills: SkillDiscoverer,
   workspaceId: WorkspaceId,
   skillId: SkillId,
 ): Promise<SkillInfo> {
-  const skill = await resolveSkill(workspaces, workspaceId, skillId);
+  const skill = await resolveSkill(workspaces, discoverSkills, workspaceId, skillId);
   const file = skillFile(skill);
   const content = fs.readFileSync(file, "utf8");
   return {
@@ -134,12 +197,13 @@ async function info(
 /** Enable or disable selected skills without overwriting file conflicts. */
 async function toggle(
   workspaces: WorkspaceRegistry,
+  discoverSkills: SkillDiscoverer,
   workspaceId: WorkspaceId,
   skillIds: SkillId[],
   mode: "enable" | "disable",
 ): Promise<ToggleSummary> {
   const discovered = new Map(
-    (await list(workspaces, workspaceId, true)).map((skill) => [skill.id, skill]),
+    (await list(workspaces, discoverSkills, workspaceId, true)).map((skill) => [skill.id, skill]),
   );
   const results: ToggleSummary["results"] = [];
 
@@ -195,14 +259,31 @@ async function toggle(
 /** Validate one workspace-scoped skill through ccski. */
 async function validate(
   workspaces: WorkspaceRegistry,
+  discoverSkills: SkillDiscoverer,
+  validateSkill: SkillValidator,
   workspaceId: WorkspaceId,
   skillId: SkillId,
 ): Promise<ValidateResult> {
-  const skill = await resolveSkill(workspaces, workspaceId, skillId);
-  const result = await validateCcskiSkill({
-    ...workspaces.resolve(workspaceId, true).options,
-    path: skillFile(skill),
-  });
+  const skill = (await list(workspaces, discoverSkills, workspaceId, true)).find(
+    (candidate) => candidate.id === skillId,
+  );
+  if (!skill) throw new DomainError("NOT_FOUND", `Skill not found in workspace: ${skillId}`);
+  const result = safeParseExternal(
+    CcskiValidateResultSchema,
+    await validateSkill({
+      ...workspaces.resolve(workspaceId, true).options,
+      path: skillFile(skill),
+    }),
+  );
+  if (!result) {
+    return {
+      skillId,
+      name: skill.name,
+      success: false,
+      errors: ["ccski returned an incompatible validation result."],
+      warnings: [],
+    };
+  }
   return {
     skillId,
     name: skill.name,

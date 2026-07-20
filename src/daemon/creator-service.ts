@@ -2,6 +2,7 @@
  * Revision-safe skill creation, editing, and deletion.
  *
  * User input [2026-07-14]: "我们还需要有一个 创造、编辑 技能的路由(/creator)。二者是有机互联的"
+ * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  * Architecture decisions [2026-07-14]: preserve unknown frontmatter and expose
  * revision conflicts as typed, actionable RPC errors.
  *
@@ -21,6 +22,7 @@ import {
   type SkillDocument,
 } from "../shared/contracts/creator.js";
 import type { SkillId } from "../shared/contracts/skills.js";
+import { safeParseExternal } from "../shared/external-input.js";
 import { DomainError } from "./domain-error.js";
 import { assertPathInside, atomicWriteUtf8, contentRevision, directChild } from "./path-safety.js";
 import type { SkillService } from "./skill-service.js";
@@ -32,15 +34,30 @@ function parseDocument(
   directoryName: string,
   raw: string,
 ): SkillDocument {
-  const parsed = matter(raw);
+  let parsed: ReturnType<typeof matter>;
+  try {
+    parsed = matter(raw);
+  } catch {
+    throw incompatibleDocument();
+  }
+  const safeDirectoryName = safeParseExternal(SkillDirectoryNameSchema, directoryName);
+  const frontmatter = safeParseExternal(SkillFrontmatterSchema, parsed.data);
+  if (!safeDirectoryName || !frontmatter) throw incompatibleDocument();
   return {
     skillId,
     workspaceId,
-    directoryName: SkillDirectoryNameSchema.parse(directoryName),
-    frontmatter: SkillFrontmatterSchema.parse(parsed.data),
+    directoryName: safeDirectoryName,
+    frontmatter,
     body: parsed.content,
     revision: contentRevision(raw),
   };
+}
+
+function incompatibleDocument(): DomainError {
+  return new DomainError(
+    "INVALID_OPERATION",
+    "The skill document frontmatter is incompatible with the current format.",
+  );
 }
 
 /** Bind Creator operations to one Workspace Registry and skill module. */
