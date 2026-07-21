@@ -1,14 +1,15 @@
 /**
  * User input [2026-07-14]: "参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)"
  * User input [2026-07-21]: "我们默认是破坏性更新的……遇到不兼容的就当是空值。"
+ * User input [2026-07-22]: "同意，但是改成 `skill-creator openinbrowser`。"
  * Architecture decision [2026-07-14]: lifecycle behavior is verified through
  * the public CLI and framed IPC boundary.
  *
  * Orthogonal intents:
  *   [1] Start/replace a daemon and preserve actionable startup diagnostics.
- *   [2] Project tray/headless status through the CLI.
+ *   [2] Project tray/headless status and explicit browser access through the CLI.
  *   [3] Wait through starting races and recover a mounted daemon whose tray is unavailable.
- *   [4] Report stop success only after asynchronous teardown releases the socket.
+ *   [4] Discover production/development runtimes and report stop success only after teardown.
  *   [5] Isolate real daemon fixtures from the operator's native tray runtime.
  * 妥协声明：这些断言共享同一临时 daemon fixture 与进程清理边界，拆分
  * 会让 lifecycle race 失去端到端时序；业务单元测试仍按 service 分文件。
@@ -189,6 +190,123 @@ describe("CLI daemon lifecycle", () => {
     }
   });
 
+  it("does not open a browser when start reaches a headless daemon", async () => {
+    const home = await createTemporaryHome();
+    setHomeOverride(home);
+    const openerMarker = path.join(home, "browser-opened.txt");
+    const openerDirectory = await writeBrowserOpener(home);
+    const daemon = createDaemon({
+      version: currentVersion,
+      tray: "headless",
+      port: 4567,
+      webUrl: "http://127.0.0.1:4567/#token=headless",
+    });
+    expect(await daemon.start()).toBe(true);
+
+    try {
+      const result = await runCli(home, ["start"], {
+        PATH: prependPath(openerDirectory),
+        TEST_BROWSER_MARKER: openerMarker,
+      });
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("skill-creator daemon is already running.");
+      expect(result.stdout).toContain("skill-creator openinbrowser");
+      expect(result.stdout).not.toContain("Opening browser:");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(fs.existsSync(openerMarker)).toBe(false);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  it("does not downgrade open to a browser when the daemon is headless", async () => {
+    const home = await createTemporaryHome();
+    setHomeOverride(home);
+    let openAttempts = 0;
+    let daemon: IpcServer;
+    daemon = new IpcServer({
+      onStatus: () =>
+        daemonStatus({
+          version: currentVersion,
+          tray: "headless",
+          port: 4567,
+          webUrl: "http://127.0.0.1:4567/#token=headless",
+        }),
+      onOpen: async () => {
+        openAttempts += 1;
+      },
+      onStop: async () => async () => {
+        await daemon.stop();
+      },
+    });
+    expect(await daemon.start()).toBe(true);
+
+    try {
+      await expect(runCli(home, ["open"])).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("skill-creator openinbrowser"),
+      });
+      expect(openAttempts).toBe(0);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  if (process.platform !== "win32") {
+    it("opens the authenticated WebUI URL only through openinbrowser", async () => {
+      const home = await createTemporaryHome();
+      setHomeOverride(home);
+      const openerMarker = path.join(home, "browser-opened.txt");
+      const openerDirectory = await writeBrowserOpener(home);
+      const url = "http://127.0.0.1:4567/#token=explicit";
+      const daemon = createDaemon({
+        version: currentVersion,
+        tray: "headless",
+        port: 4567,
+        webUrl: url,
+      });
+      expect(await daemon.start()).toBe(true);
+
+      try {
+        const result = await runCli(home, ["openinbrowser"], {
+          PATH: prependPath(openerDirectory),
+          TEST_BROWSER_MARKER: openerMarker,
+        });
+        expect(result.stderr).toBe("");
+        expect(result.stdout).toContain(`Opening browser: ${url}`);
+        await waitForFile(openerMarker);
+        expect(await fs.promises.readFile(openerMarker, "utf8")).toBe(url);
+      } finally {
+        await daemon.stop();
+      }
+    });
+
+    it("returns the WebUI URL when the system browser launcher is unavailable", async () => {
+      const home = await createTemporaryHome();
+      setHomeOverride(home);
+      const url = "http://127.0.0.1:4567/#token=unavailable";
+      const daemon = createDaemon({
+        version: currentVersion,
+        tray: "headless",
+        port: 4567,
+        webUrl: url,
+      });
+      expect(await daemon.start()).toBe(true);
+
+      try {
+        await expect(
+          runCli(home, ["openinbrowser"], { PATH: path.join(home, "missing-browser-opener") }),
+        ).rejects.toMatchObject({
+          code: 1,
+          stdout: expect.stringContaining(`Open this URL in your browser: ${url}`),
+          stderr: expect.stringContaining("Failed to launch browser:"),
+        });
+      } finally {
+        await daemon.stop();
+      }
+    });
+  }
+
   it("reports stop success only after asynchronous teardown releases the socket", async () => {
     const home = await createTemporaryHome();
     setHomeOverride(home);
@@ -211,6 +329,35 @@ describe("CLI daemon lifecycle", () => {
       expect(result.stdout).toContain("skill-creator daemon stopped.");
       expect(teardownCompleted).toBe(true);
       if (process.platform !== "win32") expect(fs.existsSync(socketPath())).toBe(false);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  it("stops a development daemon when the production socket is absent", async () => {
+    const productionHome = await createTemporaryHome();
+    const developmentHome = await createTemporaryHome();
+    setHomeOverride(developmentHome);
+    let teardownCompleted = false;
+    let daemon: IpcServer;
+    daemon = new IpcServer({
+      onStatus: () => daemonStatus({ version: currentVersion, tray: "mounted", port: 4567 }),
+      onOpen: async () => {},
+      onStop: async () => async () => {
+        await daemon.stop();
+        teardownCompleted = true;
+      },
+    });
+    expect(await daemon.start()).toBe(true);
+
+    try {
+      const result = await runCli(productionHome, ["stop"], {
+        SKILL_CREATOR_DEV_HOME: developmentHome,
+      });
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("skill-creator development daemon stopped.");
+      expect(teardownCompleted).toBe(true);
+      expect(await socketAcceptsConnections(socketPath(developmentHome), 50)).toBe(false);
     } finally {
       await daemon.stop();
     }
@@ -243,6 +390,8 @@ function createDaemon(status: {
   version: string;
   tray: "starting" | "mounted" | "headless";
   trayError?: string;
+  port?: number;
+  webUrl?: string;
 }): IpcServer {
   return new IpcServer({
     onStatus: () => daemonStatus(status),
@@ -256,6 +405,7 @@ function daemonStatus(status: {
   tray: "starting" | "mounted" | "headless";
   trayError?: string;
   port?: number;
+  webUrl?: string;
 }) {
   return {
     active: true,
@@ -265,6 +415,7 @@ function daemonStatus(status: {
     startedAt: 0,
     tray: status.tray,
     ...(status.trayError ? { trayError: status.trayError } : {}),
+    ...(status.webUrl ? { webUrl: status.webUrl } : {}),
   };
 }
 
@@ -343,4 +494,33 @@ void main();
 `;
   await fs.promises.writeFile(entry, source, "utf8");
   return entry;
+}
+
+async function writeBrowserOpener(home: string): Promise<string> {
+  const directory = path.join(home, "browser-opener");
+  const binary = process.platform === "darwin" ? "open" : "xdg-open";
+  const entry = path.join(directory, binary);
+  const source = `#!/usr/bin/env node
+const fs = require("node:fs");
+const marker = process.env.TEST_BROWSER_MARKER;
+if (!marker) throw new Error("TEST_BROWSER_MARKER is required");
+fs.writeFileSync(marker, process.argv[2] ?? "", "utf8");
+`;
+  await fs.promises.mkdir(directory, { recursive: true });
+  await fs.promises.writeFile(entry, source, "utf8");
+  await fs.promises.chmod(entry, 0o755);
+  return directory;
+}
+
+function prependPath(directory: string): string {
+  return `${directory}${path.delimiter}${process.env.PATH ?? ""}`;
+}
+
+async function waitForFile(file: string, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(file)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for browser opener marker: ${file}`);
 }

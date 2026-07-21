@@ -1,6 +1,7 @@
 /**
  * 原始需求 [2026-07-14]：「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)」。
  * 用户原始需求 [2026-07-20]：「将 Vite 生成的 appIcon 用于 dev/build 的 daemon 运行时」。
+ * 用户原始需求 [2026-07-21]：「placement直接居中就行，不用跟随tray。」
  * 正交意图：
  * 1. 先取得单实例 IPC 所有权，再暴露运行时服务。
  * 2. 启动受权的 HTTP/WebSocket 服务。
@@ -144,9 +145,8 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
 
   // Declared before the IPC server so onOpen can reference it safely (the IPC
   // handler may fire before the rest of bootDaemon finishes assigning it).
-  const handlesRef: { trayHost: TrayHost | null; stopPlacement: () => void } = {
+  const handlesRef: { trayHost: TrayHost | null } = {
     trayHost: null,
-    stopPlacement: () => {},
   };
 
   const ipc = new IpcServer({
@@ -200,7 +200,6 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     log("daemon stop requested");
     try {
       const tasks = [
-        settleTeardown("tray placement", () => handlesRef.stopPlacement()),
         settleTeardown("tray host", async () => handlesRef.trayHost?.destroy()),
         settleTeardown("web server", () => web.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("IPC server", () => ipc.stop({ graceMs: SHUTDOWN_GRACE_MS })),
@@ -256,13 +255,9 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     });
     if (stopPromise) {
       // stop 已在进行 —— mount 迟到，立即销毁，绝不保留迟到 native handle。
-      await Promise.allSettled([
-        settleTeardown("late tray placement", () => result.stopPlacement()),
-        settleTeardown("late tray host", async () => host?.destroy()),
-      ]);
+      await Promise.allSettled([settleTeardown("late tray host", async () => host?.destroy())]);
     } else {
       handlesRef.trayHost = host;
-      handlesRef.stopPlacement = result.stopPlacement;
       status.tray = result.window ? "mounted" : "headless";
       if (result.failure) {
         status.trayError = `[${result.failure.kind}@${result.failure.stage}] ${

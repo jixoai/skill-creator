@@ -1,5 +1,5 @@
 <!--
-文件意图（2026-07-21）
+文件意图（2026-07-22）
 用户原始需求摘录：
 - 「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)，基于 ../ccski 这个 sdk 来快速搭建一个 skills 管理器。」
 - 「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。」
@@ -8,6 +8,8 @@
 - [2026-07-19]「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
 - [2026-07-21]「我们默认是破坏性更新的……使用 zod 的 safeParse 来统一解决这个问题，遇到不兼容的就当是空值。」
 - [2026-07-21]「任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等。」
+- [2026-07-21]「`skill-creator stop` 找不到 daemon，但 `pnpm dev` 又说已有 daemon 持有 socket。」
+- [2026-07-22]「同意，但是改成 `skill-creator openinbrowser`。」
 正交意图：1. 定义产品边界；2. 给出真实安装与运行方式；3. 说明协议和安全模型；4. 提供开发验证入口；5. 承载品牌门面图（color-symbol）。
 妥协声明：README 是包发布后唯一随包分发的公开入口，安装、运行、边界与安全事实必须同处一份文件，拆分会使发布包缺失必要上下文。品牌图经项目相对路径 `./resources/color-symbol.png` 引用，GitHub 自动渲染为 raw 链接；resources 不进 npm 包，npm 端图片缺失不影响文本可读性，repository 字段引导读者到 GitHub。
 -->
@@ -85,7 +87,7 @@ pnpm install
 pnpm dev
 ```
 
-Vite 会先分配 daemon 端口，再于 SvelteKit SPA fallback 之前挂载 `/api/` 与 `/ws/` 代理，并挂载开发态 OpenTray。daemon 启动窗口返回可重试 `503`，不会把 API 请求误回退为 `index.html`。macOS 开发态的 home override 为 `/tmp/sc-v2`，因此应用状态位于 `/tmp/sc-v2/.skill-creator/`，不会读写正式用户状态。Windows 使用系统临时目录下的 `skill-creator-v2-dev`。
+Vite 会先释放正式 daemon 与上一棵开发进程树，再分配 daemon 端口，于 SvelteKit SPA fallback 之前挂载 `/api/` 与 `/ws/` 代理，并挂载开发态 OpenTray。重复执行 `pnpm dev` 不需要手动清理旧 socket；接管会等待旧 daemon 的 PID 和 IPC endpoint 同时释放。daemon 启动窗口返回可重试 `503`，不会把 API 请求误回退为 `index.html`。macOS 开发态的 home 默认为 `/tmp/sc-v2`，因此应用状态位于 `/tmp/sc-v2/.skill-creator/`，不会读写正式用户状态。Windows 使用系统临时目录下的 `skill-creator-v2-dev`。
 
 构建与完整静态检查：
 
@@ -108,20 +110,22 @@ dist/
 
 构建后可在仓库内使用 `pnpm skill-creator <command>`；作为包安装后使用 `skill-creator <command>`。
 
-| Command   | 行为                                                                              |
-| --------- | --------------------------------------------------------------------------------- |
-| `start`   | 启动 daemon，等待 WebUI 与 tray 完成挂载，然后显示窗口；版本不同时先替换旧 daemon |
-| `open`    | 显示并聚焦现有 tray 窗口，重复调用不会切换为隐藏                                  |
-| `status`  | 输出 PID、版本、HTTP 端口、tray 状态和可用的 tray 错误                            |
-| `stop`    | 请求 daemon 退出；grace deadline 后强制回收非协作连接，并等待 IPC endpoint 释放   |
-| `version` | 输出包版本                                                                        |
-| `help`    | 输出命令帮助                                                                      |
+| Command         | 行为                                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------------------- |
+| `start`         | 启动 daemon，等待 WebUI 与 tray 完成挂载，然后显示原生窗口；headless 时只提示 `openinbrowser`，不自动打开浏览器 |
+| `open`          | 显示并聚焦现有 tray 窗口；headless 时失败并提示 `openinbrowser`，绝不降级为浏览器                               |
+| `openinbrowser` | 显式在系统浏览器打开当前 daemon 的带 token WebUI URL                                                            |
+| `status`        | 输出 PID、版本、HTTP 端口、tray 状态和可用的 tray 错误                                                          |
+| `stop`          | 停止正式 daemon；若正式 endpoint 不存在则发现开发 daemon，并等待 endpoint 释放                                  |
+| `version`       | 输出包版本                                                                                                      |
+| `help`          | 输出命令帮助                                                                                                    |
 
 ```bash
 pnpm build
 pnpm skill-creator start
 pnpm skill-creator status
 pnpm skill-creator open
+pnpm skill-creator openinbrowser
 pnpm skill-creator stop
 ```
 
@@ -206,7 +210,7 @@ Git source + ref --> temporary clone --> commit SHA --> repo_<session>
 | Daemon log         | `~/.skill-creator/logs/daemon.log`        | `%USERPROFILE%\.skill-creator\logs\daemon.log` |
 | IPC                | `~/.skill-creator/run/skill-creator.sock` | `\\.\pipe\skill-creator-sock`                  |
 
-`SKILL_CREATOR_HOME` 可覆盖 home 根目录；应用仍在该根目录下创建 `.skill-creator/`。macOS 开发态对应 `/tmp/sc-v2/.skill-creator/`。
+`SKILL_CREATOR_HOME` 可覆盖当前命令的 home 根目录；应用仍在该目录下创建 `.skill-creator/`。`SKILL_CREATOR_DEV_HOME` 专门覆盖开发 runtime 的发现路径；macOS 默认对应 `/tmp/sc-v2/.skill-creator/`。
 
 ## 验证
 

@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 /**
  * 原始需求 [2026-07-14]：「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)，基于 ../ccski 这个 sdk 来快速搭建一个 “skills 管理器”。」
+ * 用户原始需求 [2026-07-22]：「同意，但是改成 `skill-creator openinbrowser`。」
  * 正交意图：
  * 1. 解析并路由公开 CLI 命令。
  * 2. 通过带版本、运行时校验的 IPC 协议调用 daemon。
  * 3. 安全启动、替换或恢复 tray 已失联的分离运行 daemon。
- * 4. 向终端投影 daemon 与 tray 状态。
+ * 4. 向终端投影 daemon 与 tray 状态，并只由显式命令打开系统浏览器。
  *
  * Routing:
  *   skill-creator start   -> spawn daemon + open tray window
  *   skill-creator open    -> show/focus the tray window of a running daemon
+ *   skill-creator openinbrowser -> open the running daemon WebUI in the system browser
  *   skill-creator status  -> query daemon status
  *   skill-creator stop    -> graceful daemon shutdown
  *   skill-creator help    -> print command help
@@ -24,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IpcCommand } from "../shared/frame.js";
 import { DaemonStatusSchema, type DaemonStatus } from "../shared/contracts/daemon.js";
+import { resolveDevHome } from "../shared/dev-runtime.js";
 import { daemonLogPath, ensureAppDirs, socketPath } from "../shared/paths.js";
 import { socketAcceptsConnections } from "../shared/socket-liveness.js";
 import { DaemonConnectionError, DaemonResponseError, requestDaemon } from "./ipc-client.js";
@@ -66,10 +69,14 @@ function spawnDaemon(): void {
 }
 
 /** Send one versioned IPC request and validate its response. */
-async function ipcRequest(command: IpcCommand, timeoutMs = 4000): Promise<unknown> {
+async function ipcRequest(
+  command: IpcCommand,
+  timeoutMs = 4000,
+  endpoint = socketPath(),
+): Promise<unknown> {
   try {
     return await requestDaemon({
-      socket: socketPath(),
+      socket: endpoint,
       clientVersion: CLI_VERSION,
       command,
       timeoutMs,
@@ -90,8 +97,8 @@ async function requestStatus(timeoutMs = 4000): Promise<DaemonStatus> {
   return parsed.data;
 }
 
-/** Wait for the current daemon to mount and successfully accept an open request. */
-async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<boolean> {
+/** Wait for the current daemon to converge, then open only a mounted native window. */
+async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<DaemonStatus | null> {
   const deadline = Date.now() + maxMs;
   let lastOpenError: Error | null = null;
   while (Date.now() < deadline) {
@@ -103,18 +110,16 @@ async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<boolean> {
         );
       }
       if (isDaemonReady(status)) {
-        // opentray 是 Dashboard 模式：tray 挂载时聚焦原生窗口，否则打开系统浏览器。
         if (status.tray === "mounted") {
           try {
             await ipcRequest({ type: "open" }, 500);
-            return true;
+            return status;
           } catch (error) {
             if (!(error instanceof Error)) throw new Error(String(error));
             lastOpenError = error;
           }
         } else {
-          openUrlInBrowser(status.webUrl ?? `http://127.0.0.1:${status.port}/`);
-          return true;
+          return status;
         }
       }
     } catch (error) {
@@ -125,16 +130,21 @@ async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<boolean> {
   if (lastOpenError) {
     throw new DaemonResponseError(`Daemon mounted but could not open: ${lastOpenError.message}`);
   }
-  return false;
+  return null;
 }
 
 function isDaemonReady(status: DaemonStatus): boolean {
-  // `starting` 尚不能决定原生窗口或浏览器降级；等待 tray 收敛为终态。
+  // `starting` 尚不能决定原生窗口或 headless 提示；等待 tray 收敛为终态。
   return status.active && status.port > 0 && status.tray !== "starting";
 }
 
-/** 在系统默认浏览器中打开一个 URL；失败只记录，不阻断主流程。 */
-function openUrlInBrowser(url: string): void {
+/** Return the authenticated daemon WebUI URL. */
+function webUrl(status: DaemonStatus): string {
+  return status.webUrl ?? `http://127.0.0.1:${status.port}/`;
+}
+
+/** 在系统默认浏览器中打开一个 URL，并返回 launcher 是否已成功启动。 */
+async function openUrlInBrowser(url: string): Promise<boolean> {
   let binary: string;
   let args: string[];
   if (process.platform === "win32") {
@@ -148,20 +158,32 @@ function openUrlInBrowser(url: string): void {
     args = [url];
   }
   try {
-    spawn(binary, args, { stdio: "ignore", detached: true }).unref();
+    const child = spawn(binary, args, { stdio: "ignore", detached: true });
+    const launchError = await new Promise<Error | null>((resolve) => {
+      child.once("error", resolve);
+      child.once("spawn", () => resolve(null));
+    });
+    child.unref();
+    if (launchError) {
+      console.log(`Open this URL in your browser: ${url}`);
+      console.error(`Failed to launch browser: ${launchError.message}`);
+      return false;
+    }
     console.log(`Opening browser: ${url}`);
+    return true;
   } catch (err) {
     console.log(`Open this URL in your browser: ${url}`);
     if (err instanceof Error) console.error(`Failed to launch browser: ${err.message}`);
+    return false;
   }
 }
 
 /** Wait until graceful shutdown has removed the socket from the runtime namespace. */
-async function waitForDaemonRelease(maxMs = 8000): Promise<boolean> {
+async function waitForDaemonRelease(maxMs = 8000, endpoint = socketPath()): Promise<boolean> {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
-    const acceptsConnections = await socketAcceptsConnections(socketPath());
-    const socketRemoved = process.platform === "win32" || !fs.existsSync(socketPath());
+    const acceptsConnections = await socketAcceptsConnections(endpoint);
+    const socketRemoved = process.platform === "win32" || !fs.existsSync(endpoint);
     if (!acceptsConnections && socketRemoved) return true;
     await sleep(100);
   }
@@ -227,14 +249,14 @@ async function runStart(): Promise<number> {
     spawned = true;
   }
 
-  let openable = false;
+  let readyStatus: DaemonStatus | null = null;
   try {
-    openable = await waitForCurrentDaemonToOpen();
+    readyStatus = await waitForCurrentDaemonToOpen();
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     return 1;
   }
-  if (!openable) {
+  if (!readyStatus) {
     console.error(
       spawned
         ? `Failed to start the daemon. Check ${daemonLogPath()}`
@@ -248,14 +270,20 @@ async function runStart(): Promise<number> {
   } else {
     console.log("skill-creator daemon is already running.");
   }
-  console.log("Opening the tray window…");
+  if (readyStatus.tray === "mounted") {
+    console.log("Opening the tray window…");
+  } else {
+    console.log(
+      "The daemon is running headlessly. Run 'skill-creator openinbrowser' to open the WebUI.",
+    );
+  }
   return 0;
 }
 
 async function runStatus(): Promise<number> {
   try {
     const status = await requestStatus();
-    const url = status.webUrl ?? `http://127.0.0.1:${status.port}/`;
+    const url = webUrl(status);
     console.log("skill-creator daemon is running:");
     console.log(`  pid:     ${status.pid}`);
     console.log(`  version: ${status.version}`);
@@ -273,18 +301,49 @@ async function runStatus(): Promise<number> {
 }
 
 async function runStop(): Promise<number> {
-  try {
-    await ipcRequest({ type: "stop" });
-    if (!(await waitForDaemonRelease())) {
-      console.error("Daemon accepted the stop request but did not release its socket.");
+  const productionEndpoint = socketPath();
+  const developmentEndpoint = socketPath(resolveDevHome());
+  const runtimes = [
+    { kind: "production" as const, endpoint: productionEndpoint },
+    ...(developmentEndpoint === productionEndpoint
+      ? []
+      : [{ kind: "development" as const, endpoint: developmentEndpoint }]),
+  ];
+  const stopped: Array<(typeof runtimes)[number]["kind"]> = [];
+
+  for (const runtime of runtimes) {
+    if (!(await socketAcceptsConnections(runtime.endpoint, 100))) continue;
+    try {
+      await ipcRequest({ type: "stop" }, 4_000, runtime.endpoint);
+      if (!(await waitForDaemonRelease(8_000, runtime.endpoint))) {
+        console.error(
+          `${runtime.kind} daemon accepted the stop request but did not release ${runtime.endpoint}.`,
+        );
+        return 1;
+      }
+      stopped.push(runtime.kind);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
       return 1;
     }
-    console.log("skill-creator daemon stopped.");
-    return 0;
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
+  }
+
+  if (stopped.length === 0) {
+    const endpoints = runtimes.map((runtime) => runtime.endpoint).join(", ");
+    console.error(
+      `cannot reach a Skill Creator daemon (${endpoints}). Run 'skill-creator start' first.`,
+    );
     return 1;
   }
+
+  for (const kind of stopped) {
+    console.log(
+      kind === "development"
+        ? "skill-creator development daemon stopped."
+        : "skill-creator daemon stopped.",
+    );
+  }
+  return 0;
 }
 
 async function runOpen(): Promise<number> {
@@ -295,9 +354,33 @@ async function runOpen(): Promise<number> {
       console.log("Opening the tray window…");
       return 0;
     }
-    // Dashboard 模式：tray 不可用时打开系统浏览器访问 WebUI。
-    openUrlInBrowser(status.webUrl ?? `http://127.0.0.1:${status.port}/`);
-    return 0;
+    if (status.tray === "headless") {
+      console.error(
+        "The daemon is running headlessly. Run 'skill-creator openinbrowser' to open the WebUI.",
+      );
+      return 1;
+    }
+    console.error(
+      "The native window is still starting. Run 'skill-creator open' again after it mounts.",
+    );
+    return 1;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 1;
+  }
+}
+
+/** Open the running daemon WebUI in the system browser only on explicit request. */
+async function runOpenInBrowser(): Promise<number> {
+  try {
+    const status = await requestStatus();
+    if (!status.active || status.port === 0) {
+      console.error(
+        "The daemon WebUI is still starting. Run 'skill-creator openinbrowser' again shortly.",
+      );
+      return 1;
+    }
+    return (await openUrlInBrowser(webUrl(status))) ? 0 : 1;
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
@@ -312,6 +395,10 @@ interface CommandDefinition {
 const COMMANDS = {
   start: { description: "Boot the daemon and open the tray window", run: runStart },
   open: { description: "Show/focus the tray window of a running daemon", run: runOpen },
+  openinbrowser: {
+    description: "Open the running WebUI in the system browser",
+    run: runOpenInBrowser,
+  },
   status: { description: "Check the running daemon", run: runStatus },
   stop: { description: "Gracefully stop the daemon", run: runStop },
   version: {
@@ -338,7 +425,7 @@ function isCommandName(value: string): value is CommandName {
 
 function printHelp(): void {
   const lines = Object.entries(COMMANDS)
-    .map(([name, command]) => `  skill-creator ${name.padEnd(9)} ${command.description}`)
+    .map(([name, command]) => `  skill-creator ${name.padEnd(14)} ${command.description}`)
     .join("\n");
   console.log(`skill-creator — skills manager (CLI + tray WebUI)\n\nUsage:\n${lines}\n`);
 }

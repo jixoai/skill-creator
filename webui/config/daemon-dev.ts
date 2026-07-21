@@ -1,5 +1,6 @@
 /**
  * 原始需求 [2026-07-14]：「opentray 的一些适配没做好，好好学习 pnpm-pub」。
+ * 用户原始需求 [2026-07-21]：「开发模式下，配置启动命令成 `pnpm dev`；Dock 点击要恢复完整开发进程树。」
  * 正交意图：
  * 1. 释放生产 daemon 后由 Vite 接管应用身份，并绑定开发进程生命周期。
  * 2. 将开发态 HTTP 与 WebSocket 请求代理到动态 daemon 端口。
@@ -19,7 +20,7 @@ import {
   SKILL_CREATOR_DEV_APP_LAUNCH_ENV,
   type DevAppLaunch,
 } from "../../src/shared/dev-app-launch";
-import { stopProductionDaemonForDev } from "./dev-production-takeover";
+import { stopExistingDaemonsForDev } from "./dev-runtime-takeover";
 
 /** Spawn the development daemon and proxy its browser transport through Vite. */
 export function skillCreatorDaemonDev(): Plugin {
@@ -53,8 +54,12 @@ export function skillCreatorDaemonDev(): Plugin {
       const httpServer = server.httpServer;
       if (!httpServer) return;
 
-      if (await stopProductionDaemonForDev()) {
+      const releasedRuntime = await stopExistingDaemonsForDev();
+      if (releasedRuntime.production) {
         console.info("[dev] production daemon stopped; development now owns OpenTray");
+      }
+      if (releasedRuntime.development) {
+        console.info("[dev] previous development runtime stopped; replacement now owns OpenTray");
       }
 
       const configuredPort = readOptionalPort(process.env.SKILL_CREATOR_DEV_DAEMON_PORT);

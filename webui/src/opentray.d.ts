@@ -1,4 +1,11 @@
-/** 原始需求 [2026-07-14]：「opentray 的一些适配没做好，好好学习 pnpm-pub」；意图：[1] 声明页面侧原生窗口 bridge；[2] 将非原生宿主表达为可选能力。 */
+/**
+ * 原始需求 [2026-07-14]：「opentray 的一些适配没做好，好好学习 pnpm-pub」。
+ * 用户原始需求 [2026-07-21]：「窗口推荐尺寸改进成最小推荐尺寸。」
+ * 正交意图：
+ * 1. 声明页面侧原生窗口 bridge。
+ * 2. 将非原生宿主表达为可选能力。
+ * 3. 声明最小尺寸所需的可选逻辑 bounds 读取能力。
+ */
 
 declare global {
   /** 原生宿主返回的逻辑像素矩形。 */
@@ -38,6 +45,8 @@ declare global {
     stopAppRegionDrag?(opts: { pointerId: number }): Promise<void> | void;
     /** 调整原生窗口尺寸。 */
     resizeTo?(width: number, height: number): Promise<void> | void;
+    /** 读取原生窗口的逻辑桌面像素 bounds。 */
+    getBounds?(): Promise<OpentrayRect> | OpentrayRect;
     /** 查询窗口可见性。 */
     isVisible?(): Promise<boolean> | boolean;
     /** 显示窗口。 */

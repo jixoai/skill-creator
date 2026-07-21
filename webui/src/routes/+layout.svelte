@@ -1,9 +1,10 @@
 <script lang="ts">
   /**
    * 原始需求 [2026-07-14]：「导航栏、顶部栏，都参考 pnpm-pub 进行创作」。
+   * 用户原始需求 [2026-07-21]：「窗口推荐尺寸……改进成最小推荐尺寸。」
    * 正交意图：
    * 1. 管理 daemon 连接生命周期。
-   * 2. 按路由同步 app mode 原生窗口尺寸。
+   * 2. 按路由确保 app mode 原生窗口最小推荐尺寸。
    * 3. 组合工作台导航与全局浮层。
    */
   import "./layout.css";
@@ -18,7 +19,11 @@
   import ImportWorkspaceDialog from "$lib/components/import-workspace-dialog.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
   import ToastContainer from "$lib/components/toast-container.svelte";
-  import { resizeWindow, CREATOR_WINDOW_SIZE, HOME_WINDOW_SIZE } from "$lib/window-size";
+  import {
+    CREATOR_MINIMUM_WINDOW_SIZE,
+    ensureMinimumWindowSize,
+    HOME_MINIMUM_WINDOW_SIZE,
+  } from "$lib/window-size";
   import { TooltipProvider } from "$lib/components/ui/tooltip";
   import IconCommand from "@lucide/svelte/icons/command";
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
@@ -37,13 +42,13 @@
     return disconnect;
   });
 
-  // 路由变化时只调整原生 app window 尺寸；焦点与关闭生命周期由系统管理。
+  // 路由变化时只补足 app window 的推荐下限；焦点、关闭与更大尺寸均由系统/操作者管理。
   let pathname = $derived(page.url.pathname);
   $effect(() => {
     if (pathname.startsWith("/creator")) {
-      void resizeWindow(CREATOR_WINDOW_SIZE);
+      void ensureMinimumWindowSize(CREATOR_MINIMUM_WINDOW_SIZE);
     } else {
-      void resizeWindow(HOME_WINDOW_SIZE);
+      void ensureMinimumWindowSize(HOME_MINIMUM_WINDOW_SIZE);
     }
   });
   // WS 连接后加载 workspaces。

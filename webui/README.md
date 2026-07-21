@@ -1,6 +1,6 @@
 <!--
 文件意图（2026-07-19）
-用户原始需求摘录：「skills manager 只是路由的一部分(`/workspace/~/`)；支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。二者是有机互联的。」；[2026-07-19]「走 appMode:true 模式。所以走原生的窗口管理。」
+用户原始需求摘录：「skills manager 只是路由的一部分(`/workspace/~/`)；支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。二者是有机互联的。」；[2026-07-19]「走 appMode:true 模式。所以走原生的窗口管理。」；[2026-07-21]「`skill-creator stop` 找不到 daemon，但 `pnpm dev` 又说已有 daemon 持有 socket。」
 正交意图：1. 定义 WebUI 的三路由职责；2. 解释前端状态和共享契约；3. 记录开发与组件边界；4. 承载品牌门面图（color-symbol，经 `../resources/` 相对路径引用）。
 妥协声明：本文件是 WebUI package 的单一入口，三项都属于使用该 package 前不可缺少的上下文；产品细节已下沉到独立 route、store 与 component。
 -->
@@ -13,7 +13,7 @@
 
 `webui` 是 daemon 承载的 SvelteKit 静态 SPA，也是 OpenTray 窗口中的人机工作台。它不直接访问 Node.js 或文件系统，所有读取和 mutation 均通过共享 oRPC 契约进入 daemon。
 
-WebUI 只请求路由对应的窗口尺寸，不控制原生窗口透明度、焦点、层级或 blur 关闭；这些生命周期由 App Mode 原生窗口负责。
+WebUI 只在路由变化时确保窗口达到对应的最小推荐尺寸，不缩小操作者已有的更大窗口；不控制原生窗口透明度、焦点、层级或 blur 关闭，这些生命周期由 App Mode 原生窗口负责。
 
 ```text
 App shell
@@ -107,6 +107,9 @@ session token --> ws(s)://same-origin/ws/rpc?token=...
 开发态按以下顺序建立同源边界；release 由 daemon 同源提供静态 SPA 与 WebSocket。组件不持有文件输出路径，后续 mutation 使用 Workspace ID、Skill ID 或 Repository Session ID。
 
 ```text
+release production daemon
+  -> release previous development daemon
+  -> wait for each PID + IPC endpoint
 allocate daemon port
   -> mount /api/ Connect proxy
   -> mount /ws/ upgrade proxy

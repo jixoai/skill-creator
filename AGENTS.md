@@ -1,24 +1,27 @@
 <!--
-文件意图（2026-07-21）
+文件意图（2026-07-22）
 用户原始需求摘录：
 - 「现在你将作为总负责人，接手这个项目，研究 claude-code 的代码……进行大胆的开发。」
 - 「按照你自己的节奏去推进开发迭代。」
 - 「Chat 针对人（澄清意图），Spec 针对意图（形成规范），Style 针对代码（约束产出）。」
 - 「单个物理文件的正交意图上限为 5 个。达到 3 个即需触发警报，考虑重构拆分。」
 - 「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
+- 「placement直接居中就行，不用跟随tray；窗口推荐尺寸改进成最小推荐尺寸。」
 - 「默认的变体名是 `default`，不填写就是默认；变体也可以表达垃圾篓 `empty/files`。」
 - 「我们默认是破坏性更新的……使用 zod 的 safeParse 来统一解决这个问题，遇到不兼容的就当是空值。」
 - 「任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等。」
 - 「开发模式下，配置启动命令成 `pnpm dev`；Dock 点击要恢复完整开发进程树。」
 - 「`pnpm skill-creator start` 必须挂载托盘；退出托盘后点击固定 Dock 图标必须重新启动。」
 - 「`node dist/daemon.js` 确实没反应；生产 Dock 入口必须恢复或聚焦应用。」
+- 「`skill-creator stop` 找不到 daemon，但 `pnpm dev` 又说已有 daemon 持有 socket。」
+- 「同意，但是改成 `skill-creator openinbrowser`。」
 正交意图：1. 固化产品真相；2. 固化模块与安全边界；3. 固化工程风格；4. 固化验证标准；5. 固化演进与无兼容策略。
 妥协声明：根级 `AGENTS.md` 是当前全仓共享的自动发现入口；五项是安全交付不可分离的治理上下文，具体领域定义已物理拆分到 `i18n.zh.md` 与源码契约。
 -->
 
 # AGENTS.md
 
-本文件是 2026-07-21 架构诊断后的覆盖性事实源。每次架构诊断都应根据真实代码覆盖更新本文件，不追加失效历史；领域词汇同步到 `i18n.zh.md`。
+本文件是 2026-07-22 架构诊断后的覆盖性事实源。每次架构诊断都应根据真实代码覆盖更新本文件，不追加失效历史；领域词汇同步到 `i18n.zh.md`。
 
 ## 1. 决策闭环
 
@@ -87,7 +90,7 @@ Repository         = clone + pin commit + scan + preview + install
 4. WebUI 不拼接 mutation 输出路径；server 解析 opaque ID 到真实根目录。
 5. UI 服务于人的直觉与操作密度，允许场景聚合，但不能绕过协议和文件系统边界。
 6. Creator 允许无 query、workspace-only 新建上下文、workspace+skill 编辑上下文；skill-only 或非法身份必须在渲染前清理。
-7. OpenTray 以 `appMode: true` 承载正常应用窗口：窗口层级、焦点、最小化/最大化与关闭交给系统管理；tray 是 macOS/Windows 的 UX 加成，WebUI 在任何平台（含 Linux/CI/headless）仍须经系统浏览器可达，`status.tray === "headless"` 不是不可用。
+7. OpenTray 以 `appMode: true` 承载正常应用窗口：窗口层级、焦点、最小化/最大化与关闭交给系统管理；启动时只按当前屏幕一次性居中，不读取 tray bounds 或持续跟随 tray；tray 是 macOS/Windows 的 UX 加成，WebUI 在任何平台（含 Linux/CI/headless）仍须经系统浏览器可达，`status.tray === "headless"` 不是不可用。系统浏览器只能由 `skill-creator openinbrowser` 显式打开，`start` 与 `open` 不得产生浏览器副作用。
 8. App identity 只使用当前平台标准资产：macOS/Windows 优先使用 `resources/app-icon` 中手工生成的 light/dark ICNS/ICO，Linux 使用 Vite 从 `resources/color-symbol.png` 预构建的带尺寸 72 DPI PNG；tray template PNG 不得提升为 `appIcon`。
 9. light 资产同时声明 `default/light`，dark 资产声明 `dark`。Core 只管理目录和当前变体；本项目暂不增加主题 IPC，WebView 不拥有 App identity 切换权。
 
@@ -161,9 +164,11 @@ stop during tray mount --> bounded teardown --> late native handles arrive
                                                 `--> destroy; never retain
 ```
 
-`status.tray === "starting"` 是不可决策的过渡态：即使 HTTP 已可用，CLI `start` 也必须继续等待，不能提前打开浏览器。只有 `mounted` 与 `headless` 是 capability 终态；`mounted` 执行 retained-session `open`（show/focus），`headless` 才降级为打开系统浏览器。OpenTray 是 Dashboard 模式：原生 tray 是 UX 加成，WebUI 始终浏览器可达。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
+`status.tray === "starting"` 是不可决策的过渡态：即使 HTTP 已可用，CLI `start` 也必须继续等待，不能提前决定原生窗口或 headless 提示。只有 `mounted` 与 `headless` 是 capability 终态；`mounted` 执行 retained-session `open`（show/focus），`headless` 只输出 `skill-creator openinbrowser` 的恢复提示。`open` 仅尝试原生窗口，在 headless 时失败并给出同一提示；唯有 `openinbrowser` 显式调用系统浏览器。OpenTray 是 Dashboard 模式：原生 tray 是 UX 加成，WebUI 始终浏览器可达。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
 
-Tray 采用 retained-session 模型：`createWebviewWindow` 仅 bootstrap 一次创建原生 session，之后所有激活用 `toVisible()`、隐藏用 `close()`，绝不重放 startup 宽高/style/native flags（OpenTray 当前 session 法则）。`isVisible()`/`visibleChange` 是原生操作可见性真相（含最小化），客户端不维护镜像猜测。tray 菜单主项按可见性切换 Show/Hide 文案。窗口以 `appMode: true`、`frameless: false`、`autoHide: false` 创建；系统 Shell 负责窗口层级、焦点、最小化/最大化与关闭，daemon/WebUI 不再实现 opacity 动画、blur 倒计时、keep-on-top 偏好或窗口状态投影协议。
+Tray 采用 retained-session 模型：`createWebviewWindow` 仅 bootstrap 一次创建原生 session，之后所有激活用 `toVisible()`、隐藏用 `close()`，绝不重放 startup 宽高/style/native flags（OpenTray 当前 session 法则）。`isVisible()`/`visibleChange` 是原生操作可见性真相（含最小化），客户端不维护镜像猜测。tray 菜单主项按可见性切换 Show/Hide 文案。窗口以 `appMode: true`、`frameless: false`、`autoHide: false` 创建；启动完成后以 `WebviewPlacementKit.applyOnce(..., { placement: "screen-center" })` 按当前屏幕居中一次，不查询 tray bounds、不持续重定位；系统 Shell 负责窗口层级、焦点、最小化/最大化与关闭，daemon/WebUI 不再实现 opacity 动画、blur 倒计时、keep-on-top 偏好或窗口状态投影协议。
+
+WebUI 按路由请求的是最小推荐尺寸：先读取 native `getBounds()`，只有当前宽或高不足时才将该维度扩展到推荐下限；任何已更大的维度必须保留，普通浏览器或缺失 native bridge 时静默跳过。
 
 ```text
 tray click/menu --> toggle() --> query isVisible() truth --> toVisible()/close()
@@ -176,9 +181,10 @@ OS taskbar / Dock / app switcher --> native app window focus / minimize / maximi
 开发态 Dock 冷启动必须恢复 Vite 监督器，而不是只恢复 daemon：
 
 ```text
-pnpm dev -> stop production daemon -> wait IPC release + PID exit
-                                      |
-                                      v
+pnpm dev -> stop production daemon ----+
+         -> stop previous dev daemon --+-> wait each IPC release + PID exit
+                                       |
+                                       v
              Vite -> absolute Node + absolute tsx loader -> dev daemon -> WebView
                |
                `--> appLaunch = process.execPath
@@ -189,7 +195,9 @@ live Dock click -> reopenRequested -> latest retained appMode window
                                   -> toVisible() -> focus()
 ```
 
-OpenTray broker 是 caller-scoped single-session；生产与开发模式不得并发争抢同一 app identity。`pnpm dev` 在 Vite 监听前检测正式 daemon，发送 stop，并同时等待正式 IPC endpoint 释放与 daemon PID 退出；接管失败必须终止 dev 启动，不能静默降级 headless。Vite 再使用绝对 Node 与绝对 `tsx` loader 启动源 daemon，完整开发树的任何子进程都不得依赖 Finder PATH。
+OpenTray broker 是 caller-scoped single-session；生产、旧开发与新开发模式不得并发争抢同一 app identity。`pnpm dev` 在 Vite 监听前依次检测正式 endpoint 与开发 endpoint，对每个活 daemon 发送 stop，并同时等待其 IPC endpoint 释放与 daemon PID 退出；Windows 同名 pipe 必须去重。旧开发 daemon 退出会驱动其 Vite 监督器关闭，接管失败必须终止新 dev 启动，不能静默降级 headless。Vite 再使用绝对 Node 与绝对 `tsx` loader 启动源 daemon，完整开发树的任何子进程都不得依赖 Finder PATH。
+
+CLI `stop` 先探测当前正式 endpoint；若开发 endpoint 不同则继续探测并停止开发 daemon。开发 home 由 `SKILL_CREATOR_DEV_HOME` 显式覆盖，否则遵循当前 `SKILL_CREATOR_HOME` 或平台短路径默认值。任何“已有 daemon”诊断都必须输出 `pnpm skill-creator stop` 这一真实可执行恢复入口，不能指向只会检查另一 runtime 的命令。
 
 `SKILL_CREATOR_DEV_APP_LAUNCH` 是 Vite 到 daemon 的私有、严格 Zod 校验传输；不得持久化 shell、pnpm/package script、`.bin/vite` shim、完整环境变量或 daemon 子进程的 `process.argv`。开发向量由绝对 Node 直接执行项目内稳定的 `webui/node_modules/vite/bin/vite.js`，既避免 Finder PATH 中缺失裸 `node`，也不绑定一次安装的 pnpm virtual-store 版本目录。源码 link 期间，`predev` 与 `skill-creator start` 只在识别到真实 OpenTray workspace 时运行 `prepare:linked-consumer`；`status/open/stop` 与 registry 安装不得增加构建开销。
 

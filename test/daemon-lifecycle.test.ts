@@ -91,7 +91,6 @@ describe("daemon shutdown orchestration", () => {
       const mountReleased = new Promise<void>((resolve) => {
         releaseMount = resolve;
       });
-      const stopPlacement = vi.fn();
       const destroyTray = vi.fn(async () => {});
       const destroyWindow = vi.fn(async () => {});
       const lateHost = new TrayHost(
@@ -123,7 +122,7 @@ describe("daemon shutdown orchestration", () => {
           signalMountStarted();
           await mountReleased;
           return {
-            result: { tray: null, window: null, stopPlacement },
+            result: { tray: null, window: null },
             host: lateHost,
           };
         },
@@ -153,7 +152,6 @@ describe("daemon shutdown orchestration", () => {
 
       expect(handles?.status.active).toBe(false);
       expect(handles?.trayHost).toBeNull();
-      expect(stopPlacement).toHaveBeenCalledOnce();
       expect(destroyWindow).toHaveBeenCalledOnce();
       expect(destroyTray).toHaveBeenCalledOnce();
     },

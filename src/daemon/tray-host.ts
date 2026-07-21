@@ -1,5 +1,6 @@
 /**
  * 用户原始需求 [2026-07-19]：「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。」
+ * 用户原始需求 [2026-07-21]：「placement直接居中就行，不用跟随tray。」
  * 用户原始需求 [2026-07-20]：「预构建基于 color-symbol 的 appIcon：背景白色+合理的留白边界。」
  * 用户原始需求 [2026-07-20]：「appIcon 必须跟随操作系统平台的标准来。」
  * 正交意图：
@@ -8,7 +9,7 @@
  *       resolveTrayIconPath 解析为跨平台 file Icon，macOS 走 template 自适应）。
  *   [2] 保留单一 WebView session：show() 仅 bootstrap 一次，之后用 toVisible()/close()
  *       复用 session；以 isVisible()/visibleChange 作为原生可见性真相（含最小化）。
- *   [3] 按屏幕与 tray 几何锚定窗口，并把原生失败隔离为可诊断的 headless 降级。
+ *   [3] 在启动时按当前屏幕一次性居中窗口，并把原生失败隔离为可诊断的 headless 降级。
  *   [4] 以 app mode 交还窗口层级、焦点与关闭行为给原生窗口管理器。
  * 妥协声明：OpenTray 的 tray、retained window、placement 与可见性真相只能在同一
  * 原生 capability adapter 中协调；产品路由与 daemon 生命周期不放在本文件。
@@ -64,7 +65,6 @@ export type TrayMountFailureStage =
 export interface TrayMountResult {
   tray: OpentrayTray | null;
   window: OpentrayWindow | null;
-  stopPlacement: () => void;
   failure?: TrayMountFailure;
 }
 
@@ -113,7 +113,6 @@ export async function mountTray(opts: {
   let baseTray: EventfulTrayHandle | null = null;
   let tray: OpentrayTray | null = null;
   let panel: OpentrayWindow | null = null;
-  let stopPlacement: () => void = () => {};
 
   try {
     const windowsHostTopology = configureOpenTrayWindowsHostTopology(process.env, process.platform);
@@ -186,7 +185,7 @@ export async function mountTray(opts: {
       await safeCall("panel.devtools.open", panel.devtools?.open?.());
     }
 
-    stopPlacement = await startPlacement(tray, panel, ext);
+    await centerWindow(panel, tray, ext);
 
     const host = new TrayHost(tray, panel, {
       openItemId: MENU_OPEN_ID,
@@ -200,7 +199,7 @@ export async function mountTray(opts: {
 
     log("opentray webview window mounted");
     return {
-      result: { tray, window: panel, stopPlacement },
+      result: { tray, window: panel },
       host,
     };
   } catch (err) {
@@ -210,7 +209,7 @@ export async function mountTray(opts: {
       panel,
       stage: inferTrayMountFailureStage({ baseTray, tray, panel }),
     });
-    await destroyMounted({ baseTray, tray, panel, stopPlacement });
+    await destroyMounted({ baseTray, tray, panel });
     log(`opentray mount failed (${formatTrayMountFailure(failure)}) — running headless`);
     const host = new TrayHost(null, null, {
       openItemId: MENU_OPEN_ID,
@@ -219,7 +218,7 @@ export async function mountTray(opts: {
       onQuit: () => void opts.onQuit(),
     });
     return {
-      result: { tray: null, window: null, stopPlacement: () => {}, failure },
+      result: { tray: null, window: null, failure },
       host,
     };
   }
@@ -457,33 +456,21 @@ function resolvePackagedIconPath(fileName: string, webuiDir: string | undefined)
   return null;
 }
 
-/** 启动 tray placement 锚定（best-effort）。 */
-async function startPlacement(
-  tray: OpentrayTray,
+/** 在启动时按当前屏幕一次性居中；正常 app window 后续位置由系统与用户拥有。 */
+async function centerWindow(
   panel: OpentrayWindow,
+  screen: OpentrayTray,
   ext: typeof import("@opentray/ext-webview"),
-): Promise<() => void> {
-  if (typeof tray.getBounds !== "function" || typeof tray.getScreenDetails !== "function") {
-    return () => {};
-  }
+): Promise<void> {
   try {
-    const kit = new ext.WebviewPlacementKit({ tray, screen: tray });
-    const watch = await kit.watch(panel, {
-      placement: "tray",
+    const kit = new ext.WebviewPlacementKit({ screen });
+    await kit.applyOnce(panel, {
+      placement: "screen-center",
       width: WINDOW_WIDTH,
       height: WINDOW_HEIGHT,
-      placementMargin: 8,
     });
-    return () => {
-      try {
-        watch.stop();
-      } catch {
-        /* placement 回收绝不能崩溃关停。 */
-      }
-    };
   } catch (err) {
-    log(`placement watch failed (${errorToLogMessage(err)}) — window unanchored`);
-    return () => {};
+    log(`window center placement failed (${errorToLogMessage(err)}) — keeping system position`);
   }
 }
 
@@ -492,13 +479,7 @@ async function destroyMounted(handles: {
   baseTray: EventfulTrayHandle | null;
   tray: OpentrayTray | null;
   panel: OpentrayWindow | null;
-  stopPlacement: () => void;
 }): Promise<void> {
-  try {
-    handles.stopPlacement?.();
-  } catch {
-    /* ignore */
-  }
   await safeCall("panel.destroy", handles.panel?.destroy?.());
   await safeCall("tray.destroy", (handles.tray ?? handles.baseTray)?.destroy?.());
 }
