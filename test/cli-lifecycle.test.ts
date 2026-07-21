@@ -9,6 +9,7 @@
  *   [2] Project tray/headless status through the CLI.
  *   [3] Wait through starting and mounted-before-openable races.
  *   [4] Report stop success only after asynchronous teardown releases the socket.
+ *   [5] Isolate real daemon fixtures from the operator's native tray runtime.
  * 妥协声明：这些断言共享同一临时 daemon fixture 与进程清理边界，拆分
  * 会让 lifecycle race 失去端到端时序；业务单元测试仍按 service 分文件。
  */
@@ -102,11 +103,11 @@ describe("CLI daemon lifecycle", () => {
     daemon = new IpcServer({
       onStatus: () => {
         statusChecks += 1;
-        const mounted = statusChecks > 1;
+        const mounted = statusChecks > 2;
         return daemonStatus({
           version: currentVersion,
           tray: mounted ? "mounted" : "starting",
-          port: mounted ? 4567 : 0,
+          port: 4567,
         });
       },
       onOpen: async () => {
@@ -124,6 +125,7 @@ describe("CLI daemon lifecycle", () => {
       expect(result.stderr).toBe("");
       expect(result.stdout).toContain("skill-creator daemon is already running.");
       expect(result.stdout).toContain("Opening the tray window");
+      expect(result.stdout).not.toContain("Opening browser:");
       expect(statusChecks).toBeGreaterThanOrEqual(3);
       expect(openAttempts).toBe(2);
     } finally {
@@ -244,7 +246,13 @@ async function runCli(
 ): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync(process.execPath, ["--import", "tsx", cliEntry, ...args], {
     cwd: root,
-    env: { ...process.env, ...extraEnv, SKILL_CREATOR_HOME: home },
+    env: {
+      ...process.env,
+      ...extraEnv,
+      OPENTRAY_HOME: path.join(home, "opentray-runtime"),
+      SKILL_CREATOR_DISABLE_TRAY: "1",
+      SKILL_CREATOR_HOME: home,
+    },
     encoding: "utf8",
     timeout: 15_000,
   });

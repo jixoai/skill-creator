@@ -200,8 +200,8 @@ async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<boolean> {
 }
 
 function isDaemonReady(status: DaemonStatus): boolean {
-  // tray 是否 mounted 不再阻断 ready：headless/任何平台都允许浏览器访问 WebUI。
-  return status.active && status.port > 0;
+  // `starting` 尚不能决定原生窗口或浏览器降级；等待 tray 收敛为终态。
+  return status.active && status.port > 0 && status.tray !== "starting";
 }
 
 /** 在系统默认浏览器中打开一个 URL；失败只记录，不阻断主流程。 */

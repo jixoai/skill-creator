@@ -4,7 +4,7 @@
  * 1. 由 Vite 启动开发 daemon，并绑定二者的进程生命周期。
  * 2. 将开发态 HTTP 与 WebSocket 请求代理到动态 daemon 端口。
  * 3. 在 daemon 启动竞态期间返回可重试失败，不让代理错误终止 Vite。
- * 4. 把完整 pnpm dev 监督器向量传给 daemon，供 Dock 冷启动恢复开发树。
+ * 4. 把绝对 Node + 真实 Vite JS 监督器向量传给 daemon，供 Dock 冷启动恢复开发树。
  */
 import http from "node:http";
 import net, { type AddressInfo } from "node:net";
@@ -68,7 +68,7 @@ export function skillCreatorDaemonDev(): Plugin {
         daemonExitExpected = false;
         stopDaemonPromise = null;
         const entry = path.resolve(repoRoot(), "src/daemon/dev.ts");
-        const appLaunch = resolveDevAppLaunch(process.env);
+        const appLaunch = resolveDevAppLaunch();
         daemon = execa("bun", [entry], {
           stdio: "inherit",
           forceKillAfterDelay: 3_000,
@@ -124,24 +124,27 @@ export function skillCreatorDaemonDev(): Plugin {
   };
 }
 
-/** Resolve the package-manager supervisor that owns Vite, daemon, and WebView together. */
+/** Resolve the PATH-independent Vite supervisor that owns daemon and WebView together. */
 export function resolveDevAppLaunch(
-  environment: NodeJS.ProcessEnv,
   command = process.execPath,
   cwd = repoRoot(),
+  viteEntry = resolveViteEntry(cwd),
 ): DevAppLaunch {
-  const packageManagerEntry = environment.npm_execpath;
-  if (packageManagerEntry === undefined || !path.isAbsolute(packageManagerEntry)) {
-    throw new Error("pnpm dev requires an absolute npm_execpath for Dock relaunch.");
-  }
   if (!path.isAbsolute(command)) {
     throw new Error("pnpm dev requires an absolute Node executable for Dock relaunch.");
   }
+  if (!path.isAbsolute(viteEntry)) {
+    throw new Error("pnpm dev requires an absolute Vite entry for Dock relaunch.");
+  }
   return {
     command,
-    args: [packageManagerEntry, "--dir", path.join(cwd, "webui"), "dev"],
-    cwd,
+    args: [viteEntry, "dev"],
+    cwd: path.join(cwd, "webui"),
   };
+}
+
+function resolveViteEntry(cwd: string): string {
+  return path.join(cwd, "webui/node_modules/vite/bin/vite.js");
 }
 
 function respondDaemonUnavailable(res: http.ServerResponse): void {

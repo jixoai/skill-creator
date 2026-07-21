@@ -160,7 +160,7 @@ stop during tray mount --> bounded teardown --> late native handles arrive
                                                 `--> destroy; never retain
 ```
 
-`open` 在 tray 挂载时是 retained-session 恢复（show/focus），在 headless/任何平台降级为打开系统浏览器。OpenTray 是 Dashboard 模式：原生 tray 是 UX 加成，WebUI 始终浏览器可达。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
+`status.tray === "starting"` 是不可决策的过渡态：即使 HTTP 已可用，CLI `start` 也必须继续等待，不能提前打开浏览器。只有 `mounted` 与 `headless` 是 capability 终态；`mounted` 执行 retained-session `open`（show/focus），`headless` 才降级为打开系统浏览器。OpenTray 是 Dashboard 模式：原生 tray 是 UX 加成，WebUI 始终浏览器可达。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
 
 Tray 采用 retained-session 模型：`createWebviewWindow` 仅 bootstrap 一次创建原生 session，之后所有激活用 `toVisible()`、隐藏用 `close()`，绝不重放 startup 宽高/style/native flags（OpenTray 当前 session 法则）。`isVisible()`/`visibleChange` 是原生操作可见性真相（含最小化），客户端不维护镜像猜测。tray 菜单主项按可见性切换 Show/Hide 文案。窗口以 `appMode: true`、`frameless: false`、`autoHide: false` 创建；系统 Shell 负责窗口层级、焦点、最小化/最大化与关闭，daemon/WebUI 不再实现 opacity 动画、blur 倒计时、keep-on-top 偏好或窗口状态投影协议。
 
@@ -178,14 +178,16 @@ OS taskbar / Dock / app switcher --> native app window focus / minimize / maximi
 pnpm dev -> Vite -> daemon -> WebView
     |
     `--> appLaunch = process.execPath
-                     + [absolute npm_execpath, "--dir", repo/webui, "dev"]
-                     + repository-root cwd
+                     + [real node_modules/vite/bin/vite.js, "dev"]
+                     + webui cwd
 
 live Dock click -> reopenRequested -> latest retained appMode window
                                   -> toVisible() -> focus()
 ```
 
-`SKILL_CREATOR_DEV_APP_LAUNCH` 是 Vite 到 daemon 的私有、严格 Zod 校验传输；不得持久化 shell、裸 `pnpm`、完整环境变量或 daemon 子进程的 `process.argv`。开发向量直接执行 WebUI workspace 的 `dev`，不能先进入根脚本再依赖 Finder PATH 二次查找 `pnpm`。源码 link 期间，`predev` 与 `skill-creator start` 只在识别到真实 OpenTray workspace 时运行 `prepare:linked-consumer`；`status/open/stop` 与 registry 安装不得增加构建开销。生产模式继续使用 OpenTray 的默认当前调用快照。
+`SKILL_CREATOR_DEV_APP_LAUNCH` 是 Vite 到 daemon 的私有、严格 Zod 校验传输；不得持久化 shell、pnpm/package script、`.bin/vite` shim、完整环境变量或 daemon 子进程的 `process.argv`。开发向量由绝对 Node 直接执行项目内稳定的 `webui/node_modules/vite/bin/vite.js`，既避免 Finder PATH 中缺失裸 `node`，也不绑定一次安装的 pnpm virtual-store 版本目录。源码 link 期间，`predev` 与 `skill-creator start` 只在识别到真实 OpenTray workspace 时运行 `prepare:linked-consumer`；`status/open/stop` 与 registry 安装不得增加构建开销。生产模式继续使用 OpenTray 的默认当前调用快照。
+
+真实 daemon 生命周期测试必须同时设置独立 `OPENTRAY_HOME` 与 `SKILL_CREATOR_DISABLE_TRAY=1`。只隔离 `SKILL_CREATOR_HOME` 不足以隔离 broker lock、稳定 Bundle 和 native tray；测试退出不得留下影响操作者后续 `pnpm skill-creator start` / `pnpm dev` 的正式 OpenTray 状态。
 
 WebUI 的 Workspace、Skill、Repository 读取与 mutation 分别使用独立 latest-request-wins 代次门；新请求、主动清理、路由变化或断线会撤销旧响应的提交资格。每次替换 RPC client 都递增 connection owner generation；请求令牌的 `isLatest` 只允许当前请求清理自身 loading，`isCurrent` 还要求 owner generation 未变化，只有它能提交数据、错误或后续 RPC。失效 mutation 的成功和 rejection 都投影为无结果，不能 toast、导航、刷新或调用新 client。Creator 额外把 query route key 与初始化代次绑定；旧连接的 await 尾部不得调用新连接的 RPC client。
 

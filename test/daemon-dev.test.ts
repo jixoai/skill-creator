@@ -8,7 +8,7 @@
  * Orthogonal intents:
  *   [1] Exercise the real Vite restart order against a singleton fake daemon.
  *   [2] Prove duplicate closeBundle hooks terminate each child exactly once.
- *   [3] Model the absolute package-manager entry guaranteed by pnpm dev.
+ *   [3] Prove Vite startup has no package-manager environment dependency.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -36,14 +36,15 @@ describe("Vite development daemon", () => {
         writeFakeBun(path.join(binDirectory, "bun"));
         fs.writeFileSync(configFile, viteConfigSource(appRoot));
         fs.writeFileSync(harnessFile, harnessSource(configFile, eventsFile));
+        const environment = {
+          ...process.env,
+          PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
+          SKILL_CREATOR_VITE_RESTART_FIXTURE: fixture,
+        };
+        delete environment.npm_execpath;
 
         const result = await execa(process.execPath, [harnessFile], {
-          env: {
-            ...process.env,
-            PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
-            npm_execpath: path.join(fixture, "pnpm.cjs"),
-            SKILL_CREATOR_VITE_RESTART_FIXTURE: fixture,
-          },
+          env: environment,
           reject: false,
           timeout: 15_000,
         });
@@ -96,8 +97,11 @@ import { createServer } from ${JSON.stringify(viteUrl)};
 
 delete process.env.SKILL_CREATOR_DEV_DAEMON_PORT;
 const eventsFile = ${JSON.stringify(eventsFile)};
-const server = await createServer({ configFile: ${JSON.stringify(configFile)} });
-await server.listen();
+const server = await createServer({
+  configFile: ${JSON.stringify(configFile)},
+  server: { host: "127.0.0.1", port: 0, strictPort: false },
+});
+await server.listen(0);
 await waitFor(() => count("acquired ") === 1);
 await server.restart();
 await waitFor(() => count("spawn ") === 2);

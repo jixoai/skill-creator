@@ -1,8 +1,9 @@
 /**
  * 用户原始需求 [2026-07-21]：「开发模式下，配置启动命令成 pnpm dev。」
  * 正交意图：
- * 1. 证明 Dock 描述符直接恢复 WebUI 的 pnpm dev 监督器，而不是依赖根脚本二次查找 pnpm。
+ * 1. 证明 Dock 描述符用绝对 Node 直接恢复 WebUI 的 Vite 监督器。
  * 2. 证明内部 JSON 必须通过当前 Zod schema。
+ * 3. 拒绝任何仍需 shell shim 或 PATH 查找的相对启动入口。
  */
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -10,15 +11,15 @@ import { resolveDevAppLaunch } from "../webui/config/daemon-dev.js";
 import { parseDevAppLaunch, serializeDevAppLaunch } from "../src/shared/dev-app-launch.js";
 
 describe("development app launch vector", () => {
-  it("captures the absolute package-manager entry and repository cwd", () => {
+  it("captures the real Vite JavaScript entry and WebUI cwd", () => {
     const command = path.resolve("/runtime/node");
-    const packageManager = path.resolve("/runtime/pnpm.cjs");
     const cwd = path.resolve("/workspace/skill-creator-v2");
+    const viteEntry = path.join(cwd, "webui/node_modules/vite/bin/vite.js");
 
-    expect(resolveDevAppLaunch({ npm_execpath: packageManager }, command, cwd)).toEqual({
+    expect(resolveDevAppLaunch(command, cwd)).toEqual({
       command,
-      args: [packageManager, "--dir", path.join(cwd, "webui"), "dev"],
-      cwd,
+      args: [viteEntry, "dev"],
+      cwd: path.join(cwd, "webui"),
     });
   });
 
@@ -35,12 +36,12 @@ describe("development app launch vector", () => {
     );
   });
 
-  it("rejects a missing or relative package-manager entry", () => {
-    expect(() => resolveDevAppLaunch({}, "/runtime/node", "/workspace")).toThrow(
-      "absolute npm_execpath",
+  it("rejects relative runtime and Vite entries", () => {
+    expect(() => resolveDevAppLaunch("node", "/workspace", "/workspace/vite.js")).toThrow(
+      "absolute Node executable",
     );
-    expect(() =>
-      resolveDevAppLaunch({ npm_execpath: "pnpm.cjs" }, "/runtime/node", "/workspace"),
-    ).toThrow("absolute npm_execpath");
+    expect(() => resolveDevAppLaunch("/runtime/node", "/workspace", "vite.js")).toThrow(
+      "absolute Vite entry",
+    );
   });
 });
