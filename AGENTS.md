@@ -175,15 +175,20 @@ OS taskbar / Dock / app switcher --> native app window focus / minimize / maximi
 开发态 Dock 冷启动必须恢复 Vite 监督器，而不是只恢复 daemon：
 
 ```text
-pnpm dev -> Vite -> daemon -> WebView
-    |
-    `--> appLaunch = process.execPath
-                     + [real node_modules/vite/bin/vite.js, "dev"]
-                     + webui cwd
+pnpm dev -> stop production daemon -> wait IPC release + PID exit
+                                      |
+                                      v
+             Vite -> absolute Node + absolute tsx loader -> dev daemon -> WebView
+               |
+               `--> appLaunch = process.execPath
+                                + [real node_modules/vite/bin/vite.js, "dev"]
+                                + webui cwd
 
 live Dock click -> reopenRequested -> latest retained appMode window
                                   -> toVisible() -> focus()
 ```
+
+OpenTray broker 是 caller-scoped single-session；生产与开发模式不得并发争抢同一 app identity。`pnpm dev` 在 Vite 监听前检测正式 daemon，发送 stop，并同时等待正式 IPC endpoint 释放与 daemon PID 退出；接管失败必须终止 dev 启动，不能静默降级 headless。Vite 再使用绝对 Node 与绝对 `tsx` loader 启动源 daemon，完整开发树的任何子进程都不得依赖 Finder PATH。
 
 `SKILL_CREATOR_DEV_APP_LAUNCH` 是 Vite 到 daemon 的私有、严格 Zod 校验传输；不得持久化 shell、pnpm/package script、`.bin/vite` shim、完整环境变量或 daemon 子进程的 `process.argv`。开发向量由绝对 Node 直接执行项目内稳定的 `webui/node_modules/vite/bin/vite.js`，既避免 Finder PATH 中缺失裸 `node`，也不绑定一次安装的 pnpm virtual-store 版本目录。源码 link 期间，`predev` 与 `skill-creator start` 只在识别到真实 OpenTray workspace 时运行 `prepare:linked-consumer`；`status/open/stop` 与 registry 安装不得增加构建开销。生产模式继续使用 OpenTray 的默认当前调用快照。
 

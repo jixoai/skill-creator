@@ -8,7 +8,7 @@
  * Orthogonal intents:
  *   [1] Exercise the real Vite restart order against a singleton fake daemon.
  *   [2] Prove duplicate closeBundle hooks terminate each child exactly once.
- *   [3] Prove Vite startup has no package-manager environment dependency.
+ *   [3] Prove Vite starts its daemon through an absolute runtime without PATH lookup.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -25,20 +25,21 @@ describe("Vite development daemon", () => {
     async () => {
       const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-vite-restart-"));
       try {
-        const binDirectory = path.join(fixture, "bin");
         const appRoot = path.join(fixture, "app");
         const eventsFile = path.join(fixture, "daemon.events");
+        const daemonEntry = path.join(fixture, "fake-daemon.cjs");
         const configFile = path.join(fixture, "vite.config.ts");
         const harnessFile = path.join(fixture, "harness.mjs");
-        fs.mkdirSync(binDirectory);
         fs.mkdirSync(appRoot);
         fs.writeFileSync(path.join(appRoot, "index.html"), '<div id="app"></div>');
-        writeFakeBun(path.join(binDirectory, "bun"));
+        writeFakeDaemon(daemonEntry);
         fs.writeFileSync(configFile, viteConfigSource(appRoot));
         fs.writeFileSync(harnessFile, harnessSource(configFile, eventsFile));
         const environment = {
           ...process.env,
-          PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
+          PATH: "/usr/bin:/bin",
+          SKILL_CREATOR_DEV_DAEMON_ENTRY: daemonEntry,
+          SKILL_CREATOR_DEV_PRODUCTION_HOME: path.join(fixture, "production-home"),
           SKILL_CREATOR_VITE_RESTART_FIXTURE: fixture,
         };
         delete environment.npm_execpath;
@@ -127,7 +128,7 @@ async function waitFor(predicate) {
 `;
 }
 
-function writeFakeBun(file: string): void {
+function writeFakeDaemon(file: string): void {
   fs.writeFileSync(
     file,
     `#!/usr/bin/env node

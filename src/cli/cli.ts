@@ -20,20 +20,13 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createIpcRequest,
-  encodeFrame,
-  FrameReader,
-  parseIpcResponse,
-  type IpcCommand,
-  type IpcErrorCode,
-} from "../shared/frame.js";
+import type { IpcCommand } from "../shared/frame.js";
 import { DaemonStatusSchema, type DaemonStatus } from "../shared/contracts/daemon.js";
 import { daemonLogPath, ensureAppDirs, socketPath } from "../shared/paths.js";
 import { socketAcceptsConnections } from "../shared/socket-liveness.js";
+import { DaemonConnectionError, DaemonResponseError, requestDaemon } from "./ipc-client.js";
 import { readCliVersion } from "./package-version.js";
 
 /** Process.argv minus node + script path (matches yargs/helpers hideBin). */
@@ -43,21 +36,6 @@ function hideBin(argv: string[]): string[] {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_VERSION = readCliVersion();
-
-class DaemonConnectionError extends Error {
-  override readonly name = "DaemonConnectionError";
-}
-
-class DaemonResponseError extends Error {
-  override readonly name = "DaemonResponseError";
-
-  constructor(
-    message: string,
-    readonly code?: IpcErrorCode,
-  ) {
-    super(message);
-  }
-}
 
 /** Resolve the daemon entry to spawn. Bundled uses Node; source development uses Bun. */
 function resolveDaemonEntry(): string {
@@ -89,68 +67,19 @@ function spawnDaemon(): void {
 
 /** Send one versioned IPC request and validate its response. */
 async function ipcRequest(command: IpcCommand, timeoutMs = 4000): Promise<unknown> {
-  return new Promise<unknown>((resolve, reject) => {
-    const sock = net.createConnection({ path: socketPath() });
-    const reader = new FrameReader();
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      sock.destroy();
-      reject(new DaemonConnectionError("IPC request timed out — is the daemon running?"));
-    }, timeoutMs);
-
-    sock.on("connect", () => {
-      sock.write(encodeFrame(createIpcRequest(command, CLI_VERSION)));
+  try {
+    return await requestDaemon({
+      socket: socketPath(),
+      clientVersion: CLI_VERSION,
+      command,
+      timeoutMs,
     });
-    sock.on("data", (chunk: Buffer) => reader.push(chunk));
-    sock.on("error", (err: Error) => {
-      reader.close();
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(
-        new DaemonConnectionError(
-          `cannot reach daemon (${err.message}). Run 'skill-creator start' first.`,
-        ),
-      );
-    });
-    sock.on("end", () => reader.close());
-    sock.on("close", () => reader.close());
-
-    void (async () => {
-      try {
-        for await (const body of reader.frames()) {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          const decoded: unknown = JSON.parse(Buffer.from(body).toString("utf8"));
-          const response = parseIpcResponse(decoded);
-          if (!response) {
-            reject(new DaemonResponseError("Daemon returned an invalid IPC response."));
-            return;
-          }
-          if (!response.ok) {
-            reject(new DaemonResponseError(response.error, response.code));
-            return;
-          }
-          resolve(response.data);
-          sock.end();
-          return;
-        }
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          reject(new DaemonConnectionError("daemon closed the connection without responding"));
-        }
-      } catch (err) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
-    })();
-  });
+  } catch (error) {
+    if (error instanceof DaemonConnectionError) {
+      throw new DaemonConnectionError(`${error.message}. Run 'skill-creator start' first.`);
+    }
+    throw error;
+  }
 }
 
 /** Query and runtime-validate the daemon status projection. */

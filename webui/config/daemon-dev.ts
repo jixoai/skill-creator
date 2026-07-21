@@ -1,7 +1,7 @@
 /**
  * 原始需求 [2026-07-14]：「opentray 的一些适配没做好，好好学习 pnpm-pub」。
  * 正交意图：
- * 1. 由 Vite 启动开发 daemon，并绑定二者的进程生命周期。
+ * 1. 释放生产 daemon 后由 Vite 接管应用身份，并绑定开发进程生命周期。
  * 2. 将开发态 HTTP 与 WebSocket 请求代理到动态 daemon 端口。
  * 3. 在 daemon 启动竞态期间返回可重试失败，不让代理错误终止 Vite。
  * 4. 把绝对 Node + 真实 Vite JS 监督器向量传给 daemon，供 Dock 冷启动恢复开发树。
@@ -9,6 +9,7 @@
 import http from "node:http";
 import net, { type AddressInfo } from "node:net";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { execa, type ResultPromise } from "execa";
 import httpProxy from "http-proxy";
@@ -18,6 +19,7 @@ import {
   SKILL_CREATOR_DEV_APP_LAUNCH_ENV,
   type DevAppLaunch,
 } from "../../src/shared/dev-app-launch";
+import { stopProductionDaemonForDev } from "./dev-production-takeover";
 
 /** Spawn the development daemon and proxy its browser transport through Vite. */
 export function skillCreatorDaemonDev(): Plugin {
@@ -51,6 +53,10 @@ export function skillCreatorDaemonDev(): Plugin {
       const httpServer = server.httpServer;
       if (!httpServer) return;
 
+      if (await stopProductionDaemonForDev()) {
+        console.info("[dev] production daemon stopped; development now owns OpenTray");
+      }
+
       const configuredPort = readOptionalPort(process.env.SKILL_CREATOR_DEV_DAEMON_PORT);
       const port = configuredPort ?? (await allocateRandomPort());
       let shuttingDown = false;
@@ -67,9 +73,11 @@ export function skillCreatorDaemonDev(): Plugin {
         if (daemon) throw new Error("The Vite plugin already owns a development daemon.");
         daemonExitExpected = false;
         stopDaemonPromise = null;
-        const entry = path.resolve(repoRoot(), "src/daemon/dev.ts");
+        const entry =
+          process.env.SKILL_CREATOR_DEV_DAEMON_ENTRY ??
+          path.resolve(repoRoot(), "src/daemon/dev.ts");
         const appLaunch = resolveDevAppLaunch();
-        daemon = execa("bun", [entry], {
+        daemon = execa(process.execPath, resolveDevDaemonArgs(entry), {
           stdio: "inherit",
           forceKillAfterDelay: 3_000,
           env: {
@@ -122,6 +130,12 @@ export function skillCreatorDaemonDev(): Plugin {
       return stopDaemon();
     },
   };
+}
+
+function resolveDevDaemonArgs(entry: string): string[] {
+  if (!entry.endsWith(".ts")) return [entry];
+  const tsxLoader = createRequire(import.meta.url).resolve("tsx");
+  return ["--import", tsxLoader, entry];
 }
 
 /** Resolve the PATH-independent Vite supervisor that owns daemon and WebView together. */

@@ -64,11 +64,11 @@ export function daemonLogPath(): string {
  *  - macOS / linux: Unix Domain Socket at ~/.skill-creator/run/skill-creator.sock
  *  - Windows: Named Pipe at \\.\pipe\skill-creator-sock
  */
-export function socketPath(): string {
+export function socketPath(resolvedHome = homeDir()): string {
   if (process.platform === "win32") {
     return "\\\\.\\pipe\\skill-creator-sock";
   }
-  return path.join(runDir(), SOCKET_FILE);
+  return path.join(resolvedHome, APP_DIR_NAME, "run", SOCKET_FILE);
 }
 
 /** 确保应用状态目录树存在。 */
