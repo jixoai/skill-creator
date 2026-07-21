@@ -32,43 +32,44 @@ import {
 } from "./contracts/skills.js";
 import {
   ImportedWorkspaceIdSchema,
+  WorkspaceProviderTargetSchema,
   WorkspaceIdSchema,
   WorkspaceSchema,
 } from "./contracts/workspaces.js";
 
-const WorkspaceReadInputSchema = z.object({
-  workspaceId: WorkspaceIdSchema,
+const WorkspaceProviderReadInputSchema = z.object({
+  ...WorkspaceProviderTargetSchema.shape,
   includeDisabled: z.boolean().optional(),
 });
 
 /** Complete browser-safe contract shared by the WebUI and daemon. */
 export const rpcContract = oc.errors(RpcErrorDefinitions).router({
   skills: {
-    /** Discover skills within one explicit workspace. */
+    /** Discover skills within one explicit Workspace Provider. */
     list: oc
-      .input(WorkspaceReadInputSchema)
+      .input(WorkspaceProviderReadInputSchema)
       .output(z.object({ skills: z.array(SkillMetadataSchema) })),
-    /** Read one workspace-scoped skill document. */
+    /** Read one Workspace Provider-scoped skill document. */
     info: oc
-      .input(WorkspaceReadInputSchema.extend({ skillId: SkillIdSchema }))
+      .input(WorkspaceProviderReadInputSchema.extend({ skillId: SkillIdSchema }))
       .output(SkillInfoSchema),
     /** Enable or disable selected opaque skill IDs. */
     toggle: oc
       .input(
         z.object({
-          workspaceId: WorkspaceIdSchema,
+          ...WorkspaceProviderTargetSchema.shape,
           skillIds: z.array(SkillIdSchema).min(1),
           mode: z.enum(["enable", "disable"]),
         }),
       )
       .output(ToggleSummarySchema),
-    /** Validate one workspace-scoped skill. */
+    /** Validate one Workspace Provider-scoped skill. */
     validate: oc
-      .input(z.object({ workspaceId: WorkspaceIdSchema, skillId: SkillIdSchema }))
+      .input(z.object({ ...WorkspaceProviderTargetSchema.shape, skillId: SkillIdSchema }))
       .output(ValidateResultSchema),
   },
   workspace: {
-    /** List home and imported workspaces with fresh counts. */
+    /** List Global and imported Workspaces with fresh Provider counts. */
     list: oc.input(z.object({})).output(z.object({ workspaces: z.array(WorkspaceSchema) })),
     /** Import a canonical directory workspace. */
     add: oc
@@ -90,13 +91,13 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     save: oc.input(SaveSkillInputSchema).output(SaveSkillResultSchema),
     /** Load an editable skill document. */
     load: oc
-      .input(z.object({ workspaceId: ImportedWorkspaceIdSchema, skillId: SkillIdSchema }))
+      .input(z.object({ ...WorkspaceProviderTargetSchema.shape, skillId: SkillIdSchema }))
       .output(SkillDocumentSchema),
     /** Revision-check and delete one skill. */
     remove: oc
       .input(
         z.object({
-          workspaceId: ImportedWorkspaceIdSchema,
+          ...WorkspaceProviderTargetSchema.shape,
           skillId: SkillIdSchema,
           expectedRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
         }),

@@ -1,6 +1,6 @@
 <!--
 文件意图（2026-07-19）
-用户原始需求摘录：「skills manager 只是路由的一部分(`/workspace/~/`)；支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。二者是有机互联的。」；[2026-07-19]「走 appMode:true 模式。所以走原生的窗口管理。」；[2026-07-21]「`skill-creator stop` 找不到 daemon，但 `pnpm dev` 又说已有 daemon 持有 socket。」
+用户原始需求摘录：「skills manager 只是路由的一部分(`/workspace/~/`)；支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。二者是有机互联的。」；[2026-07-19]「走 appMode:true 模式。所以走原生的窗口管理。」；[2026-07-21]「`skill-creator stop` 找不到 daemon，但 `pnpm dev` 又说已有 daemon 持有 socket。」；[2026-07-22]「home 目录定义为特殊的 GlobalWorkspace；一个 Workspace 下可以包含多个 providers；下载到某个 Workspace.provider，且能多选。」
 正交意图：1. 定义 WebUI 的三路由职责；2. 解释前端状态和共享契约；3. 记录开发与组件边界；4. 承载品牌门面图（color-symbol，经 `../resources/` 相对路径引用）。
 妥协声明：本文件是 WebUI package 的单一入口，三项都属于使用该 package 前不可缺少的上下文；产品细节已下沉到独立 route、store 与 component。
 -->
@@ -19,8 +19,8 @@ WebUI 只在路由变化时确保窗口达到对应的最小推荐尺寸，不�
 App shell
 |-- Workspaces ---------------- /workspace registry index
 |   `-- /workspace/[id]
-|       |-- ~ ----------------- ccski default agent locations
-|       `-- ws_<opaque-id> ---- imported directory
+|       |-- ~ ----------------- Global Workspace / Agent provider roots
+|       `-- ws_<opaque-id> ---- imported directory / provider roots
 |-- Creator ------------------- /creator
 `-- Repository ---------------- /repository
 
@@ -34,30 +34,30 @@ domain store --> typed oRPC client --> WebSocket --> daemon
 
 ## 路由职责
 
-| Route             | 人的任务                                                                              | RPC module                       |
-| ----------------- | ------------------------------------------------------------------------------------- | -------------------------------- |
-| `/workspace`      | 浏览 Home/Imported Workspace，并在所有视口导入或移除 registry entry                   | `workspace`                      |
-| `/workspace/[id]` | 扫描、搜索、查看、校验、启用或禁用当前 Workspace 的技能                               | `skills`, `workspace`            |
-| `/workspace/~/`   | 查看 ccski 默认 Agent 位置中的技能                                                    | `skills`                         |
-| `/creator`        | 无 query 新建、workspace-only 定位新建目标、workspace+skill revision-safe 编辑        | `creator`, `skills`, `workspace` |
-| `/repository`     | 扫描并预览固定 commit，安装到 Imported Workspace，再以本地 Skill ID 衔接 Creator 复核 | `repository`, `workspace`        |
+| Route             | 人的任务                                                                                          | RPC module                       |
+| ----------------- | ------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `/workspace`      | 浏览 Global/Imported Workspace，并在所有视口导入或移除 registry entry                             | `workspace`                      |
+| `/workspace/[id]` | 选择当前 Workspace 的 Provider，再扫描、搜索、查看、校验、启用或禁用该 Provider 的技能            | `skills`, `workspace`            |
+| `/workspace/~/`   | 查看 Global Workspace 中各 Agent Provider 的全局技能                                              | `skills`                         |
+| `/creator`        | 无 query 新建，或由 workspace+provider 定位新建/编辑目标                                          | `creator`, `skills`, `workspace` |
+| `/repository`     | 扫描并预览固定 commit，多选 Imported Workspace.Provider 安装，再以本地 Skill ID 衔接 Creator 复核 | `repository`, `workspace`        |
 
-Creator 与 Repository 只把 Imported Workspace 作为写入目标。`~` 是发现视图，不是这两个路由的目标目录。
+Creator 与 Repository 只把 Imported Workspace.Provider 作为写入目标。`~` 是 Global Workspace 的发现/管理视图，不是这两个路由的目标目录。
 
 ```text
 Creator route load
   no query --------------------> blank draft
-  workspace -------------------> explicit create scope
-  workspace + skill -----------> explicit edit scope
+  workspace + provider --------> explicit create scope
+  workspace + provider + skill -> explicit edit scope
   skill-only / invalid IDs ----> redirect /creator
 
 Repository result
-  installed / overwritten -----> workspaceId + daemon-signed local skillId
+  installed / overwritten -----> workspaceId + providerId + daemon-signed local skillId
                                       |
                                       +-- one ---> direct Review installed
                                       `-- many --> review menu
                                                     |
-                                                    `--> /creator?workspace=...&skill=...
+                                                    `--> /creator?workspace=...&provider=...&skill=...
 ```
 
 ## 前端结构
@@ -104,7 +104,7 @@ session token --> ws(s)://same-origin/ws/rpc?token=...
                                       `--> daemon validates before upgrade
 ```
 
-开发态按以下顺序建立同源边界；release 由 daemon 同源提供静态 SPA 与 WebSocket。组件不持有文件输出路径，后续 mutation 使用 Workspace ID、Skill ID 或 Repository Session ID。
+开发态按以下顺序建立同源边界；release 由 daemon 同源提供静态 SPA 与 WebSocket。组件不持有文件输出路径，后续 mutation 使用 Workspace Provider Target、Skill ID 或 Repository Session ID。
 
 ```text
 release production daemon

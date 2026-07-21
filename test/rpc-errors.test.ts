@@ -19,10 +19,12 @@ import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { DomainError } from "../src/daemon/domain-error.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
+import { GLOBAL_WORKSPACE_ID, ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
 let sandbox = "";
+const openClawProviderId = ProviderIdSchema.parse("openclaw");
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-rpc-error-test-"));
@@ -68,6 +70,7 @@ describe("RPC domain-error boundary", () => {
     const created = await client.creator.save({
       mode: "create",
       workspaceId: workspace.id,
+      providerId: openClawProviderId,
       directoryName: "revision-safe",
       frontmatter: {
         name: "revision-safe",
@@ -76,7 +79,7 @@ describe("RPC domain-error boundary", () => {
       body: "# Revision safe\n",
     });
     fs.appendFileSync(
-      path.join(workspaceDirectory, "revision-safe", "SKILL.md"),
+      path.join(workspaceDirectory, "skills", "revision-safe", "SKILL.md"),
       "\nExternal edit.\n",
       "utf8",
     );
@@ -85,6 +88,7 @@ describe("RPC domain-error boundary", () => {
       await client.creator.save({
         mode: "update",
         workspaceId: workspace.id,
+        providerId: openClawProviderId,
         skillId: created.document.skillId,
         expectedRevision: created.document.revision,
         frontmatter: created.document.frontmatter,
@@ -159,6 +163,7 @@ describe("RPC domain-error boundary", () => {
       await client.creator.save({
         mode: "create",
         workspaceId: workspace.id,
+        providerId: openClawProviderId,
         directoryName: "blocked",
         frontmatter: { name: "blocked", description: "Must not write through a file." },
         body: "# Blocked\n",
@@ -170,6 +175,24 @@ describe("RPC domain-error boundary", () => {
       expect(error.defined).toBe(true);
       expect(error.code).toBe("UNAVAILABLE");
       expect(error.status).toBe(503);
+    }
+  });
+
+  it("projects an unknown Provider as the defined NOT_FOUND RPC error", async () => {
+    const client = createClient();
+    try {
+      await client.skills.list({
+        workspaceId: GLOBAL_WORKSPACE_ID,
+        providerId: ProviderIdSchema.parse("unknown-agent"),
+      });
+      expect.fail("Expected unknown Provider to be rejected.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ORPCError);
+      if (!(error instanceof ORPCError)) throw error;
+      expect(error.defined).toBe(true);
+      expect(error.code).toBe("NOT_FOUND");
+      expect(error.status).toBe(404);
+      expect(error.message).toBe("Provider not found: unknown-agent");
     }
   });
 });

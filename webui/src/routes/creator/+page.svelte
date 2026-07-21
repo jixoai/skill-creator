@@ -1,8 +1,8 @@
 <script lang="ts">
   /**
-   * 正交意图（2026-07-14）
-   * 原始需求 [2026-07-14]：「我们还需要有一个 创造、编辑 技能的路由(/creator)。二者是有机互联的」。
-   * 1. 按可选 workspace 创建作用域与 workspace+skill 编辑身份，创建、编辑、预览和删除技能。
+   * 正交意图（2026-07-22）
+   * 原始需求 [2026-07-22]：「一个 Workspace 下，是可以包含多个 providers 的。」
+   * 1. 按可选 Workspace Provider 创建作用域与 Provider+skill 编辑身份，创建、编辑、预览和删除技能。
    * 2. 以 revision 防止陈旧表单覆盖磁盘新版本。
    * 3. 保存后同步技能列表与 workspace 计数。
    * 4. 在窄屏维持技能列表与编辑器的可恢复焦点路径。
@@ -26,7 +26,7 @@
     removeSkill,
     saveSkill,
     skillsState,
-    writableWorkspaces,
+    writableWorkspaceProviders,
     workspaceState,
   } from "$lib/store.svelte";
   import {
@@ -34,7 +34,14 @@
     type RequestGeneration,
   } from "$lib/stores/request-generation";
   import { TEMPLATES, type SkillTemplate } from "$lib/templates";
-  import type { ImportedWorkspaceId, SaveSkillInput, SkillDocument, SkillId } from "$lib/types";
+  import type {
+    ProviderId,
+    SaveSkillInput,
+    SkillDocument,
+    SkillId,
+    WorkspaceId,
+    WorkspaceProviderTarget,
+  } from "$lib/types";
   import IconChevron from "@lucide/svelte/icons/chevron-down";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconFile from "@lucide/svelte/icons/file-text";
@@ -52,7 +59,8 @@
   const documentRequests = createRequestGenerationGate(getConnectionGeneration);
   const mutationRequests = createRequestGenerationGate(getConnectionGeneration);
 
-  let workspaceId = $state<ImportedWorkspaceId | null>(null);
+  let workspaceId = $state<WorkspaceId | null>(null);
+  let providerId = $state<ProviderId | null>(null);
   let document = $state<SkillDocument | null>(null);
   let editorMode = $state<"create" | "edit">("create");
   let name = $state("");
@@ -86,22 +94,36 @@
     if (busy || (dirty && !globalThis.confirm("Discard your unsaved changes?"))) cancel();
   });
 
-  let workspaces = $derived(writableWorkspaces());
-  let selectedWorkspace = $derived(workspaces.find((workspace) => workspace.id === workspaceId));
+  let targets = $derived(writableWorkspaceProviders());
+  let selectedTarget = $derived(
+    targets.find(
+      (candidate) =>
+        candidate.target.workspaceId === workspaceId && candidate.target.providerId === providerId,
+    ),
+  );
   let filteredExisting = $derived(
     skillsState.skills.filter(
       (skill) => !search.trim() || skill.name.toLowerCase().includes(search.trim().toLowerCase()),
     ),
   );
   let snapshot = $derived(
-    JSON.stringify({ workspaceId, editorMode, name, description, body, extraFrontmatter }),
+    JSON.stringify({
+      workspaceId,
+      providerId,
+      editorMode,
+      name,
+      description,
+      body,
+      extraFrontmatter,
+    }),
   );
   let dirty = $derived(Boolean(baseline) && snapshot !== baseline);
 
   $effect(() => {
     const requestedWorkspaceId = data.workspaceId;
+    const requestedProviderId = data.providerId;
     const requestedSkillId = data.skillId;
-    const routeKey = `${requestedWorkspaceId ?? ""}:${requestedSkillId ?? ""}`;
+    const routeKey = `${requestedWorkspaceId ?? ""}:${requestedProviderId ?? ""}:${requestedSkillId ?? ""}`;
     if (sessionRouteKey !== routeKey) {
       sessionRouteKey = routeKey;
       completedRouteKey = null;
@@ -119,11 +141,13 @@
 
     const request = routeRequests.issue();
     pendingRouteKey = routeKey;
-    void initialize(requestedWorkspaceId, requestedSkillId, request).then((completed) => {
-      if (!request.isCurrent() || pendingRouteKey !== routeKey) return;
-      pendingRouteKey = null;
-      if (completed) completedRouteKey = routeKey;
-    });
+    void initialize(requestedWorkspaceId, requestedProviderId, requestedSkillId, request).then(
+      (completed) => {
+        if (!request.isCurrent() || pendingRouteKey !== routeKey) return;
+        pendingRouteKey = null;
+        if (completed) completedRouteKey = routeKey;
+      },
+    );
 
     return () => {
       if (request.isCurrent()) routeRequests.invalidate();
@@ -135,7 +159,8 @@
   });
 
   async function initialize(
-    requestedWorkspaceId: ImportedWorkspaceId | null,
+    requestedWorkspaceId: WorkspaceId | null,
+    requestedProviderId: ProviderId | null,
     requestedSkillId: SkillId | null,
     request: RequestGeneration,
   ): Promise<boolean> {
@@ -147,35 +172,45 @@
       if (workspaceLoad === "stale") return false;
       if (workspaceLoad === "failed") {
         workspaceId = null;
-        error = workspaceState.error ?? "The writable Workspace list could not be loaded.";
+        providerId = null;
+        error = workspaceState.error ?? "The writable Workspace Provider list could not be loaded.";
         markBaseline();
         return true;
       }
 
-      const availableWorkspaces = writableWorkspaces();
-      const requestedWorkspace = availableWorkspaces.find(
-        (workspace) => workspace.id === requestedWorkspaceId,
+      const availableTargets = writableWorkspaceProviders();
+      const requestedTarget = availableTargets.find(
+        (candidate) =>
+          candidate.target.workspaceId === requestedWorkspaceId &&
+          candidate.target.providerId === requestedProviderId,
       );
-      if (requestedWorkspaceId && !requestedWorkspace) {
+      if ((requestedWorkspaceId || requestedProviderId) && !requestedTarget) {
         workspaceId = null;
-        error = "The requested Workspace is no longer available as a writable destination.";
+        providerId = null;
+        error =
+          "The requested Workspace Provider is no longer available as a writable destination.";
         markBaseline();
         return true;
       }
 
-      workspaceId = requestedWorkspace?.id ?? availableWorkspaces[0]?.id ?? null;
-      if (!workspaceId) {
+      const selected = requestedTarget ?? availableTargets[0] ?? null;
+      workspaceId = selected?.target.workspaceId ?? null;
+      providerId = selected?.target.providerId ?? null;
+      if (!selected) {
         markBaseline();
         return true;
       }
-      const targetWorkspaceId = workspaceId;
-      await loadSkills(targetWorkspaceId);
+      const target = selected.target;
+      await loadSkills(target);
       if (!request.isCurrent()) return false;
       if (requestedSkillId) {
         return await loadExistingDocument(
-          targetWorkspaceId,
+          target,
           requestedSkillId,
-          () => request.isCurrent() && workspaceId === targetWorkspaceId,
+          () =>
+            request.isCurrent() &&
+            workspaceId === target.workspaceId &&
+            providerId === target.providerId,
         );
       }
       markBaseline();
@@ -203,6 +238,7 @@
   function markBaseline(): void {
     baseline = JSON.stringify({
       workspaceId,
+      providerId,
       editorMode,
       name,
       description,
@@ -215,12 +251,18 @@
     return !dirty || globalThis.confirm("Discard your unsaved changes?");
   }
 
-  async function chooseWorkspace(nextId: ImportedWorkspaceId): Promise<void> {
-    if (busy || nextId === workspaceId || !allowDiscard()) return;
+  async function chooseTarget(next: WorkspaceProviderTarget): Promise<void> {
+    if (
+      busy ||
+      (next.workspaceId === workspaceId && next.providerId === providerId) ||
+      !allowDiscard()
+    )
+      return;
     documentRequests.invalidate();
-    workspaceId = nextId;
+    workspaceId = next.workspaceId;
+    providerId = next.providerId;
     resetDraft("create");
-    await loadSkills(nextId);
+    await loadSkills(next);
     mobileListOpen = false;
     markBaseline();
   }
@@ -276,11 +318,11 @@
   }
 
   async function loadExistingDocument(
-    targetWorkspaceId: ImportedWorkspaceId,
+    target: WorkspaceProviderTarget,
     skillId: SkillId,
     canCommit: () => boolean,
   ): Promise<boolean> {
-    const loaded = await loadSkillDoc(targetWorkspaceId, skillId);
+    const loaded = await loadSkillDoc(target, skillId);
     if (!canCommit()) return false;
     editorMode = "edit";
     document = loaded;
@@ -295,22 +337,26 @@
   }
 
   async function openExisting(skillId: string): Promise<void> {
-    if (busy || !workspaceId || !allowDiscard()) return;
+    if (busy || !workspaceId || !providerId || !allowDiscard()) return;
     const parsedSkillId = SkillIdSchema.safeParse(skillId);
     if (!parsedSkillId.success) {
       error = "The requested skill ID is invalid.";
       return;
     }
-    const targetWorkspaceId = workspaceId;
+    const target = { workspaceId, providerId };
     const request = documentRequests.issue();
     const restoreEditorFocus = mobileListOpen;
     resetDraft("edit");
     busy = true;
     try {
       const committed = await loadExistingDocument(
-        targetWorkspaceId,
+        target,
         parsedSkillId.data,
-        () => request.isCurrent() && mounted && workspaceId === targetWorkspaceId,
+        () =>
+          request.isCurrent() &&
+          mounted &&
+          workspaceId === target.workspaceId &&
+          providerId === target.providerId,
       );
       if (committed && restoreEditorFocus) await focusEditorAfterMobileSelection();
     } catch (cause) {
@@ -323,8 +369,8 @@
   }
 
   async function save(): Promise<void> {
-    if (!workspaceId || !name.trim() || !description.trim()) return;
-    const submittedWorkspaceId = workspaceId;
+    if (!workspaceId || !providerId || !name.trim() || !description.trim()) return;
+    const submittedTarget = { workspaceId, providerId };
     const submittedMode = editorMode;
     const submittedDocument = document;
     const submittedBody = body;
@@ -339,6 +385,7 @@
       input = {
         mode: "update",
         workspaceId: submittedDocument.workspaceId,
+        providerId: submittedDocument.providerId,
         skillId: submittedDocument.skillId,
         expectedRevision: submittedDocument.revision,
         frontmatter,
@@ -347,7 +394,7 @@
     } else {
       input = {
         mode: "create",
-        workspaceId: submittedWorkspaceId,
+        ...submittedTarget,
         directoryName: name.trim(),
         frontmatter,
         body: submittedBody,
@@ -355,7 +402,10 @@
     }
     const request = mutationRequests.issue();
     const canCommit = (): boolean =>
-      request.isCurrent() && mounted && workspaceId === submittedWorkspaceId;
+      request.isCurrent() &&
+      mounted &&
+      workspaceId === submittedTarget.workspaceId &&
+      providerId === submittedTarget.providerId;
     busy = true;
     error = null;
     notice = null;
@@ -369,7 +419,7 @@
           ? "Skill created and validated."
           : "Changes saved and validated."
         : `Saved with ${result.validation.errors.length} validation issue(s).`;
-      await Promise.all([loadSkills(submittedWorkspaceId), loadWorkspaces()]);
+      await Promise.all([loadSkills(submittedTarget), loadWorkspaces()]);
       if (!canCommit()) return;
       markBaseline();
     } catch (cause) {
@@ -380,24 +430,27 @@
   }
 
   async function removeCurrent(): Promise<void> {
-    const currentWorkspaceId = workspaceId;
+    const currentTarget = workspaceId && providerId ? { workspaceId, providerId } : null;
     const currentDocument = document;
     if (
       busy ||
       !currentDocument ||
-      !currentWorkspaceId ||
+      !currentTarget ||
       !globalThis.confirm(`Delete ${currentDocument.frontmatter.name} and its resource directory?`)
     )
       return;
     const request = mutationRequests.issue();
     const canCommit = (): boolean =>
-      request.isCurrent() && mounted && workspaceId === currentWorkspaceId;
+      request.isCurrent() &&
+      mounted &&
+      workspaceId === currentTarget.workspaceId &&
+      providerId === currentTarget.providerId;
     busy = true;
     try {
       await removeSkill(currentDocument);
       if (!canCommit()) return;
       resetDraft("create");
-      await Promise.all([loadSkills(currentWorkspaceId), loadWorkspaces()]);
+      await Promise.all([loadSkills(currentTarget), loadWorkspaces()]);
       if (!canCommit()) return;
       markBaseline();
     } catch (cause) {
@@ -421,7 +474,7 @@
     <div class="creator-heading min-w-0">
       <h1 class="text-sm font-semibold">Creator</h1>
       <p class="truncate text-[10px] text-muted-foreground">
-        {selectedWorkspace?.path ?? "Import a writable workspace to begin"}
+        {selectedTarget?.provider.path ?? "Choose a writable Workspace Provider to begin"}
       </p>
     </div>
     <div class="creator-toolbar ml-auto flex min-w-0 items-center gap-1.5">
@@ -433,13 +486,13 @@
               size="sm"
               class="creator-workspace-select h-8 max-w-48 gap-1.5"
               disabled={busy}
-              ><span class="truncate">{selectedWorkspace?.label ?? "Choose workspace"}</span
+              ><span class="truncate">{selectedTarget?.label ?? "Choose Provider"}</span
               ><IconChevron class="h-3.5 w-3.5" /></Button
             >{/snippet}
         </DropdownMenu.Trigger>
         <DropdownMenu.Content
-          >{#each workspaces as workspace}<DropdownMenu.Item
-              onclick={() => chooseWorkspace(workspace.id)}>{workspace.label}</DropdownMenu.Item
+          >{#each targets as target}<DropdownMenu.Item onclick={() => chooseTarget(target.target)}
+              >{target.label}</DropdownMenu.Item
             >{/each}</DropdownMenu.Content
         >
       </DropdownMenu.Root>
@@ -481,7 +534,7 @@
         aria-label="Open existing skill"
         title="Open existing skill"
         onclick={showMobileList}
-        disabled={busy || !workspaceId}
+        disabled={busy || !workspaceId || !providerId}
       >
         <IconFolderOpen class="h-4 w-4" />
       </Button>
@@ -500,6 +553,7 @@
         onclick={save}
         disabled={busy ||
           !workspaceId ||
+          !providerId ||
           !name.trim() ||
           !description.trim() ||
           (editorMode === "edit" && !document)}
@@ -524,12 +578,13 @@
       {notice}
     </div>{/if}
 
-  {#if workspaces.length === 0}
+  {#if targets.length === 0}
     <div class="flex flex-1 items-center justify-center p-8 text-center">
       <div>
-        <p class="text-sm font-medium">Creator needs a writable workspace</p>
+        <p class="text-sm font-medium">Creator needs a writable Workspace Provider</p>
         <p class="mt-1 text-xs text-muted-foreground">
-          Import a directory from the sidebar, then create or edit skills here.
+          Choose an Agent Provider in Global Workspace or import a directory, then create or edit
+          skills here.
         </p>
       </div>
     </div>

@@ -1,5 +1,5 @@
 /**
- * 原始需求 [2026-07-14]：「我们还需要一个 `/repository/`，来支持远程仓库预览 skills 并安装 它们」。
+ * 原始需求 [2026-07-22]：「下载到某个 Workspace.provider；另外这里应该要能多选。」
  * 正交意图：
  * 1. 将扫描会话固定到不可变 Git commit。
  * 2. 以不透明 ID 标识发现的技能。
@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import { SkillIdSchema } from "./skills.js";
-import { ImportedWorkspaceIdSchema } from "./workspaces.js";
+import { WorkspaceProviderTargetSchema } from "./workspaces.js";
 
 /** 固定仓库扫描快照的、不透明会话 ID。 */
 export const RepositorySessionIdSchema = z
@@ -59,6 +59,7 @@ export const RemoteSkillPreviewSchema = z.object({
 export type RemoteSkillPreview = z.infer<typeof RemoteSkillPreviewSchema>;
 
 const InstallResultEntryBaseSchema = z.object({
+  target: WorkspaceProviderTargetSchema,
   skill: z.string(),
   destination: z.string(),
   path: z.string(),
@@ -89,7 +90,7 @@ export type InstallResultEntry = z.infer<typeof InstallResultEntrySchema>;
 /** 实际安装操作的聚合结果。 */
 export const InstallSummarySchema = z.object({
   kind: z.literal("result"),
-  workspaceId: ImportedWorkspaceIdSchema,
+  targets: z.array(WorkspaceProviderTargetSchema).min(1),
   results: z.array(InstallResultEntrySchema),
   installed: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),
@@ -103,7 +104,9 @@ export type InstallSummary = z.infer<typeof InstallSummarySchema>;
 export const InstallPreviewSchema = z.object({
   kind: z.literal("preview"),
   skills: z.array(z.object({ name: z.string(), description: z.string() })),
-  destinations: z.array(z.object({ path: z.string(), exists: z.boolean() })),
+  destinations: z.array(
+    z.object({ target: WorkspaceProviderTargetSchema, path: z.string(), exists: z.boolean() }),
+  ),
   totalInstalls: z.number().int().nonnegative(),
 });
 /** dry-run 生成的目标路径预览。 */
@@ -121,7 +124,23 @@ export type InstallResult = z.infer<typeof InstallResultSchema>;
 export const RepositoryInstallInputSchema = z.object({
   sessionId: RepositorySessionIdSchema,
   skillIds: z.array(RemoteSkillIdSchema).min(1),
-  workspaceId: ImportedWorkspaceIdSchema,
+  targets: z
+    .array(WorkspaceProviderTargetSchema)
+    .min(1)
+    .superRefine((targets, context) => {
+      const seen = new Set<string>();
+      for (const [index, target] of targets.entries()) {
+        const key = `${target.workspaceId}:${target.providerId}`;
+        if (seen.has(key)) {
+          context.addIssue({
+            code: "custom",
+            message: "Install targets must be unique.",
+            path: [index],
+          });
+        }
+        seen.add(key);
+      }
+    }),
   force: z.boolean().optional(),
   dryRun: z.boolean().optional(),
 });

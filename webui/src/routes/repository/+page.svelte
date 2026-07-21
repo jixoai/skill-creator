@@ -1,17 +1,17 @@
 <script lang="ts">
   /**
-   * 正交意图（2026-07-14）
-   * 原始需求 [2026-07-14]：「我们还需要一个 `/repository/`，来支持远程仓库预览 skills 并安装 它们」。
+   * 正交意图（2026-07-22）
+   * 原始需求 [2026-07-22]：「下载到某个 Workspace.provider；另外这里应该要能多选。」
    * 1. 扫描并固定 Git commit，预览与安装复用同一快照。
-   * 2. 选择目标 workspace、冲突策略与 dry-run，再执行安装。
-   * 3. 以安装时的 workspace 身份呈现结果，并同步技能计数。
+   * 2. 多选 Workspace Provider 目标、冲突策略与 dry-run，再执行安装。
+   * 3. 以安装时的 Workspace Provider 身份呈现结果，并同步技能计数。
    * 4. 在窄屏显式切换技能列表与快照预览，始终保留返回路径。
    * 妥协声明：四项属于 Repository 单页连续任务；RPC 状态已拆入 store，继续拆散页面状态会破坏操作上下文。
    */
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { tick } from "svelte";
-  import { ImportedWorkspaceIdSchema } from "$shared/contracts/workspaces.js";
+  import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
   import { Button } from "$lib/components/ui/button";
   import { Checkbox } from "$lib/components/ui/checkbox";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
@@ -25,9 +25,9 @@
     previewRemoteSkill,
     repositoryState,
     scanRemoteRepo,
-    writableWorkspaces,
+    writableWorkspaceProviders,
   } from "$lib/store.svelte";
-  import type { ImportedWorkspaceId, InstallResult, RemoteSkillId, SkillId } from "$lib/types";
+  import type { InstallResult, RemoteSkillId, SkillId, WorkspaceProviderTarget } from "$lib/types";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconAlert from "@lucide/svelte/icons/triangle-alert";
   import IconCheck from "@lucide/svelte/icons/circle-check";
@@ -41,25 +41,33 @@
 
   let source = $state("");
   let ref = $state("");
+  let targetQuery = $state("");
   interface InstallOutcome {
     result: InstallResult;
-    workspaceLabel: string;
+    destinationLabel: string;
   }
 
-  let workspaceId = $state<ImportedWorkspaceId | null>(null);
+  let selectedTargetKeys = $state<Set<string>>(new Set());
   let selectedIds = $state<Set<RemoteSkillId>>(new Set());
   let selectedPreviewId = $state<RemoteSkillId | null>(null);
   let force = $state(false);
   let outcome = $state<InstallOutcome | null>(null);
   let initialized = $state(false);
-  let appliedRouteWorkspace = "";
+  let appliedRouteTargets = "";
   let actionError = $state<string | null>(null);
   let mobilePreviewOpen = $state(false);
   let previewTrigger = $state<HTMLButtonElement | null>(null);
   let mobilePreviewHeading = $state<HTMLElement | null>(null);
 
-  let workspaces = $derived(writableWorkspaces());
-  let targetWorkspace = $derived(workspaces.find((workspace) => workspace.id === workspaceId));
+  let targets = $derived(writableWorkspaceProviders());
+  let filteredTargets = $derived(
+    targets.filter((target) =>
+      target.label.toLowerCase().includes(targetQuery.trim().toLowerCase()),
+    ),
+  );
+  let selectedTargets = $derived(
+    targets.filter((target) => selectedTargetKeys.has(targetKey(target.target))),
+  );
   let scan = $derived(repositoryState.scan);
   let preview = $derived(repositoryState.preview);
   let selectedPreview = $derived(
@@ -67,13 +75,20 @@
   );
   let reviewTargets = $derived.by(() => {
     if (!outcome || outcome.result.kind !== "result") return [];
-    const targets = new Map<SkillId, string>();
+    const targets = new Map<
+      string,
+      { skillId: SkillId; name: string; target: WorkspaceProviderTarget }
+    >();
     for (const entry of outcome.result.results) {
       if (entry.status === "installed" || entry.status === "overwritten") {
-        targets.set(entry.skillId, entry.skill);
+        targets.set(`${targetKey(entry.target)}:${entry.skillId}`, {
+          skillId: entry.skillId,
+          name: entry.skill,
+          target: entry.target,
+        });
       }
     }
-    return [...targets].map(([skillId, name]) => ({ skillId, name }));
+    return [...targets.values()];
   });
 
   $effect(() => {
@@ -87,23 +102,24 @@
   });
 
   $effect(() => {
-    const requestedValue = page.url.searchParams.get("workspace") ?? "";
-    const availableWorkspaces = workspaces;
+    const requestedValue = page.url.searchParams.get("targets") ?? "";
+    const availableTargets = targets;
     if (connectionState.status !== "connected" || !initialized) return;
-    if (availableWorkspaces.length === 0) {
-      workspaceId = null;
-      return;
+    if (appliedRouteTargets === requestedValue) return;
+    const next = new Set<string>();
+    for (const source of requestedValue.split(",").filter(Boolean)) {
+      const delimiter = source.lastIndexOf(":");
+      if (delimiter < 1) continue;
+      const workspaceId = WorkspaceIdSchema.safeParse(source.slice(0, delimiter));
+      const providerId = ProviderIdSchema.safeParse(source.slice(delimiter + 1));
+      if (!workspaceId.success || !providerId.success) continue;
+      const target = { workspaceId: workspaceId.data, providerId: providerId.data };
+      if (availableTargets.some((candidate) => targetKey(candidate.target) === targetKey(target))) {
+        next.add(targetKey(target));
+      }
     }
-
-    const targetStillAvailable = availableWorkspaces.some(
-      (workspace) => workspace.id === workspaceId,
-    );
-    if (appliedRouteWorkspace === requestedValue && targetStillAvailable) return;
-    const requested = ImportedWorkspaceIdSchema.safeParse(requestedValue);
-    workspaceId =
-      availableWorkspaces.find((workspace) => workspace.id === requested.data)?.id ??
-      availableWorkspaces[0].id;
-    appliedRouteWorkspace = requestedValue;
+    selectedTargetKeys = next;
+    appliedRouteTargets = requestedValue;
   });
 
   async function scanRepository(): Promise<void> {
@@ -145,29 +161,46 @@
     selectedIds = selectedIds.size === installable.length ? new Set() : new Set(installable);
   }
 
+  function targetKey(target: WorkspaceProviderTarget): string {
+    return `${target.workspaceId}:${target.providerId}`;
+  }
+
+  function toggleTarget(target: WorkspaceProviderTarget): void {
+    const next = new Set(selectedTargetKeys);
+    const key = targetKey(target);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    selectedTargetKeys = next;
+  }
+
   async function install(dryRun: boolean): Promise<void> {
-    const submittedWorkspaceId = workspaceId;
-    const submittedWorkspace = workspaces.find(
-      (workspace) => workspace.id === submittedWorkspaceId,
-    );
-    if (!submittedWorkspaceId || !submittedWorkspace || selectedIds.size === 0) return;
+    const submittedTargets = selectedTargets.map((target) => target.target);
+    if (submittedTargets.length === 0 || selectedIds.size === 0) return;
     const submittedSkillIds = [...selectedIds];
     actionError = null;
     outcome = null;
     try {
       const result = await installRemoteSkills({
         skillIds: submittedSkillIds,
-        workspaceId: submittedWorkspaceId,
+        targets: submittedTargets,
         force,
         dryRun,
       });
       if (!result) return;
-      if (result.kind === "result" && result.workspaceId !== submittedWorkspaceId) {
-        throw new Error("The daemon returned an install result for a different Workspace.");
+      if (
+        result.kind === "result" &&
+        result.targets.some(
+          (target) =>
+            !submittedTargets.some((candidate) => targetKey(candidate) === targetKey(target)),
+        )
+      ) {
+        throw new Error(
+          "The daemon returned an install result for an unexpected Workspace Provider.",
+        );
       }
       outcome = {
         result,
-        workspaceLabel: submittedWorkspace.label,
+        destinationLabel: selectedTargets.map((target) => target.label).join(", "),
       };
       if (!dryRun && result.kind === "result") await loadWorkspaces();
     } catch (cause) {
@@ -175,10 +208,10 @@
     }
   }
 
-  function creatorReviewUrl(skillId: SkillId): string {
-    if (!outcome || outcome.result.kind !== "result") return "/creator";
+  function creatorReviewUrl(target: WorkspaceProviderTarget, skillId: SkillId): string {
     const search = new URLSearchParams({
-      workspace: outcome.result.workspaceId,
+      workspace: target.workspaceId,
+      provider: target.providerId,
       skill: skillId,
     });
     return `/creator?${search.toString()}`;
@@ -244,13 +277,13 @@
       <span class="min-w-0">
         {#if outcome.result.kind === "preview"}Preview: {outcome.result.totalInstalls} installation(s)
           into
-          {outcome.workspaceLabel}.{:else}Installation result for {outcome.workspaceLabel}: {outcome
+          {outcome.destinationLabel}.{:else}Installation result for {outcome.destinationLabel}: {outcome
             .result.installed} installed; {outcome.result.overwritten} overwritten; {outcome.result
             .skipped} skipped; {outcome.result.failed} failed.{/if}
       </span>
       {#if reviewTargets.length === 1}
         <Button
-          href={creatorReviewUrl(reviewTargets[0].skillId)}
+          href={creatorReviewUrl(reviewTargets[0].target, reviewTargets[0].skillId)}
           variant="outline"
           size="sm"
           class="repository-outcome-action h-7 gap-1.5"
@@ -270,9 +303,15 @@
               </Button>{/snippet}
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="end" class="max-w-64">
-            {#each reviewTargets as target (target.skillId)}
-              <DropdownMenu.Item onclick={() => goto(creatorReviewUrl(target.skillId))}>
-                <IconPen class="h-3.5 w-3.5" /><span class="truncate">{target.name}</span>
+            {#each reviewTargets as target (`${targetKey(target.target)}:${target.skillId}`)}
+              <DropdownMenu.Item
+                onclick={() => goto(creatorReviewUrl(target.target, target.skillId))}
+              >
+                <IconPen class="h-3.5 w-3.5" /><span class="truncate"
+                  >{target.name} · {targets.find(
+                    (candidate) => targetKey(candidate.target) === targetKey(target.target),
+                  )?.label ?? target.target.providerId}</span
+                >
               </DropdownMenu.Item>
             {/each}
           </DropdownMenu.Content>
@@ -351,15 +390,40 @@
                 size="sm"
                 class="repository-destination h-8 w-full justify-between"
                 disabled={repositoryState.installing}
-                ><span class="truncate">{targetWorkspace?.label ?? "Choose destination"}</span
+                ><span class="truncate"
+                  >{selectedTargets.length === 0
+                    ? "Choose destinations"
+                    : selectedTargets.length === 1
+                      ? selectedTargets[0]?.label
+                      : `${selectedTargets.length} destinations`}</span
                 ><IconChevron class="h-3.5 w-3.5" /></Button
               >{/snippet}</DropdownMenu.Trigger
           >
-          <DropdownMenu.Content
-            >{#each workspaces as workspace}<DropdownMenu.Item
-                onclick={() => (workspaceId = workspace.id)}>{workspace.label}</DropdownMenu.Item
-              >{/each}</DropdownMenu.Content
-          >
+          <DropdownMenu.Content align="end" class="w-80 max-h-72 overflow-y-auto p-1">
+            <div
+              role="presentation"
+              class="sticky top-0 z-10 bg-popover pb-1"
+              onkeydown={(event) => event.stopPropagation()}
+            >
+              <Input
+                aria-label="Filter destinations"
+                class="h-8"
+                bind:value={targetQuery}
+                placeholder="Filter destinations"
+              />
+            </div>
+            {#each filteredTargets as target (targetKey(target.target))}
+              <DropdownMenu.CheckboxItem
+                checked={selectedTargetKeys.has(targetKey(target.target))}
+                closeOnSelect={false}
+                onCheckedChange={() => toggleTarget(target.target)}
+                >{target.label}</DropdownMenu.CheckboxItem
+              >
+            {/each}
+            {#if filteredTargets.length === 0}
+              <DropdownMenu.Item disabled>No matching destinations</DropdownMenu.Item>
+            {/if}
+          </DropdownMenu.Content>
         </DropdownMenu.Root>
         <label class="repository-force flex items-center justify-between text-xs"
           ><span>Overwrite conflicts</span><Switch
@@ -372,13 +436,17 @@
             variant="outline"
             size="sm"
             class="repository-install-action h-8"
-            disabled={!workspaceId || selectedIds.size === 0 || repositoryState.installing}
+            disabled={selectedTargets.length === 0 ||
+              selectedIds.size === 0 ||
+              repositoryState.installing}
             onclick={() => install(true)}>Preview</Button
           >
           <Button
             size="sm"
             class="repository-install-action h-8 gap-1.5"
-            disabled={!workspaceId || selectedIds.size === 0 || repositoryState.installing}
+            disabled={selectedTargets.length === 0 ||
+              selectedIds.size === 0 ||
+              repositoryState.installing}
             onclick={() => install(false)}
             >{#if repositoryState.installing}<IconLoader
                 class="h-3.5 w-3.5 animate-spin"

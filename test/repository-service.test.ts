@@ -29,13 +29,18 @@ import {
 } from "../src/daemon/repository-service.js";
 import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
-import type { ImportedWorkspace } from "../src/shared/contracts/workspaces.js";
+import {
+  ProviderIdSchema,
+  type ImportedWorkspace,
+  type WorkspaceProviderTarget,
+} from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
 let sandbox = "";
 let repository = "";
 let domain: DaemonDomain;
+const openClawProviderId = ProviderIdSchema.parse("openclaw");
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-repository-test-"));
@@ -88,13 +93,21 @@ function commit(message: string): string {
 }
 
 function importDestination(): ImportedWorkspace {
-  const destination = path.join(sandbox, "destination");
+  return importWorkspace("destination", "Destination");
+}
+
+function importWorkspace(directoryName: string, label: string): ImportedWorkspace {
+  const destination = path.join(sandbox, directoryName);
   fs.mkdirSync(destination, { recursive: true });
-  return domain.workspaces.import(destination, "Destination");
+  return domain.workspaces.import(destination, label);
 }
 
 function directoryPath(workspace: ImportedWorkspace): string {
-  return workspace.path;
+  return path.join(workspace.path, "skills");
+}
+
+function target(workspace: ImportedWorkspace): WorkspaceProviderTarget {
+  return { workspaceId: workspace.id, providerId: openClawProviderId };
 }
 
 describe("repository service", () => {
@@ -121,13 +134,15 @@ describe("repository service", () => {
     const dryRun = await domain.repository.install({
       sessionId: scan.sessionId,
       skillIds: [selected.id],
-      workspaceId: destination.id,
+      targets: [target(destination)],
       dryRun: true,
     });
     expect(dryRun).toEqual({
       kind: "preview",
       skills: [{ name: "reviewed", description: "Install the reviewed revision." }],
-      destinations: [{ path: fs.realpathSync(destinationPath), exists: true }],
+      destinations: [
+        { target: target(destination), path: fs.realpathSync(destinationPath), exists: true },
+      ],
       totalInstalls: 1,
     });
     expect(fs.existsSync(path.join(destinationPath, "reviewed"))).toBe(false);
@@ -147,15 +162,15 @@ describe("repository service", () => {
     const installed = await domain.repository.install({
       sessionId: scan.sessionId,
       skillIds: [selected.id],
-      workspaceId: destination.id,
+      targets: [target(destination)],
     });
     expect(installed).toMatchObject({
       kind: "result",
-      workspaceId: destination.id,
+      targets: [target(destination)],
       installed: 1,
       failed: 0,
     });
-    const localSkill = (await domain.skills.list(destination.id, true)).find(
+    const localSkill = (await domain.skills.list(target(destination), true)).find(
       (skill) => skill.directoryName === "reviewed",
     );
     if (!localSkill) throw new Error("Expected Workspace discovery to expose the installed skill.");
@@ -184,7 +199,7 @@ describe("repository service", () => {
     const dryRun = await domain.repository.install({
       sessionId: scan.sessionId,
       skillIds: scan.skills.map((skill) => skill.id),
-      workspaceId: destination.id,
+      targets: [target(destination)],
       dryRun: true,
     });
 
@@ -194,10 +209,55 @@ describe("repository service", () => {
         { name: "alpha", description: "Install alpha." },
         { name: "beta", description: "Install beta." },
       ],
-      destinations: [{ path: fs.realpathSync(destinationPath), exists: true }],
+      destinations: [
+        { target: target(destination), path: fs.realpathSync(destinationPath), exists: true },
+      ],
       totalInstalls: 2,
     });
     expect(fs.readdirSync(destinationPath)).toEqual([]);
+  });
+
+  it("installs each selected skill into every selected Workspace Provider", async () => {
+    writeSkill("shared", "shared", "Install into each target.", "# Shared\n");
+    commit("add multi-target skill");
+    const first = importWorkspace("first-target", "First target");
+    const second = importWorkspace("second-target", "Second target");
+    const scan = await domain.repository.scan(repository);
+    const selected = scan.skills[0];
+    if (!selected) throw new Error("Expected the multi-target fixture.");
+
+    const preview = await domain.repository.install({
+      sessionId: scan.sessionId,
+      skillIds: [selected.id],
+      targets: [target(first), target(second)],
+      dryRun: true,
+    });
+    expect(preview).toMatchObject({
+      kind: "preview",
+      destinations: [
+        { target: target(first), path: directoryPath(first), exists: true },
+        { target: target(second), path: directoryPath(second), exists: true },
+      ],
+      totalInstalls: 2,
+    });
+
+    const installed = await domain.repository.install({
+      sessionId: scan.sessionId,
+      skillIds: [selected.id],
+      targets: [target(first), target(second)],
+    });
+    expect(installed).toMatchObject({
+      kind: "result",
+      targets: [target(first), target(second)],
+      installed: 2,
+      failed: 0,
+    });
+    await expect(domain.skills.list(target(first))).resolves.toMatchObject([
+      expect.objectContaining({ directoryName: "shared" }),
+    ]);
+    await expect(domain.skills.list(target(second))).resolves.toMatchObject([
+      expect.objectContaining({ directoryName: "shared" }),
+    ]);
   });
 
   it("treats an incompatible installer dry-run result as an empty preview", async () => {
@@ -224,7 +284,7 @@ describe("repository service", () => {
         service.install({
           sessionId: scan.sessionId,
           skillIds: [selected.id],
-          workspaceId: destination.id,
+          targets: [target(destination)],
           dryRun: true,
         }),
       ).resolves.toEqual({ kind: "preview", skills: [], destinations: [], totalInstalls: 0 });
@@ -244,7 +304,7 @@ describe("repository service", () => {
     const installed = await domain.repository.install({
       sessionId: scan.sessionId,
       skillIds: [selected.id],
-      workspaceId: destination.id,
+      targets: [target(destination)],
     });
     if (installed.kind !== "result") throw new Error("Expected an actual install result.");
     const installedEntry = installed.results[0];
@@ -255,12 +315,12 @@ describe("repository service", () => {
     const overwritten = await domain.repository.install({
       sessionId: scan.sessionId,
       skillIds: [selected.id],
-      workspaceId: destination.id,
+      targets: [target(destination)],
       force: true,
     });
     expect(overwritten).toMatchObject({
       kind: "result",
-      workspaceId: destination.id,
+      targets: [target(destination)],
       installed: 0,
       overwritten: 1,
     });
@@ -275,10 +335,11 @@ describe("repository service", () => {
     writeSkill("skip-me", "skip-me", "Skip this skill.", "# Skip\n");
     writeSkill("fail-me", "fail-me", "Fail this skill.", "# Fail\n");
     commit("add non-successful install fixtures");
-    const destinationPath = path.join(sandbox, "status-destination");
-    fs.mkdirSync(destinationPath);
+    const workspaceDirectory = path.join(sandbox, "status-destination");
+    const destinationPath = path.join(workspaceDirectory, "skills");
+    fs.mkdirSync(destinationPath, { recursive: true });
     const workspaces = createWorkspaceRegistry();
-    const destination = workspaces.import(destinationPath, "Status destination");
+    const destination = workspaces.import(workspaceDirectory, "Status destination");
     const installer: RepositoryInstaller = async (options) => {
       const skill = path.basename(options.path ?? "unknown");
       const status: "skipped" | "failed" = skill === "skip-me" ? "skipped" : "failed";
@@ -307,12 +368,12 @@ describe("repository service", () => {
       const result = await service.install({
         sessionId: scan.sessionId,
         skillIds: scan.skills.map((skill) => skill.id),
-        workspaceId: destination.id,
+        targets: [target(destination)],
       });
 
       expect(result).toMatchObject({
         kind: "result",
-        workspaceId: destination.id,
+        targets: [target(destination)],
         installed: 0,
         skipped: 1,
         overwritten: 0,
@@ -329,9 +390,10 @@ describe("repository service", () => {
   it("converts a successful installer result outside its Workspace into a safe failure", async () => {
     writeSkill("escaped", "escaped", "Do not trust its result path.", "# Escaped\n");
     commit("add escaped install fixture");
-    const destinationPath = path.join(sandbox, "bounded-destination");
+    const workspaceDirectory = path.join(sandbox, "bounded-destination");
+    const destinationPath = path.join(workspaceDirectory, "skills");
     const escapedPath = path.join(sandbox, "outside-workspace", "escaped");
-    fs.mkdirSync(destinationPath);
+    fs.mkdirSync(destinationPath, { recursive: true });
     fs.mkdirSync(escapedPath, { recursive: true });
     fs.writeFileSync(
       path.join(escapedPath, "SKILL.md"),
@@ -339,7 +401,7 @@ describe("repository service", () => {
       "utf8",
     );
     const workspaces = createWorkspaceRegistry();
-    const destination = workspaces.import(destinationPath, "Bounded destination");
+    const destination = workspaces.import(workspaceDirectory, "Bounded destination");
     const installer: RepositoryInstaller = async () => ({
       results: [
         {
@@ -365,7 +427,7 @@ describe("repository service", () => {
       const result = await service.install({
         sessionId: scan.sessionId,
         skillIds: [selected.id],
-        workspaceId: destination.id,
+        targets: [target(destination)],
       });
       if (result.kind !== "result") throw new Error("Expected an actual install result.");
       expect(result).toMatchObject({ installed: 0, failed: 1 });
@@ -386,11 +448,12 @@ describe("repository service", () => {
   it("does not sign a sibling skill identity for a selected remote skill", async () => {
     writeSkill("alpha", "alpha", "Install alpha.", "# Alpha\n");
     commit("add alpha skill");
-    const destinationPath = path.join(sandbox, "sibling-destination");
+    const workspaceDirectory = path.join(sandbox, "sibling-destination");
+    const destinationPath = path.join(workspaceDirectory, "skills");
     const siblingPath = path.join(destinationPath, "beta");
     writeSkillDocument(siblingPath, "beta", "A pre-existing sibling.", "# Beta\n");
     const workspaces = createWorkspaceRegistry();
-    const destination = workspaces.import(destinationPath, "Sibling destination");
+    const destination = workspaces.import(workspaceDirectory, "Sibling destination");
     const skills = createSkillService(workspaces);
     const installer: RepositoryInstaller = async () => ({
       results: [
@@ -415,7 +478,7 @@ describe("repository service", () => {
       const result = await service.install({
         sessionId: scan.sessionId,
         skillIds: [alpha.id],
-        workspaceId: destination.id,
+        targets: [target(destination)],
       });
       if (result.kind !== "result") throw new Error("Expected an actual install result.");
       expect(result).toMatchObject({ installed: 0, failed: 1 });
@@ -425,7 +488,7 @@ describe("repository service", () => {
         status: "failed",
       });
       expect(result.results[0]).not.toHaveProperty("skillId");
-      expect((await skills.list(destination.id)).map((skill) => skill.directoryName)).toEqual([
+      expect((await skills.list(target(destination))).map((skill) => skill.directoryName)).toEqual([
         "beta",
       ]);
     } finally {
@@ -437,10 +500,11 @@ describe("repository service", () => {
     writeSkill("alpha", "alpha", "Install alpha.", "# Alpha\n");
     writeSkill("beta", "beta", "Install beta.", "# Beta\n");
     commit("add install validation fixtures");
-    const destinationPath = path.join(sandbox, "validation-destination");
-    fs.mkdirSync(destinationPath);
+    const workspaceDirectory = path.join(sandbox, "validation-destination");
+    const destinationPath = path.join(workspaceDirectory, "skills");
+    fs.mkdirSync(destinationPath, { recursive: true });
     const workspaces = createWorkspaceRegistry();
-    const destination = workspaces.import(destinationPath, "Validation destination");
+    const destination = workspaces.import(workspaceDirectory, "Validation destination");
     const skills = createSkillService(workspaces);
     const installer: RepositoryInstaller = async (options) => {
       const name = path.basename(options.path ?? "");
@@ -480,13 +544,13 @@ describe("repository service", () => {
       const result = await service.install({
         sessionId: scan.sessionId,
         skillIds: [alpha.id, beta.id],
-        workspaceId: destination.id,
+        targets: [target(destination)],
       });
       if (result.kind !== "result") throw new Error("Expected an actual install result.");
       expect(result).toMatchObject({ installed: 1, failed: 1 });
       const installed = result.results.find((entry) => entry.status === "installed");
       const failed = result.results.find((entry) => entry.status === "failed");
-      const discoveredAlpha = (await skills.list(destination.id)).find(
+      const discoveredAlpha = (await skills.list(target(destination))).find(
         (skill) => skill.directoryName === "alpha",
       );
       expect(installed).toMatchObject({ skill: "alpha", skillId: discoveredAlpha?.id });
@@ -505,10 +569,11 @@ describe("repository service", () => {
     writeSkill("alpha", "alpha", "Install alpha.", "# Alpha\n");
     writeSkill("beta", "beta", "Install beta.", "# Beta\n");
     commit("add installer failure fixtures");
-    const destinationPath = path.join(sandbox, "throwing-destination");
-    fs.mkdirSync(destinationPath);
+    const workspaceDirectory = path.join(sandbox, "throwing-destination");
+    const destinationPath = path.join(workspaceDirectory, "skills");
+    fs.mkdirSync(destinationPath, { recursive: true });
     const workspaces = createWorkspaceRegistry();
-    const destination = workspaces.import(destinationPath, "Throwing destination");
+    const destination = workspaces.import(workspaceDirectory, "Throwing destination");
     const skills = createSkillService(workspaces);
     const installer: RepositoryInstaller = async (options) => {
       const name = path.basename(options.path ?? "");
@@ -540,7 +605,7 @@ describe("repository service", () => {
       const result = await service.install({
         sessionId: scan.sessionId,
         skillIds: [alpha.id, beta.id],
-        workspaceId: destination.id,
+        targets: [target(destination)],
       });
       if (result.kind !== "result") throw new Error("Expected an actual install result.");
       expect(result).toMatchObject({ installed: 1, failed: 1 });
@@ -557,10 +622,11 @@ describe("repository service", () => {
     writeSkill("alpha", "alpha", "Install alpha.", "# Alpha\n");
     writeSkill("beta", "beta", "Install beta.", "# Beta\n");
     commit("add malformed installer result fixtures");
-    const destinationPath = path.join(sandbox, "malformed-result-destination");
-    fs.mkdirSync(destinationPath);
+    const workspaceDirectory = path.join(sandbox, "malformed-result-destination");
+    const destinationPath = path.join(workspaceDirectory, "skills");
+    fs.mkdirSync(destinationPath, { recursive: true });
     const workspaces = createWorkspaceRegistry();
-    const destination = workspaces.import(destinationPath, "Malformed result destination");
+    const destination = workspaces.import(workspaceDirectory, "Malformed result destination");
     const skills = createSkillService(workspaces);
     const installer: RepositoryInstaller = async (options) => {
       const name = path.basename(options.path ?? "");
@@ -598,7 +664,7 @@ describe("repository service", () => {
       const result = await service.install({
         sessionId: scan.sessionId,
         skillIds: [alpha.id, beta.id],
-        workspaceId: destination.id,
+        targets: [target(destination)],
       });
       if (result.kind !== "result") throw new Error("Expected an actual install result.");
       expect(result).toMatchObject({ installed: 1, failed: 1 });
@@ -616,10 +682,11 @@ describe("repository service", () => {
     async () => {
       writeSkill("linked", "linked", "Reject linked skill files.", "# Linked\n");
       commit("add linked skill fixture");
-      const destinationPath = path.join(sandbox, "linked-skill-destination");
-      fs.mkdirSync(destinationPath);
+      const workspaceDirectory = path.join(sandbox, "linked-skill-destination");
+      const destinationPath = path.join(workspaceDirectory, "skills");
+      fs.mkdirSync(destinationPath, { recursive: true });
       const workspaces = createWorkspaceRegistry();
-      const destination = workspaces.import(destinationPath, "Linked skill destination");
+      const destination = workspaces.import(workspaceDirectory, "Linked skill destination");
       const skills = createSkillService(workspaces);
       const installer: RepositoryInstaller = async (options) => {
         const name = path.basename(options.path ?? "");
@@ -655,7 +722,7 @@ describe("repository service", () => {
         const result = await service.install({
           sessionId: scan.sessionId,
           skillIds: [linked.id],
-          workspaceId: destination.id,
+          targets: [target(destination)],
         });
         if (result.kind !== "result") throw new Error("Expected an actual install result.");
         expect(result).toMatchObject({ installed: 0, failed: 1 });
@@ -688,7 +755,7 @@ describe("repository service", () => {
       domain.repository.install({
         sessionId: scan.sessionId,
         skillIds: [unsafe.id],
-        workspaceId: destination.id,
+        targets: [target(destination)],
       }),
     ).rejects.toThrow("is not installable");
     expect(fs.existsSync(path.join(destinationPath, "unsafe"))).toBe(false);
@@ -705,9 +772,9 @@ describe("repository service", () => {
       domain.repository.install({
         sessionId: scan.sessionId,
         skillIds: ["rsk_000000000000000000000000"],
-        workspaceId: destination.id,
+        targets: [target(destination)],
       }),
     ).rejects.toThrow("Remote skill not found in scan session");
-    expect(fs.readdirSync(destinationPath)).toEqual([]);
+    expect(fs.existsSync(destinationPath)).toBe(false);
   });
 });

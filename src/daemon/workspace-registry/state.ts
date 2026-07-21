@@ -1,9 +1,9 @@
 /**
  * Persisted Workspace Registry state and pure transitions.
  *
- * User input [2026-07-15]: "按照你自己的节奏去推进开发迭代。"
- * Architecture decision [2026-07-15]: concurrent Workspace projections must
- * never overwrite a newer import, forget, or activation.
+ * User input [2026-07-22]: "home 目录定义为特殊的 GlobalWorkspace；一个 Workspace 下可以包含多个 providers。"
+ * Architecture decision [2026-07-22]: Provider roots are catalog projections,
+ * never a second persisted workspace registry.
  *
  * Orthogonal intents:
  *   [1] Define the strict, count-free persisted registry state.
@@ -12,7 +12,7 @@
 import path from "node:path";
 import { z } from "zod";
 import {
-  HOME_WORKSPACE_ID,
+  GLOBAL_WORKSPACE_ID,
   ImportedWorkspaceIdSchema,
   WorkspaceIdSchema,
 } from "../../shared/contracts/workspaces.js";
@@ -34,7 +34,7 @@ export const StoredWorkspaceSchema = z
 /** Strict versioned Registry state with identity, uniqueness, and active-scope invariants. */
 export const WorkspaceRegistryStateSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     activeId: WorkspaceIdSchema,
     workspaces: z.array(StoredWorkspaceSchema),
   })
@@ -67,7 +67,7 @@ export const WorkspaceRegistryStateSchema = z
       ids.add(workspace.id);
       paths.add(workspace.path);
     }
-    if (state.activeId !== HOME_WORKSPACE_ID && !ids.has(state.activeId)) {
+    if (state.activeId !== GLOBAL_WORKSPACE_ID && !ids.has(state.activeId)) {
       context.addIssue({
         code: "custom",
         message: `Active Workspace is not registered: ${state.activeId}`,
@@ -81,9 +81,9 @@ export type StoredWorkspace = z.infer<typeof StoredWorkspaceSchema>;
 /** Complete authoritative Registry state. */
 export type WorkspaceRegistryState = z.infer<typeof WorkspaceRegistryStateSchema>;
 
-/** Construct an empty Registry with Home Workspace active. */
+/** Construct an empty Registry with Global Workspace active. */
 export function emptyRegistryState(): WorkspaceRegistryState {
-  return { schemaVersion: 1, activeId: HOME_WORKSPACE_ID, workspaces: [] };
+  return { schemaVersion: 2, activeId: GLOBAL_WORKSPACE_ID, workspaces: [] };
 }
 
 /** Return the immutable next state for an idempotent Workspace import. */
@@ -116,7 +116,7 @@ export function forgetWorkspace(
   if (!state.workspaces.some((workspace) => workspace.id === id)) return null;
   return {
     ...state,
-    activeId: state.activeId === id ? HOME_WORKSPACE_ID : state.activeId,
+    activeId: state.activeId === id ? GLOBAL_WORKSPACE_ID : state.activeId,
     workspaces: state.workspaces.filter((workspace) => workspace.id !== id),
   };
 }
@@ -126,7 +126,7 @@ export function activateWorkspace(
   state: WorkspaceRegistryState,
   id: WorkspaceRegistryState["activeId"],
 ): WorkspaceRegistryState | null {
-  if (id !== HOME_WORKSPACE_ID && !state.workspaces.some((workspace) => workspace.id === id)) {
+  if (id !== GLOBAL_WORKSPACE_ID && !state.workspaces.some((workspace) => workspace.id === id)) {
     return null;
   }
   if (state.activeId === id) return state;

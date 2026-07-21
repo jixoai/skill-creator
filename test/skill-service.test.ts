@@ -15,11 +15,19 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
-import { HOME_WORKSPACE_ID } from "../src/shared/contracts/workspaces.js";
+import {
+  GLOBAL_WORKSPACE_ID,
+  ProviderIdSchema,
+  type WorkspaceProviderTarget,
+} from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
 let sandbox = "";
+const codexTarget: WorkspaceProviderTarget = {
+  workspaceId: GLOBAL_WORKSPACE_ID,
+  providerId: ProviderIdSchema.parse("codex"),
+};
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-skill-service-test-"));
@@ -57,7 +65,7 @@ describe("skill service", () => {
       discoverSkills: async () => [discoveredSkill(validDirectory), { name: 42 }],
     });
 
-    await expect(skills.list(HOME_WORKSPACE_ID)).resolves.toMatchObject([
+    await expect(skills.list(codexTarget)).resolves.toMatchObject([
       { name: "valid-skill", path: fs.realpathSync(validDirectory) },
     ]);
   });
@@ -71,10 +79,10 @@ describe("skill service", () => {
       discoverSkills: async () => [discoveredSkill(validDirectory)],
       validateSkill: async () => ({ success: "yes" }),
     });
-    const [skill] = await skills.list(HOME_WORKSPACE_ID);
+    const [skill] = await skills.list(codexTarget);
     if (!skill) throw new Error("Expected the valid discovery fixture.");
 
-    await expect(skills.validate(HOME_WORKSPACE_ID, skill.id)).resolves.toEqual({
+    await expect(skills.validate(codexTarget, skill.id)).resolves.toEqual({
       skillId: skill.id,
       name: skill.name,
       success: false,

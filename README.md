@@ -3,6 +3,7 @@
 用户原始需求摘录：
 - 「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)，基于 ../ccski 这个 sdk 来快速搭建一个 skills 管理器。」
 - 「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace；创造、编辑技能的路由(/creator)；以及 `/repository/`。」
+- [2026-07-22]「home 目录定义为特殊的 GlobalWorkspace；一个 Workspace 下可以包含多个 providers；下载到某个 Workspace.provider，且能多选。」
 - 「继续迭代，大胆创新……以人为本，要让小白到各行各业到专业工程师用起来都舒心。」
 - [2026-07-15]「按照你自己的节奏去推进开发迭代。」
 - [2026-07-19]「我们已经不做 keepOnTop:true 的模式了。而是走 appMode:true 模式。所以走原生的窗口管理。」
@@ -20,7 +21,7 @@
 
 <h1 align="center">Skill Creator</h1>
 
-Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 daemon，daemon 通过 OpenTray 承载 Svelte WebUI，并以 ccski 发现、校验和安装 `SKILL.md` 技能。
+Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 daemon，daemon 通过 OpenTray 承载 Svelte WebUI，并以 ccski SDK 发现、校验和安装 `SKILL.md` 技能；Workspace/Provider 投影、权限边界和跨路由体验属于 Skill Creator，而不是 ccski。
 
 ```text
                                Skill Creator
@@ -41,26 +42,29 @@ Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 da
 
 ## 产品边界
 
-| Surface           | 责任                                                    | 写入边界                                                                           |
-| ----------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `/workspace`      | 索引 Home 与 Imported Workspace，提供导入与移除恢复入口 | Remove Workspace 只删除 registry entry，不删除用户目录                             |
-| `/workspace/[id]` | 发现、筛选、查看、校验、启用或禁用技能                  | 每次操作显式携带 Workspace ID                                                      |
-| `/workspace/~/`   | 聚合 ccski 的默认 Agent 技能位置                        | 当前用于管理现有技能，不作为 Creator 或 Repository 的安装目标                      |
-| `/creator`        | 在已导入 Workspace 中创建、加载、编辑和删除 `SKILL.md`  | workspace-only 预选新建目标；workspace+skill 加载编辑；更新和删除需要内容 revision |
-| `/repository`     | 扫描 Git 仓库、预览技能、dry-run、安装并复核结果        | 扫描会话固定到一个 commit；安装目标必须是已导入 Workspace                          |
+| Surface           | 责任                                                                  | 写入边界                                                                            |
+| ----------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `/workspace`      | 索引 Global 与 Imported Workspace，提供导入与移除恢复入口             | Remove Workspace 只删除 registry entry，不删除用户目录                              |
+| `/workspace/[id]` | 在一个 Workspace 的 Provider 中发现、筛选、查看、校验、启用或禁用技能 | 每次操作显式携带 Workspace ID + Provider ID                                         |
+| `/workspace/~/`   | 聚合各 Agent 的全局 skills roots                                      | 可读/可管理现有技能，不作为 Creator 或 Repository 的写入目标                        |
+| `/creator`        | 在已导入 Workspace.Provider 中创建、加载、编辑和删除 `SKILL.md`       | `workspace`+`provider` 预选新建；再加 `skill` 加载编辑；更新和删除需要内容 revision |
+| `/repository`     | 扫描 Git 仓库、预览技能、dry-run、多目标安装并复核结果                | 扫描会话固定到一个 commit；可多选已导入 Workspace.Provider 写入目标                 |
 
-Workspace 是所有技能操作的作用域。用户只在导入 Workspace 时提交目录路径；注册后，技能读写使用 daemon 生成的 opaque Workspace ID 和 Skill ID，不由 WebUI 拼接输出路径。
+Workspace 是技能作用域的第一层，Provider 是其中的 Agent skills root。Global Workspace（`~`）从社区 catalog 解析本机 Agent 全局目录；Imported Workspace 从其 canonical directory 派生每个 Provider 根目录。用户只在导入 Workspace 时提交目录路径；注册后，技能读写使用 daemon 验证的 `WorkspaceProviderTarget`、opaque Workspace ID 和 Skill ID，不由 WebUI 拼接输出路径。
+
+Provider catalog 是 [vercel-labs/skills](https://github.com/vercel-labs/skills) `src/agents.ts` 的审阅快照，运行时位于 `src/shared/provider-catalog.ts`。本地研究检出说明见 [references/README.md](references/README.md)；它不是运行时或发布依赖。
 
 ```text
 /creator
-   |-- no query -------------------------- blank draft in the first writable Workspace
-   |-- ?workspace=ws_* ------------------ blank draft in that Imported Workspace
-   `-- ?workspace=ws_*&skill=sk_* ------- revision-safe edit
+   |-- no query ----------------------------------- blank draft in the first writable Workspace.Provider
+   |-- ?workspace=ws_*&provider=<provider> -------- blank draft in that Imported Workspace.Provider
+   `-- ?workspace=ws_*&provider=<provider>&skill=sk_* -- revision-safe edit
 
 skill without workspace / invalid ID ---- redirect to canonical /creator
 
 Repository install
-   `-- written entry -> daemon-verified local Skill ID -> Review installed -> Creator edit
+   `-- selected skills x selected Workspace.Provider targets
+          -> daemon-verified local Skill IDs -> Review installed -> Creator edit
 ```
 
 ## 环境要求
@@ -179,7 +183,7 @@ explicit import path
  realpath + directory check --> ws_<digest> --> server registry
                                             |
 WebUI mutation -----------------------------+--> server resolves root
-   workspaceId + skillId                         |
+   workspaceId + providerId + skillId            |
                                                  +--> containment check
                                                  +--> atomic write
 
@@ -191,15 +195,15 @@ Git source + ref --> temporary clone --> commit SHA --> repo_<session>
 - HTTP 仅监听 `127.0.0.1`。`/api/health` 和静态 SPA 不执行文件系统 mutation。
 - daemon 每次启动生成 32-byte Web token。token 经 URL fragment 交给 WebUI，捕获到当前标签页的 `sessionStorage` 后从地址栏移除；`/ws/rpc` 在升级前校验 token。
 - IPC endpoint 是单例锁。macOS 上 runtime 目录权限为 `0700`、socket 为 `0600`；Windows 使用 `\\.\pipe\skill-creator-sock`。
-- Workspace、Skill、Repository Session 与 Remote Skill 均由 server 生成或验证 opaque ID。除 `workspace.add` 的显式导入和 `repository.scan` 的 Git source 外，mutation 不接受调用方输出路径。
+- Workspace、Provider、Skill、Repository Session 与 Remote Skill 均由 server 生成或验证的身份约束。除 `workspace.add` 的显式导入和 `repository.scan` 的 Git source 外，mutation 不接受调用方输出路径。
 - daemon 生命周期内只有一个内存 Workspace Registry。持久路径必须绝对且规范化，`ws_*` 必须与路径 digest 相符；导入、移除和切换先原子提交完整 next state，再替换内存状态。`skillCount` 与可用性只在读取时派生，永不写入 registry。
-- Creator 新建只允许已导入 Workspace 的直接子目录；编辑和删除必须仍在 Workspace 内。文档使用临时文件加 rename 原子落盘，update/delete 以 SHA-256 revision 拒绝陈旧操作。
+- Creator 新建只允许已导入 Workspace.Provider 的直接子目录；编辑和删除必须仍在该 Provider root 内。文档使用临时文件加 rename 原子落盘，update/delete 以 SHA-256 revision 拒绝陈旧操作。
 - Repository 扫描先 clone，再用 Zod 收窄 HEAD commit。预览和安装复用同一临时快照与 session ID；淘汰立即拒绝新操作，但会让已接受的安装持有快照直到完成。daemon stop 会终止 pending clone，且 late scan 不得重新登记 session。
-- Repository 安装不能指向 `~`；目标必须是存在且可写的 Imported Workspace。
-- Repository 安装汇总携带提交时的 Workspace ID；ccski installer output 先经 runtime schema 收窄，只有实际 `installed` / `overwritten` 且重新验证为 Workspace 直属、非符号链接 `SKILL.md` 目录的结果项会获得本地 Skill ID，供 Creator 复核。
+- Repository 安装不能指向 `~`；每个目标必须是一个已导入、可写的 Workspace.Provider。多选目标会得到逐 skill、逐目标的独立结果。
+- Repository 安装汇总携带提交时的 Workspace.Provider target；ccski installer output 先经 runtime schema 收窄，只有实际 `installed` / `overwritten` 且重新验证为 Provider root 直属、非符号链接 `SKILL.md` 目录的结果项会获得本地 Skill ID，供 Creator 复核。
 - daemon 在 tray mount 前发布 stop coordinator 与 signal listeners。stop 先关闭 HTTP/WebSocket 与 IPC admission，再并行回收 Repository、tray 与连接；mount 期间迟到的 native handles 会被立即销毁，非协作 socket 在 grace deadline 后强制关闭，并发 stop 合并为同一完成态。
 - 所有外部读取先解码为 `unknown`，再用当前 Zod schema `safeParse`。配置文件、未来数据库记录和第三方/网络返回中不兼容的快照按其领域投影为空，集合丢弃无效项，不能读取为安全空值的结果返回类型化失败；RPC/IPC、鉴权、路径和 mutation 输入仍明确拒绝，绝不降级为空。
-- 当前 v2 registry 没有旧 schema 的迁移层。JSON 语法错误或不符合当前 Zod schema 的旧状态整体按空值加载：不读取、不转换、不在加载时写回；下一次正常 workspace mutation 才原子提交当前 v1 状态。文件 I/O 错误仍拒绝启动并写入当前 home 下的 `.skill-creator/logs/daemon.log`。当前没有数据库实现；引入后数据库读取必须遵循同一投影法则。
+- 当前 v2 registry 没有旧 schema 的迁移层。JSON 语法错误或不符合当前 Zod schema 的旧状态整体按空值加载：不读取、不转换、不在加载时写回；下一次正常 workspace mutation 才原子提交当前 v2 状态。文件 I/O 错误仍拒绝启动并写入当前 home 下的 `.skill-creator/logs/daemon.log`。当前没有数据库实现；引入后数据库读取必须遵循同一投影法则。
 
 ## 状态路径
 

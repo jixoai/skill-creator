@@ -1,10 +1,16 @@
 /**
  * 原始需求 [2026-07-14]：「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace」。
  * 正交意图：
- * 1. 按最新请求代次投影 home 与导入 workspace 的导航状态。
+ * 1. 按最新请求代次投影 Global 与导入 Workspace 的导航状态。
  * 2. 编排 workspace 导入、移除与当前目标切换。
  */
-import type { ImportedWorkspace, Workspace, WorkspaceId } from "../types";
+import type {
+  ImportedWorkspace,
+  Workspace,
+  WorkspaceId,
+  WorkspaceProvider,
+  WorkspaceProviderTarget,
+} from "../types";
 import { ImportedWorkspaceIdSchema } from "$shared/contracts/workspaces.js";
 import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
@@ -15,7 +21,7 @@ const workspaceMutationRequests = createRequestGenerationGate(getConnectionGener
 /** 一次 Workspace 投影请求对调用方可见的终态。 */
 export type WorkspaceLoadOutcome = "loaded" | "superseded" | "failed";
 
-/** home 与导入 workspace 的全局导航状态。 */
+/** Global 与导入 Workspace 的全局导航状态。 */
 export const workspaceState = $state<{
   workspaces: Workspace[];
   activeId: WorkspaceId;
@@ -107,11 +113,37 @@ export function activeWorkspace(): Workspace | null {
   );
 }
 
-/** 返回可作为 Creator 或 Repository 目标的可写 workspace。 */
+/** 返回可作为 Creator 或 Repository 目标的可写 Imported Workspace。 */
 export function writableWorkspaces(): ImportedWorkspace[] {
   return workspaceState.workspaces.filter(isWritableWorkspace);
 }
 
 function isWritableWorkspace(workspace: Workspace): workspace is ImportedWorkspace {
   return workspace.kind === "directory" && workspace.available;
+}
+
+/** 已投影的可写 Workspace Provider 目的地。 */
+export interface WritableWorkspaceProvider {
+  target: WorkspaceProviderTarget;
+  workspace: Workspace;
+  provider: WorkspaceProvider;
+  label: string;
+}
+
+/** 展开 Imported Workspaces 的所有可写 Provider 目的地。 */
+export function writableWorkspaceProviders(): WritableWorkspaceProvider[] {
+  const targets: WritableWorkspaceProvider[] = [];
+  for (const workspace of workspaceState.workspaces) {
+    if (workspace.kind !== "directory" || !workspace.available) continue;
+    for (const provider of workspace.providers) {
+      if (!provider.writable) continue;
+      targets.push({
+        target: { workspaceId: workspace.id, providerId: provider.id },
+        workspace,
+        provider,
+        label: `${workspace.label} / ${provider.label}`,
+      });
+    }
+  }
+  return targets;
 }

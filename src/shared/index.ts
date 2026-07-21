@@ -12,6 +12,7 @@ export * from "./contracts/errors.js";
 export * from "./contracts/repository.js";
 export * from "./contracts/skills.js";
 export * from "./contracts/workspaces.js";
+export * from "./provider-catalog.js";
 export * from "./rpc-contract.js";
 export * from "./frame.js";
 

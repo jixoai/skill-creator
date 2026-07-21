@@ -1,9 +1,9 @@
 /**
- * 原始需求 [2026-07-14]：「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace」。
+ * 用户原始需求 [2026-07-22]：「一个 Workspace 下，是可以包含多个 providers 的。」
  * 正交意图：
- * 1. 按最新请求代次投影 workspace 范围内的技能列表与详情。
- * 2. 编排启停和校验命令。
- * 3. 派生查询过滤与统计数据。
+ *   [1] 按 Workspace Provider 对投影技能列表与详情。
+ *   [2] 编排同一 Provider 根目录内的启停和校验命令。
+ *   [3] 派生查询过滤与统计数据。
  */
 import type {
   SkillId,
@@ -11,7 +11,7 @@ import type {
   SkillMetadata,
   ToggleSummary,
   ValidateResult,
-  WorkspaceId,
+  WorkspaceProviderTarget,
 } from "../types";
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
@@ -21,9 +21,9 @@ const selectionRequests = createRequestGenerationGate(getConnectionGeneration);
 const mutationRequests = createRequestGenerationGate(getConnectionGeneration);
 const validationRequests = createRequestGenerationGate(getConnectionGeneration);
 
-/** 当前 workspace 的技能列表、选中项与加载状态。 */
+/** 当前 Workspace Provider 的技能列表、选中项与加载状态。 */
 export const skillsState = $state<{
-  workspaceId: WorkspaceId;
+  target: WorkspaceProviderTarget | null;
   skills: SkillMetadata[];
   selected: SkillInfo | null;
   loading: boolean;
@@ -31,7 +31,7 @@ export const skillsState = $state<{
   error: string | null;
   query: string;
 }>({
-  workspaceId: "~",
+  target: null,
   skills: [],
   selected: null,
   loading: false,
@@ -40,16 +40,14 @@ export const skillsState = $state<{
   query: "",
 });
 
-/** 加载指定 workspace 的完整技能列表。 */
-export async function loadSkills(
-  workspaceId: WorkspaceId = skillsState.workspaceId,
-): Promise<void> {
+/** 加载指定 Workspace Provider 的完整技能列表。 */
+export async function loadSkills(target: WorkspaceProviderTarget): Promise<void> {
   const request = listRequests.issue();
-  const canCommit = (): boolean => request.isCurrent() && skillsState.workspaceId === workspaceId;
-  const workspaceChanged = skillsState.workspaceId !== workspaceId;
-  if (workspaceChanged) {
+  const canCommit = (): boolean => request.isCurrent() && targetsEqual(skillsState.target, target);
+  const targetChanged = !targetsEqual(skillsState.target, target);
+  if (targetChanged) {
     selectionRequests.invalidate();
-    skillsState.workspaceId = workspaceId;
+    skillsState.target = target;
     skillsState.skills = [];
     skillsState.selected = null;
   }
@@ -57,7 +55,7 @@ export async function loadSkills(
   skillsState.refreshing = skillsState.skills.length > 0;
   skillsState.error = null;
   try {
-    const { skills } = await requireRpc().skills.list({ workspaceId, includeDisabled: true });
+    const { skills } = await requireRpc().skills.list({ ...target, includeDisabled: true });
     if (!canCommit()) return;
     skillsState.skills = skills;
     if (skillsState.selected && !skills.some((skill) => skill.id === skillsState.selected?.id)) {
@@ -74,18 +72,15 @@ export async function loadSkills(
   }
 }
 
-/** 加载并选中当前 workspace 内的技能详情。 */
+/** 加载并选中当前 Workspace Provider 内的技能详情。 */
 export async function selectSkill(skillId: SkillId): Promise<void> {
-  const workspaceId = skillsState.workspaceId;
+  const target = skillsState.target;
+  if (!target) return;
   const request = selectionRequests.issue();
-  const canCommit = (): boolean => request.isCurrent() && skillsState.workspaceId === workspaceId;
+  const canCommit = (): boolean => request.isCurrent() && targetsEqual(skillsState.target, target);
   skillsState.error = null;
   try {
-    const selected = await requireRpc().skills.info({
-      workspaceId,
-      skillId,
-      includeDisabled: true,
-    });
+    const selected = await requireRpc().skills.info({ ...target, skillId, includeDisabled: true });
     if (canCommit()) skillsState.selected = selected;
   } catch (error) {
     if (!canCommit()) return;
@@ -99,42 +94,39 @@ export function clearSelection(): void {
   skillsState.selected = null;
 }
 
-/** 批量启用或禁用当前 workspace 内的技能并刷新投影。 */
+/** 批量启用或禁用当前 Provider 内的技能并刷新投影。 */
 export async function toggleSkills(
   skillIds: SkillId[],
   mode: "enable" | "disable",
 ): Promise<ToggleSummary | null> {
-  const workspaceId = skillsState.workspaceId;
+  const target = skillsState.target;
+  if (!target) return null;
   const request = mutationRequests.issue();
-  const canCommit = (): boolean => request.isCurrent() && skillsState.workspaceId === workspaceId;
+  const canCommit = (): boolean => request.isCurrent() && targetsEqual(skillsState.target, target);
   let result: ToggleSummary;
   try {
-    result = await requireRpc().skills.toggle({
-      workspaceId,
-      skillIds,
-      mode,
-    });
+    result = await requireRpc().skills.toggle({ ...target, skillIds, mode });
   } catch (error) {
     if (!canCommit()) return null;
     throw error;
   }
   if (!canCommit()) return null;
-  await loadSkills(workspaceId);
+  await loadSkills(target);
   if (!canCommit()) return null;
   if (skillsState.selected && skillIds.includes(skillsState.selected.id)) {
     await selectSkill(skillsState.selected.id);
   }
-  if (!canCommit()) return null;
-  return result;
+  return canCommit() ? result : null;
 }
 
-/** 校验当前 workspace 内的一个技能。 */
+/** 校验当前 Provider 内的一个技能。 */
 export async function validateSkill(skillId: SkillId): Promise<ValidateResult | null> {
-  const workspaceId = skillsState.workspaceId;
+  const target = skillsState.target;
+  if (!target) return null;
   const request = validationRequests.issue();
-  const canCommit = (): boolean => request.isCurrent() && skillsState.workspaceId === workspaceId;
+  const canCommit = (): boolean => request.isCurrent() && targetsEqual(skillsState.target, target);
   try {
-    const result = await requireRpc().skills.validate({ workspaceId, skillId });
+    const result = await requireRpc().skills.validate({ ...target, skillId });
     return canCommit() ? result : null;
   } catch (error) {
     if (!canCommit()) return null;
@@ -153,7 +145,7 @@ export function filteredSkills(): SkillMetadata[] {
   );
 }
 
-/** 派生技能总数、启停数与 provider 分布。 */
+/** 派生技能总数、启停数与 Provider 分布。 */
 export function skillCounts(): {
   total: number;
   enabled: number;
@@ -169,4 +161,12 @@ export function skillCounts(): {
     byProvider[skill.provider] = (byProvider[skill.provider] ?? 0) + 1;
   }
   return { total: skillsState.skills.length, enabled, disabled, byProvider };
+}
+
+/** Compare the authority-carrying fields of a Workspace Provider target. */
+export function targetsEqual(
+  left: WorkspaceProviderTarget | null,
+  right: WorkspaceProviderTarget | null,
+): boolean {
+  return left?.workspaceId === right?.workspaceId && left?.providerId === right?.providerId;
 }

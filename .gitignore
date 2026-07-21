@@ -12,3 +12,4 @@ webui/.cache
 .DS_Store
 .zcode/
 tmp/
+/references/skills/

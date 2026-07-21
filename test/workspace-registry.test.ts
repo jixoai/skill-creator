@@ -4,10 +4,10 @@
  * User input [2026-07-15]: "按照你自己的节奏去推进开发迭代。"
  * Architecture decision [2026-07-15]: concurrent projections and mutations must
  * preserve every authoritative imported Workspace transition.
- * User input [2026-07-21]: "我们默认是破坏性更新的……遇到不兼容的就当是空值。"
+ * User input [2026-07-22]: "home 目录定义为特殊的 GlobalWorkspace；一个 Workspace 下可以包含多个 providers。"
  *
  * Orthogonal intents:
- *   [1] Prove collision-resistant identity and isolated discovery scopes.
+ *   [1] Prove Global and Imported Workspace Provider scopes stay isolated.
  *   [2] Prove non-destructive persistence and recovery from incompatible stale state.
  *   [3] Prove asynchronous projections cannot overwrite or hide newer mutations.
  */
@@ -19,18 +19,24 @@ import type { ListOptions } from "ccski";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import {
-  HOME_WORKSPACE_ID,
+  GLOBAL_WORKSPACE_ID,
   ImportedWorkspaceIdSchema,
+  ProviderIdSchema,
+  type WorkspaceId,
+  type WorkspaceProviderTarget,
 } from "../src/shared/contracts/workspaces.js";
 import { appDir, setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
+const previousCodexHome = process.env.CODEX_HOME;
 let sandbox = "";
+const openClawProviderId = ProviderIdSchema.parse("openclaw");
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-workspace-registry-test-"));
   const isolatedHome = path.join(sandbox, "state");
   process.env.SKILL_CREATOR_HOME = isolatedHome;
+  process.env.CODEX_HOME = path.join(sandbox, "codex");
   setHomeOverride(isolatedHome);
 });
 
@@ -38,6 +44,8 @@ afterEach(() => {
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousHome;
+  if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = previousCodexHome;
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
@@ -49,6 +57,10 @@ function directory(...segments: string[]): string {
 
 function zeroCount(): Promise<number> {
   return Promise.resolve(0);
+}
+
+function target(workspaceId: WorkspaceId): WorkspaceProviderTarget {
+  return { workspaceId, providerId: openClawProviderId };
 }
 
 function activeId(
@@ -76,12 +88,12 @@ function deferredCounter(): {
     started,
     release: signalRelease,
     count: async (options) => {
-      if (shouldPause && !("skillDir" in options)) {
+      if (shouldPause && options.customDirs?.[0]) {
         shouldPause = false;
         signalStarted();
         await released;
       }
-      return "skillDir" in options ? (options.skillDir?.[0]?.length ?? 0) : 7;
+      return options.customDirs?.[0]?.length ?? 7;
     },
   };
 }
@@ -105,7 +117,7 @@ function deferredRejectingCounter(directory: string): {
     started,
     reject: () => rejectCount(new Error("Forgotten Workspace is unavailable.")),
     count: async (options) => {
-      if (shouldReject && options.skillDir?.[0] === directory) {
+      if (shouldReject && options.customDirs?.[0] === directory) {
         shouldReject = false;
         signalStarted();
         return rejected;
@@ -116,7 +128,7 @@ function deferredRejectingCounter(directory: string): {
 }
 
 describe("Workspace Registry", () => {
-  it("assigns unique IDs and resolves home/imported discovery scopes", async () => {
+  it("assigns unique IDs and resolves Global/Imported Provider scopes", async () => {
     const registry = createWorkspaceRegistry({ countSkills: zeroCount });
     const commonRoot = ["organizations", "engineering", "skills"];
     const firstPath = directory(...commonRoot, "frontend");
@@ -125,20 +137,29 @@ describe("Workspace Registry", () => {
     const first = registry.import(firstPath);
     const second = registry.import(secondPath);
 
+    const global = (await registry.list())[0];
+    if (!global || global.kind !== "global") throw new Error("Expected Global Workspace.");
+
     expect(first.id).toMatch(/^ws_[a-f0-9]{24}$/);
     expect(second.id).toMatch(/^ws_[a-f0-9]{24}$/);
     expect(first.id).not.toBe(second.id);
     expect((await registry.list()).map((workspace) => workspace.id)).toEqual([
-      HOME_WORKSPACE_ID,
+      GLOBAL_WORKSPACE_ID,
       first.id,
       second.id,
     ]);
-    expect(registry.resolve(HOME_WORKSPACE_ID).options).toEqual({ all: true });
-    expect(registry.resolve(first.id).options).toEqual({
-      skillDir: [fs.realpathSync(firstPath)],
+    expect(global.providers).toContainEqual(
+      expect.objectContaining({ id: ProviderIdSchema.parse("codex"), writable: false }),
+    );
+    expect(registry.resolve(target(first.id)).options).toEqual({
+      customDirs: [path.join(fs.realpathSync(firstPath), "skills")],
+      customProvider: openClawProviderId,
       scanDefaultDirs: false,
       all: true,
     });
+    expect(() => registry.resolveWritable(target(GLOBAL_WORKSPACE_ID))).toThrow(
+      "Global Workspace providers are not writable installation targets.",
+    );
   });
 
   it("persists active state across restart and forgets without deleting files", async () => {
@@ -153,30 +174,32 @@ describe("Workspace Registry", () => {
 
     const restarted = createWorkspaceRegistry({ countSkills: zeroCount });
     expect(activeId(await restarted.list())).toBe(first.id);
-    expect(restarted.resolve(second.id).directory).toBe(fs.realpathSync(secondPath));
+    expect(restarted.resolve(target(second.id)).directory).toBe(
+      path.join(fs.realpathSync(secondPath), "skills"),
+    );
 
     restarted.forget(first.id);
     expect(fs.readFileSync(marker, "utf8")).toBe("preserve");
-    expect(activeId(await restarted.list())).toBe(HOME_WORKSPACE_ID);
+    expect(activeId(await restarted.list())).toBe(GLOBAL_WORKSPACE_ID);
 
     const persisted = fs.readFileSync(path.join(appDir(), "workspaces.json"), "utf8");
     expect(persisted).not.toContain("skillCount");
-    expect(persisted).toContain('"schemaVersion": 1');
+    expect(persisted).toContain('"schemaVersion": 2');
   });
 
-  it("treats an incompatible persisted Registry as empty until a mutation commits v1", async () => {
-    const legacySource = JSON.stringify({ activeId: null, workspaces: [] });
+  it("treats an incompatible persisted Registry as empty until a mutation commits v2", async () => {
+    const legacySource = JSON.stringify({ schemaVersion: 1, activeId: "~", workspaces: [] });
     fs.mkdirSync(appDir(), { recursive: true });
     const registryFile = path.join(appDir(), "workspaces.json");
     fs.writeFileSync(registryFile, legacySource, "utf8");
 
     const registry = createWorkspaceRegistry({ countSkills: zeroCount });
-    expect((await registry.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
+    expect((await registry.list()).map((workspace) => workspace.id)).toEqual([GLOBAL_WORKSPACE_ID]);
     expect(fs.readFileSync(registryFile, "utf8")).toBe(legacySource);
 
     const imported = registry.import(directory("current"));
     expect(JSON.parse(fs.readFileSync(registryFile, "utf8"))).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       activeId: imported.id,
       workspaces: [expect.objectContaining({ id: imported.id })],
     });
@@ -187,7 +210,7 @@ describe("Workspace Registry", () => {
     fs.writeFileSync(path.join(appDir(), "workspaces.json"), "{", "utf8");
 
     const registry = createWorkspaceRegistry({ countSkills: zeroCount });
-    expect((await registry.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
+    expect((await registry.list()).map((workspace) => workspace.id)).toEqual([GLOBAL_WORKSPACE_ID]);
   });
 
   it("rejects unknown IDs without changing the active Workspace", async () => {
@@ -195,7 +218,7 @@ describe("Workspace Registry", () => {
     const known = registry.import(directory("known"));
     const unknownId = ImportedWorkspaceIdSchema.parse("ws_000000000000000000000000");
 
-    expect(() => registry.resolve(unknownId)).toThrow(`Workspace not found: ${unknownId}`);
+    expect(() => registry.resolve(target(unknownId))).toThrow(`Workspace not found: ${unknownId}`);
     expect(() => registry.activate(unknownId)).toThrow(`Workspace not found: ${unknownId}`);
     expect(() => registry.forget(unknownId)).toThrow(`Workspace not found: ${unknownId}`);
     expect(activeId(await registry.list())).toBe(known.id);
@@ -208,7 +231,7 @@ describe("Workspace Registry", () => {
     fs.writeFileSync(
       path.join(appDir(), "workspaces.json"),
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         activeId: forgedId,
         workspaces: [{ id: forgedId, label: known.label, path: known.path }],
       }),
@@ -216,7 +239,9 @@ describe("Workspace Registry", () => {
     );
 
     const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
-    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
+    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([
+      GLOBAL_WORKSPACE_ID,
+    ]);
   });
 
   it("discards a relative persisted Workspace path", async () => {
@@ -225,7 +250,7 @@ describe("Workspace Registry", () => {
     fs.writeFileSync(
       path.join(appDir(), "workspaces.json"),
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         activeId: relativeId,
         workspaces: [{ id: relativeId, label: "Relative", path: "relative/workspace" }],
       }),
@@ -233,7 +258,9 @@ describe("Workspace Registry", () => {
     );
 
     const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
-    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
+    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([
+      GLOBAL_WORKSPACE_ID,
+    ]);
   });
 
   it("discards a non-normalized persisted Workspace path", async () => {
@@ -246,7 +273,7 @@ describe("Workspace Registry", () => {
     fs.writeFileSync(
       path.join(appDir(), "workspaces.json"),
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         activeId: storedId,
         workspaces: [{ id: storedId, label: "Normalized", path: storedPath }],
       }),
@@ -254,13 +281,17 @@ describe("Workspace Registry", () => {
     );
 
     const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
-    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID]);
+    expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([
+      GLOBAL_WORKSPACE_ID,
+    ]);
   });
 
   it("restarts a projection when a Workspace is imported while counts are pending", async () => {
     const counter = deferredCounter();
     const registry = createWorkspaceRegistry({ countSkills: counter.count });
-    const first = registry.import(directory("first"));
+    const firstPath = directory("first");
+    fs.mkdirSync(path.join(firstPath, "skills"));
+    const first = registry.import(firstPath);
 
     const pendingList = registry.list();
     await counter.started;
@@ -269,7 +300,7 @@ describe("Workspace Registry", () => {
 
     const projected = await pendingList;
     expect(projected.map((workspace) => workspace.id)).toEqual([
-      HOME_WORKSPACE_ID,
+      GLOBAL_WORKSPACE_ID,
       first.id,
       second.id,
     ]);
@@ -283,6 +314,7 @@ describe("Workspace Registry", () => {
     const counter = deferredCounter();
     const registry = createWorkspaceRegistry({ countSkills: counter.count });
     const firstPath = directory("first");
+    fs.mkdirSync(path.join(firstPath, "skills"));
     const first = registry.import(firstPath);
     const second = registry.import(directory("second"));
     registry.activate(first.id);
@@ -294,14 +326,16 @@ describe("Workspace Registry", () => {
     counter.release();
 
     const projected = await pendingList;
-    expect(projected.map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID, second.id]);
+    expect(projected.map((workspace) => workspace.id)).toEqual([GLOBAL_WORKSPACE_ID, second.id]);
     expect(activeId(projected)).toBe(second.id);
     expect(fs.existsSync(firstPath)).toBe(true);
   });
 
   it("discards a stale count failure after its Workspace is forgotten", async () => {
     const firstPath = directory("first");
-    const counter = deferredRejectingCounter(fs.realpathSync(firstPath));
+    const firstSkillsPath = path.join(firstPath, "skills");
+    fs.mkdirSync(firstSkillsPath);
+    const counter = deferredRejectingCounter(fs.realpathSync(firstSkillsPath));
     const registry = createWorkspaceRegistry({ countSkills: counter.count });
     const first = registry.import(firstPath);
     const second = registry.import(directory("second"));
@@ -312,7 +346,7 @@ describe("Workspace Registry", () => {
     counter.reject();
 
     const projected = await pendingList;
-    expect(projected.map((workspace) => workspace.id)).toEqual([HOME_WORKSPACE_ID, second.id]);
+    expect(projected.map((workspace) => workspace.id)).toEqual([GLOBAL_WORKSPACE_ID, second.id]);
     expect(activeId(projected)).toBe(second.id);
   });
 });

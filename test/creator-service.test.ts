@@ -19,12 +19,17 @@ import { createCreatorService } from "../src/daemon/creator-service.js";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import type { SkillService } from "../src/daemon/skill-service.js";
 import { SkillIdSchema, type SkillMetadata } from "../src/shared/contracts/skills.js";
-import type { ImportedWorkspace } from "../src/shared/contracts/workspaces.js";
+import {
+  ProviderIdSchema,
+  type ImportedWorkspace,
+  type WorkspaceProviderTarget,
+} from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
 let sandbox = "";
 let domain: DaemonDomain;
+const openClawProviderId = ProviderIdSchema.parse("openclaw");
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-creator-test-"));
@@ -49,7 +54,11 @@ function importWorkspace(name: string): ImportedWorkspace {
 }
 
 function directoryPath(workspace: ImportedWorkspace): string {
-  return workspace.path;
+  return path.join(workspace.path, "skills");
+}
+
+function target(workspace: ImportedWorkspace): WorkspaceProviderTarget {
+  return { workspaceId: workspace.id, providerId: openClawProviderId };
 }
 
 function skillServiceForFile(skill: SkillMetadata, file: string): SkillService {
@@ -90,6 +99,7 @@ describe("creator service", () => {
       domain.creator.save({
         mode: "create",
         workspaceId: workspace.id,
+        providerId: openClawProviderId,
         directoryName: "../escaped",
         frontmatter: { name: "escaped", description: "Must not be written." },
         body: "# Unsafe\n",
@@ -104,6 +114,7 @@ describe("creator service", () => {
     const created = await domain.creator.save({
       mode: "create",
       workspaceId: workspace.id,
+      providerId: openClawProviderId,
       directoryName: "release-guide",
       frontmatter: {
         name: "release-guide",
@@ -114,7 +125,7 @@ describe("creator service", () => {
       body: "# Release\n\nShip the reviewed artifact.\n",
     });
 
-    const loaded = await domain.creator.load(workspace.id, created.document.skillId);
+    const loaded = await domain.creator.load(target(workspace), created.document.skillId);
     expect(loaded.frontmatter).toEqual({
       name: "release-guide",
       description: "Guide a production release.",
@@ -126,6 +137,7 @@ describe("creator service", () => {
     const updated = await domain.creator.save({
       mode: "update",
       workspaceId: workspace.id,
+      providerId: openClawProviderId,
       skillId: loaded.skillId,
       expectedRevision: loaded.revision,
       frontmatter: {
@@ -148,7 +160,7 @@ describe("creator service", () => {
     const workspace = importWorkspace("invalid-document-root");
     const skillDirectory = path.join(directoryPath(workspace), "invalid-document");
     const skillFile = path.join(skillDirectory, "SKILL.md");
-    fs.mkdirSync(skillDirectory);
+    fs.mkdirSync(skillDirectory, { recursive: true });
     fs.writeFileSync(skillFile, "---\nname: 42\ndescription: null\n---\n# Invalid\n", "utf8");
     const skill: SkillMetadata = {
       id: SkillIdSchema.parse("sk_000000000000000000000000"),
@@ -166,7 +178,7 @@ describe("creator service", () => {
     };
     const creator = createCreatorService(domain.workspaces, skillServiceForFile(skill, skillFile));
 
-    await expect(creator.load(workspace.id, skill.id)).rejects.toMatchObject({
+    await expect(creator.load(target(workspace), skill.id)).rejects.toMatchObject({
       code: "INVALID_OPERATION",
       message: "The skill document frontmatter is incompatible with the current format.",
     });
@@ -177,6 +189,7 @@ describe("creator service", () => {
     const created = await domain.creator.save({
       mode: "create",
       workspaceId: workspace.id,
+      providerId: openClawProviderId,
       directoryName: "incident-guide",
       frontmatter: { name: "incident-guide", description: "Handle an incident." },
       body: "# Incident\n\nUse the initial runbook.\n",
@@ -198,6 +211,7 @@ describe("creator service", () => {
       domain.creator.save({
         mode: "update",
         workspaceId: workspace.id,
+        providerId: openClawProviderId,
         skillId: created.document.skillId,
         expectedRevision: created.document.revision,
         frontmatter: created.document.frontmatter,
@@ -214,6 +228,7 @@ describe("creator service", () => {
     const created = await domain.creator.save({
       mode: "create",
       workspaceId: sourceWorkspace.id,
+      providerId: openClawProviderId,
       directoryName: "protected-skill",
       frontmatter: { name: "protected-skill", description: "Remain in the source workspace." },
       body: "# Protected\n",
@@ -221,8 +236,12 @@ describe("creator service", () => {
     const sourceDirectory = path.join(directoryPath(sourceWorkspace), "protected-skill");
 
     await expect(
-      domain.creator.remove(otherWorkspace.id, created.document.skillId, created.document.revision),
-    ).rejects.toThrow("Skill not found in workspace");
+      domain.creator.remove(
+        target(otherWorkspace),
+        created.document.skillId,
+        created.document.revision,
+      ),
+    ).rejects.toThrow("Skill not found in Workspace Provider");
 
     expect(fs.existsSync(sourceDirectory)).toBe(true);
   });

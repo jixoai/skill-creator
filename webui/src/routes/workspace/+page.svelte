@@ -3,7 +3,7 @@
    * 原始需求 [2026-07-14]：「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace」。
    * 正交意图：
    * 1. 投影 workspace 加载状态。
-   * 2. 呈现 home 与导入目录索引。
+   * 2. 呈现 Global 与导入目录索引。
    * 3. 在任意视口提供 Remove Workspace 恢复入口。
    */
   import { workspaceState, loadWorkspaces } from "$lib/store.svelte";

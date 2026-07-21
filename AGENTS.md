@@ -15,6 +15,7 @@
 - 「`node dist/daemon.js` 确实没反应；生产 Dock 入口必须恢复或聚焦应用。」
 - 「`skill-creator stop` 找不到 daemon，但 `pnpm dev` 又说已有 daemon 持有 socket。」
 - 「同意，但是改成 `skill-creator openinbrowser`。」
+- 「home 目录定义为特殊的 GlobalWorkspace；一个 Workspace 下可以包含多个 providers；下载到某个 Workspace.provider，且能多选。」
 正交意图：1. 固化产品真相；2. 固化模块与安全边界；3. 固化工程风格；4. 固化验证标准；5. 固化演进与无兼容策略。
 妥协声明：根级 `AGENTS.md` 是当前全仓共享的自动发现入口；五项是安全交付不可分离的治理上下文，具体领域定义已物理拆分到 `i18n.zh.md` 与源码契约。
 -->
@@ -64,10 +65,10 @@ Skill Creator
 |-- /workspace ---------------- Workspace registry index / import-remove recovery
 |
 |-- /workspace/[id]
-|   |-- /workspace/~/ -------- Home Workspace: ccski 默认 Agent 位置
-|   `-- /workspace/ws_* ------- Imported Workspace: 已注册目录
+|   |-- /workspace/~/ -------- Global Workspace: Agent 全局 skills roots
+|   `-- /workspace/ws_* ------- Imported Workspace: 已注册目录 / Provider roots
 |
-|-- /creator ----------------- 在 Imported Workspace 创建/编辑技能
+|-- /creator ----------------- 在 Imported Workspace.Provider 创建/编辑技能
 |
 `-- /repository -------------- 固定 Git commit 后预览/安装
 ```
@@ -75,21 +76,23 @@ Skill Creator
 唯一一级导航是 Workspaces、Creator、Repository。
 
 ```text
-Workspace          = 技能操作的作用域
-Home Workspace (~) = ccski 默认 Agent 位置的聚合发现入口
-Imported Workspace = daemon 已 canonicalize 并注册的目录
+Workspace                  = skills 作用域第一层
+Global Workspace (~)       = catalog 解析的 Agent 全局 roots 聚合
+Imported Workspace         = daemon 已 canonicalize 并注册的目录
+Provider                   = 一个 Workspace 内的 Agent skills root
+Workspace Provider Target  = { workspaceId, providerId }
 Creator            = create + revision-checked edit/delete
 Repository         = clone + pin commit + scan + preview + install
 ```
 
 核心约束：
 
-1. 每个技能读取或 mutation 都显式绑定 Workspace ID。
-2. Creator 与 Repository 的写入目标只能是 Imported Workspace，不能是 `~`。
+1. 每个技能读取或 mutation 都显式绑定 Workspace Provider Target。
+2. Global Workspace 可发现、查看、校验与启停 Provider 中现有技能；Creator 与 Repository 的写入目标只能是 Imported Workspace.Provider，不能是 `~`。
 3. Repository 的 preview 与 install 必须来自同一个 pinned clone session。
 4. WebUI 不拼接 mutation 输出路径；server 解析 opaque ID 到真实根目录。
 5. UI 服务于人的直觉与操作密度，允许场景聚合，但不能绕过协议和文件系统边界。
-6. Creator 允许无 query、workspace-only 新建上下文、workspace+skill 编辑上下文；skill-only 或非法身份必须在渲染前清理。
+6. Creator 允许无 query、workspace+provider 新建上下文、workspace+provider+skill 编辑上下文；不完整、未知或非法身份必须在渲染前清理。
 7. OpenTray 以 `appMode: true` 承载正常应用窗口：窗口层级、焦点、最小化/最大化与关闭交给系统管理；启动时只按当前屏幕一次性居中，不读取 tray bounds 或持续跟随 tray；tray 是 macOS/Windows 的 UX 加成，WebUI 在任何平台（含 Linux/CI/headless）仍须经系统浏览器可达，`status.tray === "headless"` 不是不可用。系统浏览器只能由 `skill-creator openinbrowser` 显式打开，`start` 与 `open` 不得产生浏览器副作用。
 8. App identity 只使用当前平台标准资产：macOS/Windows 优先使用 `resources/app-icon` 中手工生成的 light/dark ICNS/ICO，Linux 使用 Vite 从 `resources/color-symbol.png` 预构建的带尺寸 72 DPI PNG；tray template PNG 不得提升为 `appIcon`。
 9. light 资产同时声明 `default/light`，dark 资产声明 `dark`。Core 只管理目录和当前变体；本项目暂不增加主题 IPC，WebView 不拥有 App identity 切换权。
@@ -227,7 +230,7 @@ Vite config restart 必须 await 旧 plugin 的 `closeBundle`：先向旧 daemon
 ### 3.2 Workspace 数据流
 
 ```text
-daemon boot -> safeParse schemaVersion=1
+daemon boot -> safeParse schemaVersion=2
               | valid --------> one in-memory Registry
               |                 absolute + normalized path
               |                 id = digest(path), unique IDs/paths, registered activeId
@@ -243,7 +246,7 @@ pure next state -> atomic workspaces.json commit -> replace memory state
 
 workspace.list
      |
-     +--> immutable state snapshot -> availability + ccski counts
+     +--> immutable state snapshot -> Global/Imported Provider roots + existing-root ccski counts
      |                                      |
      |                         registry revision changed?
      |                              | yes          | no
@@ -262,7 +265,7 @@ Creator initialization
      `--> superseded by concurrent Layout load
               `--> same route/owner still current? retry : stop stale chain
 
-workspaceId + skillId -> resolve scope -> allowed root -> containment -> action
+workspaceId + providerId + skillId -> resolve scope -> allowed root -> containment -> action
 ```
 
 持久化载入必须区分“数据不兼容”和“文件系统故障”，不得用一个宽泛的 `catch` 把所有异常都降级为空值：
@@ -281,15 +284,15 @@ workspaceId + skillId -> resolve scope -> allowed root -> containment -> action
 
 `safeParse` 只负责识别当前版本无法接受的持久化数据；它不负责迁移旧字段，也不能吞掉权限、磁盘或原子写入错误。破坏性 schema 更新默认延迟到发布/部署阶段处理。
 
-`~` 是保留 Workspace ID，不是由 WebUI 展开的文件系统路径。Imported Workspace ID 使用 canonical path 的 digest，Skill ID 使用 server 发现到的 canonical skill path digest。`skillCount` 和 `available` 是动态观察值，不属于持久态；同一 daemon 内不得出现第二个 Registry 实例。
+`~` 是 Global Workspace 的保留 ID，不是由 WebUI 展开的文件系统路径。Provider catalog 从社区 Agent roots 快照导出；Global root 可按环境变量或 XDG 路径解析，Imported root 只能由 canonical Workspace 目录派生。Imported Workspace ID 使用 canonical path 的 digest，Skill ID 使用 server 发现到的 canonical skill path digest。`providers`、`skillCount`、`available` 与 `writable` 都是动态观察值，不属于持久态；同一 daemon 内不得出现第二个 Registry 实例。
 
 ### 3.3 Creator 状态机
 
 ```text
-/creator -----------------------------> first writable Workspace / blank draft
-/creator?workspace=ws_* --------------> explicit Workspace / blank draft
-/creator?workspace=ws_*&skill=sk_* ---> explicit Workspace / existing document
-skill-only or invalid opaque ID ------> redirect /creator before render
+/creator ----------------------------------------------> first writable Workspace.Provider / blank draft
+/creator?workspace=ws_*&provider=<provider> ----------> explicit Workspace.Provider / blank draft
+/creator?workspace=ws_*&provider=<provider>&skill=sk_*> explicit Workspace.Provider / existing document
+incomplete, unknown, or invalid identity --------------> redirect /creator before render
 
                                        +--> create
 Imported Workspace -------------------|      directoryName -> direct child -> atomic SKILL.md
@@ -386,7 +389,7 @@ src/
 |-- shared/
 |   |-- contracts/ ------------ [6 physical modules]
 |   |   |-- skills.ts --------- identity / metadata / toggle / validation
-|   |   |-- workspaces.ts ----- home/imported IDs / workspace projection
+|   |   |-- workspaces.ts ----- global/imported IDs / Provider projection and target
 |   |   |-- creator.ts -------- document / create-update union / revision
 |   |   |-- repository.ts ----- session / remote skill / install result union
 |   |   |-- daemon.ts --------- lifecycle status
@@ -395,6 +398,7 @@ src/
 |   |-- frame.ts -------------- [3] IPC envelope / codec / parser
 |   |-- package-version.ts ---- [2] source/bundle package version lookup
 |   |-- external-input.ts ----- [2] external JSON decode / schema-safe projection
+|   |-- provider-catalog.ts --- [2] browser-safe Agent root conventions snapshot
 |   `-- paths.ts -------------- [3] app dirs / logs / IPC endpoint
 |
 |-- daemon/
@@ -404,6 +408,7 @@ src/
 |   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
 |   |-- creator-service.ts ----- [3] create / round-trip update / revision delete
 |   |-- repository-service.ts -- [3] pinned lifecycle / inspect / preview-install
+|   |-- provider-roots.ts ------ [2] Global/Imported Provider root resolution
 |   |-- workspace-registry/
 |   |   |-- index.ts ---------- [3] registry truth / scope resolution / retry-consistent list
 |   |   |-- state.ts ---------- [2] strict persisted state / pure transitions
@@ -452,18 +457,18 @@ UNTRUSTED                         VALIDATION / AUTHORITY                 EFFECT
 
 WebSocket upgrade token -------> exact startup token -----------------> oRPC
 RPC JSON ----------------------> shared Zod schema -------------------> router
-workspaces.json ---------------> JSON parse + v1 safeParse -----------> registry state
+workspaces.json ---------------> JSON parse + v2 safeParse -----------> registry state
                                     | incompatible -------------------> empty current state
 package JSON ------------------> JSON parse + current safeParse ------> runtime `unknown` / build rejection
 ccski / Git / installer result -> current safeParse ------------------> discard entry / typed domain result
 existing SKILL.md -------------> gray-matter + current safeParse -----> typed invalid-document rejection
 workspace import path ---------> realpath + directory ----------------> registry
-workspaceId / skillId ---------> server registry + opaque ID --------> scoped root
+workspaceId / providerId / skillId -> server registry + catalog ------> scoped root
 Creator directoryName ---------> lowercase safe name + direct child -> SKILL.md
 Creator update/delete ---------> expected SHA-256 revision ----------> write/remove
 Git source/ref ----------------> git clone + pinned HEAD ------------> scan session
 Remote skill selection --------> session-owned opaque IDs ----------> install
-Install output path -----------> Workspace direct child + SKILL.md -> local Skill ID
+Install output path -----------> Provider root direct child + SKILL.md -> local Skill ID
 static request path -----------> resolved-root containment ----------> read asset
 IPC bytes ---------------------> frame size + schema + protocol ------> CLI command
 ```
@@ -473,10 +478,10 @@ IPC bytes ---------------------> frame size + schema + protocol ------> CLI comm
 1. HTTP 只监听 loopback；WebSocket 在 protocol upgrade 前鉴权。
 2. Web token 放 URL fragment，不进入初始 HTTP request；捕获后仅存当前 tab 的 `sessionStorage` 并清理 hash。
 3. Unix runtime 目录 `0700`，socket `0600`；活 socket 绝不能 unlink。
-4. 文件 mutation 必须由 server-owned Workspace root 派生，不能信任调用方组合的路径。
-5. 创建目标必须是 Workspace direct child；编辑、删除、预览必须通过 containment check。
+4. 文件 mutation 必须由 server-owned Workspace.Provider root 派生，不能信任调用方组合的路径。
+5. Creator/Repository 仅可请求 Imported Workspace.Provider；创建目标必须是 Provider root direct child，编辑、删除、预览必须通过 containment check。
 6. 文档写入使用同目录临时文件加 rename；并发编辑由 revision 拒绝，不做 last-write-wins。
-7. Repository preview/install 必须绑定同一个 commit 和 session；session 淘汰立即拒绝新操作，但不得删除已接受安装仍在使用的 clone。每个 selected skill 必须绑定预期 Workspace、名称和直属路径；installer output 必须先 runtime parse，逐字段匹配后，还需通过 canonical path、非符号链接的普通 `SKILL.md`、frontmatter name、`SkillService.resolve` 与 validate 的重新发现链。安装汇总携带提交时的 Workspace ID；部分失败必须保留已完成项，只有完整验证的 `installed` / `overwritten` 项能签发本地 Skill ID。
+7. Repository preview/install 必须绑定同一个 commit 和 session；session 淘汰立即拒绝新操作，但不得删除已接受安装仍在使用的 clone。每个 selected skill x selected Workspace.Provider 必须绑定预期 root、名称和直属路径；installer output 必须先 runtime parse，逐字段匹配后，还需通过 canonical path、非符号链接的普通 `SKILL.md`、frontmatter name、`SkillService.resolve` 与 validate 的重新发现链。安装汇总携带提交时的 targets；部分失败必须保留已完成项，只有完整验证的 `installed` / `overwritten` 项能签发本地 Skill ID。
 8. 启用/禁用发生冲突时返回 conflict，不以破坏性 force 掩盖目标状态。
 9. Workspace Registry mutation 必须先原子持久化完整 next state，成功后才替换内存真相；动态计数不得写回持久态。
 10. daemon stop coordinator 与 signal listeners 必须先于 tray mount 发布；stop 先关闭 transport admission，再关停 domain，迟到的 native handles 不得重新挂载；非协作连接在 grace deadline 后强制回收，所有 stop 来源共享完成态与退出意图。

@@ -22,11 +22,21 @@ import {
 } from "../src/daemon/repository-service.js";
 import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
+import {
+  ProviderIdSchema,
+  type ImportedWorkspace,
+  type WorkspaceProviderTarget,
+} from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
 let sandbox = "";
 let repository: RepositoryService | null = null;
+const openClawProviderId = ProviderIdSchema.parse("openclaw");
+
+function target(workspace: ImportedWorkspace): WorkspaceProviderTarget {
+  return { workspaceId: workspace.id, providerId: openClawProviderId };
+}
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-repository-lifecycle-test-"));
@@ -106,9 +116,10 @@ describe("repository service lifecycle", () => {
 
   it("defers deletion of an evicted snapshot until its active install finishes", async () => {
     const workspaces = createWorkspaceRegistry();
-    const destination = path.join(sandbox, "destination");
-    fs.mkdirSync(destination);
-    const workspace = workspaces.import(destination, "Destination");
+    const workspaceDirectory = path.join(sandbox, "destination");
+    const destination = path.join(workspaceDirectory, "skills");
+    fs.mkdirSync(destination, { recursive: true });
+    const workspace = workspaces.import(workspaceDirectory, "Destination");
     const snapshots: string[] = [];
     let cloneIndex = 0;
     let signalInstallStarted: () => void = () => {};
@@ -127,7 +138,7 @@ describe("repository service lifecycle", () => {
       const sourceFile = path.join(leasedSnapshot, "skills", "leased", "SKILL.md");
       expect(fs.existsSync(sourceFile)).toBe(true);
       const installedDirectory = path.join(destination, "leased");
-      fs.mkdirSync(installedDirectory);
+      fs.mkdirSync(installedDirectory, { recursive: true });
       fs.copyFileSync(sourceFile, path.join(installedDirectory, "SKILL.md"));
       return {
         results: [
@@ -167,7 +178,7 @@ describe("repository service lifecycle", () => {
     const installing = repository.install({
       sessionId: oldest.sessionId,
       skillIds: [selected.id],
-      workspaceId: workspace.id,
+      targets: [target(workspace)],
     });
     await installStarted;
 

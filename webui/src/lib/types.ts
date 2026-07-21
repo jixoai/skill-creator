@@ -33,6 +33,9 @@ export type {
 export type {
   ImportedWorkspace,
   ImportedWorkspaceId,
+  ProviderId,
   Workspace,
   WorkspaceId,
+  WorkspaceProvider,
+  WorkspaceProviderTarget,
 } from "$shared/contracts/workspaces.js";

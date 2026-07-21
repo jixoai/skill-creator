@@ -48,16 +48,14 @@ export function createRpcRouter(deps: RpcRouterDeps) {
   return rpc.use(domainErrorBoundary).router({
     skills: {
       list: rpc.skills.list.handler(async ({ input }) => ({
-        skills: await domain.skills.list(input.workspaceId, input.includeDisabled ?? true),
+        skills: await domain.skills.list(input, input.includeDisabled ?? true),
       })),
-      info: rpc.skills.info.handler(async ({ input }) =>
-        domain.skills.info(input.workspaceId, input.skillId),
-      ),
+      info: rpc.skills.info.handler(async ({ input }) => domain.skills.info(input, input.skillId)),
       toggle: rpc.skills.toggle.handler(async ({ input }) =>
-        domain.skills.toggle(input.workspaceId, input.skillIds, input.mode),
+        domain.skills.toggle(input, input.skillIds, input.mode),
       ),
       validate: rpc.skills.validate.handler(async ({ input }) =>
-        domain.skills.validate(input.workspaceId, input.skillId),
+        domain.skills.validate(input, input.skillId),
       ),
     },
     workspace: {
@@ -76,11 +74,9 @@ export function createRpcRouter(deps: RpcRouterDeps) {
     },
     creator: {
       save: rpc.creator.save.handler(({ input }) => domain.creator.save(input)),
-      load: rpc.creator.load.handler(({ input }) =>
-        domain.creator.load(input.workspaceId, input.skillId),
-      ),
+      load: rpc.creator.load.handler(({ input }) => domain.creator.load(input, input.skillId)),
       remove: rpc.creator.remove.handler(async ({ input }) => {
-        await domain.creator.remove(input.workspaceId, input.skillId, input.expectedRevision);
+        await domain.creator.remove(input, input.skillId, input.expectedRevision);
         return { removed: true as const };
       }),
     },

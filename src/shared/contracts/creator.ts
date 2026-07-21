@@ -1,5 +1,5 @@
 /**
- * 原始需求 [2026-07-14]：「我们还需要有一个 创造、编辑 技能的路由(/creator)。二者是有机互联的」。
+ * 原始需求 [2026-07-22]：「一个 Workspace 下，是可以包含多个 providers 的。」
  * 正交意图：
  * 1. 编辑核心字段时保留未知 frontmatter。
  * 2. 物理区分新建与带 revision 的更新输入。
@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import { SkillIdSchema, ValidateResultSchema } from "./skills.js";
-import { ImportedWorkspaceIdSchema } from "./workspaces.js";
+import { WorkspaceProviderTargetSchema } from "./workspaces.js";
 
 /** 技能目录名的运行时约束。 */
 export const SkillDirectoryNameSchema = z
@@ -30,7 +30,7 @@ export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>;
 /** Creator 加载和保存的完整技能文档。 */
 export const SkillDocumentSchema = z.object({
   skillId: SkillIdSchema,
-  workspaceId: ImportedWorkspaceIdSchema,
+  ...WorkspaceProviderTargetSchema.shape,
   directoryName: SkillDirectoryNameSchema,
   frontmatter: SkillFrontmatterSchema,
   body: z.string(),
@@ -42,7 +42,7 @@ export type SkillDocument = z.infer<typeof SkillDocumentSchema>;
 /** 新建技能的输入约束。 */
 export const CreateSkillInputSchema = z.object({
   mode: z.literal("create"),
-  workspaceId: ImportedWorkspaceIdSchema,
+  ...WorkspaceProviderTargetSchema.shape,
   directoryName: SkillDirectoryNameSchema,
   frontmatter: SkillFrontmatterSchema,
   body: z.string(),
@@ -51,7 +51,7 @@ export const CreateSkillInputSchema = z.object({
 /** 更新现有技能的 revision-safe 输入约束。 */
 export const UpdateSkillInputSchema = z.object({
   mode: z.literal("update"),
-  workspaceId: ImportedWorkspaceIdSchema,
+  ...WorkspaceProviderTargetSchema.shape,
   skillId: SkillIdSchema,
   expectedRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   frontmatter: SkillFrontmatterSchema,

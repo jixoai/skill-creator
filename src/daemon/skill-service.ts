@@ -3,8 +3,8 @@
  *
  * User input [2026-07-14]: "基于 ../ccski 这个 sdk 来快速搭建一个 ‘skills 管理器’。"
  * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
- * Architecture decisions [2026-07-14]: bind operations to explicit Workspace
- * identity and expose expected lookup failures without leaking infrastructure.
+ * Architecture decisions [2026-07-22]: bind operations to explicit Workspace
+ * Provider identity and expose expected lookup failures without leaking infrastructure.
  *
  * Orthogonal intents:
  *   [1] Discover and identify skills through a daemon-owned Workspace Registry.
@@ -20,7 +20,7 @@ import {
   type ValidateOptions,
 } from "ccski";
 import { z } from "zod";
-import type { WorkspaceId } from "../shared/contracts/workspaces.js";
+import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import type {
   SkillId,
   SkillInfo,
@@ -116,31 +116,31 @@ export function createSkillService(
   const discoverSkills = options.discoverSkills ?? listSkills;
   const validateSkill = options.validateSkill ?? validateCcskiSkill;
   return {
-    list: (workspaceId: WorkspaceId, includeDisabled = true) =>
-      list(workspaces, discoverSkills, workspaceId, includeDisabled),
-    resolve: (workspaceId: WorkspaceId, skillId: SkillId) =>
-      resolveSkill(workspaces, discoverSkills, workspaceId, skillId),
+    list: (target: WorkspaceProviderTarget, includeDisabled = true) =>
+      list(workspaces, discoverSkills, target, includeDisabled),
+    resolve: (target: WorkspaceProviderTarget, skillId: SkillId) =>
+      resolveSkill(workspaces, discoverSkills, target, skillId),
     skillFile,
-    info: (workspaceId: WorkspaceId, skillId: SkillId) =>
-      info(workspaces, discoverSkills, workspaceId, skillId),
-    toggle: (workspaceId: WorkspaceId, skillIds: SkillId[], mode: "enable" | "disable") =>
-      toggle(workspaces, discoverSkills, workspaceId, skillIds, mode),
-    validate: (workspaceId: WorkspaceId, skillId: SkillId) =>
-      validate(workspaces, discoverSkills, validateSkill, workspaceId, skillId),
+    info: (target: WorkspaceProviderTarget, skillId: SkillId) =>
+      info(workspaces, discoverSkills, target, skillId),
+    toggle: (target: WorkspaceProviderTarget, skillIds: SkillId[], mode: "enable" | "disable") =>
+      toggle(workspaces, discoverSkills, target, skillIds, mode),
+    validate: (target: WorkspaceProviderTarget, skillId: SkillId) =>
+      validate(workspaces, discoverSkills, validateSkill, target, skillId),
   };
 }
 
-/** Workspace-scoped skill discovery, lookup, mutation, and validation operations. */
+/** Workspace Provider-scoped skill discovery, lookup, mutation, and validation operations. */
 export type SkillService = ReturnType<typeof createSkillService>;
 
-/** Discover unique skill metadata within one server-owned workspace scope. */
+/** Discover unique skill metadata within one server-owned Workspace Provider scope. */
 async function list(
   workspaces: WorkspaceRegistry,
   discoverSkills: SkillDiscoverer,
-  workspaceId: WorkspaceId,
+  target: WorkspaceProviderTarget,
   includeDisabled = true,
 ): Promise<SkillMetadata[]> {
-  const skills = await discoverSkills(workspaces.resolve(workspaceId, includeDisabled).options);
+  const skills = await discoverSkills(workspaces.resolve(target, includeDisabled).options);
   const byId = new Map<SkillId, SkillMetadata>();
   for (const skill of skills) {
     const projected = projectMetadata(skill);
@@ -151,17 +151,18 @@ async function list(
   return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
-/** Resolve an opaque skill ID only within its requested workspace. */
+/** Resolve an opaque skill ID only within its requested Workspace Provider. */
 async function resolveSkill(
   workspaces: WorkspaceRegistry,
   discoverSkills: SkillDiscoverer,
-  workspaceId: WorkspaceId,
+  target: WorkspaceProviderTarget,
   skillId: SkillId,
 ): Promise<SkillMetadata> {
-  const skill = (await list(workspaces, discoverSkills, workspaceId, true)).find(
+  const skill = (await list(workspaces, discoverSkills, target, true)).find(
     (candidate) => candidate.id === skillId,
   );
-  if (!skill) throw new DomainError("NOT_FOUND", `Skill not found in workspace: ${skillId}`);
+  if (!skill)
+    throw new DomainError("NOT_FOUND", `Skill not found in Workspace Provider: ${skillId}`);
   return skill;
 }
 
@@ -176,14 +177,14 @@ function skillFile(skill: SkillMetadata): string {
   return file;
 }
 
-/** Read one skill document and its current content revision. */
+/** Read one Workspace Provider skill document and its current content revision. */
 async function info(
   workspaces: WorkspaceRegistry,
   discoverSkills: SkillDiscoverer,
-  workspaceId: WorkspaceId,
+  target: WorkspaceProviderTarget,
   skillId: SkillId,
 ): Promise<SkillInfo> {
-  const skill = await resolveSkill(workspaces, discoverSkills, workspaceId, skillId);
+  const skill = await resolveSkill(workspaces, discoverSkills, target, skillId);
   const file = skillFile(skill);
   const content = fs.readFileSync(file, "utf8");
   return {
@@ -198,12 +199,12 @@ async function info(
 async function toggle(
   workspaces: WorkspaceRegistry,
   discoverSkills: SkillDiscoverer,
-  workspaceId: WorkspaceId,
+  target: WorkspaceProviderTarget,
   skillIds: SkillId[],
   mode: "enable" | "disable",
 ): Promise<ToggleSummary> {
   const discovered = new Map(
-    (await list(workspaces, discoverSkills, workspaceId, true)).map((skill) => [skill.id, skill]),
+    (await list(workspaces, discoverSkills, target, true)).map((skill) => [skill.id, skill]),
   );
   const results: ToggleSummary["results"] = [];
 
@@ -256,22 +257,23 @@ async function toggle(
   };
 }
 
-/** Validate one workspace-scoped skill through ccski. */
+/** Validate one Workspace Provider-scoped skill through ccski. */
 async function validate(
   workspaces: WorkspaceRegistry,
   discoverSkills: SkillDiscoverer,
   validateSkill: SkillValidator,
-  workspaceId: WorkspaceId,
+  target: WorkspaceProviderTarget,
   skillId: SkillId,
 ): Promise<ValidateResult> {
-  const skill = (await list(workspaces, discoverSkills, workspaceId, true)).find(
+  const skill = (await list(workspaces, discoverSkills, target, true)).find(
     (candidate) => candidate.id === skillId,
   );
-  if (!skill) throw new DomainError("NOT_FOUND", `Skill not found in workspace: ${skillId}`);
+  if (!skill)
+    throw new DomainError("NOT_FOUND", `Skill not found in Workspace Provider: ${skillId}`);
   const result = safeParseExternal(
     CcskiValidateResultSchema,
     await validateSkill({
-      ...workspaces.resolve(workspaceId, true).options,
+      ...workspaces.resolve(target, true).options,
       path: skillFile(skill),
     }),
   );

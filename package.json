@@ -60,7 +60,7 @@
     "@opentray/vite-plugin": "0.18.0",
     "@orpc/contract": "1.14.6",
     "@orpc/server": "1.14.6",
-    "ccski": "^2.4.0",
+    "ccski": "link:../ccski",
     "execa": "^9.6.1",
     "gray-matter": "^4.0.3",
     "opentray": "0.18.0",

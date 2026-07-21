@@ -1,8 +1,8 @@
 <script lang="ts">
   /**
-   * 原始需求 [2026-07-14]：「skills manager 只是路由的一部分(`/workspace/~/`)；我们还需要支持导入 workspace」。
+   * 原始需求 [2026-07-22]：「Workspace 是双层结构；Workspace 下可以包含多个 providers。」
    * 正交意图：
-   * 1. 按路由和连接代次加载、筛选、选择技能并维持窄屏焦点往返。
+   * 1. 按 Workspace Provider 路由和连接代次加载、筛选、选择技能并维持窄屏焦点往返。
    * 2. 编排技能校验和启停操作。
    * 3. 将可写技能衔接到 Creator，将安装需求衔接到 Repository。
    */
@@ -29,8 +29,7 @@
     workspaceState,
   } from "$lib/store.svelte";
   import { showToast } from "$lib/toast.svelte";
-  import type { SkillId } from "$lib/types";
-  import IconFilter from "@lucide/svelte/icons/list-filter";
+  import type { ProviderId, SkillId, WorkspaceProviderTarget } from "$lib/types";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPlus from "@lucide/svelte/icons/plus";
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
@@ -40,10 +39,12 @@
 
   let { data }: { data: PageData } = $props();
   let id = $derived(data.workspaceId);
+  let requestedProviderId = $derived(data.providerId);
   let selectedId = $state<SkillId | null>(null);
   let mobileDetailOpen = $state(false);
   let showDisabled = $state(false);
-  let provider = $state<string | null>(null);
+  let providerId = $state<ProviderId | null>(null);
+  let providerQuery = $state("");
   let toggling = $state(false);
   let loadedKey = "";
   let skillList = $state<HTMLElement | null>(null);
@@ -51,14 +52,15 @@
 
   $effect(() => {
     const routeId = id;
+    const routeKey = `${routeId}:${requestedProviderId ?? ""}`;
     if (connectionState.status !== "connected") {
       loadedKey = "";
       return;
     }
-    if (!routeId || loadedKey === routeId) return;
+    if (!routeId || loadedKey === routeKey) return;
 
     let cancelled = false;
-    loadedKey = routeId;
+    loadedKey = routeKey;
     selectedId = null;
     mobileDetailOpen = false;
     clearSelection();
@@ -68,7 +70,18 @@
         if (cancelled) return;
         const activated = await setActiveWorkspace(routeId);
         if (cancelled || !activated) return;
-        await loadSkills(routeId);
+        const workspace = workspaceState.workspaces.find((candidate) => candidate.id === routeId);
+        const readableProviders = workspace?.providers.filter(
+          (candidate) => candidate.path !== null,
+        );
+        const selected =
+          readableProviders?.find((candidate) => candidate.id === requestedProviderId) ??
+          readableProviders?.find((candidate) => candidate.skillCount > 0) ??
+          readableProviders?.find((candidate) => candidate.available) ??
+          readableProviders?.[0];
+        if (!selected) throw new Error("No readable Provider is available in this Workspace.");
+        providerId = selected.id;
+        await loadSkills({ workspaceId: routeId, providerId: selected.id });
       } catch (error) {
         if (cancelled) return;
         loadedKey = "";
@@ -82,15 +95,22 @@
   });
 
   let workspace = $derived(workspaceState.workspaces.find((candidate) => candidate.id === id));
-  let counts = $derived(skillCounts());
-  let providers = $derived(
-    Object.entries(counts.byProvider).sort((left, right) => right[1] - left[1]),
+  let readableProviders = $derived(
+    (workspace?.providers ?? []).filter((candidate) => candidate.path !== null),
   );
-  let visible = $derived(
-    filteredSkills().filter(
-      (skill) => (showDisabled || !skill.disabled) && (!provider || skill.provider === provider),
+  let filteredProviders = $derived(
+    readableProviders.filter((candidate) =>
+      candidate.label.toLowerCase().includes(providerQuery.trim().toLowerCase()),
     ),
   );
+  let selectedProvider = $derived(
+    workspace?.providers.find((candidate) => candidate.id === providerId),
+  );
+  let target = $derived<WorkspaceProviderTarget | null>(
+    providerId ? { workspaceId: id, providerId } : null,
+  );
+  let counts = $derived(skillCounts());
+  let visible = $derived(filteredSkills().filter((skill) => showDisabled || !skill.disabled));
 
   async function choose(skillId: SkillId): Promise<void> {
     await selectSkill(skillId);
@@ -143,7 +163,8 @@
   }
 
   function creatorUrl(): string {
-    const params = new URLSearchParams({ workspace: id });
+    if (!target) return "/creator";
+    const params = new URLSearchParams(target);
     if (selectedId) params.set("skill", selectedId);
     return `/creator?${params}`;
   }
@@ -159,18 +180,53 @@
         <h1 class="truncate text-sm font-semibold">{workspace?.label ?? "Workspace"}</h1>
         <span class="text-xs text-muted-foreground">{counts.total} skills</span>
       </div>
-      {#if workspace?.path}<p class="truncate font-mono text-[10px] text-muted-foreground">
-          {workspace.path}
+      {#if selectedProvider?.path}<p class="truncate font-mono text-[10px] text-muted-foreground">
+          {selectedProvider.path}
         </p>{/if}
     </div>
     <div class="ml-auto flex items-center gap-1">
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}<Button
+              {...props}
+              variant="outline"
+              size="sm"
+              class="workspace-provider-command h-8 max-w-48 gap-1.5"
+              ><span class="truncate">{selectedProvider?.label ?? "Choose Provider"}</span></Button
+            >{/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="w-64 max-h-72 overflow-y-auto p-1">
+          <div
+            role="presentation"
+            class="sticky top-0 z-10 bg-popover pb-1"
+            onkeydown={(event) => event.stopPropagation()}
+          >
+            <Input
+              aria-label="Filter Providers"
+              class="h-8"
+              bind:value={providerQuery}
+              placeholder="Filter Providers"
+            />
+          </div>
+          {#each filteredProviders as candidate (candidate.id)}
+            <DropdownMenu.Item
+              onclick={() => goto(`/workspace/${id}?provider=${encodeURIComponent(candidate.id)}`)}
+              >{candidate.label}<span class="ml-auto text-muted-foreground"
+                >{candidate.skillCount}</span
+              ></DropdownMenu.Item
+            >
+          {:else}
+            <DropdownMenu.Item disabled>No matching Providers</DropdownMenu.Item>
+          {/each}
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
       <Button
         variant="ghost"
         size="icon"
         class="workspace-refresh-command h-8 w-8"
         aria-label="Refresh skills"
         title="Refresh skills"
-        onclick={() => loadSkills(id)}
+        onclick={() => target && loadSkills(target)}
         disabled={skillsState.refreshing}
       >
         {#if skillsState.refreshing}<IconLoader class="h-4 w-4 animate-spin" />{:else}<IconRefresh
@@ -183,17 +239,21 @@
         class="workspace-compact-command h-8 gap-1.5"
         aria-label="Repository"
         title="Repository"
-        onclick={() => goto(`/repository?workspace=${encodeURIComponent(id)}`)}
+        onclick={() =>
+          target &&
+          goto(
+            `/repository?targets=${encodeURIComponent(`${target.workspaceId}:${target.providerId}`)}`,
+          )}
       >
         <IconRepository class="h-4 w-4" /> <span class="workspace-command-label">Repository</span>
       </Button>
-      {#if workspace?.kind === "directory"}
+      {#if selectedProvider?.writable}
         <Button
           size="sm"
           class="workspace-compact-command h-8 gap-1.5"
           aria-label="New skill"
           title="New skill"
-          onclick={() => goto(`/creator?workspace=${encodeURIComponent(id)}`)}
+          onclick={() => goto(creatorUrl())}
         >
           <IconPlus class="h-4 w-4" /> <span class="workspace-command-label">New skill</span>
         </Button>
@@ -234,24 +294,6 @@
             >{/if}
         </div>
         <div class="flex items-center gap-1.5">
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger>
-              {#snippet child({ props })}<Button
-                  {...props}
-                  variant="outline"
-                  size="sm"
-                  class="workspace-filter-control h-7 gap-1.5 px-2 text-[11px]"
-                  ><IconFilter class="h-3 w-3" />{provider ?? "All providers"}</Button
-                >{/snippet}
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content>
-              <DropdownMenu.Item onclick={() => (provider = null)}>All providers</DropdownMenu.Item>
-              {#each providers as [name, count]}<DropdownMenu.Item onclick={() => (provider = name)}
-                  >{name}<span class="ml-auto text-muted-foreground">{count}</span
-                  ></DropdownMenu.Item
-                >{/each}
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
           <Button
             variant={showDisabled ? "secondary" : "ghost"}
             size="sm"
@@ -288,7 +330,7 @@
         bind:headingRef={detailHeading}
         skill={skillsState.selected}
         busy={toggling}
-        editable={workspace?.kind === "directory"}
+        editable={selectedProvider?.writable ?? false}
         onToggle={toggle}
         onEdit={() => goto(creatorUrl())}
         onBack={() => void closeDetail()}
@@ -309,6 +351,7 @@
   @container (max-width: 680px) {
     :global(.workspace-refresh-command),
     :global(.workspace-compact-command),
+    :global(.workspace-provider-command),
     :global(.workspace-filter-control),
     :global(.workspace-search-control),
     .workspace-clear-search {

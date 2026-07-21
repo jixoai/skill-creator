@@ -5,11 +5,11 @@
  * 2. 按连接所有权与最新请求代次管理安装操作状态。
  */
 import type {
-  ImportedWorkspaceId,
   InstallResult,
   RemoteRepoScan,
   RemoteSkillId,
   RemoteSkillPreview,
+  WorkspaceProviderTarget,
 } from "../types";
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
@@ -81,10 +81,10 @@ export async function previewRemoteSkill(skillId: RemoteSkillId): Promise<void> 
   }
 }
 
-/** 将当前固定会话中的技能安装或 dry-run 到显式 workspace。 */
+/** 将当前固定会话中的技能安装或 dry-run 到显式 Workspace Providers。 */
 export async function installRemoteSkills(input: {
   skillIds: RemoteSkillId[];
-  workspaceId: ImportedWorkspaceId;
+  targets: WorkspaceProviderTarget[];
   force?: boolean;
   dryRun?: boolean;
 }): Promise<InstallResult | null> {

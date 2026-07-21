@@ -1,7 +1,7 @@
 /**
  * Immutable repository scan, preview, and install sessions.
  *
- * User input [2026-07-14]: "我们还需要一个 `/repository/`，来支持远程仓库预览 skills 并安装 它们"
+ * User input [2026-07-22]: "下载到某个 Workspace.provider；另外这里应该要能多选。"
  * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  * Architecture decisions [2026-07-14]: preview/install share one pinned clone;
  * expected failures are actionable without exposing credential-bearing Git output.
@@ -36,6 +36,7 @@ import {
   type RepositorySessionId,
 } from "../shared/contracts/repository.js";
 import { SkillIdSchema, type SkillId } from "../shared/contracts/skills.js";
+import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import { DomainError } from "./domain-error.js";
 import { assertPathInside, canonicalDirectory, opaquePathId } from "./path-safety.js";
 import type { SkillService } from "./skill-service.js";
@@ -395,10 +396,10 @@ async function preview(
   };
 }
 
-function emptySummary(workspaceId: InstallSummary["workspaceId"]): InstallSummary {
+function emptySummary(targets: WorkspaceProviderTarget[]): InstallSummary {
   return {
     kind: "result",
-    workspaceId,
+    targets,
     results: [],
     installed: 0,
     skipped: 0,
@@ -408,14 +409,14 @@ function emptySummary(workspaceId: InstallSummary["workspaceId"]): InstallSummar
 }
 
 interface ExpectedInstallTarget {
-  workspaceId: InstallSummary["workspaceId"];
+  target: WorkspaceProviderTarget;
   workspaceRoot: string;
   skill: RemoteSkill;
   expectedPath: string;
 }
 
 function createExpectedInstallTarget(
-  workspaceId: InstallSummary["workspaceId"],
+  target: WorkspaceProviderTarget,
   workspaceRoot: string,
   skill: RemoteSkill,
 ): ExpectedInstallTarget {
@@ -423,11 +424,12 @@ function createExpectedInstallTarget(
   if (path.dirname(expectedPath) !== workspaceRoot) {
     throw new Error("Remote skill name must resolve to a direct Workspace child.");
   }
-  return { workspaceId, workspaceRoot, skill, expectedPath };
+  return { target, workspaceRoot, skill, expectedPath };
 }
 
 function expectedInstallEntryBase(target: ExpectedInstallTarget) {
   return {
+    target: target.target,
     skill: target.skill.name,
     destination: target.workspaceRoot,
     path: target.expectedPath,
@@ -506,11 +508,11 @@ async function installedSkillId(
     throw new Error("Installed skill frontmatter name does not match the selected remote skill.");
   }
   const skillId = SkillIdSchema.parse(opaquePathId("sk", canonicalPath));
-  const discovered = await skills.resolve(target.workspaceId, skillId);
+  const discovered = await skills.resolve(target.target, skillId);
   if (discovered.directoryName !== target.skill.name || discovered.path !== canonicalPath) {
     throw new Error("Installed skill identity does not match the selected remote skill.");
   }
-  const validation = await skills.validate(target.workspaceId, skillId);
+  const validation = await skills.validate(target.target, skillId);
   if (!validation.success) {
     throw new Error("Installed skill frontmatter is invalid.");
   }
@@ -582,18 +584,25 @@ function formatInstallFailure(error: unknown): string {
 function appendPreview(
   target: InstallPreview,
   source: Pick<InstallerPreview, "skills" | "destinations" | "totalInstalls">,
+  installTarget: WorkspaceProviderTarget,
 ): void {
   target.skills.push(...source.skills);
-  const destinationPaths = new Set(target.destinations.map((destination) => destination.path));
+  const destinationPaths = new Set(
+    target.destinations.map(
+      (destination) =>
+        `${destination.target.workspaceId}:${destination.target.providerId}:${destination.path}`,
+    ),
+  );
   for (const destination of source.destinations) {
-    if (destinationPaths.has(destination.path)) continue;
-    destinationPaths.add(destination.path);
-    target.destinations.push(destination);
+    const key = `${installTarget.workspaceId}:${installTarget.providerId}:${destination.path}`;
+    if (destinationPaths.has(key)) continue;
+    destinationPaths.add(key);
+    target.destinations.push({ ...destination, target: installTarget });
   }
   target.totalInstalls += source.totalInstalls;
 }
 
-/** Preview or install selected skills from one pinned session into a workspace. */
+/** Preview or install selected skills from one pinned session into selected Workspace Providers. */
 async function install(
   sessions: RepositorySessions,
   workspaces: WorkspaceRegistry,
@@ -616,14 +625,19 @@ async function install(
       }
       return skill;
     });
-    const scope = workspaces.resolve(input.workspaceId);
-    if (scope.kind !== "directory") {
-      throw new DomainError(
-        "INVALID_OPERATION",
-        "Repository installs require an imported Workspace.",
-      );
-    }
-    const destination = scope.directory;
+    const targets = input.targets.map((target) => {
+      const scope = workspaces.resolveWritable(target);
+      try {
+        fs.mkdirSync(scope.directory, { recursive: true });
+      } catch (error) {
+        throw new DomainError(
+          "UNAVAILABLE",
+          `Provider skills directory is not writable: ${scope.workspaceLabel}`,
+          { cause: error },
+        );
+      }
+      return { target, destination: scope.directory };
+    });
 
     if (input.dryRun) {
       const installPreview: InstallPreview = {
@@ -632,45 +646,49 @@ async function install(
         destinations: [],
         totalInstalls: 0,
       };
-      for (const skill of selected) {
-        const result = await installer({
-          source: session.directory,
-          path: skill.relativePath,
-          outDir: [destination],
-          all: true,
-          force: input.force,
-          yes: true,
-          dryRun: true,
-        });
-        const parsedPreview = InstallerPreviewSchema.safeParse(result);
-        if (!parsedPreview.success) continue;
-        appendPreview(installPreview, parsedPreview.data);
+      for (const target of targets) {
+        for (const skill of selected) {
+          const result = await installer({
+            source: session.directory,
+            path: skill.relativePath,
+            outDir: [target.destination],
+            all: true,
+            force: input.force,
+            yes: true,
+            dryRun: true,
+          });
+          const parsedPreview = InstallerPreviewSchema.safeParse(result);
+          if (!parsedPreview.success) continue;
+          appendPreview(installPreview, parsedPreview.data, target.target);
+        }
       }
       return installPreview;
     }
 
-    const summary = emptySummary(input.workspaceId);
-    for (const skill of selected) {
-      const expected = createExpectedInstallTarget(input.workspaceId, destination, skill);
-      try {
-        const result = await installer({
-          source: session.directory,
-          path: skill.relativePath,
-          outDir: [destination],
-          all: true,
-          force: input.force,
-          yes: true,
-        });
-        if (InstallerPreviewSchema.safeParse(result).success) {
-          appendInstallEntry(
-            summary,
-            failedInstallEntry(expected, "Installer returned an unexpected dry-run result."),
-          );
-          continue;
+    const summary = emptySummary(input.targets);
+    for (const target of targets) {
+      for (const skill of selected) {
+        const expected = createExpectedInstallTarget(target.target, target.destination, skill);
+        try {
+          const result = await installer({
+            source: session.directory,
+            path: skill.relativePath,
+            outDir: [target.destination],
+            all: true,
+            force: input.force,
+            yes: true,
+          });
+          if (InstallerPreviewSchema.safeParse(result).success) {
+            appendInstallEntry(
+              summary,
+              failedInstallEntry(expected, "Installer returned an unexpected dry-run result."),
+            );
+            continue;
+          }
+          await appendSummary(summary, result, expected, skills);
+        } catch (error) {
+          appendInstallEntry(summary, failedInstallEntry(expected, formatInstallFailure(error)));
         }
-        await appendSummary(summary, result, expected, skills);
-      } catch (error) {
-        appendInstallEntry(summary, failedInstallEntry(expected, formatInstallFailure(error)));
       }
     }
     return summary;
