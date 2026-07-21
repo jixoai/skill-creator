@@ -4,6 +4,7 @@
  * 1. 由 Vite 启动隔离的开发 daemon，不读写正式用户状态。
  * 2. 注入固定 HTTP 端口、WebUI URL 与测试 token，支持 HMR 和自动化验收。
  * 3. 挂载开发态 OpenTray，并在 Vite 退出后清理孤儿进程。
+ * 4. 将 Vite 监督器的 pnpm dev 向量持久化为 Dock 冷启动入口。
  */
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +12,7 @@ import fs from "node:fs";
 import { bootDaemon } from "./index.js";
 import { setHomeOverride } from "../shared/paths.js";
 import { readPackageVersion } from "./package-version.js";
+import { parseDevAppLaunch, SKILL_CREATOR_DEV_APP_LAUNCH_ENV } from "../shared/dev-app-launch.js";
 
 async function main(): Promise<void> {
   const devHome = process.env.SKILL_CREATOR_HOME ?? defaultDevHome();
@@ -20,6 +22,7 @@ async function main(): Promise<void> {
   // [2][3] 读 vite 插件注入的 env。
   const port = readOptionalPort(process.env.SKILL_CREATOR_DEV_DAEMON_PORT);
   const webviewUrl = process.env.SKILL_CREATOR_DEV_WEBVIEW_URL;
+  const appLaunch = parseDevAppLaunch(process.env[SKILL_CREATOR_DEV_APP_LAUNCH_ENV]);
 
   const handles = await bootDaemon({
     cliVersion: readPackageVersion(),
@@ -30,6 +33,7 @@ async function main(): Promise<void> {
       : {}),
     withTray: true,
     enableDevtools: true,
+    ...(appLaunch === undefined ? {} : { appLaunch }),
   });
 
   if (!handles) {

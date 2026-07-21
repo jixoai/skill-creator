@@ -20,6 +20,7 @@ import { IpcServer } from "./ipc-server.js";
 import { WebServer } from "./web-server.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
 import { log } from "./log.js";
+import type { OpenTrayAppLaunchOptions } from "opentray";
 
 /** 生产与开发 daemon 入口共享的启动配置。 */
 export interface DaemonOptions {
@@ -34,6 +35,8 @@ export interface DaemonOptions {
   webviewUrl?: string;
   /** Deterministic token for isolated dev/browser verification only. */
   webToken?: string;
+  /** Stable cold-launch vector; development points at the Vite supervisor command. */
+  appLaunch?: OpenTrayAppLaunchOptions;
   /** Native tray mount adapter; replace only at the daemon lifecycle test boundary. */
   trayMounter?: typeof mountTray;
   exitProcess?: (code: number) => void;
@@ -245,6 +248,7 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
       packageVersion: opts.cliVersion,
       enableDevtools: opts.enableDevtools ?? false,
       webuiDir,
+      ...(opts.appLaunch === undefined ? {} : { appLaunch: opts.appLaunch }),
       onQuit: async () => {
         const stop = await stopReady;
         await stop({ exit: true });

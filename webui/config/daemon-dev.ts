@@ -4,6 +4,7 @@
  * 1. 由 Vite 启动开发 daemon，并绑定二者的进程生命周期。
  * 2. 将开发态 HTTP 与 WebSocket 请求代理到动态 daemon 端口。
  * 3. 在 daemon 启动竞态期间返回可重试失败，不让代理错误终止 Vite。
+ * 4. 把完整 pnpm dev 监督器向量传给 daemon，供 Dock 冷启动恢复开发树。
  */
 import http from "node:http";
 import net, { type AddressInfo } from "node:net";
@@ -12,6 +13,11 @@ import { fileURLToPath } from "node:url";
 import { execa, type ResultPromise } from "execa";
 import httpProxy from "http-proxy";
 import type { Plugin } from "vite";
+import {
+  serializeDevAppLaunch,
+  SKILL_CREATOR_DEV_APP_LAUNCH_ENV,
+  type DevAppLaunch,
+} from "../../src/shared/dev-app-launch";
 
 /** Spawn the development daemon and proxy its browser transport through Vite. */
 export function skillCreatorDaemonDev(): Plugin {
@@ -62,6 +68,7 @@ export function skillCreatorDaemonDev(): Plugin {
         daemonExitExpected = false;
         stopDaemonPromise = null;
         const entry = path.resolve(repoRoot(), "src/daemon/dev.ts");
+        const appLaunch = resolveDevAppLaunch(process.env);
         daemon = execa("bun", [entry], {
           stdio: "inherit",
           forceKillAfterDelay: 3_000,
@@ -70,6 +77,7 @@ export function skillCreatorDaemonDev(): Plugin {
             SKILL_CREATOR_DEV_DAEMON_PORT: String(port),
             SKILL_CREATOR_DEV_WEBVIEW_URL: webuiUrl,
             SKILL_CREATOR_DEV_SUPERVISOR_PID: String(process.pid),
+            [SKILL_CREATOR_DEV_APP_LAUNCH_ENV]: serializeDevAppLaunch(appLaunch),
           },
         });
         daemon.once("exit", (code, signal) => {
@@ -113,6 +121,26 @@ export function skillCreatorDaemonDev(): Plugin {
     closeBundle() {
       return stopDaemon();
     },
+  };
+}
+
+/** Resolve the package-manager supervisor that owns Vite, daemon, and WebView together. */
+export function resolveDevAppLaunch(
+  environment: NodeJS.ProcessEnv,
+  command = process.execPath,
+  cwd = repoRoot(),
+): DevAppLaunch {
+  const packageManagerEntry = environment.npm_execpath;
+  if (packageManagerEntry === undefined || !path.isAbsolute(packageManagerEntry)) {
+    throw new Error("pnpm dev requires an absolute npm_execpath for Dock relaunch.");
+  }
+  if (!path.isAbsolute(command)) {
+    throw new Error("pnpm dev requires an absolute Node executable for Dock relaunch.");
+  }
+  return {
+    command,
+    args: [packageManagerEntry, "--dir", path.join(cwd, "webui"), "dev"],
+    cwd,
   };
 }
 

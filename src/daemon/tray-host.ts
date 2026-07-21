@@ -22,6 +22,7 @@ import type {
   CreateTrayOptions,
   EventfulTrayHandle,
   Icon,
+  OpenTrayAppLaunchOptions,
   TrayIcon,
 } from "opentray";
 import type { WebviewTrayCapability, WebviewWindowHandle } from "@opentray/ext-webview";
@@ -106,6 +107,7 @@ export async function mountTray(opts: {
   packageVersion: string;
   enableDevtools?: boolean;
   webuiDir?: string;
+  appLaunch?: OpenTrayAppLaunchOptions;
   onQuit: () => Promise<void>;
 }): Promise<{ result: TrayMountResult; host: TrayHost }> {
   let baseTray: EventfulTrayHandle | null = null;
@@ -152,6 +154,7 @@ export async function mountTray(opts: {
       appId: `com.${APP_ID}`,
       appName: APP_TITLE,
       ...(appIcon === null ? {} : { appIcon }),
+      ...(opts.appLaunch === undefined ? {} : { appLaunch: opts.appLaunch }),
     });
     tray = baseTray.extend(ext.WebviewExt);
 

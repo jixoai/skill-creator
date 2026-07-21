@@ -8,6 +8,7 @@
  * Orthogonal intents:
  *   [1] Exercise the real Vite restart order against a singleton fake daemon.
  *   [2] Prove duplicate closeBundle hooks terminate each child exactly once.
+ *   [3] Model the absolute package-manager entry guaranteed by pnpm dev.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -40,6 +41,7 @@ describe("Vite development daemon", () => {
           env: {
             ...process.env,
             PATH: `${binDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
+            npm_execpath: path.join(fixture, "pnpm.cjs"),
             SKILL_CREATOR_VITE_RESTART_FIXTURE: fixture,
           },
           reject: false,
