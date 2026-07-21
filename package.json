@@ -56,14 +56,14 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@opentray/ext-webview": "link:../opentray/packages/ext-webview",
-    "@opentray/vite-plugin": "0.17.0",
+    "@opentray/ext-webview": "0.18.0",
+    "@opentray/vite-plugin": "0.18.0",
     "@orpc/contract": "1.14.6",
     "@orpc/server": "1.14.6",
     "ccski": "^2.4.0",
     "execa": "^9.6.1",
     "gray-matter": "^4.0.3",
-    "opentray": "link:../opentray/packages/cli",
+    "opentray": "0.18.0",
     "ws": "^8.18.1",
     "zod": "^4.4.3"
   },

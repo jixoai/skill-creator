@@ -4,7 +4,3 @@ packages:
 onlyBuiltDependencies:
   - "@tailwindcss/oxide"
   - esbuild
-
-overrides:
-  "@opentray/ext-webview": link:../opentray/packages/ext-webview
-  opentray: link:../opentray/packages/cli
