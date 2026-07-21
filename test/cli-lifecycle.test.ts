@@ -7,7 +7,7 @@
  * Orthogonal intents:
  *   [1] Start/replace a daemon and preserve actionable startup diagnostics.
  *   [2] Project tray/headless status through the CLI.
- *   [3] Wait through starting and mounted-before-openable races.
+ *   [3] Wait through starting races and recover a mounted daemon whose tray is unavailable.
  *   [4] Report stop success only after asynchronous teardown releases the socket.
  *   [5] Isolate real daemon fixtures from the operator's native tray runtime.
  * 妥协声明：这些断言共享同一临时 daemon fixture 与进程清理边界，拆分
@@ -130,6 +130,41 @@ describe("CLI daemon lifecycle", () => {
       expect(openAttempts).toBe(2);
     } finally {
       await daemon.stop();
+    }
+  });
+
+  it("restarts a running daemon whose mounted tray can no longer open", async () => {
+    const home = await createTemporaryHome();
+    setHomeOverride(home);
+    let staleDaemonStopped = false;
+    let staleDaemon: IpcServer;
+    staleDaemon = new IpcServer({
+      onStatus: () => daemonStatus({ version: currentVersion, tray: "mounted", port: 4567 }),
+      onOpen: async () => {
+        throw new Error("broker connection closed");
+      },
+      onStop: async () => async () => {
+        staleDaemonStopped = true;
+        await staleDaemon.stop();
+      },
+    });
+    expect(await staleDaemon.start()).toBe(true);
+
+    try {
+      const marker = path.join(home, "spawned-daemon.pid");
+      const daemonEntry = await writeFixtureDaemon(home);
+      const result = await runCli(home, ["start"], {
+        SKILL_CREATOR_DAEMON_ENTRY: daemonEntry,
+        TEST_DAEMON_MARKER: marker,
+      });
+
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("restarting daemon because its tray runtime is unavailable");
+      expect(result.stdout).toContain("skill-creator daemon started.");
+      expect(staleDaemonStopped).toBe(true);
+      spawnedDaemonPids.add(Number.parseInt(await fs.promises.readFile(marker, "utf8"), 10));
+    } finally {
+      await staleDaemon.stop();
     }
   });
 

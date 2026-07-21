@@ -11,6 +11,7 @@
 - 「任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等。」
 - 「开发模式下，配置启动命令成 `pnpm dev`；Dock 点击要恢复完整开发进程树。」
 - 「`pnpm skill-creator start` 必须挂载托盘；退出托盘后点击固定 Dock 图标必须重新启动。」
+- 「`node dist/daemon.js` 确实没反应；生产 Dock 入口必须恢复或聚焦应用。」
 正交意图：1. 固化产品真相；2. 固化模块与安全边界；3. 固化工程风格；4. 固化验证标准；5. 固化演进与无兼容策略。
 妥协声明：根级 `AGENTS.md` 是当前全仓共享的自动发现入口；五项是安全交付不可分离的治理上下文，具体领域定义已物理拆分到 `i18n.zh.md` 与源码契约。
 -->
@@ -190,7 +191,9 @@ live Dock click -> reopenRequested -> latest retained appMode window
 
 OpenTray broker 是 caller-scoped single-session；生产与开发模式不得并发争抢同一 app identity。`pnpm dev` 在 Vite 监听前检测正式 daemon，发送 stop，并同时等待正式 IPC endpoint 释放与 daemon PID 退出；接管失败必须终止 dev 启动，不能静默降级 headless。Vite 再使用绝对 Node 与绝对 `tsx` loader 启动源 daemon，完整开发树的任何子进程都不得依赖 Finder PATH。
 
-`SKILL_CREATOR_DEV_APP_LAUNCH` 是 Vite 到 daemon 的私有、严格 Zod 校验传输；不得持久化 shell、pnpm/package script、`.bin/vite` shim、完整环境变量或 daemon 子进程的 `process.argv`。开发向量由绝对 Node 直接执行项目内稳定的 `webui/node_modules/vite/bin/vite.js`，既避免 Finder PATH 中缺失裸 `node`，也不绑定一次安装的 pnpm virtual-store 版本目录。源码 link 期间，`predev` 与 `skill-creator start` 只在识别到真实 OpenTray workspace 时运行 `prepare:linked-consumer`；`status/open/stop` 与 registry 安装不得增加构建开销。生产模式继续使用 OpenTray 的默认当前调用快照。
+`SKILL_CREATOR_DEV_APP_LAUNCH` 是 Vite 到 daemon 的私有、严格 Zod 校验传输；不得持久化 shell、pnpm/package script、`.bin/vite` shim、完整环境变量或 daemon 子进程的 `process.argv`。开发向量由绝对 Node 直接执行项目内稳定的 `webui/node_modules/vite/bin/vite.js`，既避免 Finder PATH 中缺失裸 `node`，也不绑定一次安装的 pnpm virtual-store 版本目录。源码 link 期间，`predev` 与 `skill-creator start` 只在识别到真实 OpenTray workspace 时运行 `prepare:linked-consumer`；`status/open/stop` 与 registry 安装不得增加构建开销。
+
+生产 Dock 冷启动不得持久化内部 `dist/daemon.js` 入口；raw daemon 遇到已有 IPC owner 会按单实例法则直接退出，无法表达 open/focus。生产 `appLaunch` 必须是绝对 Node + `dist/cli.js start` + package cwd：无 daemon 时由 CLI 启动，有 daemon 时发送 open；若 daemon 仍报告 mounted 但 open 已失败，则 CLI 先优雅停止失联实例，再重建 daemon、broker 与 retained window。
 
 真实 daemon 生命周期测试必须同时设置独立 `OPENTRAY_HOME` 与 `SKILL_CREATOR_DISABLE_TRAY=1`。只隔离 `SKILL_CREATOR_HOME` 不足以隔离 broker lock、稳定 Bundle 和 native tray；测试退出不得留下影响操作者后续 `pnpm skill-creator start` / `pnpm dev` 的正式 OpenTray 状态。
 

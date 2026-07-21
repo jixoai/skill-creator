@@ -4,7 +4,7 @@
  * 正交意图：
  * 1. 解析并路由公开 CLI 命令。
  * 2. 通过带版本、运行时校验的 IPC 协议调用 daemon。
- * 3. 安全启动或替换分离运行的 daemon。
+ * 3. 安全启动、替换或恢复 tray 已失联的分离运行 daemon。
  * 4. 向终端投影 daemon 与 tray 状态。
  *
  * Routing:
@@ -198,6 +198,28 @@ async function runStart(): Promise<number> {
       return 1;
     }
     runningStatus = null;
+  }
+
+  if (runningStatus?.tray === "mounted") {
+    try {
+      await ipcRequest({ type: "open" }, 750);
+      console.log("skill-creator daemon is already running.");
+      console.log("Opening the tray window…");
+      return 0;
+    } catch {
+      console.log("restarting daemon because its tray runtime is unavailable...");
+      try {
+        await ipcRequest({ type: "stop" });
+      } catch (stopError) {
+        console.error(stopError instanceof Error ? stopError.message : String(stopError));
+        return 1;
+      }
+      if (!(await waitForDaemonRelease())) {
+        console.error("Timed out waiting for the unavailable daemon to release its socket.");
+        return 1;
+      }
+      runningStatus = null;
+    }
   }
 
   if (!runningStatus) {
