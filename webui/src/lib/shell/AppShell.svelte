@@ -17,6 +17,7 @@
     type RouterContextValue,
   } from "./portal-context.svelte";
   import { page } from "$app/state";
+  import { untrack } from "svelte";
   import { parseSearchString } from "./search";
   import type { ZodSchema } from "zod";
   import type { Component } from "svelte";
@@ -68,26 +69,36 @@
   // 叶子组件懒加载：URL 变化 → 重新 import → 存入 $state → 模板渲染。
   let leafComponent = $state<Component | null>(null);
   let leafError = $state<string | null>(null);
+  // 已加载的叶子 route（registry 稳定对象身份）。matchResult 每次重算都会产生新的
+  // chain 数组；若按数组身份建立依赖，纯 search 变化（选技能/筛选/切视图）也会把
+  // leafComponent 清空，导致叶子组件卸载重挂、组件状态与焦点全部丢失。
+  let leafLoadedRoute: MatchedRouteNode["route"] | null = null;
+  let leafLoadToken = 0;
 
   $effect(() => {
-    const chain = leafChain;
-    if (chain.length === 0) {
+    const leaf = leafChain.length > 0 ? leafChain[leafChain.length - 1] : undefined;
+    const route = leaf?.route;
+    const loadedRoute = untrack(() => leafLoadedRoute);
+    if (!route) {
+      leafLoadedRoute = null;
+      leafLoadToken += 1;
       leafComponent = null;
+      leafError = null;
       return;
     }
-    const leaf = chain[chain.length - 1];
-    if (!leaf) {
-      leafComponent = null;
-      return;
-    }
+    if (loadedRoute === route) return;
+    leafLoadedRoute = route;
     leafComponent = null;
     leafError = null;
-    leaf.route
+    const token = ++leafLoadToken;
+    route
       .component()
       .then((mod) => {
+        if (token !== leafLoadToken) return;
         leafComponent = mod.default as Component;
       })
       .catch((err: unknown) => {
+        if (token !== leafLoadToken) return;
         leafError = err instanceof Error ? err.message : String(err);
       });
   });

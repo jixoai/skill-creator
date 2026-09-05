@@ -44,8 +44,10 @@
     }
     setNavControllerAdapter({
       navigate(path, action) {
+        // REPLACE 必须走 goto({replaceState:true})：本版本 replaceState 浅路由
+        // 不更新响应式 page.url，search 派生会失联；keepFocus 保住筛选输入焦点。
         if (action === "REPLACE") {
-          void import("$app/navigation").then(({ replaceState }) => replaceState(path, {}));
+          void goto(path, { replaceState: true, keepFocus: true, noScroll: true });
         } else {
           void goto(path);
         }
