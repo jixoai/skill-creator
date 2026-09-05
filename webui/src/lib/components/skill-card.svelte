@@ -24,6 +24,7 @@
 
 <button
   type="button"
+  data-skill-id={skill.id}
   {onclick}
   aria-pressed={selected}
   class={cn(

@@ -8,6 +8,7 @@
   5. 窄屏（@container max-width 680px）下详情面板折叠到列表下方，?view=detail 切换焦点。
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import { useParams, useSearch, goById } from "$lib/shell";
   import { getConnectionGeneration } from "$lib/store.svelte";
   import {
@@ -73,6 +74,12 @@
   // 行内轻量编辑草稿（仅当 detail 加载后初始化；不写 localStorage）。
   let draftName = $state("");
   let draftDescription = $state("");
+
+  // 焦点管理目标：详情语义标题（programmatic focus target）与筛选输入。
+  let detailHeaderEl = $state<HTMLElement | null>(null);
+  let filterInputEl = $state<HTMLInputElement | null>(null);
+  // backToList 记录待恢复的触发行，由下方 viewMode 迁移 effect 在渲染 flush 内恢复。
+  let pendingFocusSkillId: string | null = null;
 
   // URL params 经 manifest 的 zod schema 校验（match 阶段）；这里再次安全解析以获得 branded 类型。
   const providerTarget = $derived.by(() => {
@@ -174,8 +181,34 @@
 
   function backToList(): void {
     if (!wsId || !providerId) return;
+    pendingFocusSkillId = selectedSkillId ?? null;
     goById("workspaces.provider", { wsId, providerId }, { ...search, view: "list" });
   }
+
+  // detail→list 迁移时恢复触发行焦点；行已被筛选掉时退回筛选输入。
+  // 焦点必须在渲染 flush 内落位：SvelteKit 完成导航时会检测手动焦点管理
+  // （changed_focus），只要 activeElement 已离开 body 就跳过自身 reset_focus。
+  let previousViewMode: "list" | "detail" = "list";
+  $effect(() => {
+    const mode = viewMode;
+    const wasDetail = untrack(() => previousViewMode);
+    const restoreSkillId = untrack(() => pendingFocusSkillId);
+    previousViewMode = mode;
+    if (mode !== "list" || wasDetail !== "detail" || !restoreSkillId) return;
+    pendingFocusSkillId = null;
+    const row = document.querySelector<HTMLButtonElement>(
+      `button[data-skill-id="${CSS.escape(restoreSkillId)}"]`,
+    );
+    (row ?? filterInputEl)?.focus();
+  });
+
+  // 进入详情视图且详情就绪后聚焦语义标题（同一技能刷新不重复夺焦）。
+  $effect(() => {
+    if (viewMode !== "detail" || detailLoading) return;
+    const loadedSkillId = detail?.id;
+    if (loadedSkillId === undefined) return;
+    detailHeaderEl?.focus();
+  });
 
   async function handleToggle(): Promise<void> {
     const current = detail;
@@ -327,7 +360,7 @@
   // 导入 creator 契约 frontmatter schema 以安全解析已加载 frontmatter（见文件顶部）。
 </script>
 
-<div class="provider-surface flex h-full min-h-0">
+<div class="provider-surface flex h-full min-h-0 w-full min-w-0">
   <!-- 技能列表（窄屏 ?view=detail 时隐藏） -->
   <section
     class="provider-list flex min-h-0 flex-col border-r border-border {viewMode === 'detail'
@@ -368,8 +401,10 @@
           class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
         />
         <input
+          bind:this={filterInputEl}
           class="h-7 w-full rounded-md border border-input bg-input/20 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           placeholder="Filter skills"
+          aria-label="Filter skills"
           value={filterQuery}
           oninput={(e) => setFilterQuery((e.currentTarget as HTMLInputElement).value)}
         />
@@ -552,7 +587,11 @@
       </div>
     {:else if detail}
       {@const editable = providerWritable}
-      <header class="detail-header shrink-0 border-b border-border px-4 py-3">
+      <header
+        bind:this={detailHeaderEl}
+        tabindex="-1"
+        class="detail-header shrink-0 border-b border-border px-4 py-3 focus:outline-none"
+      >
         <div class="flex items-start gap-2">
           <button
             class="provider-back mt-0.5 hidden h-8 w-8 items-center justify-center"
@@ -685,6 +724,9 @@
   }
   .provider-detail {
     flex: 1 1 0%;
+    /* flex item 默认 min-width:auto 会随长代码行增长，导致 pre 的横向滚动永不触发、
+       面板宽度被内容撑破；显式归零后宽度由容器分配，代码块改为内部滚动。 */
+    min-width: 0;
   }
   /* 列表/详情在宽屏下都可见；隐藏类只在窄屏生效。 */
   .provider-back {
