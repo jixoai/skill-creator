@@ -30,7 +30,7 @@ export default defineConfig({
   test: {
     plugins: [resolveTypeScriptSources()],
     environment: "node",
-    include: ["test/**/*.test.ts", "webui/config/**/*.test.ts"],
+    include: ["test/**/*.test.ts", "webui/config/**/*.test.ts", "webui/src/**/*.test.ts"],
     globals: false,
     fileParallelism: false,
     testTimeout: 20_000,

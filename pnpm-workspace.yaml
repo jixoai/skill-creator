@@ -1,6 +1,7 @@
 packages:
   - webui
 
-onlyBuiltDependencies:
-  - "@tailwindcss/oxide"
-  - esbuild
+allowBuilds:
+  esbuild: true
+  sharp: true
+  "@tailwindcss/oxide": true

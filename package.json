@@ -31,6 +31,7 @@
   ],
   "os": [
     "darwin",
+    "linux",
     "win32"
   ],
   "cpu": [
@@ -45,7 +46,7 @@
     "stage:webui": "bun scripts/stage-webui.sh.ts",
     "prepare:linked-opentray": "bun scripts/prepare-linked-opentray.sh.ts",
     "predev": "pnpm run prepare:linked-opentray",
-    "dev": "pnpm --dir webui dev",
+    "dev": "bun scripts/dev.sh.ts",
     "dev:cli": "bun src/cli/cli.ts",
     "dev:daemon": "bun src/daemon/main.ts",
     "skill-creator": "bun scripts/run-skill-creator.sh.ts",
@@ -56,6 +57,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.3.0",
     "@opentray/ext-webview": "0.18.0",
     "@opentray/vite-plugin": "0.18.0",
     "@orpc/contract": "1.14.6",
@@ -79,5 +81,5 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "packageManager": "pnpm@10.22.0"
+  "packageManager": "pnpm@12.3.1"
 }
