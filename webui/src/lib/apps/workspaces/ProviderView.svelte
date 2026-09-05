@@ -44,6 +44,7 @@
   import IconDownload from "@lucide/svelte/icons/arrow-down-to-line";
   import IconFile from "@lucide/svelte/icons/file-text";
   import IconGraph from "@lucide/svelte/icons/network";
+  import IconBot from "@lucide/svelte/icons/bot";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPower from "@lucide/svelte/icons/power";
   import IconShield from "@lucide/svelte/icons/shield-check";
@@ -394,6 +395,20 @@
         >
           <IconGraph class="h-3.5 w-3.5" />
           Insights
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1.5 px-2 text-xs"
+          title="Agent steward: backend runs with Manager approval"
+          onclick={() => {
+            if (wsId && providerId) {
+              goById("workspaces.steward", { wsId, providerId }, {});
+            }
+          }}
+        >
+          <IconBot class="h-3.5 w-3.5" />
+          Steward
         </Button>
         <Button
           variant="ghost"

@@ -24,7 +24,24 @@ import {
   type SkillIntelligenceService,
 } from "./skill-intelligence-service.js";
 import { createSkillService, type SkillService } from "./skill-service.js";
+import { createStewardService, type StewardService } from "./steward-service.js";
+import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
+import { createDshHarnessAdapter } from "./steward/dsh-adapter.js";
+import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
+import type { HarnessAdapter } from "./steward/harness-adapter.js";
 import { createWorkspaceRegistry, type WorkspaceRegistry } from "./workspace-registry/index.js";
+
+/**
+ * 生产 daemon 的 steward backend 集合：DSH 与 Codex 总是注册（缺失时 typed
+ * unavailable）；fixture 仅在显式 env 开关下注册（测试/演示确定性 backend）。
+ */
+function defaultStewardAdapters(): HarnessAdapter[] {
+  const adapters: HarnessAdapter[] = [createDshHarnessAdapter(), createCodexAppServerAdapter()];
+  if (process.env.SKILL_CREATOR_STEWARD_ENABLE_FIXTURE === "1") {
+    adapters.unshift(createFixtureHarnessAdapter());
+  }
+  return adapters;
+}
 
 /** One daemon lifetime's coherent Workspace, Skill, Creator, Repository, and ACP modules. */
 export interface DaemonDomain {
@@ -42,16 +59,20 @@ export interface DaemonDomain {
   acpBridge: AcpBridgeService;
   /** 只读技能分析 + proposal 草稿审批服务。 */
   skillIntelligence: SkillIntelligenceService;
+  /** Agent steward 编排：analyze→recommend→draft→validate→approval→apply。 */
+  steward: StewardService;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
 export function createDaemonDomain(
   workspaces: WorkspaceRegistry = createWorkspaceRegistry(),
+  options: { stewardAdapters?: HarnessAdapter[] } = {},
 ): DaemonDomain {
   const skillsCliProbe = createSkillsCliProbe();
   const skills = createSkillService(workspaces, { skillsCliProbe });
   const repository = createRepositoryService(workspaces, skills);
   const creator = createCreatorService(workspaces, skills);
+  const skillIntelligence = createSkillIntelligenceService(skills, creator);
   return {
     workspaces,
     skills,
@@ -61,6 +82,9 @@ export function createDaemonDomain(
     skillsCliProbe,
     skillsUpdate: createSkillsUpdateService(workspaces, skills, skillsCliProbe, repository),
     acpBridge: createAcpBridgeService(workspaces),
-    skillIntelligence: createSkillIntelligenceService(skills, creator),
+    skillIntelligence,
+    steward: createStewardService(workspaces, skills, skillIntelligence, {
+      adapters: options.stewardAdapters ?? defaultStewardAdapters(),
+    }),
   };
 }

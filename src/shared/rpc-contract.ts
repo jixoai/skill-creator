@@ -15,6 +15,21 @@ import {
   AcpSessionOpenResultSchema,
 } from "./contracts/acp.js";
 import {
+  StewardApproveResultSchema,
+  StewardBackendsResultSchema,
+  StewardCancelInputSchema,
+  StewardCancelResultSchema,
+  StewardDecidePermissionInputSchema,
+  StewardDecidePermissionResultSchema,
+  StewardEventsInputSchema,
+  StewardEventsResultSchema,
+  StewardListResultSchema,
+  StewardProposalInputSchema,
+  StewardRejectResultSchema,
+  StewardStartInputSchema,
+  StewardStartResultSchema,
+} from "./contracts/agent-steward.js";
+import {
   SaveSkillInputSchema,
   SaveSkillResultSchema,
   SkillDocumentSchema,
@@ -190,6 +205,26 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     reject: oc.input(RejectProposalInputSchema).output(RejectProposalResultSchema),
     /** Apply one proposal through existing revision-safe mutations. */
     approve: oc.input(ApproveProposalInputSchema).output(ApproveResultSchema),
+  },
+  steward: {
+    /** Probe every registered backend (typed unavailable; no auto fallback). */
+    backends: oc.input(z.object({})).output(StewardBackendsResultSchema),
+    /** List steward runs (newest first, bounded). */
+    list: oc.input(z.object({})).output(StewardListResultSchema),
+    /** Start a steward run on an explicit backend and Imported Workspace.Provider. */
+    start: oc.input(StewardStartInputSchema).output(StewardStartResultSchema),
+    /** Poll normalized run events after a seq cursor. */
+    events: oc.input(StewardEventsInputSchema).output(StewardEventsResultSchema),
+    /** Cancel one active run (idempotent; terminal runs return their projection). */
+    cancel: oc.input(StewardCancelInputSchema).output(StewardCancelResultSchema),
+    /** Resolve one pending agent permission request (one-shot). */
+    decidePermission: oc
+      .input(StewardDecidePermissionInputSchema)
+      .output(StewardDecidePermissionResultSchema),
+    /** Approve one run proposal through the Manager apply pipeline. */
+    approveProposal: oc.input(StewardProposalInputSchema).output(StewardApproveResultSchema),
+    /** Reject one run proposal (consumes the draft). */
+    rejectProposal: oc.input(StewardProposalInputSchema).output(StewardRejectResultSchema),
   },
   acp: {
     /** List ACP-capable agents installed on this machine (daemon-lifetime cached). */

@@ -1,0 +1,229 @@
+{
+  "generatedAt": "2026-09-05T19:57:13.542Z",
+  "backend": "fixture",
+  "note": "Sanitized steward smoke transcript: real daemon domain, fixture harness backend.",
+  "applied": {
+    "results": [
+      {
+        "workspaceId": "ws_6bbe7bb095f942b75d7c97a4",
+        "providerId": "openclaw",
+        "skillId": "sk_49531e3f8d27c6acee4051b9",
+        "name": "deploy-api",
+        "status": "applied"
+      },
+      {
+        "workspaceId": "ws_6bbe7bb095f942b75d7c97a4",
+        "providerId": "openclaw",
+        "skillId": "sk_8abd6150b7ee35265206e866",
+        "name": "deploy-web",
+        "status": "applied"
+      }
+    ],
+    "applied": 2,
+    "conflicts": 0,
+    "failed": 0,
+    "skipped": 0
+  },
+  "run": {
+    "runId": "sr_4aeaf6391e48fe5bbe88f6ff",
+    "backendId": "fixture",
+    "target": {
+      "workspaceId": "ws_6bbe7bb095f942b75d7c97a4",
+      "providerId": "openclaw"
+    },
+    "skillIds": [
+      "sk_e5c756de6744a32d4baddd95",
+      "sk_49531e3f8d27c6acee4051b9",
+      "sk_8abd6150b7ee35265206e866"
+    ],
+    "observedRevisions": [
+      {
+        "skillId": "sk_e5c756de6744a32d4baddd95",
+        "revision": "sha256:d25b3021f39561498e26689865a29fdae6429cbe097f20369b99d43af3807ec0"
+      },
+      {
+        "skillId": "sk_49531e3f8d27c6acee4051b9",
+        "revision": "sha256:684c987198db66506824689269ad78ccd201bc88f1f279384b0ec8fe25cdd190"
+      },
+      {
+        "skillId": "sk_8abd6150b7ee35265206e866",
+        "revision": "sha256:79dad4cbc6703c3225c2487157b1beed8f01173ce6a80c3f38fa0e6f1d9e4a6b"
+      }
+    ],
+    "capabilities": {
+      "backendId": "fixture",
+      "version": "fixture-1",
+      "streamingEvents": true,
+      "cancellation": true,
+      "permissionRequests": true,
+      "executionRoot": "isolated"
+    },
+    "executionRoot": "<sandbox>/state/.skill-creator/run/steward/run-rxJDOp",
+    "objective": "Smoke run: analyze and propose safe maintenance recommendations.",
+    "startedAt": "2026-09-05T19:57:13.458Z",
+    "endedAt": "2026-09-05T19:57:13.540Z",
+    "status": "completed",
+    "phase": null,
+    "error": null,
+    "recommendations": [
+      {
+        "id": "rcmd_45b775b50739962a",
+        "kind": "disable",
+        "skillIds": ["sk_49531e3f8d27c6acee4051b9", "sk_8abd6150b7ee35265206e866"],
+        "rationale": "Fixture backend recommends disabling skills linked to finding fn_28a7bf9c28a7bf9c (duplicate-trigger).",
+        "findingIds": ["fn_28a7bf9c28a7bf9c"],
+        "payload": {
+          "kind": "disable",
+          "selections": [
+            {
+              "workspaceId": "ws_6bbe7bb095f942b75d7c97a4",
+              "providerId": "openclaw",
+              "skillId": "sk_49531e3f8d27c6acee4051b9"
+            },
+            {
+              "workspaceId": "ws_6bbe7bb095f942b75d7c97a4",
+              "providerId": "openclaw",
+              "skillId": "sk_8abd6150b7ee35265206e866"
+            }
+          ],
+          "reason": "Agent recommendation from finding fn_28a7bf9c28a7bf9c."
+        }
+      }
+    ],
+    "proposalIds": ["pr_8d32f839a38bb3edf1932c83"],
+    "permissionRequests": [
+      {
+        "id": "prm_88ba5f8c06e6229a",
+        "runId": "sr_4aeaf6391e48fe5bbe88f6ff",
+        "at": "2026-09-05T19:57:13.477Z",
+        "summary": "Fixture asks to proceed with drafting recommendations."
+      }
+    ],
+    "permissionDecisions": [
+      {
+        "requestId": "prm_88ba5f8c06e6229a",
+        "at": "2026-09-05T19:57:13.488Z",
+        "decision": "granted"
+      }
+    ]
+  },
+  "events": [
+    {
+      "kind": "run-started",
+      "phase": "analyzing",
+      "seq": 1,
+      "at": "2026-09-05T19:57:13.458Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "phase",
+      "phase": "recommending",
+      "seq": 2,
+      "at": "2026-09-05T19:57:13.477Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "agent-message",
+      "message": "Fixture steward run for 3 skills.",
+      "seq": 3,
+      "at": "2026-09-05T19:57:13.477Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "agent-message",
+      "message": "Permission requested: Fixture asks to proceed with drafting recommendations.",
+      "seq": 4,
+      "at": "2026-09-05T19:57:13.477Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "permission-request",
+      "permissionRequestId": "prm_88ba5f8c06e6229a",
+      "message": "Fixture asks to proceed with drafting recommendations.",
+      "seq": 5,
+      "at": "2026-09-05T19:57:13.477Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "permission-decision",
+      "permissionRequestId": "prm_88ba5f8c06e6229a",
+      "message": "granted",
+      "seq": 6,
+      "at": "2026-09-05T19:57:13.488Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "agent-message",
+      "message": "Permission granted.",
+      "seq": 7,
+      "at": "2026-09-05T19:57:13.488Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "recommendation",
+      "recommendationId": "rcmd_45b775b50739962a",
+      "message": "Fixture backend recommends disabling skills linked to finding fn_28a7bf9c28a7bf9c (duplicate-trigger).",
+      "seq": 8,
+      "at": "2026-09-05T19:57:13.489Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "phase",
+      "phase": "drafting",
+      "seq": 9,
+      "at": "2026-09-05T19:57:13.489Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "draft-created",
+      "proposalId": "pr_8d32f839a38bb3edf1932c83",
+      "recommendationId": "rcmd_45b775b50739962a",
+      "seq": 10,
+      "at": "2026-09-05T19:57:13.495Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "phase",
+      "phase": "validating",
+      "seq": 11,
+      "at": "2026-09-05T19:57:13.495Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "phase",
+      "phase": "awaiting-approval",
+      "seq": 12,
+      "at": "2026-09-05T19:57:13.495Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "approval",
+      "proposalId": "pr_8d32f839a38bb3edf1932c83",
+      "message": "applied=2 conflicts=0 failed=0",
+      "seq": 13,
+      "at": "2026-09-05T19:57:13.540Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "apply",
+      "proposalId": "pr_8d32f839a38bb3edf1932c83",
+      "seq": 14,
+      "at": "2026-09-05T19:57:13.540Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "phase",
+      "phase": "applying",
+      "seq": 15,
+      "at": "2026-09-05T19:57:13.540Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    },
+    {
+      "kind": "run-terminal",
+      "terminalStatus": "completed",
+      "seq": 16,
+      "at": "2026-09-05T19:57:13.540Z",
+      "runId": "sr_4aeaf6391e48fe5bbe88f6ff"
+    }
+  ]
+}

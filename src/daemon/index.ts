@@ -209,6 +209,8 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
         settleTeardown("repository sessions", () => domain.repository.dispose()),
         // ACP 子进程池：有界杀光所有 agent 子进程，避免孤儿进程泄漏。
         settleTeardown("acp bridge", () => domain.acpBridge.dispose()),
+        // steward：取消活动 run、回收隔离 execution root、dispose backend adapter。
+        settleTeardown("steward service", () => domain.steward.dispose()),
       ];
       await Promise.allSettled(tasks);
     } finally {

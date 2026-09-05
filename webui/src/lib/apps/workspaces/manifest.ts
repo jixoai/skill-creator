@@ -1,6 +1,6 @@
 /**
  * 用户原始需求 [2026-07-27]：「三个导航意味着三个 ChromeTabs」。
- * 正交意图：[1] 声明 Workspaces App 的 manifest（home / provider / intelligence 三个 activity）。
+ * 正交意图：[1] 声明 Workspaces App 的 manifest（home / provider / intelligence / steward activity）。
  */
 import IconBoxes from "@lucide/svelte/icons/boxes";
 import { defineApp, defineActivity, defineRoute, leafRoute } from "$lib/shell";
@@ -54,6 +54,19 @@ export const workspacesApp = defineApp({
           severity: z.enum(["all", "error", "warning", "info"]).optional(),
         }),
         component: () => import("./IntelligenceView.svelte"),
+      }),
+    }),
+    // 管家 tab：Agent steward run（backend 选择、事件流、审批门）
+    defineActivity({
+      pattern: "/workspaces",
+      root: defineRoute({
+        id: "workspaces.steward",
+        pattern: "steward/:wsId/:providerId",
+        params: z.object({
+          wsId: WorkspaceIdSchema,
+          providerId: ProviderIdSchema,
+        }),
+        component: () => import("./StewardView.svelte"),
       }),
     }),
   ],

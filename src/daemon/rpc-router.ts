@@ -127,6 +127,22 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         domain.skillIntelligence.approve(input),
       ),
     },
+    steward: {
+      backends: rpc.steward.backends.handler(async () => domain.steward.backends()),
+      list: rpc.steward.list.handler(() => domain.steward.list()),
+      start: rpc.steward.start.handler(async ({ input }) => domain.steward.start(input)),
+      events: rpc.steward.events.handler(({ input }) => domain.steward.events(input)),
+      cancel: rpc.steward.cancel.handler(async ({ input }) => domain.steward.cancel(input)),
+      decidePermission: rpc.steward.decidePermission.handler(async ({ input }) =>
+        domain.steward.decidePermission(input),
+      ),
+      approveProposal: rpc.steward.approveProposal.handler(async ({ input }) =>
+        domain.steward.approveProposal(input),
+      ),
+      rejectProposal: rpc.steward.rejectProposal.handler(async ({ input }) =>
+        domain.steward.rejectProposal(input),
+      ),
+    },
     acp: {
       agents: {
         list: rpc.acp.agents.list.handler(async () => ({
