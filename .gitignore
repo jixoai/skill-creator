@@ -13,3 +13,5 @@ webui/.cache
 .zcode/
 tmp/
 /references/skills/
+.claude/
+.codex/

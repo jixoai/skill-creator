@@ -1,0 +1,559 @@
+<!doctype html>
+<!--
+用户原始需求 [2026-09-05]：「分析 skills，将一个或者多个 skills 可视化；优化 skill、拆分甚至合并 skills。」
+正交意图：
+  [1] 展示 evidence-first 的单技能与多技能分析
+  [2] 展示 overlap/conflict graph 和 finding 筛选
+  [3] 展示 revision 锁定的 proposal review
+妥协声明：这是静态交互参考，不执行分析或 mutation；生产实现必须由 daemon 提供只读报告与受审批保护的 proposal。
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skill Intelligence Reference</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #19262d;
+        --muted: #6a7880;
+        --line: #d8e0e3;
+        --canvas: #f4f7f7;
+        --panel: #fff;
+        --accent: #256b91;
+        --accent-soft: #e3f0f7;
+        --warn: #a06718;
+        --danger: #a24444;
+        --violet: #7359a6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--canvas);
+        font:
+          14px/1.45 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      button,
+      select {
+        font: inherit;
+      }
+      button {
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 6px;
+        padding: 8px 11px;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        color: #fff;
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+      }
+      aside {
+        border-right: 1px solid var(--line);
+        background: #fbfcfc;
+        padding: 22px 15px;
+      }
+      .brand {
+        font-size: 18px;
+        font-weight: 750;
+        margin: 0 8px 26px;
+      }
+      .brand small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+        margin-top: 3px;
+      }
+      nav {
+        display: grid;
+        gap: 4px;
+      }
+      nav button {
+        text-align: left;
+        border-color: transparent;
+        background: transparent;
+        width: 100%;
+      }
+      nav button.active {
+        color: var(--accent);
+        background: var(--accent-soft);
+        font-weight: 700;
+      }
+      main {
+        min-width: 0;
+        padding: 26px clamp(18px, 4vw, 48px) 44px;
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 18px;
+        margin-bottom: 20px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 26px;
+      }
+      h2 {
+        font-size: 17px;
+      }
+      h3 {
+        font-size: 14px;
+      }
+      .eyebrow {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 5px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 15px;
+      }
+      .toolbar select {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 8px;
+        background: #fff;
+        color: var(--ink);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(380px, 1.35fr) minmax(300px, 0.8fr);
+        gap: 16px;
+        align-items: start;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 15px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-body {
+        padding: 15px 16px;
+      }
+      .graph {
+        position: relative;
+        height: 390px;
+        overflow: hidden;
+        background: linear-gradient(135deg, #fafdfe, #f1f6f7);
+        border-radius: 5px;
+      }
+      .graph svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .edge {
+        stroke: #9ab1bd;
+        stroke-width: 2;
+        stroke-dasharray: 5 5;
+      }
+      .edge.conflict {
+        stroke: var(--danger);
+      }
+      .node {
+        position: absolute;
+        min-width: 130px;
+        padding: 10px;
+        background: #fff;
+        border: 2px solid var(--accent);
+        border-radius: 7px;
+        box-shadow: 0 3px 12px #17344012;
+      }
+      .node strong {
+        display: block;
+      }
+      .node small {
+        color: var(--muted);
+      }
+      .node.warn {
+        border-color: var(--warn);
+      }
+      .node.danger {
+        border-color: var(--danger);
+      }
+      .legend {
+        display: flex;
+        gap: 15px;
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .legend span {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .dot.warn {
+        background: var(--warn);
+      }
+      .dot.danger {
+        background: var(--danger);
+      }
+      .finding {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 9px;
+        cursor: pointer;
+      }
+      .finding:hover {
+        border-color: var(--accent);
+      }
+      .finding.selected {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-soft);
+      }
+      .finding .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+      .severity {
+        font-size: 11px;
+        border-radius: 999px;
+        padding: 3px 7px;
+        background: #edf1f2;
+        color: #5c6b72;
+      }
+      .severity.high {
+        background: #fae3e3;
+        color: var(--danger);
+      }
+      .severity.medium {
+        background: #fff0d5;
+        color: var(--warn);
+      }
+      .severity.low {
+        background: #e5f0f7;
+        color: var(--accent);
+      }
+      .finding p {
+        margin-top: 7px;
+      }
+      .finding code {
+        display: block;
+        color: #4f6069;
+        font-size: 12px;
+        margin-top: 7px;
+        white-space: pre-wrap;
+      }
+      .proposal {
+        margin-top: 16px;
+      }
+      .proposal-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .proposal-card {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 12px;
+      }
+      .proposal-card.before {
+        background: #fffafa;
+      }
+      .proposal-card.after {
+        background: #f8fcfa;
+      }
+      pre {
+        overflow: auto;
+        white-space: pre-wrap;
+        font:
+          12px/1.55 ui-monospace,
+          SFMono-Regular,
+          monospace;
+        background: #19252b;
+        color: #dce8e8;
+        padding: 11px;
+        border-radius: 5px;
+        margin-top: 8px;
+        max-height: 155px;
+      }
+      .notice {
+        margin-top: 12px;
+        background: var(--accent-soft);
+        color: #2a5870;
+        padding: 10px 12px;
+        border-left: 3px solid var(--accent);
+      }
+      @media (max-width: 850px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+        aside {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+          padding: 13px 15px;
+        }
+        .brand {
+          margin: 0 0 10px;
+        }
+        nav {
+          display: flex;
+          overflow: auto;
+        }
+        nav button {
+          width: auto;
+          white-space: nowrap;
+        }
+        main {
+          padding: 20px 16px 34px;
+        }
+        .top {
+          flex-direction: column;
+        }
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .graph {
+          height: 330px;
+        }
+      }
+      @media (max-width: 560px) {
+        .proposal-grid {
+          grid-template-columns: 1fr;
+        }
+        .graph {
+          min-width: 520px;
+        }
+        .graph-wrap {
+          overflow: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside>
+        <div class="brand">Skill Creator<small>Intelligence reference</small></div>
+        <nav aria-label="Primary navigation">
+          <button>Workspaces</button><button>Creator</button><button>Repository</button
+          ><button class="active">Intelligence</button><button>Steward</button>
+        </nav>
+      </aside>
+      <main>
+        <header class="top">
+          <div>
+            <div class="eyebrow">Analysis / 3 selected skills / snapshot 8bd7c2a</div>
+            <h1>Skill intelligence</h1>
+            <p class="muted">
+              Evidence explains why a skill needs attention before anyone changes it.
+            </p>
+          </div>
+          <div class="actions">
+            <button id="reanalyze">Re-analyze</button
+            ><button class="primary" id="propose">Create proposal</button>
+          </div>
+        </header>
+        <div class="toolbar">
+          <div class="actions">
+            <button class="primary">3 selected</button><button>Clear selection</button>
+          </div>
+          <select id="filter" aria-label="Finding severity">
+            <option value="all">All findings</option>
+            <option value="high">High severity</option>
+            <option value="medium">Medium severity</option>
+            <option value="low">Low severity</option>
+          </select>
+        </div>
+        <section class="layout">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Relationship graph</h2>
+                <div class="muted">Overlap and conflict evidence</div>
+              </div>
+              <span class="severity high">2 conflicts</span>
+            </div>
+            <div class="panel-body">
+              <div class="graph-wrap">
+                <div class="graph">
+                  <svg viewBox="0 0 620 390" aria-hidden="true">
+                    <line class="edge" x1="130" y1="100" x2="330" y2="190" />
+                    <line class="edge conflict" x1="330" y1="190" x2="510" y2="95" />
+                    <line class="edge" x1="330" y1="190" x2="495" y2="300" />
+                  </svg>
+                  <div class="node" style="left: 7%; top: 15%">
+                    <strong>release-check</strong><small>12 triggers</small>
+                  </div>
+                  <div class="node danger" style="left: 39%; top: 40%">
+                    <strong>deploy-safety</strong><small>shared responsibility</small>
+                  </div>
+                  <div class="node warn" style="left: 67%; top: 14%">
+                    <strong>legacy-deploy</strong><small>stale reference</small>
+                  </div>
+                  <div class="node" style="left: 65%; top: 68%">
+                    <strong>browser-research</strong><small>5 triggers</small>
+                  </div>
+                </div>
+              </div>
+              <div class="legend">
+                <span><i class="dot"></i>related</span
+                ><span><i class="dot danger"></i>conflict</span
+                ><span><i class="dot warn"></i>stale</span>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Findings</h2>
+                <div class="muted">4 findings from the same snapshot</div>
+              </div>
+              <button id="collapse">Hide details</button>
+            </div>
+            <div class="panel-body" id="findings">
+              <div class="finding selected" data-severity="high">
+                <div class="row">
+                  <strong>Overlapping responsibility</strong><span class="severity high">high</span>
+                </div>
+                <p class="muted">Both skills instruct the agent to approve a production deploy.</p>
+                <code>evidence: deploy-safety.md:L24 and release-check.md:L31</code>
+              </div>
+              <div class="finding" data-severity="medium">
+                <div class="row">
+                  <strong>Trigger collision</strong><span class="severity medium">medium</span>
+                </div>
+                <p class="muted">The phrase "release checklist" activates two skills.</p>
+                <code>evidence: trigger overlap = 0.78</code>
+              </div>
+              <div class="finding" data-severity="low">
+                <div class="row">
+                  <strong>Stale reference</strong><span class="severity low">low</span>
+                </div>
+                <p class="muted">A referenced command disappeared from the repository.</p>
+                <code>evidence: scripts/release.sh not found</code>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="panel proposal">
+          <div class="panel-head">
+            <div>
+              <h2>Proposal draft</h2>
+              <div class="muted">edit / observed revisions 8bd7c2a, 19e04f1</div>
+            </div>
+            <div class="actions">
+              <button id="reject">Reject</button
+              ><button class="primary" id="approve">Review approval</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="proposal-grid">
+              <div class="proposal-card before">
+                <strong>Before: deploy-safety</strong>
+                <pre>
+## Deploy approval
+Approve production deploys after checks.</pre
+                >
+              </div>
+              <div class="proposal-card after">
+                <strong>After: release-check</strong>
+                <pre>
+## Deploy approval
+Provide evidence; a human owns approval.</pre
+                >
+              </div>
+            </div>
+            <div class="notice" id="notice">
+              Proposal is read-only until validation passes and the user explicitly approves it. Any
+              revision change makes it stale.
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      const notice = document.querySelector("#notice");
+      document.querySelector("#reanalyze").addEventListener("click", (event) => {
+        event.currentTarget.textContent = "Analyzing...";
+        setTimeout(() => {
+          event.currentTarget.textContent = "Re-analyze";
+          notice.textContent =
+            "New report completed. Findings are bound to the latest observed revisions.";
+        }, 700);
+      });
+      document.querySelector("#propose").addEventListener("click", () => {
+        notice.textContent =
+          "A Manager-owned proposal draft was created. No Provider file has changed.";
+      });
+      document.querySelector("#approve").addEventListener("click", () => {
+        notice.textContent =
+          "Approval review opens with validation results, affected skills, revisions, and the final apply action.";
+      });
+      document.querySelector("#reject").addEventListener("click", () => {
+        notice.textContent = "Proposal rejected. The report remains available for audit.";
+      });
+      document.querySelector("#filter").addEventListener("change", (event) => {
+        const value = event.currentTarget.value;
+        document.querySelectorAll(".finding").forEach((item) => {
+          item.hidden = value !== "all" && item.dataset.severity !== value;
+        });
+      });
+      document.querySelectorAll(".finding").forEach((item) =>
+        item.addEventListener("click", () => {
+          document
+            .querySelectorAll(".finding")
+            .forEach((other) => other.classList.remove("selected"));
+          item.classList.add("selected");
+          notice.textContent =
+            "Selected finding. Production UI links evidence to the exact Skill revision.";
+        }),
+      );
+      document.querySelector("#collapse").addEventListener("click", (event) => {
+        const body = document.querySelector("#findings");
+        body.hidden = !body.hidden;
+        event.currentTarget.textContent = body.hidden ? "Show details" : "Hide details";
+      });
+    </script>
+  </body>
+</html>

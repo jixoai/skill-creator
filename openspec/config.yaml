@@ -1,0 +1,62 @@
+schema: spec-driven
+
+context: |
+  ## 项目：Skill Creator
+  本地优先的 Agent 技能工作台。CLI 管单例 daemon，daemon 用 OpenTray 承载 SvelteKit
+  WebUI，通过 ccski SDK 发现/校验/安装 SKILL.md，并以 Workspace→Provider 两层作用域 +
+  revision-safe / pinned-session 安全模型组织技能。
+
+  ## 技术栈
+  - 后端：Node ESM (esbuild bundle)，oRPC over WebSocket，Zod v4 runtime 契约
+  - 前端：SvelteKit SPA (Svelte 5 runes)，shadcn-svelte，Tailwind v4，Vite 8
+  - 桌面：OpenTray ext-webview (appMode 原生窗口) 或 web 模式 (纯 tray + 浏览器)
+  - 测试：Vitest，101+ 测试，pnpm check 聚合门禁
+  - 包管理：pnpm workspace (root + webui)
+
+  ## 核心约束 (AGENTS.md)
+  - type-safe = runtime-safe：外部输入一律 unknown → Zod safeParse，禁止 any/as any
+  - 破坏性更新：不做向下兼容，schema 不兼容按空值加载
+  - 文件意图法：每文件顶部维护正交意图，单文件上限 5 个意图
+  - 安全不变量：loopback only，token in fragment，server-owned path，containment check
+  - WebUI 不维护第二份 RPC 类型，从 src/shared/contracts/ 推导
+
+  ## 外部依赖关键事实
+  - ACP (Agent Client Protocol)：浏览器可作 client (ws-client)，但不能 spawn 本地 CLI；
+    必须由 daemon 桥接 (spawn agent 子进程 + stdio↔WS)
+  - vercel-labs/skills CLI：无 SDK (无 exports/main/types)，只能 shell out 或 vendor；
+    update 模型 = lock 文件 (schema v3 全局 / v1 项目) + hash 对比 + 重跑 add
+
+  ## 状态分层原则（2026-07-27 确立）
+  参考 gaubee.com 的 GaubeeOS 标准，状态严格分三层：
+  1. URL (pathname + search)：视图状态的唯一真相源。tab 身份、选中项、筛选条件、
+     子视图切换全部编码在 URL 里。URL 变化驱动渲染，刷新可恢复。
+  2. 后端 daemon (oRPC + WebSocket)：持久 + 共享状态。workspace registry、安装记录、
+     skills lock 文件、ACP 会话、repository 扫描会话等。实时推送用 WS。
+  3. 前端 localStorage：仅设备偏好。theme、sidebar 折叠、窗口尺寸偏好等。
+  前端 memory ($state)：仅临时表单草稿和瞬时 UI 状态。
+  禁止把业务状态存在 localStorage 或散落的 $state 单例里。
+
+  ## ChromeTabShell 标准（参考 gaubee.com GaubeeOS）
+  Skill Creator 建立独立的 Shell 标准模块 (src/lib/shell/)，精简版 GaubeeOS：
+  - RouteContract：声明式路由节点 (id + pattern + zod params/search + component + children)
+  - defineRoute / defineActivity：类型安全工厂 + 运行时自注册
+  - AppShell：隔离容器 (isolation:isolate) + portal 锚定 + ActivityRouter
+  - Tab 保活：按 tabId 常驻 DOM，visibility 切换不卸载
+  - navigate API：go(route, params) / goById(routeId, params)
+  - hooks：useParams<T>() / useSearch<T>() 返回 getter + $derived 响应式
+  参考：/Users/kzf/Dev/GitHub/gaubee.com/src/lib/{app-scaffold,router,apps,nav}
+
+rules:
+  proposal:
+    - 每个 proposal 聚焦一个可独立交付的产品能力，不跨越多个 App
+    - 必须说明对现有安全不变量和契约层的影响
+    - 必须区分「新增能力」与「改造现有能力」
+  design:
+    - 设计必须遵守 AGENTS.md 的依赖方向 (shared contracts < domain < transport < entry)
+    - 跨进程边界必须经 Zod runtime 校验
+    - WebUI 禁止 import daemon 实现或 node:fs
+    - ASCII 图优先于文字描述数据流和状态机
+  tasks:
+    - 每个 task 必须可被 pnpm check 验证 (test + typecheck + webui check + fmt)
+    - 涉及 UI 的 task 必须包含桌面 + 窄屏视觉验证
+    - 涉及 daemon 生命周期的 task 必须运行对应 focused tests

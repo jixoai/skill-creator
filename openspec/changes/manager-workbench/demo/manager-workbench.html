@@ -1,0 +1,577 @@
+<!doctype html>
+<!--
+用户原始需求 [2026-09-05]：「管理器首先得是管理器，然后接入 Agent 能力；我要的是产品级的可上线应用。」
+正交意图：
+  [1] 展示 Workspace/Provider/Skill 的管理层级
+  [2] 展示 Creator、Repository 和状态反馈的工作流
+  [3] 为 ZCode 提供桌面与窄窗口的布局参考
+妥协声明：这是静态交互参考，不连接生产 RPC；生产实现必须使用真实 Svelte、daemon 和文件系统。
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skill Creator - Manager Workbench Reference</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1c252b;
+        --muted: #66747d;
+        --line: #d9e0e3;
+        --panel: #fff;
+        --canvas: #f4f7f7;
+        --accent: #0b6f68;
+        --accent-soft: #e0f1ef;
+        --warn: #996319;
+        --danger: #a53d3d;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--canvas);
+        font:
+          14px/1.45 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        padding: 8px 11px;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+      }
+      aside {
+        border-right: 1px solid var(--line);
+        background: #fbfcfc;
+        padding: 22px 15px;
+      }
+      .brand {
+        font-size: 18px;
+        font-weight: 750;
+        letter-spacing: 0.02em;
+        margin: 0 8px 26px;
+      }
+      .brand small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+        margin-top: 3px;
+      }
+      nav {
+        display: grid;
+        gap: 4px;
+      }
+      nav button {
+        text-align: left;
+        border-color: transparent;
+        background: transparent;
+        padding: 10px 11px;
+      }
+      nav button.active {
+        color: var(--accent);
+        background: var(--accent-soft);
+        font-weight: 700;
+      }
+      main {
+        min-width: 0;
+        padding: 26px clamp(18px, 4vw, 48px) 44px;
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        align-items: flex-start;
+        margin-bottom: 22px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 26px;
+      }
+      h2 {
+        font-size: 17px;
+      }
+      h3 {
+        font-size: 14px;
+      }
+      .eyebrow {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 5px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+      .metric,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .metric {
+        padding: 15px;
+      }
+      .metric strong {
+        display: block;
+        font-size: 24px;
+        margin-top: 5px;
+      }
+      .metric span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .workspace-grid {
+        display: grid;
+        grid-template-columns: minmax(300px, 0.85fr) minmax(420px, 1.5fr);
+        gap: 16px;
+        align-items: start;
+      }
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 15px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-body {
+        padding: 15px 16px;
+      }
+      .workspace {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 13px;
+        margin-bottom: 9px;
+        background: #fff;
+      }
+      .workspace.selected {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-soft);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .workspace strong {
+        display: block;
+        margin-bottom: 3px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .provider {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid #edf0f1;
+      }
+      .provider:last-child {
+        border-bottom: 0;
+      }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .status::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #3d9a76;
+      }
+      .status.off::before {
+        background: #aeb8bc;
+      }
+      .skill-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .skill-table th,
+      .skill-table td {
+        text-align: left;
+        border-bottom: 1px solid #edf0f1;
+        padding: 11px 8px;
+        vertical-align: middle;
+      }
+      .skill-table th {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 650;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .skill-table tr {
+        cursor: pointer;
+      }
+      .skill-table tr:hover,
+      .skill-table tr.current {
+        background: #f7fbfa;
+      }
+      .pill {
+        display: inline-block;
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: #eef2f2;
+        color: #526067;
+        font-size: 11px;
+      }
+      .pill.good {
+        background: #e2f2e9;
+        color: #26734d;
+      }
+      .pill.warn {
+        background: #fff0d8;
+        color: var(--warn);
+      }
+      .pill.bad {
+        background: #fae5e5;
+        color: var(--danger);
+      }
+      .detail {
+        margin-top: 16px;
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+      }
+      .detail-section {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 13px;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow: auto;
+        background: #172126;
+        color: #dce9e8;
+        border-radius: 5px;
+        padding: 13px;
+        font:
+          12px/1.6 ui-monospace,
+          SFMono-Regular,
+          monospace;
+        max-height: 190px;
+      }
+      .notice {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-left: 3px solid var(--accent);
+        background: var(--accent-soft);
+        color: #285b58;
+      }
+      @media (max-width: 850px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+        aside {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+          padding: 13px 15px;
+        }
+        .brand {
+          margin: 0 0 10px;
+        }
+        nav {
+          display: flex;
+          overflow: auto;
+        }
+        nav button {
+          white-space: nowrap;
+        }
+        main {
+          padding: 20px 16px 34px;
+        }
+        .workspace-grid,
+        .detail-grid {
+          grid-template-columns: 1fr;
+        }
+        .metrics {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .top {
+          flex-direction: column;
+        }
+        .actions {
+          justify-content: flex-start;
+        }
+      }
+      @media (max-width: 520px) {
+        .metrics {
+          gap: 7px;
+        }
+        .metric {
+          padding: 11px;
+        }
+        .metric strong {
+          font-size: 20px;
+        }
+        .skill-table {
+          min-width: 570px;
+        }
+        .table-scroll {
+          overflow: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside>
+        <div class="brand">Skill Creator<small>Manager workbench reference</small></div>
+        <nav aria-label="Primary navigation">
+          <button class="active" data-view="workspaces">Workspaces</button>
+          <button data-view="creator">Creator</button>
+          <button data-view="repository">Repository</button>
+        </nav>
+      </aside>
+      <main>
+        <header class="top">
+          <div>
+            <div class="eyebrow">Imported Workspace / ws_team</div>
+            <h1>Workspaces</h1>
+            <p class="muted">
+              Manage providers, inspect skills, and keep every mutation reviewable.
+            </p>
+          </div>
+          <div class="actions">
+            <button id="import">Import workspace</button
+            ><button class="primary" id="new-skill">New skill</button>
+          </div>
+        </header>
+        <section class="metrics" aria-label="Workspace metrics">
+          <div class="metric"><span>Workspaces</span><strong>3</strong></div>
+          <div class="metric"><span>Providers</span><strong>7</strong></div>
+          <div class="metric"><span>Skills</span><strong>42</strong></div>
+          <div class="metric"><span>Needs review</span><strong>4</strong></div>
+        </section>
+        <section class="workspace-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Workspace registry</h2>
+              <button id="refresh">Refresh</button>
+            </div>
+            <div class="panel-body">
+              <div class="workspace selected">
+                <div class="row">
+                  <strong>Team automations</strong><span class="pill good">available</span>
+                </div>
+                <div class="muted">/Users/kzf/skills/team</div>
+                <div class="status">2 providers / 18 skills</div>
+              </div>
+              <div class="workspace">
+                <div class="row"><strong>Personal</strong><span class="pill">offline</span></div>
+                <div class="muted">/Users/kzf/skills/personal</div>
+                <div class="status off">1 provider / 9 skills</div>
+              </div>
+              <div class="workspace">
+                <div class="row">
+                  <strong>Global Workspace</strong><span class="pill">read only</span>
+                </div>
+                <div class="muted">Agent global roots</div>
+                <div class="status">4 providers / 15 skills</div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Providers</h2>
+                <div class="muted">Team automations</div>
+              </div>
+              <button>Add provider</button>
+            </div>
+            <div class="panel-body">
+              <div class="provider">
+                <div>
+                  <strong>codex</strong>
+                  <div class="muted">~/.codex/skills</div>
+                </div>
+                <div class="status">12 skills</div>
+              </div>
+              <div class="provider">
+                <div>
+                  <strong>claude</strong>
+                  <div class="muted">~/.claude/skills</div>
+                </div>
+                <div class="status">6 skills</div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <h2>Skills</h2>
+              <div class="muted">Provider: codex</div>
+            </div>
+            <div class="actions"><button>Filter</button><button>Validate all</button></div>
+          </div>
+          <div class="panel-body table-scroll">
+            <table class="skill-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Revision</th>
+                  <th>State</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="current" data-skill="release">
+                  <td>
+                    <strong>release-check</strong>
+                    <div class="muted">Check release evidence and gates</div>
+                  </td>
+                  <td><code>8bd7c2a</code></td>
+                  <td><span class="pill good">enabled</span></td>
+                  <td>Today</td>
+                </tr>
+                <tr data-skill="browser">
+                  <td>
+                    <strong>browser-research</strong>
+                    <div class="muted">Research with authenticated browser</div>
+                  </td>
+                  <td><code>19e04f1</code></td>
+                  <td><span class="pill warn">review</span></td>
+                  <td>3 days ago</td>
+                </tr>
+                <tr data-skill="legacy">
+                  <td>
+                    <strong>legacy-deploy</strong>
+                    <div class="muted">Old deployment checklist</div>
+                  </td>
+                  <td><code>5a301d8</code></td>
+                  <td><span class="pill bad">disabled</span></td>
+                  <td>2 months ago</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <h2 id="detail-title">release-check</h2>
+              <div class="muted">codex provider / revision 8bd7c2a</div>
+            </div>
+            <div class="actions">
+              <button id="toggle">Disable</button><button id="edit">Edit in Creator</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="detail-grid">
+              <div class="detail-section">
+                <h3>Validation</h3>
+                <p class="muted" style="margin: 7px 0 10px">
+                  Last run completed with 0 errors and 1 advisory.
+                </p>
+                <span class="pill good">valid</span>
+                <div class="notice" id="notice">
+                  Changes are saved with an expected revision. A conflict will keep the draft
+                  intact.
+                </div>
+              </div>
+              <div class="detail-section">
+                <h3>SKILL.md preview</h3>
+                <pre>
+---
+name: release-check
+description: Verify release evidence
+---
+
+## Workflow
+Run the release gates and record evidence.</pre
+                >
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      const notice = document.querySelector("#notice");
+      document.querySelector("#toggle").addEventListener("click", (event) => {
+        const button = event.currentTarget;
+        button.textContent = button.textContent === "Disable" ? "Enable" : "Disable";
+        notice.textContent =
+          button.textContent === "Enable"
+            ? "Skill is disabled. Enablement is a Manager mutation."
+            : "Skill is enabled. The daemon will revalidate the current revision.";
+      });
+      document.querySelector("#refresh").addEventListener("click", (event) => {
+        event.currentTarget.textContent = "Refreshing...";
+        setTimeout(() => {
+          event.currentTarget.textContent = "Refresh";
+          notice.textContent = "Workspace projection refreshed from the daemon.";
+        }, 650);
+      });
+      document.querySelector("#import").addEventListener("click", () => {
+        notice.textContent =
+          "Import flow: choose a directory, canonicalize it, then review discovered providers.";
+      });
+      document.querySelector("#new-skill").addEventListener("click", () => {
+        notice.textContent =
+          "Creator opens with the selected Workspace.Provider as its writable target.";
+      });
+      document.querySelector("#edit").addEventListener("click", () => {
+        notice.textContent =
+          "Creator deep link preserves the selected target and observed revision.";
+      });
+      document.querySelectorAll("[data-skill]").forEach((row) =>
+        row.addEventListener("click", () => {
+          document
+            .querySelectorAll("[data-skill]")
+            .forEach((item) => item.classList.remove("current"));
+          row.classList.add("current");
+          document.querySelector("#detail-title").textContent = row.dataset.skill;
+          notice.textContent =
+            "Selected skill detail. Production UI loads the document through typed RPC.";
+        }),
+      );
+    </script>
+  </body>
+</html>

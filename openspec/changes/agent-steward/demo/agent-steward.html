@@ -1,0 +1,518 @@
+<!doctype html>
+<!--
+用户原始需求 [2026-09-05]：「让 Agent 成为我的技能管家；它应该能禁用、分析、优化、拆分、合并 skills，但必须服务于管理器。」
+正交意图：
+  [1] 展示 provider-neutral Agent run 的生命周期
+  [2] 展示 recommendation、approval 与 Manager apply 的边界
+  [3] 展示 backend capability、失败和恢复状态
+妥协声明：这是静态交互参考，不启动 DSH/Codex 或修改文件；生产实现必须接入真实 adapter、审批和审计。
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Steward Reference</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1d2730;
+        --muted: #6b7780;
+        --line: #d8dfe2;
+        --canvas: #f4f7f7;
+        --panel: #fff;
+        --accent: #7b4c8f;
+        --accent-soft: #f0e7f4;
+        --green: #2c7a58;
+        --green-soft: #e2f2e8;
+        --warn: #9a641d;
+        --warn-soft: #fff0d5;
+        --danger: #a34545;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--canvas);
+        font:
+          14px/1.45 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      button,
+      select {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        border-radius: 6px;
+        padding: 8px 11px;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        color: #fff;
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+      }
+      aside {
+        border-right: 1px solid var(--line);
+        background: #fbfcfc;
+        padding: 22px 15px;
+      }
+      .brand {
+        font-size: 18px;
+        font-weight: 750;
+        margin: 0 8px 26px;
+      }
+      .brand small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+        margin-top: 3px;
+      }
+      nav {
+        display: grid;
+        gap: 4px;
+      }
+      nav button {
+        text-align: left;
+        width: 100%;
+        border-color: transparent;
+        background: transparent;
+      }
+      nav button.active {
+        color: var(--accent);
+        background: var(--accent-soft);
+        font-weight: 700;
+      }
+      main {
+        min-width: 0;
+        padding: 26px clamp(18px, 4vw, 48px) 44px;
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 18px;
+        margin-bottom: 20px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 26px;
+      }
+      h2 {
+        font-size: 17px;
+      }
+      h3 {
+        font-size: 14px;
+      }
+      .eyebrow {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 5px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .statusbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        margin-bottom: 16px;
+      }
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .status i {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+      .status strong {
+        color: var(--green);
+      }
+      .select {
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 6px;
+        padding: 7px 8px;
+        color: var(--ink);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(360px, 1fr) minmax(330px, 0.85fr);
+        gap: 16px;
+        align-items: start;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 15px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-body {
+        padding: 15px 16px;
+      }
+      .timeline {
+        position: relative;
+        padding-left: 29px;
+      }
+      .timeline::before {
+        content: "";
+        position: absolute;
+        left: 8px;
+        top: 10px;
+        bottom: 10px;
+        width: 2px;
+        background: #e1d8e5;
+      }
+      .step {
+        position: relative;
+        padding: 0 0 17px;
+      }
+      .step::before {
+        content: "";
+        position: absolute;
+        left: -25px;
+        top: 4px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2px solid var(--accent);
+      }
+      .step.done::before {
+        background: var(--accent);
+      }
+      .step.wait::before {
+        border-color: var(--warn);
+      }
+      .step strong {
+        display: block;
+      }
+      .step p {
+        color: var(--muted);
+        margin-top: 3px;
+      }
+      .time {
+        color: #9aa5aa;
+        font-size: 11px;
+        float: right;
+      }
+      .recommendation {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 9px;
+      }
+      .recommendation.selected {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-soft);
+      }
+      .rec-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+      }
+      .tag {
+        display: inline-block;
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: #edf0f1;
+        color: #5e6b72;
+        font-size: 11px;
+      }
+      .tag.high {
+        background: #fae2e2;
+        color: var(--danger);
+      }
+      .tag.pending {
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+      .recommendation p {
+        margin-top: 7px;
+      }
+      .recommendation code {
+        display: block;
+        margin-top: 7px;
+        color: #5e6a71;
+        font:
+          12px/1.5 ui-monospace,
+          SFMono-Regular,
+          monospace;
+        white-space: pre-wrap;
+      }
+      .approval {
+        margin-top: 16px;
+      }
+      .approval-box {
+        padding: 13px;
+        border: 1px solid #dfd3e4;
+        background: #fcf9fd;
+        border-radius: 6px;
+      }
+      .approval-box h3 {
+        margin-bottom: 6px;
+      }
+      .approval-box ul {
+        margin: 8px 0 0;
+        padding-left: 19px;
+        color: var(--muted);
+      }
+      .notice {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-left: 3px solid var(--accent);
+        background: var(--accent-soft);
+        color: #5b3d68;
+      }
+      @media (max-width: 850px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+        aside {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+          padding: 13px 15px;
+        }
+        .brand {
+          margin: 0 0 10px;
+        }
+        nav {
+          display: flex;
+          overflow: auto;
+        }
+        nav button {
+          width: auto;
+          white-space: nowrap;
+        }
+        main {
+          padding: 20px 16px 34px;
+        }
+        .top {
+          flex-direction: column;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .statusbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside>
+        <div class="brand">Skill Creator<small>Agent steward reference</small></div>
+        <nav aria-label="Primary navigation">
+          <button>Workspaces</button><button>Creator</button><button>Repository</button
+          ><button>Intelligence</button><button class="active">Steward</button>
+        </nav>
+      </aside>
+      <main>
+        <header class="top">
+          <div>
+            <div class="eyebrow">Steward run / run_20260905_014 / 3 skills</div>
+            <h1>Agent steward</h1>
+            <p class="muted">The Agent recommends; the Manager validates and applies.</p>
+          </div>
+          <div class="actions">
+            <select class="select" aria-label="Harness backend">
+              <option>DSH backend</option>
+              <option>Codex app-server</option>
+              <option>Fixture adapter</option></select
+            ><button id="cancel">Cancel run</button
+            ><button class="primary" id="new-run">New run</button>
+          </div>
+        </header>
+        <div class="statusbar">
+          <div class="status">
+            <i></i>
+            <div>
+              <strong id="run-status">Waiting for approval</strong>
+              <div class="muted">Handshake complete / capabilities: analyze, draft, stream</div>
+            </div>
+          </div>
+          <div class="muted">Started 2 min ago</div>
+        </div>
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Run timeline</h2>
+                <div class="muted">Normalized events from the selected backend</div>
+              </div>
+              <span class="tag pending">approval</span>
+            </div>
+            <div class="panel-body">
+              <div class="timeline">
+                <div class="step done">
+                  <span class="time">09:14:02</span><strong>Analyze selected skills</strong>
+                  <p>Manager snapshot: revisions 8bd7c2a, 19e04f1, 5a301d8.</p>
+                </div>
+                <div class="step done">
+                  <span class="time">09:14:09</span><strong>Recommend changes</strong>
+                  <p>1 disable recommendation and 1 edit proposal with evidence.</p>
+                </div>
+                <div class="step done">
+                  <span class="time">09:14:16</span><strong>Draft Manager patch</strong>
+                  <p>Patch stored outside Provider roots; no files changed.</p>
+                </div>
+                <div class="step wait">
+                  <span class="time">now</span><strong>Await explicit approval</strong>
+                  <p>Apply is blocked until the user reviews affected skills and revisions.</p>
+                </div>
+                <div class="step">
+                  <strong>Validate and apply</strong>
+                  <p>Runs only after approval, then re-discovers and records provenance.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Recommendation queue</h2>
+                <div class="muted">Manager-owned proposal drafts</div>
+              </div>
+              <span class="tag">2 items</span>
+            </div>
+            <div class="panel-body">
+              <div class="recommendation selected">
+                <div class="rec-head">
+                  <strong>Disable legacy-deploy</strong><span class="tag high">high</span>
+                </div>
+                <p class="muted">No references in the current workspace; overlaps deploy-safety.</p>
+                <code>evidence: stale 62 days / overlap 0.84 / revision 5a301d8</code>
+              </div>
+              <div class="recommendation">
+                <div class="rec-head">
+                  <strong>Edit release-check</strong><span class="tag pending">review</span>
+                </div>
+                <p class="muted">
+                  Narrow the trigger phrase and remove duplicated approval wording.
+                </p>
+                <code>patch: draft_441 / revision 8bd7c2a</code>
+              </div>
+              <div class="actions">
+                <button id="show-all">Open analysis report</button
+                ><button id="retry">Retry failed step</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="panel approval">
+          <div class="panel-head">
+            <div>
+              <h2>Approval gate</h2>
+              <div class="muted">One-time approval for this exact patch and revision set</div>
+            </div>
+            <div class="actions">
+              <button id="reject">Reject</button
+              ><button class="primary" id="approve">Approve and validate</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="approval-box">
+              <h3>What will happen</h3>
+              <ul>
+                <li>Manager rechecks all observed revisions.</li>
+                <li>Validation runs against the target Workspace.Provider.</li>
+                <li>Only validated changes are applied atomically and recorded.</li>
+                <li>A stale revision returns to review; it never overwrites newer work.</li>
+              </ul>
+            </div>
+            <div class="notice" id="notice">
+              The Agent has no direct filesystem authority. Approval is still required.
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      const notice = document.querySelector("#notice");
+      document.querySelector("#approve").addEventListener("click", (event) => {
+        event.currentTarget.disabled = true;
+        event.currentTarget.textContent = "Validating...";
+        document.querySelector("#run-status").textContent = "Validating patch";
+        notice.textContent =
+          "Validation started. The apply action remains locked until every affected skill passes.";
+        setTimeout(() => {
+          event.currentTarget.disabled = false;
+          event.currentTarget.textContent = "Approve and validate";
+          document.querySelector("#run-status").textContent = "Waiting for approval";
+          notice.textContent =
+            "Fixture reference: validation would now return a typed result and ask for final apply confirmation.";
+        }, 900);
+      });
+      document.querySelector("#reject").addEventListener("click", () => {
+        document.querySelector("#run-status").textContent = "Rejected";
+        notice.textContent =
+          "Approval rejected. The draft and evidence remain available for audit and later review.";
+      });
+      document.querySelector("#cancel").addEventListener("click", (event) => {
+        event.currentTarget.textContent = "Cancelling...";
+        document.querySelector("#run-status").textContent = "Cancelling";
+        notice.textContent =
+          "Cancellation propagates to the adapter and closes the run with a terminal status.";
+        setTimeout(() => {
+          event.currentTarget.textContent = "Cancelled";
+        }, 500);
+      });
+      document.querySelector("#new-run").addEventListener("click", () => {
+        notice.textContent =
+          "New run requires an explicit backend and a selected Workspace.Provider scope.";
+      });
+      document.querySelector("#retry").addEventListener("click", () => {
+        notice.textContent =
+          "Retry is available only for a typed failed step; it cannot bypass approval or revision checks.";
+      });
+      document.querySelector("#show-all").addEventListener("click", () => {
+        notice.textContent =
+          "Analysis report opens with the same snapshot, findings, evidence, and proposal IDs.";
+      });
+    </script>
+  </body>
+</html>
