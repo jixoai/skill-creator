@@ -147,3 +147,13 @@ export function writableWorkspaceProviders(): WritableWorkspaceProvider[] {
   }
   return targets;
 }
+
+/** Workspace 在 Workspaces App 内的默认落点路径（首个 provider；无 provider 回 home）。 */
+export function workspaceEntryPath(workspace: Workspace): string {
+  if (workspace.kind === "directory" && workspace.providers.length > 0) {
+    const provider = workspace.providers[0];
+    if (!provider) return "/workspaces";
+    return `/workspaces/${encodeURIComponent(workspace.id)}/${encodeURIComponent(provider.id)}`;
+  }
+  return "/workspaces";
+}

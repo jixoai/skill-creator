@@ -25,6 +25,8 @@ export { defineApp } from "./define-app.js";
 export { matchRouteTree } from "./match.js";
 export { compilePattern, joinPattern, stringifyPattern } from "./path-pattern.js";
 export { stringifySearch, parseSearchString } from "./search.js";
+export { sanitizeShellLocation, SHELL_HOME_PATH } from "./route-hygiene.js";
+export type { HygieneDecision } from "./route-hygiene.js";
 
 // 注册表
 export { routeRegistry, appRegistry } from "./registry.js";

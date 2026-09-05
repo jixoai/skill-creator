@@ -8,7 +8,7 @@
    */
   import * as Command from "$lib/components/ui/command";
   import { goto } from "$app/navigation";
-  import { workspaceState } from "$lib/store.svelte";
+  import { workspaceEntryPath, workspaceState } from "$lib/store.svelte";
   import IconFolder from "@lucide/svelte/icons/folder-open";
   import IconPen from "@lucide/svelte/icons/file-plus-2";
   import IconGlobe from "@lucide/svelte/icons/globe";
@@ -40,7 +40,7 @@
 
     <Command.Group heading="Navigate">
       <Command.Item
-        onSelect={() => run(() => goto("/workspace"))}
+        onSelect={() => run(() => goto("/workspaces"))}
         value="go workspaces manage locations"
       >
         <IconGrid class="h-4 w-4" />
@@ -64,7 +64,7 @@
         {#each workspaceState.workspaces as ws (ws.id)}
           <Command.Item
             value={`workspace ${ws.label} ${ws.path}`}
-            onSelect={() => run(() => goto(`/workspace/${ws.id}`))}
+            onSelect={() => run(() => goto(workspaceEntryPath(ws)))}
           >
             <IconFolder class="h-4 w-4" />
             <span class="flex-1 truncate">{ws.label}</span>

@@ -9,8 +9,9 @@
   import { page } from "$app/state";
   import AppShell from "./AppShell.svelte";
   import { appRegistry } from "./registry.js";
-  import { resolveTabIdentity } from "./nav-controller.svelte.js";
+  import { resolveTabIdentity, navController } from "./nav-controller.svelte.js";
   import { matchRouteTree } from "./match.js";
+  import { sanitizeShellLocation } from "./route-hygiene.js";
   import type { AppActivity, AppManifest } from "./types.js";
 
   // 当前 URL pathname（响应式依赖）。
@@ -22,13 +23,21 @@
   // 当前激活 App manifest。
   const activeApp = $derived.by(() => (activeAppId ? appRegistry.get(activeAppId) : null));
 
+  // 非法身份在渲染前清理：params 非法回 app 入口，search 非法剥离 search，未知 app 回全局入口。
+  $effect.pre(() => {
+    const decision = sanitizeShellLocation(pathname, page.url.search);
+    if (decision.kind !== "redirect") return;
+    if (decision.path === pathname && !page.url.search) return;
+    navController.replace(decision.path);
+  });
+
   // 解析当前 URL 应该用哪个 activity：用 matchRouteTree 逐个尝试，取首个 matched。
   const activeActivity = $derived.by(() => {
     if (!activeApp) return null;
-    // 优先尝试每个 activity 的 matchRouteTree；取首个 matched。
+    // 优先尝试每个 activity 的 matchRouteTree；取首个 matched。parse-error 交给渲染前重定向。
     for (const a of activeApp.activities) {
       const result = matchRouteTree(a.root, pathname, page.url.search, a.pattern);
-      if (result.kind === "matched" || result.kind === "parse-error") return a;
+      if (result.kind === "matched") return a;
     }
     // 无匹配：回退到 entry activity。
     return activeApp.activities.find((a) => a.entry) ?? activeApp.activities[0] ?? null;

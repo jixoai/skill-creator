@@ -41,9 +41,8 @@
     return result;
   });
 
-  const leafChain = $derived(
-    matchResult.kind === "matched" || matchResult.kind === "parse-error" ? matchResult.chain : [],
-  );
+  // 只有完整 matched 才渲染叶子；parse-error 由 TabOutlet 的渲染前重定向清理，绝不带非法 ID 渲染。
+  const leafChain = $derived(matchResult.kind === "matched" ? matchResult.chain : []);
 
   const leafParams = $derived(extractParams(leafChain));
   const leafSearch = $derived(extractSearch(matchResult, leafChain));

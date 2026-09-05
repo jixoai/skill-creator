@@ -72,6 +72,35 @@ Authority 列说明谁拥有真相：`registry` = Workspace Registry 单例（�
 ACP 安全门：agent 的 `fs/read_text_file`、`fs/write_text_file` 请求由 daemon 代为执行
 （containment + 原子写），agent 永不获得原始文件句柄；覆盖测试在 `test/acp-bridge.test.ts`。
 
+## WebUI 三 App 路由与返回路径
+
+事实源：`webui/src/lib/apps/*/manifest.ts`（声明） + `webui/src/lib/shell/`（解析）。
+唯一 SvelteKit 承载点是 `[...catch]`；一切 URL 由 shell route registry 解析，
+非法身份经 `sanitizeShellLocation` 在渲染前 replaceState 清理（`route-hygiene.ts`）。
+
+```text
+/workspaces -------------------------------------- entry：Workspace 索引（home tab）
+/workspaces/:wsId/:providerId -------------------- 实例 tab：技能列表 + 详情
+   wsId ∈ {~, ws_*}（URL 编码 %7E）；?q= 筛选；?skill=&view=list|detail 详情
+   返回：详情 → 列表（同 tab 清 search）；tab 关闭 → /workspaces
+
+/creator ----------------------------------------- entry：模板画廊 + 最近编辑（home tab）
+/creator/:mode/:wsId/:providerId ----------------- 实例 tab：new/edit 工作台
+   mode ∈ {new, edit}；edit 需要子路由 :skillId
+   ?subview=file|log|preview|validate|test；?template= 新建模板
+   返回：CreatorHome → /creator；保存成功 → Workspaces 详情深链
+
+/repository -------------------------------------- entry：Discover feed + scan 实例
+/repository/scan/:sourceId ------------------------ 固定 commit 扫描会话
+   sourceId ∈ curated id | user_*；?selected= 多选；?skill= 预览；?targets= 安装目标
+   返回：scan → Discover（/repository）；安装成功 → Workspaces 复核深链
+
+非法身份（任意 App）：
+   params 非法 → replaceState 回该 App entry
+   search 非法 → replaceState 剥离 search
+   未知 App / 无匹配 → replaceState 回 /workspaces（SHELL_HOME_PATH）
+```
+
 ## 数据流与路径边界
 
 ```text

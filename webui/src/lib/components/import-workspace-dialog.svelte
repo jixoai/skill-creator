@@ -9,7 +9,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
   import { Button } from "$lib/components/ui/button";
-  import { addWorkspace } from "$lib/store.svelte";
+  import { addWorkspace, workspaceEntryPath } from "$lib/store.svelte";
   import { goto } from "$app/navigation";
   import IconFolder from "@lucide/svelte/icons/folder-open";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
@@ -40,7 +40,7 @@
       const workspace = await addWorkspace(dirPath.trim(), label.trim() || undefined);
       if (!workspace) return;
       open = false;
-      await goto(`/workspace/${workspace.id}`);
+      await goto(workspaceEntryPath(workspace));
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
