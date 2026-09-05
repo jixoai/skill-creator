@@ -13,6 +13,7 @@ import type {
   ValidateResult,
   WorkspaceProviderTarget,
 } from "../types";
+import { untrack } from "svelte";
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 
@@ -44,15 +45,18 @@ export const skillsState = $state<{
 export async function loadSkills(target: WorkspaceProviderTarget): Promise<void> {
   const request = listRequests.issue();
   const canCommit = (): boolean => request.isCurrent() && targetsEqual(skillsState.target, target);
-  const targetChanged = !targetsEqual(skillsState.target, target);
+  // 调用方常在 $effect 中调用；untrack 防止这里同步读取的 .target/.skills 成为 effect 依赖，
+  // 否则异步提交的新 skills 数组会让 effect 无限重跑（每轮重发 list RPC）。
+  const targetChanged = untrack(() => !targetsEqual(skillsState.target, target));
+  const hadSkills = untrack(() => skillsState.skills.length > 0);
   if (targetChanged) {
     selectionRequests.invalidate();
     skillsState.target = target;
     skillsState.skills = [];
     skillsState.selected = null;
   }
-  skillsState.loading = skillsState.skills.length === 0;
-  skillsState.refreshing = skillsState.skills.length > 0;
+  skillsState.loading = !hadSkills;
+  skillsState.refreshing = hadSkills;
   skillsState.error = null;
   try {
     const { skills } = await requireRpc().skills.list({ ...target, includeDisabled: true });
