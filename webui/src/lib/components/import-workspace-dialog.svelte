@@ -10,24 +10,31 @@
   import { Label } from "$lib/components/ui/label";
   import { Button } from "$lib/components/ui/button";
   import { addWorkspace, workspaceEntryPath } from "$lib/store.svelte";
+  import { importWorkspaceUi } from "$lib/stores/import-workspace.svelte";
   import { goto } from "$app/navigation";
   import IconFolder from "@lucide/svelte/icons/folder-open";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
 
+  // 打开状态由全局 store 拥有（sidebar 与 Workspaces home 共享同一实例）。
   let open = $state(false);
+  $effect(() => {
+    importWorkspaceUi.open = open;
+  });
+  $effect(() => {
+    if (importWorkspaceUi.open) open = true;
+  });
+  // 每次打开都重置表单，避免上次输入残留。
+  $effect(() => {
+    if (open) {
+      dirPath = "";
+      label = "";
+      error = null;
+    }
+  });
   let dirPath = $state("");
   let label = $state("");
   let busy = $state(false);
   let error = $state<string | null>(null);
-
-  /** 重置表单并打开导入对话框。 */
-  export function show(): void {
-    dirPath = "";
-    label = "";
-    error = null;
-    busy = false;
-    open = true;
-  }
 
   async function submit(): Promise<void> {
     if (!dirPath.trim()) {

@@ -13,6 +13,7 @@
   import { goto } from "$app/navigation";
   import { registerApps } from "$lib/apps";
   import { connect, connectionState, disconnect, loadWorkspaces } from "$lib/store.svelte";
+  import { requestImportWorkspace } from "$lib/stores/import-workspace.svelte";
   import { captureTokenFromHash } from "$lib/rpc-client";
   import { appRegistry, resolveTabIdentity, setNavControllerAdapter } from "$lib/shell";
   import TabOutlet from "$lib/shell/TabOutlet.svelte";
@@ -34,7 +35,6 @@
   registerApps();
 
   let { children } = $props();
-  let importDialog = $state<ImportWorkspaceDialog>();
 
   onMount(() => {
     // 在任何导航之前先 capture token 到 sessionStorage（防止 goto 清掉 hash）。
@@ -149,7 +149,7 @@
           class="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title="Import workspace"
           aria-label="Import workspace"
-          onclick={() => importDialog?.show()}
+          onclick={() => requestImportWorkspace()}
         >
           <IconPlus class="h-5 w-5" />
         </button>
@@ -164,6 +164,6 @@
   </div>
 </TooltipProvider>
 
-<ImportWorkspaceDialog bind:this={importDialog} />
+<ImportWorkspaceDialog />
 <CommandPalette />
 <ToastContainer />
