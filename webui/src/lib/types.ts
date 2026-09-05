@@ -29,6 +29,11 @@ export type {
   ToggleSummary,
   ValidateResult,
 } from "$shared/contracts/skills.js";
+/** Provider 更新检查/重装使用的共享类型。 */
+export type {
+  ApplyUpdateResultEntry,
+  UpdateCheckResultEntry,
+} from "$shared/contracts/skills-update.js";
 /** WebUI 导航使用的共享 workspace 类型。 */
 export type {
   ImportedWorkspace,

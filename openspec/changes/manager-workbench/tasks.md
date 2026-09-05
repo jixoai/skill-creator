@@ -4,7 +4,7 @@
 
 - [x] 1.1 画出当前三条真实路由和返回路径，删除或重定向重复入口；加入一个 route contract test 覆盖非法 opaque ID 在渲染前 redirect。（路由图见 `docs/manager-contract-map.md`「WebUI 三 App 路由」；新增 `route-hygiene.ts` + TabOutlet `$effect.pre` 渲染前 replaceState 清理；修复 import-workspace-dialog / command-palette 3 处指向已删除 `/workspace` 单数路由的 goto；删除死组件 app-sidebar / skill-detail / workspace-removal / categorize；`route-hygiene.test.ts` 6/6 通过，svelte-check 0 错）
 - [x] 1.2 完成 Workspaces home：Global/Imported Workspace、Provider、availability、skill count、import/remove；Remove 只删除 registry entry，不删除目录。（WorkspacesHome 重写：Global 卡片（~ badge + provider 网格 + path/不可用态）、Imported 列表（Missing badge + provider chips + remove）、加载骨架/空态/更新中/失败重试四态、refresh busy 锁；新增共享 confirm-dialog 与 import-workspace 全局打开 store；removeWorkspace 走 registry-only RPC，svelte-check 0 错，webui 测试 33/33）
-- [ ] 1.3 完成 Provider view：列表、筛选、详情、markdown/frontmatter 预览、validate、enable/disable；加载、空数据、更新中、失败状态可区分。
+- [x] 1.3 完成 Provider view：列表、筛选、详情、markdown/frontmatter 预览、validate、enable/disable；加载、空数据、更新中、失败状态可区分。（toggle 补 busy 锁 + ToggleSummary 逐项分类 toast（conflict/failed/skipped 区分）；列表头部 refreshing 指示、错误态补 Retry；新增 skills-update store 与更新面板：check 四态分类（outdated/current/failed/unavailable）+ apply busy 锁 + 逐项结果与汇总，禁止 skipped-only 写成成功；svelte-check 0 错）
 - [ ] 1.4 完成 Creator new/edit：draft 只在组件内，save/delete 携带 target 和 expectedRevision；冲突不覆盖 draft，重载后用户能继续决定。
 - [ ] 1.5 完成 Repository：source list/add/remove、scan commit、remote skill selection、preview、dry-run、multi-target install；session 失效时提示重新扫描。
 - [ ] 1.6 为所有 mutation 加 disabled/loading 锁和结果分类；禁止 skipped-only 显示为成功 0 项。

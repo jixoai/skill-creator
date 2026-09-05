@@ -18,6 +18,14 @@
     validateSkill,
   } from "$lib/store.svelte";
   import { saveSkill } from "$lib/store.svelte";
+  import {
+    applyUpdates,
+    checkUpdates,
+    clearUpdateReport,
+    skillsUpdateState,
+    updateApplyCounts,
+    updateCheckCounts,
+  } from "$lib/stores/skills-update.svelte";
   import { showToast } from "$lib/toast.svelte";
   import { ORPCError } from "@orpc/client";
   import type { SkillInfo, SkillFrontmatter } from "$lib/types";
@@ -32,11 +40,13 @@
   import { Input } from "$lib/components/ui/input";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconCheck from "@lucide/svelte/icons/circle-check";
+  import IconDownload from "@lucide/svelte/icons/arrow-down-to-line";
   import IconFile from "@lucide/svelte/icons/file-text";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPower from "@lucide/svelte/icons/power";
   import IconShield from "@lucide/svelte/icons/shield-check";
   import IconSearch from "@lucide/svelte/icons/search";
+  import IconX from "@lucide/svelte/icons/x";
 
   type ProviderSearch = { q?: string; skill?: string; view?: "list" | "detail" };
 
@@ -58,6 +68,7 @@
   let validating = $state(false);
   let validation = $state<{ success: boolean; errors: string[]; warnings: string[] } | null>(null);
   let saving = $state(false);
+  let toggling = $state(false);
 
   // 行内轻量编辑草稿（仅当 detail 加载后初始化；不写 localStorage）。
   let draftName = $state("");
@@ -167,11 +178,69 @@
   }
 
   async function handleToggle(): Promise<void> {
-    if (!detail || !providerTarget) return;
+    const current = detail;
+    if (!current || !providerTarget || toggling) return;
+    toggling = true;
+    const mode = current.disabled ? "enable" : "disable";
     try {
-      await toggleSkills([detail.id], detail.disabled ? "enable" : "disable");
-      showToast(`${detail.name} ${detail.disabled ? "enabled" : "disabled"}.`);
-      await loadDetail(providerTarget, detail.id);
+      const summary = await toggleSkills([current.id], mode);
+      if (!summary) return; // 请求已被取代（切换 Provider / 断线），不投影结果
+      const entry = summary.results.find((item) => item.skillId === current.id);
+      if (entry) {
+        if (entry.status === "conflict") {
+          showToast(`${entry.name}: ${mode} conflict${entry.error ? ` — ${entry.error}` : "."}`);
+        } else if (entry.status === "failed") {
+          showToast(`${entry.name}: ${mode} failed — ${entry.error ?? "unknown error"}`);
+        } else if (entry.status === "skipped") {
+          showToast(`${entry.name}: already ${mode === "enable" ? "enabled" : "disabled"}.`);
+        } else {
+          showToast(`${entry.name} ${entry.status}.`);
+        }
+      }
+      await loadDetail(providerTarget, current.id);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error));
+    } finally {
+      toggling = false;
+    }
+  }
+
+  // ---- 更新检查 / 重装（skills.update.check + apply；结果按技能逐项分类） ----
+
+  const outdatedIds = $derived(
+    skillsUpdateState.results
+      .filter((entry) => entry.status === "updated")
+      .map((entry) => entry.skillId),
+  );
+  const checkCounts = $derived(updateCheckCounts(skillsUpdateState.results));
+  const applySummary = $derived(
+    skillsUpdateState.applyResults ? updateApplyCounts(skillsUpdateState.applyResults) : null,
+  );
+
+  // 切换 Provider 时清除上一份更新报告。
+  $effect(() => {
+    if (providerTarget) clearUpdateReport();
+  });
+
+  async function handleCheckUpdates(): Promise<void> {
+    if (!providerTarget || skillsUpdateState.checking) return;
+    await checkUpdates(providerTarget);
+  }
+
+  async function handleApplyUpdates(): Promise<void> {
+    if (!providerTarget || skillsUpdateState.applying || outdatedIds.length === 0) return;
+    try {
+      const results = await applyUpdates(providerTarget, outdatedIds);
+      if (!results) return;
+      const counts = updateApplyCounts(results);
+      const parts = [
+        counts.updated > 0 ? `${counts.updated} updated` : null,
+        counts.current > 0 ? `${counts.current} already current` : null,
+        counts.failed > 0 ? `${counts.failed} failed` : null,
+      ].filter((part): part is string => part !== null);
+      // 禁止把 skipped-only 写成成功；parts 为空时如实报告无变化。
+      showToast(parts.length > 0 ? parts.join(" · ") : "No changes applied.");
+      await loadSkills(providerTarget);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error));
     }
@@ -269,7 +338,30 @@
     <header class="shrink-0 border-b border-border px-4 py-3">
       <div class="flex items-center gap-2">
         <h1 class="truncate text-base font-semibold">{providerId ?? "—"}</h1>
-        <Badge variant="secondary">{visibleSkills.length}</Badge>
+        {#if skillsState.refreshing}
+          <IconLoader
+            class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
+            title="Refreshing skills"
+          />
+        {:else}
+          <Badge variant="secondary">{visibleSkills.length}</Badge>
+        {/if}
+        <span class="flex-1"></span>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1.5 px-2 text-xs"
+          title="Compare installed skills against their upstream sources"
+          disabled={skillsUpdateState.checking}
+          onclick={() => void handleCheckUpdates()}
+        >
+          {#if skillsUpdateState.checking}
+            <IconLoader class="h-3.5 w-3.5 animate-spin" />
+          {:else}
+            <IconDownload class="h-3.5 w-3.5" />
+          {/if}
+          Updates
+        </Button>
       </div>
       <div class="relative mt-2">
         <IconSearch
@@ -283,13 +375,133 @@
         />
       </div>
     </header>
+
+    {#if skillsUpdateState.checking}
+      <p
+        class="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground"
+        role="status"
+      >
+        <IconLoader class="h-3.5 w-3.5 animate-spin" /> Checking upstream sources…
+      </p>
+    {:else if skillsUpdateState.checkError}
+      <div
+        class="flex shrink-0 items-start gap-2 border-b border-border px-4 py-2 text-xs text-destructive"
+        role="alert"
+      >
+        <span class="min-w-0 flex-1 break-words">{skillsUpdateState.checkError}</span>
+        <button
+          class="shrink-0 underline underline-offset-2"
+          onclick={() => void handleCheckUpdates()}
+        >
+          Retry
+        </button>
+      </div>
+    {:else if skillsUpdateState.results.length > 0 || skillsUpdateState.applyResults}
+      <section
+        class="shrink-0 border-b border-border px-4 py-2.5"
+        aria-label="Update report"
+        data-testid="update-report"
+      >
+        <div class="flex items-center gap-2">
+          {#if applySummary}
+            <p class="min-w-0 flex-1 text-xs">
+              <span class="font-medium">Applied</span>
+              {#if applySummary.updated > 0}
+                <span class="text-muted-foreground"> · {applySummary.updated} updated</span>
+              {/if}
+              {#if applySummary.current > 0}
+                <span class="text-muted-foreground"> · {applySummary.current} already current</span>
+              {/if}
+              {#if applySummary.failed > 0}
+                <span class="text-destructive"> · {applySummary.failed} failed</span>
+              {/if}
+            </p>
+          {:else}
+            <p class="min-w-0 flex-1 text-xs">
+              {#if checkCounts.outdated > 0}
+                <span class="font-medium text-primary">{checkCounts.outdated} outdated</span>
+              {:else}
+                <span class="font-medium">All current</span>
+              {/if}
+              {#if checkCounts.current > 0}
+                <span class="text-muted-foreground"> · {checkCounts.current} up to date</span>
+              {/if}
+              {#if checkCounts.unavailable > 0}
+                <span class="text-muted-foreground"> · {checkCounts.unavailable} unavailable</span>
+              {/if}
+              {#if checkCounts.failed > 0}
+                <span class="text-destructive"> · {checkCounts.failed} failed</span>
+              {/if}
+            </p>
+            {#if outdatedIds.length > 0}
+              <Button
+                size="sm"
+                class="h-7 gap-1.5 px-2 text-xs"
+                disabled={skillsUpdateState.applying}
+                onclick={() => void handleApplyUpdates()}
+              >
+                {#if skillsUpdateState.applying}
+                  <IconLoader class="h-3.5 w-3.5 animate-spin" />
+                {:else}
+                  <IconDownload class="h-3.5 w-3.5" />
+                {/if}
+                Update {outdatedIds.length}
+              </Button>
+            {/if}
+          {/if}
+          <button
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Dismiss update report"
+            onclick={() => clearUpdateReport()}
+          >
+            <IconX class="h-3.5 w-3.5" />
+          </button>
+        </div>
+        {#if skillsUpdateState.applyResults ?? skillsUpdateState.results}
+          {@const report = skillsUpdateState.applyResults ?? skillsUpdateState.results}
+          <ul class="mt-1.5 max-h-40 space-y-1 overflow-y-auto text-[11px]">
+            {#each report as entry (entry.skillId)}
+              <li class="flex items-baseline gap-1.5">
+                <span class="min-w-0 flex-1 truncate">{entry.name}</span>
+                {#if entry.status === "updated"}
+                  <Badge variant="secondary" class="text-[10px]">
+                    {applySummary ? "reinstalled" : "outdated"}
+                  </Badge>
+                {:else if entry.status === "already-current"}
+                  <Badge variant="outline" class="text-[10px]">current</Badge>
+                {:else if entry.status === "failed"}
+                  <Badge variant="destructive" class="text-[10px]">failed</Badge>
+                {:else}
+                  <Badge variant="outline" class="text-[10px]">unavailable</Badge>
+                {/if}
+              </li>
+              {#if entry.error}
+                <li class="pl-3 text-[10px] text-muted-foreground">{entry.error}</li>
+              {/if}
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
     <div class="min-h-0 flex-1 overflow-y-auto">
       {#if skillsState.loading}
         <div class="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
           <IconLoader class="h-3.5 w-3.5 animate-spin" /> Loading skills…
         </div>
       {:else if skillsState.error}
-        <p class="px-4 py-6 text-xs text-destructive">{skillsState.error}</p>
+        <div class="flex flex-col items-start gap-2 px-4 py-6 text-xs text-destructive">
+          <p class="break-words">{skillsState.error}</p>
+          {#if providerTarget}
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-7 text-xs"
+              onclick={() => void loadSkills(providerTarget)}
+            >
+              Retry
+            </Button>
+          {/if}
+        </div>
       {:else if visibleSkills.length === 0}
         <p class="px-4 py-6 text-xs text-muted-foreground">No skills match.</p>
       {:else}
@@ -391,9 +603,14 @@
               size="sm"
               variant={detail.disabled ? "default" : "outline"}
               class="h-8 gap-1.5"
+              disabled={toggling}
               onclick={handleToggle}
             >
-              <IconPower class="h-3.5 w-3.5" />
+              {#if toggling}
+                <IconLoader class="h-3.5 w-3.5 animate-spin" />
+              {:else}
+                <IconPower class="h-3.5 w-3.5" />
+              {/if}
               {detail.disabled ? "Enable" : "Disable"}
             </Button>
           </div>
