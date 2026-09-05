@@ -9,6 +9,8 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import SourceCard from "$lib/components/source-card.svelte";
+  import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
+  import { showToast } from "$lib/toast.svelte";
   import { useSearch } from "$lib/shell";
   import {
     addSource,
@@ -138,13 +140,34 @@
     }
   }
 
-  async function handleRemove(sourceId: string, label: string): Promise<void> {
-    if (!confirm(`Remove custom source "${label}"?`)) return;
+  // 移除用户源：confirm 对话框 + busy 锁 + toast 终态（失败不再静默）。
+  let removingSource = $state<{ id: string; label: string } | null>(null);
+  let removeOpen = $state(false);
+  let removeBusy = $state(false);
+
+  function requestRemove(id: string, label: string): void {
+    removingSource = { id, label };
+    removeOpen = true;
+  }
+
+  $effect(() => {
+    if (!removeOpen) removingSource = null;
+  });
+
+  async function confirmRemove(): Promise<void> {
+    const source = removingSource;
+    if (!source) return;
+    removeBusy = true;
     try {
-      await removeSource(sourceId);
+      const removed = await removeSource(source.id);
+      if (removed) {
+        removeOpen = false;
+        showToast(`Removed source ${source.label}.`);
+      }
     } catch (error) {
-      // 错误已由 store 投影；这里仅吞掉导航副作用。
-      console.error(error);
+      showToast(error instanceof Error ? error.message : String(error));
+    } finally {
+      removeBusy = false;
     }
   }
 </script>
@@ -201,7 +224,7 @@
             scanSummary={getScanSummary(source.id)}
             stale={isScanSummaryStale(getScanSummary(source.id))}
             onscan={() => openScan(source.id)}
-            onremove={source.builtIn ? undefined : () => handleRemove(source.id, source.label)}
+            onremove={source.builtIn ? undefined : () => requestRemove(source.id, source.label)}
           />
         {/each}
       </div>
@@ -287,3 +310,14 @@
     </div>
   </div>
 {/if}
+
+<ConfirmDialog
+  bind:open={removeOpen}
+  title="Remove custom source"
+  description={removingSource
+    ? `Remove ${removingSource.label} from your Discover feed? Installed skills stay on disk.`
+    : ""}
+  confirmLabel="Remove"
+  busy={removeBusy}
+  onConfirm={() => void confirmRemove()}
+/>

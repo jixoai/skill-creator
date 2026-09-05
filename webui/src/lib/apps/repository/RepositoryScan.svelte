@@ -14,8 +14,10 @@
   import { curatedSourceEntry } from "$shared/curated-sources.js";
   import {
     installRemoteSkills,
+    isSessionExpired,
     previewRemoteSkill,
     scanRemoteRepo,
+    type RepositoryCallFailure,
   } from "$lib/stores/repository.svelte";
   import { loadSources, repositorySourcesState } from "$lib/stores/repository-sources.svelte";
   import { recordScanSummary } from "$lib/stores/scan-summary.svelte";
@@ -46,12 +48,15 @@
   // 扫描会话（daemon-owned，组件持当前视图所需结果）。
   let scan = $state<RemoteRepoScan | null>(null);
   let scanning = $state(false);
-  let scanError = $state<string | null>(null);
+  let scanError = $state<RepositoryCallFailure | null>(null);
   let preview = $state<RemoteSkillPreview | null>(null);
   let previewing = $state(false);
+  let previewError = $state<RepositoryCallFailure | null>(null);
   let installResult = $state<InstallResult | null>(null);
   let installing = $state(false);
-  let installError = $state<string | null>(null);
+  let installError = $state<RepositoryCallFailure | null>(null);
+  // 手动 ref（branch/tag）输入；为空扫描默认分支。
+  let scanRef = $state("");
 
   // 选中技能从 URL ?selected= 派生（视图状态真相源）。
   const selectedParam = $derived(getSearch?.()?.selected ?? "");
@@ -88,13 +93,16 @@
     void runScan(gitUrl);
   });
 
-  async function runScan(url: string): Promise<void> {
+  async function runScan(url: string, ref?: string): Promise<void> {
     scanning = true;
     scanError = null;
     scan = null;
     preview = null;
+    previewError = null;
     installResult = null;
-    const { scan: result, error } = await scanRemoteRepo(url);
+    installError = null;
+    const trimmedRef = ref?.trim() || undefined;
+    const { scan: result, error } = await scanRemoteRepo(url, trimmedRef);
     scan = result;
     scanError = error;
     if (result && sourceId) {
@@ -125,9 +133,10 @@
     skillId: RemoteSkillId,
   ): Promise<void> {
     previewing = true;
+    previewError = null;
     const { preview: result, error } = await previewRemoteSkill(sessionId, skillId);
     preview = result;
-    if (error) scanError = error;
+    previewError = error;
     previewing = false;
   }
 
@@ -204,6 +213,9 @@
     }
   }
 
+  // pinned session 已在 daemon 侧失效：提示重扫（preview 与 install 共用该判定）。
+  const sessionExpired = $derived(isSessionExpired(previewError) || isSessionExpired(installError));
+
   // 安装后跳转目标（从 InstallSummary.targets 与 installed/overwritten 条目推导）。
   const installSummary = $derived(
     installResult?.kind === "result" ? (installResult as InstallSummary) : null,
@@ -216,11 +228,7 @@
   });
 
   function viewInWorkspaces(workspaceId: string, providerId: string, skillId: string): void {
-    goById(
-      "workspaces.provider",
-      { wsId: workspaceId, providerId },
-      { skill: skillId, highlight: "1" },
-    );
+    goById("workspaces.provider", { wsId: workspaceId, providerId }, { skill: skillId });
   }
 </script>
 
@@ -237,6 +245,28 @@
         {scan.skills.length} skills · commit {scan.commit.slice(0, 12)}
       </span>
     {/if}
+    <form
+      class="flex shrink-0 items-center gap-1"
+      onsubmit={(event) => {
+        event.preventDefault();
+        if (gitUrl) void runScan(gitUrl, scanRef);
+      }}
+    >
+      <input
+        bind:value={scanRef}
+        placeholder="branch / tag"
+        title="Optional Git ref to scan (defaults to the repository default branch)"
+        aria-label="Git ref for scanning"
+        class="h-7 w-28 rounded-md border border-input bg-input/20 px-2 font-mono text-[11px] outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+      />
+      <button
+        type="submit"
+        disabled={scanning || !gitUrl}
+        class="h-7 rounded-md border border-border px-2 text-[11px] transition-colors hover:bg-muted/50 disabled:opacity-50"
+      >
+        {scanning ? "Scanning…" : "Rescan"}
+      </button>
+    </form>
     <button
       type="button"
       onclick={() => goto("/repository")}
@@ -246,10 +276,32 @@
     </button>
   </header>
 
+  {#if sessionExpired}
+    <div
+      class="flex shrink-0 items-center gap-3 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs"
+      role="alert"
+      data-testid="session-expired"
+    >
+      <span class="min-w-0 flex-1">
+        <span class="font-medium">Scan session expired.</span>
+        <span class="text-muted-foreground">
+          The pinned commit is no longer held by the daemon. Rescan this repository to continue.
+        </span>
+      </span>
+      <button
+        type="button"
+        disabled={scanning || !gitUrl}
+        onclick={() => gitUrl && void runScan(gitUrl, scanRef)}
+        class="h-7 shrink-0 rounded-md border border-border bg-background px-3 text-[11px] font-medium transition-colors hover:bg-muted/50 disabled:opacity-50"
+      >
+        Rescan
+      </button>
+    </div>
+  {/if}
   {#if scanning}
     <p class="px-4 py-8 text-center text-xs text-muted-foreground">Scanning…</p>
   {:else if scanError}
-    <p class="px-4 py-8 text-center text-xs text-destructive">{scanError}</p>
+    <p class="px-4 py-8 text-center text-xs text-destructive">{scanError.message}</p>
     {#if gitUrl}
       <div class="px-4 text-center">
         <button
@@ -386,8 +438,8 @@
               {installing ? "Installing…" : "Install"}
             </button>
           </div>
-          {#if installError}
-            <p class="mt-2 text-xs text-destructive">{installError}</p>
+          {#if installError && !sessionExpired}
+            <p class="mt-2 break-words text-xs text-destructive">{installError.message}</p>
           {/if}
         </div>
 

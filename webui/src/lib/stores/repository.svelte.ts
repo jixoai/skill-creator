@@ -8,6 +8,7 @@
  * 妥协声明：scan / preview / install 结果不再缓存在全局单例跨渲染周期；调用方（组件）按需拉取并
  * 持有当前视图所需结果，刷新会从 URL（sessionId / selected）重新拉取。
  */
+import { ORPCError } from "@orpc/client";
 import type {
   InstallResult,
   RemoteRepoScan,
@@ -17,6 +18,23 @@ import type {
 } from "../types";
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
+
+/** 结构化调用失败：区分 session 失效（需重扫）与普通错误。 */
+export interface RepositoryCallFailure {
+  message: string;
+  /** daemon 公开的 oRPC 业务错误码（如 UNAVAILABLE / INVALID_OPERATION）。 */
+  code?: string;
+}
+
+/** 判定一次调用失败是否因为 pinned session 已在 daemon 侧失效/被淘汰。 */
+export function isSessionExpired(failure: RepositoryCallFailure | null): boolean {
+  return failure?.code === "UNAVAILABLE" && failure.message.includes("session expired");
+}
+
+function toFailure(error: unknown): RepositoryCallFailure {
+  if (error instanceof ORPCError) return { message: error.message, code: String(error.code) };
+  return { message: error instanceof Error ? error.message : String(error) };
+}
 
 /** per-call 代次令牌（组件持结果前用以识别 stale 响应）。 */
 interface RequestGeneration {
@@ -39,17 +57,14 @@ function bindGate(): { issue: () => RequestGeneration } {
 export async function scanRemoteRepo(
   source: string,
   ref?: string,
-): Promise<{ scan: RemoteRepoScan | null; error: string | null }> {
+): Promise<{ scan: RemoteRepoScan | null; error: RepositoryCallFailure | null }> {
   const request = bindGate().issue();
   try {
     const scan = await requireRpc().repository.scan({ source, ref });
     return request.isCurrent() ? { scan, error: null } : { scan: null, error: null };
   } catch (error) {
     if (!request.isCurrent()) return { scan: null, error: null };
-    return {
-      scan: null,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    return { scan: null, error: toFailure(error) };
   }
 }
 
@@ -57,17 +72,14 @@ export async function scanRemoteRepo(
 export async function previewRemoteSkill(
   sessionId: RemoteRepoScan["sessionId"],
   skillId: RemoteSkillId,
-): Promise<{ preview: RemoteSkillPreview | null; error: string | null }> {
+): Promise<{ preview: RemoteSkillPreview | null; error: RepositoryCallFailure | null }> {
   const request = bindGate().issue();
   try {
     const preview = await requireRpc().repository.preview({ sessionId, skillId });
     return request.isCurrent() ? { preview, error: null } : { preview: null, error: null };
   } catch (error) {
     if (!request.isCurrent()) return { preview: null, error: null };
-    return {
-      preview: null,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    return { preview: null, error: toFailure(error) };
   }
 }
 
@@ -78,16 +90,13 @@ export async function installRemoteSkills(input: {
   targets: WorkspaceProviderTarget[];
   force?: boolean;
   dryRun?: boolean;
-}): Promise<{ result: InstallResult | null; error: string | null }> {
+}): Promise<{ result: InstallResult | null; error: RepositoryCallFailure | null }> {
   const request = bindGate().issue();
   try {
     const result = await requireRpc().repository.install(input);
     return request.isCurrent() ? { result, error: null } : { result: null, error: null };
   } catch (error) {
     if (!request.isCurrent()) return { result: null, error: null };
-    return {
-      result: null,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    return { result: null, error: toFailure(error) };
   }
 }
