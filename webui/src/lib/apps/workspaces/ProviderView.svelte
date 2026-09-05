@@ -43,6 +43,7 @@
   import IconCheck from "@lucide/svelte/icons/circle-check";
   import IconDownload from "@lucide/svelte/icons/arrow-down-to-line";
   import IconFile from "@lucide/svelte/icons/file-text";
+  import IconGraph from "@lucide/svelte/icons/network";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPower from "@lucide/svelte/icons/power";
   import IconShield from "@lucide/svelte/icons/shield-check";
@@ -380,6 +381,20 @@
           <Badge variant="secondary">{visibleSkills.length}</Badge>
         {/if}
         <span class="flex-1"></span>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1.5 px-2 text-xs"
+          title="Read-only analysis: duplicates, conflicts, shared resources"
+          onclick={() => {
+            if (wsId && providerId) {
+              goById("workspaces.intelligence", { wsId, providerId }, {});
+            }
+          }}
+        >
+          <IconGraph class="h-3.5 w-3.5" />
+          Insights
+        </Button>
         <Button
           variant="ghost"
           size="sm"
