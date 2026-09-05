@@ -26,12 +26,16 @@ export function loadSkillDoc(
   return requireRpc().creator.load({ ...target, skillId });
 }
 
-/** 按已加载文档的 revision 删除技能。 */
-export async function removeSkill(document: SkillDocument): Promise<void> {
+/** 按 caller 已加载文档的 revision 删除技能（stale revision 由 daemon 拒绝）。 */
+export async function removeSkill(input: {
+  target: WorkspaceProviderTarget;
+  skillId: SkillId;
+  expectedRevision: string;
+}): Promise<void> {
   await requireRpc().creator.remove({
-    workspaceId: document.workspaceId,
-    providerId: document.providerId,
-    skillId: document.skillId,
-    expectedRevision: document.revision,
+    workspaceId: input.target.workspaceId,
+    providerId: input.target.providerId,
+    skillId: input.skillId,
+    expectedRevision: input.expectedRevision,
   });
 }

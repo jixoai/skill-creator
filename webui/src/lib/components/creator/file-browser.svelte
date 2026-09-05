@@ -9,8 +9,10 @@
 -->
 <script lang="ts">
   import { useCreatorEditor, draftToFrontmatter } from "$lib/stores/creator-editor.svelte";
-  import { loadSkillDoc, saveSkill } from "$lib/store.svelte";
+  import { loadSkillDoc, removeSkill, saveSkill } from "$lib/store.svelte";
   import { showToast } from "$lib/toast.svelte";
+  import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
+  import { goto } from "$app/navigation";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import { getConnectionGeneration } from "$lib/store.svelte";
   import { ORPCError } from "@orpc/client";
@@ -19,6 +21,7 @@
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconSave from "@lucide/svelte/icons/save";
   import IconRotate from "@lucide/svelte/icons/rotate-cw";
+  import IconTrash from "@lucide/svelte/icons/trash-2";
   import { SkillDirectoryNameSchema } from "$shared/contracts/creator.js";
 
   const editor = useCreatorEditor();
@@ -132,6 +135,40 @@
     }
     showToast(error instanceof Error ? error.message : String(error));
   }
+
+  // ---- 删除（edit 模式；revision-safe + confirm + busy 锁） ----
+  let deleteOpen = $state(false);
+  let deleting = $state(false);
+
+  const canDelete = $derived(
+    draft.mode === "edit" && draft.skillId !== null && draft.revision !== null,
+  );
+
+  async function handleDelete(): Promise<void> {
+    if (!canDelete || deleting) return;
+    const skillId = draft.skillId;
+    const revision = draft.revision;
+    if (skillId === null || revision === null) return;
+    deleting = true;
+    try {
+      await removeSkill({ target: draft.target, skillId, expectedRevision: revision });
+      deleteOpen = false;
+      showToast("Skill deleted.");
+      await goto("/creator");
+    } catch (error) {
+      if (error instanceof ORPCError && error.code === "CONFLICT") {
+        deleteOpen = false;
+        showToast("This skill changed elsewhere. Reload before deleting.", {
+          label: "Reload",
+          run: reloadCurrent,
+        });
+      } else {
+        showToast(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      deleting = false;
+    }
+  }
 </script>
 
 <div class="flex h-full flex-col">
@@ -150,6 +187,19 @@
         >
           <IconRotate class="h-3.5 w-3.5" />
           Reload
+        </Button>
+      {/if}
+      {#if draft.mode === "edit"}
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1.5 px-2 text-destructive hover:text-destructive"
+          title="Delete this skill"
+          disabled={!canDelete || deleting}
+          onclick={() => (deleteOpen = true)}
+        >
+          <IconTrash class="h-3.5 w-3.5" />
+          <span class="hidden sm:inline">Delete</span>
         </Button>
       {/if}
       <Button size="sm" class="h-7 gap-1.5" onclick={handleSave} disabled={!canSave}>
@@ -216,3 +266,12 @@
     </div>
   {/if}
 </div>
+
+<ConfirmDialog
+  bind:open={deleteOpen}
+  title="Delete skill"
+  description={`Delete this skill from ${draft.target.providerId}? Its SKILL.md directory is removed from disk.`}
+  confirmLabel="Delete"
+  busy={deleting}
+  onConfirm={() => void handleDelete()}
+/>
