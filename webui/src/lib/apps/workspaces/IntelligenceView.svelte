@@ -314,21 +314,25 @@
     };
   }
 
-  // ---- 关系图（圆布局；节点数>12 时退化为主干列表仍可读） ----
+  // ---- 关系图（椭圆布局铺满画布宽度；窄屏靠容器横向滚动保持可读） ----
   const graph = $derived.by(() => {
     const snapshots = report?.snapshots ?? [];
     if (snapshots.length < 2) return null;
-    const width = 560;
-    const height = 360;
-    const radius = Math.min(width, height) / 2 - 70;
+    const width = Math.min(1600, Math.max(560, snapshots.length * 72));
+    const height = snapshots.length > 14 ? 420 : 360;
+    const rx = width / 2 - 70;
+    const ry = height / 2 - 70;
     const center = { x: width / 2, y: height / 2 };
     const nodes = snapshots.map((snapshot, index) => {
       const angle = (index / snapshots.length) * Math.PI * 2 - Math.PI / 2;
       return {
         skillId: snapshot.skillId,
         name: snapshot.name,
-        x: center.x + radius * Math.cos(angle),
-        y: center.y + radius * Math.sin(angle),
+        label: snapshot.name.length > 14 ? `${snapshot.name.slice(0, 13)}…` : snapshot.name,
+        // 标签在椭圆上下交替，避免相邻节点同名标签互相叠压。
+        labelDy: index % 2 === 0 ? 32 : -26,
+        x: center.x + rx * Math.cos(angle),
+        y: center.y + ry * Math.sin(angle),
       };
     });
     const indexOf = new Map(nodes.map((node, index) => [node.skillId, index]));
@@ -453,7 +457,7 @@
               aria-label="Skill relation graph"
               width={graph.width}
               height={graph.height}
-              class="mx-auto block max-w-full"
+              class="mx-auto block"
             >
               {#each graph.edges as edge, index (index)}
                 <line
@@ -475,34 +479,26 @@
                   class="cursor-pointer"
                   role="button"
                   tabindex="0"
-                  aria-label="Open skill detail"
+                  aria-label="Open {node.name} detail"
                   onclick={() => openSkillDetail(node.skillId)}
                   onkeydown={(e) => e.key === "Enter" && openSkillDetail(node.skillId)}
                 >
+                  <title>{node.name}</title>
                   <circle
                     cx={node.x}
                     cy={node.y}
-                    r="18"
+                    r="16"
                     fill="var(--background, white)"
                     stroke="var(--border, gray)"
                   />
                   <text
                     x={node.x}
-                    y={node.y + 4}
+                    y={node.y + node.labelDy}
                     text-anchor="middle"
                     font-size="9"
                     fill="var(--foreground, black)"
                   >
-                    {node.name.slice(0, 6)}
-                  </text>
-                  <text
-                    x={node.x}
-                    y={node.y + 32}
-                    text-anchor="middle"
-                    font-size="9"
-                    fill="var(--muted-foreground, gray)"
-                  >
-                    {node.name}
+                    {node.label}
                   </text>
                 </g>
               {/each}

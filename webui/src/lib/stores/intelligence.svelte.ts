@@ -32,9 +32,7 @@ const rejectGate = createRequestGenerationGate(getConnectionGeneration);
 const approveGate = createRequestGenerationGate(getConnectionGeneration);
 
 /** 只读分析一组技能；结果交给调用方持有。 */
-export async function analyzeSkills(
-  selections: SkillSelection[],
-): Promise<{
+export async function analyzeSkills(selections: SkillSelection[]): Promise<{
   report: IntelligenceReport | null;
   failures: AnalyzeFailure[];
   error: string | null;
