@@ -214,7 +214,10 @@ describe("Workspace Registry", () => {
   });
 
   it("surfaces an unreadable Registry file as a hard error, not an empty Registry", async () => {
-    if (process.platform === "win32" || typeof process.getuid === "function" && process.getuid() === 0) {
+    if (
+      process.platform === "win32" ||
+      (typeof process.getuid === "function" && process.getuid() === 0)
+    ) {
       return; // chmod cannot deny reads for root; the EACCES vector is untestable there
     }
     fs.mkdirSync(appDir(), { recursive: true });

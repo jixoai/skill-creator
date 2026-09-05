@@ -35,20 +35,23 @@ Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 da
                                                    +--> ccski
                                                    +--> OpenTray ext-webview
 
-  /workspace            /workspace/[id]       /creator              /repository
-  list / import/remove  discover / inspect    create / edit         scan / preview / install
-                        validate / toggle     revision checked      one pinned Git commit
+  /workspaces                /creator                /repository
+  list / import/remove       create / edit           scan / preview / install
+  discover / inspect         revision checked        one pinned Git commit
+  validate / toggle          change log              curated + user sources
 ```
+
+一级导航是 Workspaces、Creator、Repository 三个 App；WebUI 使用 ChromeTabs 式标签 Shell（`webui/src/lib/shell` + `webui/src/lib/apps`），URL 由 shell 内 route registry 解析，SvelteKit 侧只有一个 catch-all 承载点。
 
 ## 产品边界
 
-| Surface           | 责任                                                                  | 写入边界                                                                            |
-| ----------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `/workspace`      | 索引 Global 与 Imported Workspace，提供导入与移除恢复入口             | Remove Workspace 只删除 registry entry，不删除用户目录                              |
-| `/workspace/[id]` | 在一个 Workspace 的 Provider 中发现、筛选、查看、校验、启用或禁用技能 | 每次操作显式携带 Workspace ID + Provider ID                                         |
-| `/workspace/~/`   | 聚合各 Agent 的全局 skills roots                                      | 可读/可管理现有技能，不作为 Creator 或 Repository 的写入目标                        |
-| `/creator`        | 在已导入 Workspace.Provider 中创建、加载、编辑和删除 `SKILL.md`       | `workspace`+`provider` 预选新建；再加 `skill` 加载编辑；更新和删除需要内容 revision |
-| `/repository`     | 扫描 Git 仓库、预览技能、dry-run、多目标安装并复核结果                | 扫描会话固定到一个 commit；可多选已导入 Workspace.Provider 写入目标                 |
+| Surface                    | 责任                                                                                                          | 写入边界                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `/workspaces` home         | 索引 Global 与 Imported Workspace，提供导入与移除恢复入口                                                     | Remove Workspace 只删除 registry entry，不删除用户目录                                      |
+| `/workspaces` provider tab | 在一个 Workspace 的 Provider 中发现、筛选、查看、校验、启用或禁用技能；对比上游检查并按需重装过时技能         | 每次操作显式携带 Workspace ID + Provider ID                                                 |
+| Global Workspace（`~`）    | 聚合各 Agent 的全局 skills roots                                                                              | 可读/可管理现有技能，不作为 Creator 或 Repository 的写入目标                                |
+| `/creator`                 | 在已导入 Workspace.Provider 中创建、加载、编辑和删除 `SKILL.md`；查看 change log；接入本机 ACP agent 辅助编写 | `workspace`+`provider` 预选新建；再加 `skill` 加载编辑；更新和删除需要内容 revision         |
+| `/repository`              | 扫描 Git 仓库、预览技能、dry-run、多目标安装并复核结果；管理 curated 与自建 Discover 源                       | 扫描会话固定到一个 commit；可多选已导入 Workspace.Provider 写入目标；用户源仅 https Git URL |
 
 Workspace 是技能作用域的第一层，Provider 是其中的 Agent skills root。Global Workspace（`~`）从社区 catalog 解析本机 Agent 全局目录；Imported Workspace 从其 canonical directory 派生每个 Provider 根目录。用户只在导入 Workspace 时提交目录路径；注册后，技能读写使用 daemon 验证的 `WorkspaceProviderTarget`、opaque Workspace ID 和 Skill ID，不由 WebUI 拼接输出路径。
 
@@ -156,7 +159,10 @@ src/daemon/ipc-server.ts ---------------------- single-instance owner
                     |-- workspace-registry/ -- persisted truth + dynamic projection
                     |-- skill-service.ts ----- ccski adapter
                     |-- creator-service.ts --- revision-safe document writes
-                    `-- repository-service.ts  pinned clone lifecycle
+                    |-- repository-service.ts  pinned clone lifecycle
+                    |-- source-registry.ts --- curated + user Discover sources
+                    |-- skills-update-service.ts  lock-hash update check/apply
+                    `-- acp-bridge-service.ts  agent subprocess + fs security gate
 
 src/shared/rpc-contract.ts
     ^                    ^
@@ -166,13 +172,14 @@ src/shared/rpc-contract.ts
 
 浏览器安全的契约由 `src/shared/rpc-contract.ts` 统一组合，具体 schema 物理拆分在 `src/shared/contracts/`：
 
-| RPC module   | Procedures                           |
-| ------------ | ------------------------------------ |
-| `skills`     | `list`, `info`, `toggle`, `validate` |
-| `workspace`  | `list`, `add`, `remove`, `setActive` |
-| `creator`    | `save`, `load`, `remove`             |
-| `repository` | `scan`, `preview`, `install`         |
-| `daemon`     | `status`                             |
+| RPC module   | Procedures                                                                    |
+| ------------ | ----------------------------------------------------------------------------- |
+| `skills`     | `list`, `info`, `toggle`, `validate`, `update.check`, `update.apply`          |
+| `workspace`  | `list`, `add`, `remove`, `setActive`                                          |
+| `creator`    | `save`, `load`, `remove`, `revisions`                                         |
+| `repository` | `scan`, `preview`, `install`, `sources.list`, `sources.add`, `sources.remove` |
+| `daemon`     | `status`                                                                      |
+| `acp`        | `agents.list`, `session.open`, `session.close`                                |
 
 WebUI 直接从共享契约推导 client 类型；daemon 通过同一契约实现 handler。网络输入和输出都经过 Zod runtime validation。
 
@@ -215,6 +222,7 @@ Git source + ref --> temporary clone --> commit SHA --> repo_<session>
 | ------------------ | ----------------------------------------- | ---------------------------------------------- |
 | 应用目录           | `~/.skill-creator/`                       | `%USERPROFILE%\.skill-creator\`                |
 | Workspace registry | `~/.skill-creator/workspaces.json`        | `%USERPROFILE%\.skill-creator\workspaces.json` |
+| 用户 Repository 源 | `~/.skill-creator/sources.json`           | `%USERPROFILE%\.skill-creator\sources.json`    |
 | Daemon log         | `~/.skill-creator/logs/daemon.log`        | `%USERPROFILE%\.skill-creator\logs\daemon.log` |
 | IPC                | `~/.skill-creator/run/skill-creator.sock` | `\\.\pipe\skill-creator-sock-<home-digest>`    |
 

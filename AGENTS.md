@@ -60,20 +60,21 @@ Code + Evidence
 ## 2. 产品真相
 
 ```text
-Skill Creator
+Skill Creator（ChromeTabs 式 Shell：webui/src/lib/shell + apps 三 App）
 |
-|-- /workspace ---------------- Workspace registry index / import-remove recovery
+|-- /workspaces -------------- Workspaces App
+|   |-- home tab ------------- Workspace 索引 / import-remove recovery
+|   `-- provider tab --------- Workspace.Provider 技能列表 + 详情
+|       `-- ~/ 或 ws_* ------- Global/Imported Workspace roots
 |
-|-- /workspace/[id]
-|   |-- /workspace/~/ -------- Global Workspace: Agent 全局 skills roots
-|   `-- /workspace/ws_* ------- Imported Workspace: 已注册目录 / Provider roots
+|-- /creator ----------------- Creator App：在 Imported Workspace.Provider
+|                              创建/编辑技能 + change log + ACP agent 会话
 |
-|-- /creator ----------------- 在 Imported Workspace.Provider 创建/编辑技能
-|
-`-- /repository -------------- 固定 Git commit 后预览/安装
+`-- /repository -------------- Repository App：固定 Git commit 后预览/安装
+                               + curated/user sources Discover feed
 ```
 
-唯一一级导航是 Workspaces、Creator、Repository。
+一级导航是 Workspaces、Creator、Repository 三个 App；URL 由 shell 内 route registry（`defineApp`/`defineActivity`/`defineRoute`）解析，SvelteKit 侧只有一个 catch-all route 承载。新增产品面必须以 App manifest 注册，不得复活 SvelteKit 多路由页。
 
 ```text
 Workspace                  = skills 作用域第一层
@@ -81,8 +82,11 @@ Global Workspace (~)       = catalog 解析的 Agent 全局 roots 聚合
 Imported Workspace         = daemon 已 canonicalize 并注册的目录
 Provider                   = 一个 Workspace 内的 Agent skills root
 Workspace Provider Target  = { workspaceId, providerId }
-Creator            = create + revision-checked edit/delete
+Creator            = create + revision-checked edit/delete + change log
 Repository         = clone + pin commit + scan + preview + install
+Source             = Discover feed 的 curated 或 user Git 源（sources.json）
+Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply）
+ACP Bridge         = agent 子进程 stdio↔WS 帧桥 + daemon 代执行的 fs 安全门
 ```
 
 核心约束：
@@ -111,12 +115,15 @@ CLI              |                               |       Filesystem
 Tray WebUI        |    |                          |          ^
  |               |    +-- static SPA             |          |
  +-- oRPC/WS -----+    `-- /ws/rpc -> RPC router -+----------+
-                 |                     |         |
-                 |                     +-- ccski |
-                 |                     +-- Git   |
-                 |                     `-- paths |
+Browser (web mode)-+                  |          |
+                 |                    +-- Workspace Registry
+                 |                    +-- skills (ccski) + skillsUpdate (lock hash)
+                 |                    +-- creator / repository (Git)
+                 |                    +-- sourceRegistry (sources.json)
+                 |                    +-- acpBridge (agent 子进程池 + fs 安全门)
                  |                               |
                  | OpenTray -> ext-webview ------+--> native tray/window
+                 |          `-- web mode: tray-only + 系统浏览器
                  +-------------------------------+
 
                          shared protocol
@@ -382,34 +389,46 @@ daemon stop --> terminal gate --> abort pending clone --> reject late retain
 ```text
 scripts/
 |-- build-core.sh.ts ---------------- Bun + esbuild Node bundle
-`-- stage-webui.sh.ts --------------- Bun static SPA staging
+|-- stage-webui.sh.ts --------------- Bun static SPA staging
+`-- dev.sh.ts ----------------------- Vite 监督器 + daemon 接管编排（pnpm dev 入口）
 
 src/
 |-- cli/
 |   `-- cli.ts ---------------- [4] command route / IPC client / daemon replace / status
 |
 |-- shared/
-|   |-- contracts/ ------------ [6 physical modules]
+|   |-- contracts/ ------------ [9 physical modules]
 |   |   |-- skills.ts --------- identity / metadata / toggle / validation
 |   |   |-- workspaces.ts ----- global/imported IDs / Provider projection and target
-|   |   |-- creator.ts -------- document / create-update union / revision
-|   |   |-- repository.ts ----- session / remote skill / install result union
+|   |   |-- creator.ts -------- document / create-update union / revision + change log
+|   |   |-- repository.ts ----- session / remote skill / install result union / user sources
 |   |   |-- daemon.ts --------- lifecycle status
-|   |   `-- errors.ts --------- finite RPC business-error vocabulary
+|   |   |-- errors.ts --------- finite RPC business-error vocabulary
+|   |   |-- acp.ts ------------ agent discovery / session open-close union
+|   |   |-- skills-lock.ts ---- skills-CLI global v3 + project v1 lock snapshots
+|   |   `-- skills-update.ts -- update check / apply result unions
 |   |-- rpc-contract.ts ------- [1] compose browser-safe procedures
 |   |-- frame.ts -------------- [3] IPC envelope / codec / parser
 |   |-- package-version.ts ---- [2] source/bundle package version lookup
 |   |-- external-input.ts ----- [2] external JSON decode / schema-safe projection
 |   |-- provider-catalog.ts --- [2] browser-safe Agent root conventions snapshot
+|   |-- curated-sources.ts ---- [2] built-in Discover feed snapshot
+|   |-- web-mode.ts ----------- [2] --web/--no-web/SKILL_CREATOR_WEB flag resolution
+|   |-- browser-launch.ts ----- [2] 系统浏览器打开（openinbrowser / web 模式降级）
 |   `-- paths.ts -------------- [3] app dirs / logs / IPC endpoint
 |
 |-- daemon/
 |   |-- index.ts -------------- [4] lock / HTTP / retained app window / teardown
 |   |-- domain.ts ------------- [2] domain module composition / dependency wiring
-|   |-- rpc-router.ts ---------- [4] skill / workspace+creator / repository / status / error boundary
+|   |-- rpc-router.ts ---------- [5] skill+update / workspace+creator / repository+sources / status+acp / error boundary
 |   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
-|   |-- creator-service.ts ----- [3] create / round-trip update / revision delete
+|   |-- creator-service.ts ----- [3] create / round-trip update / revision delete / change log
 |   |-- repository-service.ts -- [3] pinned lifecycle / inspect / preview-install
+|   |-- source-registry.ts ----- [3] curated+user sources / https-only / atomic sources.json
+|   |-- skills-cli-probe.ts ---- [2] npx skills list --json 探测 / daemon 生命周期缓存
+|   |-- skills-update-service.ts [3] lock 读取 / hash 对比 / 复用 install 重装
+|   |-- acp-agent-discovery.ts - [2] ACP agent 二进制探测投影
+|   |-- acp-bridge-service.ts -- [4] 子进程池 / stdio↔WS 帧桥 / fs 安全门 / 生命周期
 |   |-- provider-roots.ts ------ [2] Global/Imported Provider root resolution
 |   |-- workspace-registry/
 |   |   |-- index.ts ---------- [3] registry truth / scope resolution / retry-consistent list
@@ -420,14 +439,16 @@ src/
 |   |-- opentray-windows-host.ts [1] win32 native material comparator bridge
 |   |-- web-server.ts ---------- [3] SPA / auth upgrade / bounded oRPC lifecycle
 |   |-- ipc-server.ts ---------- [4] lock / protocol / dispatch / bounded acknowledged stop
-|   `-- tray-host.ts ----------- app mode / retained session / visibility truth / failure classification
+|   `-- tray-host.ts ----------- app mode / retained session / visibility truth / web-mode redirect / failure classification
 |
 `-- webui/
     |-- config/daemon-dev.ts -------- Vite-owned Bun daemon + HTTP/WS proxy
     `-- src/
-        |-- routes/ ------------ product surfaces and app shell
+        |-- routes/ ------------ SvelteKit catch-all 承载点（+layout/+page/[...catch]）
+        |-- lib/shell/ --------- ChromeTabs shell / route registry / nav / device prefs
+        |-- lib/apps/ ---------- workspaces / creator / repository 三个 App manifest + 视图
         |-- lib/stores/ -------- connection / request generation / workspace / skills / creator / repository
-        |-- lib/components/ ---- product composition
+        |-- lib/components/ ---- product composition（creator 子视图、source-card 等）
         `-- lib/components/ui/ - shadcn-svelte generated primitives
 ```
 
@@ -471,6 +492,14 @@ Creator update/delete ---------> expected SHA-256 revision ----------> write/rem
 Git source/ref ----------------> git clone + pinned HEAD ------------> scan session
 Remote skill selection --------> session-owned opaque IDs ----------> install
 Install output path -----------> Provider root direct child + SKILL.md -> local Skill ID
+sources.json ------------------> JSON parse + safeParse --------------> user sources / empty
+user source gitUrl ------------> https-only + dedupe + user_ id -----> Discover feed
+skills-CLI lock (v3/v1) -------> safeParse ---------------------------> null -> skipped update
+GitHub Trees API response -----> JSON parse + tree parser ------------> unavailable（不抛错）
+npx skills list --json ---------> JSON parse + schema ----------------> empty path map
+ACP agent discovery which -----> exit-code projection ----------------> available/missing
+ACP stdio 帧 -------------------> 结构 parser（method/result/error）---> 帧桥转发 / 丢弃
+ACP fs read/write 请求 ---------> daemon 代执行 containment+原子写 --> agent 无文件句柄
 static request path -----------> resolved-root containment ----------> read asset
 IPC bytes ---------------------> frame size + schema + protocol ------> CLI command
 ```
@@ -487,6 +516,9 @@ IPC bytes ---------------------> frame size + schema + protocol ------> CLI comm
 8. 启用/禁用发生冲突时返回 conflict，不以破坏性 force 掩盖目标状态。
 9. Workspace Registry mutation 必须先原子持久化完整 next state，成功后才替换内存真相；动态计数不得写回持久态。
 10. daemon stop coordinator 与 signal listeners 必须先于 tray mount 发布；stop 先关闭 transport admission，再关停 domain，迟到的 native handles 不得重新挂载；非协作连接在 grace deadline 后强制回收，所有 stop 来源共享完成态与退出意图。
+11. ACP agent 子进程永不获得原始文件句柄：`fs/read_text_file`、`fs/write_text_file` 请求由 daemon 在 Workspace Provider containment 内代为执行（写入走原子写）；session 由 daemon 持有 opaque ID，close 与 daemon stop 有界回收子进程，不留 orphan。
+12. `repository.sources.*` 只接受 https Git URL；user 源与 curated 内置源 id 命名空间隔离，内置源不可被 remove；sources.json 是 server-owned 持久化，WebUI 不写 localStorage。
+13. `skills.update.apply` 只能重装 check 已确认过时的 selected skills；lock/GitHub API 不可用一律投影为 skipped/unavailable，不得伪装成功或抛基础设施错误。
 
 ## 6. 文件意图法
 
