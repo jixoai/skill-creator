@@ -11,7 +11,8 @@ import type { Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { RPCHandler } from "@orpc/server/ws";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket as WsWebSocket } from "ws";
+import { AcpSessionIdSchema } from "../shared/contracts/acp.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
 import type { DaemonDomain } from "./domain.js";
 import { log } from "./log.js";
@@ -54,7 +55,10 @@ export class WebServer {
   private stopPromise?: Promise<void>;
   private readonly connections = new Set<Socket>();
   private readonly rpcWsServer = new WebSocketServer({ noServer: true });
+  private readonly acpWsServer = new WebSocketServer({ noServer: true });
   private readonly rpcHandler: RPCHandler<Record<never, never>>;
+  /** 订阅 agent 子进程异常退出事件，断开时由 dispose 自动取消。 */
+  private readonly unsubscribeExited: () => void;
 
   constructor(private readonly options: WebServerOptions) {
     this.rpcHandler = new RPCHandler(
@@ -63,6 +67,25 @@ export class WebServer {
         domain: options.domain,
       }),
     );
+    // agent 子进程异常退出 → 向仍连着的浏览器 WS 推送 exited 通知，再关闭。
+    this.unsubscribeExited = options.domain.acpBridge.onSessionExited((event) => {
+      const notification = JSON.stringify({
+        jsonrpc: "2.0",
+        method: "session/exited",
+        params: { type: event.type, sessionId: event.sessionId, code: event.code },
+      });
+      for (const client of this.acpWsServer.clients) {
+        const ws = client as WsWebSocket;
+        if (ws.readyState === ws.OPEN) {
+          try {
+            ws.send(notification);
+            ws.close(1011, "agent process exited");
+          } catch {
+            // 忽略单个客户端发送失败。
+          }
+        }
+      }
+    });
   }
 
   /** 启动环回服务，并返回实际监听端口。 */
@@ -92,14 +115,19 @@ export class WebServer {
     if (!this.server) return Promise.resolve();
     const server = this.server;
     this.server = undefined;
+    // 停止接收新的 ACP exited 推送；残余 agent 子进程由 acpBridge.dispose 统一回收。
+    this.unsubscribeExited();
     const graceMs = Math.max(0, options.graceMs ?? 1_000);
     this.stopPromise = new Promise<void>((resolve, reject) => {
       let serverClosed = false;
-      let wsServerClosed = false;
+      let rpcWsClosed = false;
+      let acpWsClosed = false;
       let closeError: Error | undefined;
       let settled = false;
       const finishIfClosed = (): void => {
-        if (settled || !serverClosed || !wsServerClosed || this.connections.size > 0) return;
+        if (settled || !serverClosed || !rpcWsClosed || !acpWsClosed || this.connections.size > 0) {
+          return;
+        }
         settled = true;
         clearTimeout(timer);
         if (closeError) reject(closeError);
@@ -107,6 +135,7 @@ export class WebServer {
       };
       const forceClose = (): void => {
         for (const client of this.rpcWsServer.clients) client.terminate();
+        for (const client of this.acpWsServer.clients) client.terminate();
         for (const connection of this.connections) connection.destroy();
         server.closeAllConnections();
       };
@@ -124,12 +153,25 @@ export class WebServer {
         closeError = error instanceof Error ? error : new Error(String(error));
       }
       this.rpcWsServer.close((error) => {
-        wsServerClosed = true;
+        rpcWsClosed = true;
+        closeError ??= error;
+        finishIfClosed();
+      });
+      this.acpWsServer.close((error) => {
+        acpWsClosed = true;
         closeError ??= error;
         finishIfClosed();
       });
       for (const connection of this.connections) connection.once("close", finishIfClosed);
       for (const client of this.rpcWsServer.clients) {
+        try {
+          client.close(1001, "Server shutting down");
+        } catch (error) {
+          closeError ??= error instanceof Error ? error : new Error(String(error));
+          client.terminate();
+        }
+      }
+      for (const client of this.acpWsServer.clients) {
         try {
           client.close(1001, "Server shutting down");
         } catch (error) {
@@ -176,6 +218,11 @@ export class WebServer {
 
   private handleUpgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer): void {
     const url = new URL(request.url ?? "/", "http://localhost");
+    // ACP 桥接端点：/ws/acp/<sessionId>?token=<webToken>，与 /ws/rpc 同鉴权。
+    if (url.pathname.startsWith("/ws/acp/")) {
+      this.handleAcpUpgrade(request, socket, head, url);
+      return;
+    }
     if (url.pathname !== "/ws/rpc") {
       socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       return;
@@ -191,6 +238,29 @@ export class WebServer {
         );
         websocket.close();
       });
+    });
+  }
+
+  /** /ws/acp/<sessionId> upgrade：先验 token（401），再验 sessionId 存在（404），通过后接入桥。 */
+  private handleAcpUpgrade(
+    request: http.IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    url: URL,
+  ): void {
+    if (url.searchParams.get("token") !== this.options.webToken) {
+      socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    const rawId = decodeURIComponent(url.pathname.slice("/ws/acp/".length));
+    const parsed = AcpSessionIdSchema.safeParse(rawId);
+    if (!parsed.success || !this.options.domain.acpBridge.hasSession(parsed.data)) {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    const sessionId = parsed.data;
+    this.acpWsServer.handleUpgrade(request, socket, head, (websocket) => {
+      this.options.domain.acpBridge.attachWebSocket(sessionId, websocket as WsWebSocket);
     });
   }
 

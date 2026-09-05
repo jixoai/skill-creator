@@ -27,8 +27,10 @@ import { fileURLToPath } from "node:url";
 import type { IpcCommand } from "../shared/frame.js";
 import { DaemonStatusSchema, type DaemonStatus } from "../shared/contracts/daemon.js";
 import { resolveDevHome } from "../shared/dev-runtime.js";
+import { openUrlInBrowser as launchBrowser } from "../shared/browser-launch.js";
 import { daemonLogPath, ensureAppDirs, socketPath } from "../shared/paths.js";
 import { socketAcceptsConnections } from "../shared/socket-liveness.js";
+import { parseWebModeFlag, SKILL_CREATOR_WEB_ENV, type WebModeFlag } from "../shared/web-mode.js";
 import { DaemonConnectionError, DaemonResponseError, requestDaemon } from "./ipc-client.js";
 import { readCliVersion } from "./package-version.js";
 
@@ -50,21 +52,21 @@ function resolveDaemonEntry(): string {
   return path.join(__dirname, "..", "daemon", "main.ts");
 }
 
-/** Spawn the daemon detached so it outlives the CLI process. */
-function spawnDaemon(): void {
+/**
+ * Spawn the daemon detached so it outlives the CLI process.
+ *
+ * `webFlag` 仅在用户显式传 `--web`/`--no-web` 时注入 `SKILL_CREATOR_WEB` env；
+ * undefined 时 daemon 侧按平台默认（Linux=true）自行裁决。
+ */
+function spawnDaemon(webFlag: WebModeFlag = undefined): void {
   const entry = resolveDaemonEntry();
   const isTs = entry.endsWith(".ts");
+  const baseEnv = { ...process.env };
+  const env =
+    webFlag === undefined ? baseEnv : { ...baseEnv, [SKILL_CREATOR_WEB_ENV]: webFlag ? "1" : "0" };
   const child = isTs
-    ? spawn("bun", [entry], {
-        detached: true,
-        stdio: "ignore",
-        env: { ...process.env },
-      })
-    : spawn(process.execPath, [entry], {
-        detached: true,
-        stdio: "ignore",
-        env: { ...process.env },
-      });
+    ? spawn("bun", [entry], { detached: true, stdio: "ignore", env })
+    : spawn(process.execPath, [entry], { detached: true, stdio: "ignore", env });
   child.unref();
 }
 
@@ -97,7 +99,13 @@ async function requestStatus(timeoutMs = 4000): Promise<DaemonStatus> {
   return parsed.data;
 }
 
-/** Wait for the current daemon to converge, then open only a mounted native window. */
+/**
+ * Wait for the current daemon to converge, then open its surface.
+ *
+ * - `mounted`：发 IPC open，让 daemon 显示原生窗口。
+ * - `web`：CLI 直接打开系统浏览器（daemon 的 tray 菜单点击才走 daemon 端打开）。
+ * - `headless`：不打开，交由调用方提示 `openinbrowser`。
+ */
 async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<DaemonStatus | null> {
   const deadline = Date.now() + maxMs;
   let lastOpenError: Error | null = null;
@@ -118,6 +126,9 @@ async function waitForCurrentDaemonToOpen(maxMs = 8000): Promise<DaemonStatus | 
             if (!(error instanceof Error)) throw new Error(String(error));
             lastOpenError = error;
           }
+        } else if (status.tray === "web") {
+          await openUrlInBrowser(webUrl(status));
+          return status;
         } else {
           return status;
         }
@@ -143,39 +154,16 @@ function webUrl(status: DaemonStatus): string {
   return status.webUrl ?? `http://127.0.0.1:${status.port}/`;
 }
 
-/** 在系统默认浏览器中打开一个 URL，并返回 launcher 是否已成功启动。 */
+/** 在系统默认浏览器中打开 URL，并向终端投影结果；返回 launcher 是否成功启动。 */
 async function openUrlInBrowser(url: string): Promise<boolean> {
-  let binary: string;
-  let args: string[];
-  if (process.platform === "win32") {
-    binary = "cmd";
-    args = ["/c", "start", "", url];
-  } else if (process.platform === "darwin") {
-    binary = "open";
-    args = [url];
-  } else {
-    binary = "xdg-open";
-    args = [url];
-  }
-  try {
-    const child = spawn(binary, args, { stdio: "ignore", detached: true });
-    const launchError = await new Promise<Error | null>((resolve) => {
-      child.once("error", resolve);
-      child.once("spawn", () => resolve(null));
-    });
-    child.unref();
-    if (launchError) {
-      console.log(`Open this URL in your browser: ${url}`);
-      console.error(`Failed to launch browser: ${launchError.message}`);
-      return false;
-    }
+  const result = await launchBrowser(url);
+  if (result.opened) {
     console.log(`Opening browser: ${url}`);
     return true;
-  } catch (err) {
-    console.log(`Open this URL in your browser: ${url}`);
-    if (err instanceof Error) console.error(`Failed to launch browser: ${err.message}`);
-    return false;
   }
+  console.log(`Open this URL in your browser: ${url}`);
+  console.error(`Failed to launch browser: ${result.error ?? "unknown error"}`);
+  return false;
 }
 
 /** Wait until graceful shutdown has removed the socket from the runtime namespace. */
@@ -196,6 +184,7 @@ function sleep(ms: number): Promise<void> {
 
 async function runStart(): Promise<number> {
   ensureAppDirs();
+  const webFlag = parseWebModeFlag(hideBin(process.argv));
   let runningStatus: DaemonStatus | null = null;
   let spawned = false;
   try {
@@ -244,8 +233,16 @@ async function runStart(): Promise<number> {
     }
   }
 
+  // 已运行的 web 模式 daemon：CLI 直接打开浏览器，不重开 daemon。
+  if (runningStatus?.tray === "web") {
+    await openUrlInBrowser(webUrl(runningStatus));
+    console.log("skill-creator daemon is already running.");
+    console.log("Opening the WebUI in your browser…");
+    return 0;
+  }
+
   if (!runningStatus) {
-    spawnDaemon();
+    spawnDaemon(webFlag);
     spawned = true;
   }
 
@@ -272,6 +269,9 @@ async function runStart(): Promise<number> {
   }
   if (readyStatus.tray === "mounted") {
     console.log("Opening the tray window…");
+  } else if (readyStatus.tray === "web") {
+    // waitForCurrentDaemonToOpen 已在 web 状态下打开浏览器；这里只投影终态。
+    console.log("The WebUI is opening in your browser.");
   } else {
     console.log(
       "The daemon is running headlessly. Run 'skill-creator openinbrowser' to open the WebUI.",
@@ -284,13 +284,17 @@ async function runStatus(): Promise<number> {
   try {
     const status = await requestStatus();
     const url = webUrl(status);
+    const trayLabel =
+      status.tray === "headless"
+        ? "headless (browser mode)"
+        : status.tray === "web"
+          ? "web (tray + browser)"
+          : status.tray;
     console.log("skill-creator daemon is running:");
     console.log(`  pid:     ${status.pid}`);
     console.log(`  version: ${status.version}`);
     console.log(`  port:    ${status.port}`);
-    console.log(
-      `  tray:    ${status.tray === "headless" ? "headless (browser mode)" : status.tray}`,
-    );
+    console.log(`  tray:    ${trayLabel}`);
     if (status.trayError) console.log(`  tray error: ${status.trayError}`);
     console.log(`  url:     ${url}`);
     return 0;
@@ -353,6 +357,10 @@ async function runOpen(): Promise<number> {
       await ipcRequest({ type: "open" });
       console.log("Opening the tray window…");
       return 0;
+    }
+    if (status.tray === "web") {
+      // web 模式无原生窗口；open 降级为打开浏览器（贴合用户「打开应用」的直觉）。
+      return (await openUrlInBrowser(webUrl(status))) ? 0 : 1;
     }
     if (status.tray === "headless") {
       console.error(

@@ -9,20 +9,37 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
 import {
+  AcpAgentInfoSchema,
+  AcpSessionCloseInputSchema,
+  AcpSessionOpenInputSchema,
+  AcpSessionOpenResultSchema,
+} from "./contracts/acp.js";
+import {
   SaveSkillInputSchema,
   SaveSkillResultSchema,
   SkillDocumentSchema,
+  CreatorRevisionsInputSchema,
+  CreatorRevisionsResultSchema,
 } from "./contracts/creator.js";
 import { DaemonStatusSchema } from "./contracts/daemon.js";
 import { RpcErrorDefinitions } from "./contracts/errors.js";
 import {
+  AddUserSourceInputSchema,
+  RemoveUserSourceInputSchema,
   RemoteRepoScanSchema,
   RemoteSkillPreviewSchema,
   RepositoryInstallInputSchema,
   InstallResultSchema,
   RepositorySessionIdSchema,
   RemoteSkillIdSchema,
+  UserSourceSchema,
 } from "./contracts/repository.js";
+import {
+  ApplyUpdateInputSchema,
+  ApplyUpdateResultSchema,
+  UpdateCheckInputSchema,
+  UpdateCheckResultSchema,
+} from "./contracts/skills-update.js";
 import {
   SkillIdSchema,
   SkillInfoSchema,
@@ -67,6 +84,12 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     validate: oc
       .input(z.object({ ...WorkspaceProviderTargetSchema.shape, skillId: SkillIdSchema }))
       .output(ValidateResultSchema),
+    update: {
+      /** Compare skills-CLI lock hashes against upstream and report outdated skills. */
+      check: oc.input(UpdateCheckInputSchema).output(UpdateCheckResultSchema),
+      /** Reinstall approved outdated skills via the repository install pipeline. */
+      apply: oc.input(ApplyUpdateInputSchema).output(ApplyUpdateResultSchema),
+    },
   },
   workspace: {
     /** List Global and imported Workspaces with fresh Provider counts. */
@@ -103,6 +126,8 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
         }),
       )
       .output(z.object({ removed: z.literal(true) })),
+    /** Read revision history for one skill (change 5: change log sub-view). */
+    revisions: oc.input(CreatorRevisionsInputSchema).output(CreatorRevisionsResultSchema),
   },
   repository: {
     /** Clone, pin, and scan a repository source. */
@@ -117,10 +142,44 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       .output(RemoteSkillPreviewSchema),
     /** Preview or install selected remote skills. */
     install: oc.input(RepositoryInstallInputSchema).output(InstallResultSchema),
+    sources: {
+      /** List curated (built-in) and user-persisted sources for the Discover grid. */
+      list: oc.input(z.object({})).output(
+        z.object({
+          builtIn: z.array(
+            z.object({
+              id: z.string(),
+              label: z.string(),
+              gitUrl: z.string(),
+              description: z.string(),
+              homepage: z.string().optional(),
+            }),
+          ),
+          user: z.array(UserSourceSchema),
+        }),
+      ),
+      /** Persist a new user source (https git URL only). */
+      add: oc.input(AddUserSourceInputSchema).output(z.object({ source: UserSourceSchema })),
+      /** Remove one user-persisted source; built-in ids are rejected. */
+      remove: oc.input(RemoveUserSourceInputSchema).output(z.object({ removed: z.literal(true) })),
+    },
   },
   daemon: {
     /** Read the live daemon and tray status. */
     status: oc.input(z.object({})).output(DaemonStatusSchema),
+  },
+  acp: {
+    /** List ACP-capable agents installed on this machine (daemon-lifetime cached). */
+    agents: {
+      /** Probe known PATH binaries and return their availability projection. */
+      list: oc.input(z.object({})).output(z.object({ agents: z.array(AcpAgentInfoSchema) })),
+    },
+    session: {
+      /** Spawn the selected agent subprocess and register a daemon-owned session. */
+      open: oc.input(AcpSessionOpenInputSchema).output(AcpSessionOpenResultSchema),
+      /** Terminate the agent subprocess for one session (idempotent). */
+      close: oc.input(AcpSessionCloseInputSchema).output(z.object({ closed: z.literal(true) })),
+    },
   },
 });
 

@@ -9,9 +9,10 @@
  *   [1] Workspace-scoped skill reads and mutations.
  *   [2] Workspace registry and revision-safe Creator operations.
  *   [3] Immutable repository session operations.
- *   [4] Convert DomainError only at the root RPC boundary.
+ *   [4] skills-CLI update check and apply, reusing the repository install pipeline.
+ *   [5] Convert DomainError only at the root RPC boundary.
  * Compromise: oRPC router-wide middleware must be attached at this central
- * contract-composition root, so extracting the fourth intent would duplicate
+ * contract-composition root, so extracting the last intent would duplicate
  * or weaken the single transport boundary.
  */
 import { implement, ORPCError } from "@orpc/server";
@@ -57,6 +58,15 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       validate: rpc.skills.validate.handler(async ({ input }) =>
         domain.skills.validate(input, input.skillId),
       ),
+      update: {
+        check: rpc.skills.update.check.handler(async ({ input }) => {
+          const discovered = await domain.skills.list(input, true);
+          return domain.skillsUpdate.checkUpdates(input, discovered, input);
+        }),
+        apply: rpc.skills.update.apply.handler(async ({ input }) =>
+          domain.skillsUpdate.applyUpdates(input, input.skillIds, input),
+        ),
+      },
     },
     workspace: {
       list: rpc.workspace.list.handler(async () => ({
@@ -79,6 +89,7 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         await domain.creator.remove(input, input.skillId, input.expectedRevision);
         return { removed: true as const };
       }),
+      revisions: rpc.creator.revisions.handler(({ input }) => domain.creator.revisions(input)),
     },
     repository: {
       scan: rpc.repository.scan.handler(({ input }) =>
@@ -88,9 +99,34 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         domain.repository.preview(input.sessionId, input.skillId),
       ),
       install: rpc.repository.install.handler(({ input }) => domain.repository.install(input)),
+      sources: {
+        list: rpc.repository.sources.list.handler(() => domain.sourceRegistry.list()),
+        add: rpc.repository.sources.add.handler(({ input }) => ({
+          source: domain.sourceRegistry.add(input),
+        })),
+        remove: rpc.repository.sources.remove.handler(({ input }) =>
+          domain.sourceRegistry.remove(input.id),
+        ),
+      },
     },
     daemon: {
       status: rpc.daemon.status.handler(() => status()),
+    },
+    acp: {
+      agents: {
+        list: rpc.acp.agents.list.handler(async () => ({
+          agents: await domain.acpBridge.agents(),
+        })),
+      },
+      session: {
+        open: rpc.acp.session.open.handler(async ({ input }) =>
+          domain.acpBridge.openSession(input),
+        ),
+        close: rpc.acp.session.close.handler(async ({ input }) => {
+          await domain.acpBridge.closeSession(input.sessionId);
+          return { closed: true as const };
+        }),
+      },
     },
   });
 }

@@ -63,15 +63,21 @@ export type TrayMountFailureStage =
 
 /** tray 挂载结果；失败时携带可诊断分类并退化为空句柄。 */
 export interface TrayMountResult {
-  tray: OpentrayTray | null;
+  /** web 模式返回 base tray（无 webview 能力）；windowed 返回 extended tray。 */
+  tray: CreateTrayHandle | OpentrayTray | null;
   window: OpentrayWindow | null;
   failure?: TrayMountFailure;
 }
+
+/** tray 挂载形态：决定主菜单项语义与 show/hide 行为。 */
+export type TrayHostMode = "windowed" | "web" | "headless";
 
 /** tray 窗口的创建参数与退出回调。 */
 export interface TrayHostOptions {
   /** 日志输出（dev/test 可观测）。 */
   log?: (line: string) => void;
+  /** 挂载形态；web 模式主项打开浏览器，headless 仅占位。 */
+  mode?: TrayHostMode;
   /** 打开窗口的菜单项 id（primaryEvent）。 */
   openItemId?: number;
   /** 退出菜单项 id。 */
@@ -80,12 +86,16 @@ export interface TrayHostOptions {
   showLabel?: string;
   /** 窗口可见时主菜单项文案。 */
   hideLabel?: string;
+  /** web 模式主菜单项文案。 */
+  webLabel?: string;
   /** 退出菜单项文案。 */
   quitLabel?: string;
   /** 一次性 bootstrap show() 之后初始原生可见性。 */
   initialVisible?: boolean;
   /** 把退出意图委托给 daemon 拥有者做优雅关停。 */
   onQuit?: () => void;
+  /** web 模式下主菜单项 / show() / toggle() 触发的浏览器打开动作（由 daemon 注入）。 */
+  onOpenInBrowser?: () => void | Promise<void>;
 }
 
 type TrayHostTray = Pick<OpentrayTray, "destroy" | "onMenuClick" | "setMenu">;
@@ -96,20 +106,118 @@ type TrayHostWindow = Pick<
 
 type Visibility = "hidden" | "shown";
 
-/**
- * 创建 tray 与 retained window，并返回有状态的 `TrayHost` 管理器。
- *
- * 失败时返回 null handles（headless 降级），不抛错 —— tray mount 是 UX 加成，
- * 绝不致命；WebUI 始终可用浏览器访问。
- */
-export async function mountTray(opts: {
+/** mountTray 的公共输入；web=true 时走纯 tray 路径，不 extend ext-webview。 */
+export interface MountTrayOptions {
   url: string;
   packageVersion: string;
   enableDevtools?: boolean;
   webuiDir?: string;
   appLaunch?: OpenTrayAppLaunchOptions;
+  /** web 模式：只挂 tray（菜单+图标），主项打开浏览器，不创建原生窗口。 */
+  web?: boolean;
+  /** web 模式主项点击时由 daemon 注入的浏览器打开动作。 */
+  onOpenInBrowser?: () => void | Promise<void>;
   onQuit: () => Promise<void>;
-}): Promise<{ result: TrayMountResult; host: TrayHost }> {
+}
+
+/**
+ * 创建 tray（并在非 web 模式下创建 retained window），返回有状态的 `TrayHost`。
+ *
+ * 失败时返回 null handles（headless 降级），不抛错 —— tray mount 是 UX 加成，
+ * 绝不致命；WebUI 始终可用浏览器访问。
+ */
+export async function mountTray(
+  opts: MountTrayOptions,
+): Promise<{ result: TrayMountResult; host: TrayHost }> {
+  return opts.web ? mountWebTray(opts) : mountWindowedTray(opts);
+}
+
+/**
+ * web 模式：只挂载纯 tray（菜单+图标），不 import @opentray/ext-webview。
+ *
+ * 主菜单项「Open in Browser」打开系统浏览器；适用于 Linux（ext-webview 无原生包）
+ * 或任何显式 --web 的平台。失败仍降级为 headless（tray=null）。
+ */
+async function mountWebTray(opts: MountTrayOptions): Promise<{
+  result: TrayMountResult;
+  host: TrayHost;
+}> {
+  let baseTray: EventfulTrayHandle | null = null;
+  try {
+    const opentray = await import("opentray");
+
+    const iconPath = resolveTrayIconPath(opts.webuiDir);
+    const appIcon = resolveAppIcon(opts.webuiDir);
+    const icon: Icon | undefined = iconPath
+      ? {
+          "darwin-icon-only": { type: "file", path: iconPath, isTemplate: true },
+          "win32-icon-only": { type: "file", path: iconPath },
+          "linux-icon-only": { type: "file", path: iconPath },
+        }
+      : undefined;
+
+    const trayOptions: CreateTrayOptions = {
+      id: APP_ID,
+      tooltip: { title: APP_TITLE, description: "Skills workbench" },
+      menu: {
+        items: [
+          { type: "item", id: MENU_OPEN_ID, title: "Open in Browser", primaryEvent: true },
+          { type: "separator" },
+          { type: "item", id: MENU_QUIT_ID, title: "Quit" },
+        ],
+      },
+      ...(icon ? { icon } : {}),
+    };
+
+    baseTray = await opentray.createTray(trayOptions, {
+      packageVersion: opts.packageVersion,
+      appId: `com.${APP_ID}`,
+      appName: APP_TITLE,
+      ...(appIcon === null ? {} : { appIcon }),
+    });
+
+    const host = new TrayHost(baseTray, null, {
+      mode: "web",
+      webLabel: "Open in Browser",
+      initialVisible: false,
+      onOpenInBrowser: opts.onOpenInBrowser,
+      onQuit: () => void opts.onQuit(),
+    });
+
+    log("opentray web-mode tray mounted (no native window)");
+    return {
+      result: { tray: baseTray, window: null },
+      host,
+    };
+  } catch (err) {
+    const failure = classifyTrayMountFailure(err, {
+      baseTray,
+      tray: null,
+      panel: null,
+      stage: inferTrayMountFailureStage({ baseTray, tray: null, panel: null }),
+    });
+    await safeCall("web baseTray.destroy", baseTray?.destroy?.());
+    log(`web-mode tray mount failed (${formatTrayMountFailure(failure)}) — running headless`);
+    const host = new TrayHost(null, null, {
+      mode: "headless",
+      initialVisible: false,
+      onQuit: () => void opts.onQuit(),
+    });
+    return {
+      result: { tray: null, window: null, failure },
+      host,
+    };
+  }
+}
+
+/**
+ * windowed 模式（原有路径）：createTray + extend(WebviewExt) + createWebviewWindow。
+ * 失败降级为 headless（tray=null, window=null）。
+ */
+async function mountWindowedTray(opts: MountTrayOptions): Promise<{
+  result: TrayMountResult;
+  host: TrayHost;
+}> {
   let baseTray: EventfulTrayHandle | null = null;
   let tray: OpentrayTray | null = null;
   let panel: OpentrayWindow | null = null;
@@ -188,6 +296,7 @@ export async function mountTray(opts: {
     await centerWindow(panel, tray, ext);
 
     const host = new TrayHost(tray, panel, {
+      mode: "windowed",
       openItemId: MENU_OPEN_ID,
       quitItemId: MENU_QUIT_ID,
       showLabel: "Open Skill Creator",
@@ -212,6 +321,7 @@ export async function mountTray(opts: {
     await destroyMounted({ baseTray, tray, panel });
     log(`opentray mount failed (${formatTrayMountFailure(failure)}) — running headless`);
     const host = new TrayHost(null, null, {
+      mode: "headless",
       openItemId: MENU_OPEN_ID,
       quitItemId: MENU_QUIT_ID,
       initialVisible: false,
@@ -282,7 +392,9 @@ export class TrayHost {
       const offMenu = this.tray.onMenuClick(({ itemId }) => {
         this.logger(`menu click received: itemId=${itemId}`);
         if (itemId === openId) {
-          void this.toggle();
+          // web 模式无窗口可切换，主项直接打开浏览器；windowed/headless 走 toggle。
+          if (this.mode === "web") void this.openInBrowser();
+          else void this.toggle();
           return;
         }
         if (itemId === quitId) {
@@ -303,6 +415,20 @@ export class TrayHost {
         this.applyNativeVisibility(payload.visible, "visibleChange");
       }),
     );
+  }
+
+  /** 当前挂载形态（由构造参数固化）。 */
+  private get mode(): TrayHostMode {
+    return this.opts.mode ?? "windowed";
+  }
+
+  /** web 模式主入口：打开浏览器；失败仅记日志，不影响 tray 存活。 */
+  private async openInBrowser(): Promise<void> {
+    try {
+      await this.opts.onOpenInBrowser?.();
+    } catch (error) {
+      this.logger(`onOpenInBrowser failed: ${errorToLogMessage(error)}`);
+    }
   }
 
   /** 切换原生 tray 图标投影（best-effort；技能工作台目前不使用动态图标）。 */
@@ -357,18 +483,21 @@ export class TrayHost {
     this.applyNativeVisibility(await this.queryNativeVisibility(false), "close");
   }
 
-  /** 恢复一个隐藏或最小化的 retained 窗口。 */
+  /** 恢复一个隐藏或最小化的 retained 窗口；web 模式下改为打开浏览器。 */
   show(): Promise<void> {
+    if (this.mode === "web") return this.openInBrowser();
     return this.enqueueWindowOperation("toVisible", () => this.revealRetainedWindow());
   }
 
-  /** 隐藏 retained 窗口但保留其 WebView session。 */
+  /** 隐藏 retained 窗口但保留其 WebView session；web 模式无窗口，空操作。 */
   hide(): Promise<void> {
+    if (this.mode === "web") return Promise.resolve();
     return this.enqueueWindowOperation("close", () => this.closeRetainedWindow());
   }
 
-  /** 主 tray 动作：立即查询原生真相后再决定切换方向。 */
+  /** 主 tray 动作：windowed 查询原生真相后切换；web 打开浏览器；headless 空操作。 */
   toggle(): Promise<void> {
+    if (this.mode === "web") return this.openInBrowser();
     return this.enqueueWindowOperation("toggle visibility", async () => {
       const visible = await this.queryNativeVisibility(this.visibility === "shown");
       this.applyNativeVisibility(visible, "isVisible");
@@ -385,10 +514,13 @@ export class TrayHost {
   private buildMenu(): CreateTrayMenu {
     const openId = this.opts.openItemId ?? MENU_OPEN_ID;
     const quitId = this.opts.quitItemId ?? MENU_QUIT_ID;
+    // web 模式主项固定为「打开浏览器」；windowed 按 visibility 切换显隐文案。
     const actionTitle =
-      this.visibility === "shown"
-        ? (this.opts.hideLabel ?? "Hide window")
-        : (this.opts.showLabel ?? "Open Skill Creator");
+      this.mode === "web"
+        ? (this.opts.webLabel ?? "Open in Browser")
+        : this.visibility === "shown"
+          ? (this.opts.hideLabel ?? "Hide window")
+          : (this.opts.showLabel ?? "Open Skill Creator");
     return {
       items: [
         { type: "item", id: openId, title: actionTitle, primaryEvent: true },

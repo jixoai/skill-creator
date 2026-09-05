@@ -9,13 +9,15 @@ import { resolveDaemonAppLaunch } from "./app-launch.js";
 import { bootDaemon } from "./index.js";
 import { isDevRuntime, log } from "./log.js";
 import { readPackageVersion } from "./package-version.js";
+import { webModeFromEnv } from "../shared/web-mode.js";
 
 async function main(): Promise<void> {
   const cliVersion = readPackageVersion();
   const webviewUrl = process.env.SKILL_CREATOR_DEV_WEBVIEW_URL;
   const withTray = process.env.SKILL_CREATOR_DISABLE_TRAY !== "1";
-  const appLaunch = resolveDaemonAppLaunch(import.meta.url);
-  const handles = await bootDaemon({ cliVersion, webviewUrl, withTray, appLaunch });
+  const web = withTray ? webModeFromEnv() : false;
+  const appLaunch = web ? undefined : resolveDaemonAppLaunch(import.meta.url);
+  const handles = await bootDaemon({ cliVersion, webviewUrl, withTray, web, appLaunch });
   if (!handles) {
     // Another instance is running.
     process.exit(0);

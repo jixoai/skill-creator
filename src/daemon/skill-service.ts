@@ -3,6 +3,7 @@
  *
  * User input [2026-07-14]: "基于 ../ccski 这个 sdk 来快速搭建一个 ‘skills 管理器’。"
  * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
+ * User input [2026-07-27]: "自动区分经 npx-skills-cli 安装的技能；标记可升级。"
  * Architecture decisions [2026-07-22]: bind operations to explicit Workspace
  * Provider identity and expose expected lookup failures without leaking infrastructure.
  *
@@ -10,6 +11,7 @@
  *   [1] Discover and identify skills through a daemon-owned Workspace Registry.
  *   [2] Read enabled and disabled skill documents reliably.
  *   [3] Toggle and validate resolved skill IDs without caller paths.
+ *   [4] Project skills-CLI provenance (installedVia / updatable) from the probe map.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -42,6 +44,7 @@ import {
   contentRevision,
   opaquePathId,
 } from "./path-safety.js";
+import type { SkillsCliProbe, SkillsCliProbeMap } from "./skills-cli-probe.js";
 import type { WorkspaceRegistry } from "./workspace-registry/index.js";
 
 function metadataId(skillPath: string): SkillId {
@@ -79,14 +82,38 @@ export type SkillValidator = (options: ValidateOptions) => Promise<unknown>;
 export interface SkillServiceOptions {
   discoverSkills?: SkillDiscoverer;
   validateSkill?: SkillValidator;
+  /** 可选 skills-CLI 探测器；注入后 `skills.list` 投影 installedVia / updatable。 */
+  skillsCliProbe?: SkillsCliProbe;
 }
 
-function projectMetadata(source: unknown): SkillMetadata | null {
+/**
+ * 把 skills-CLI 探测命中投影为 provenance 字段。
+ *
+ * probe 命中（按技能的 canonical path 查表）：标记 `skills-cli` + `updatable`。
+ * 该 canonical path 已由 `skills.list(target)` 经 `workspaces.resolve` 限定在
+ * server-owned 作用域内，故命中即等价于「probe 路径落在 server-owned 根下」，
+ * 无需重复 containment（spec scenario「越界视为无 provenance」由不命中自然满足）。
+ * 未命中或无 probe：`unknown` + `updatable=false`。
+ */
+function projectProvenance(
+  skillPath: string,
+  probeMap: SkillsCliProbeMap | null,
+): { installedVia: "skills-cli" | "unknown"; updatable: boolean } {
+  if (!probeMap) return { installedVia: "unknown", updatable: false };
+  if (!probeMap.has(skillPath)) return { installedVia: "unknown", updatable: false };
+  return { installedVia: "skills-cli", updatable: true };
+}
+
+function projectMetadata(
+  source: unknown,
+  probeMap: SkillsCliProbeMap | null,
+): SkillMetadata | null {
   const skill = safeParseExternal(CcskiSkillMetadataSchema, source);
   if (!skill) return null;
 
   try {
     const canonicalPath = canonicalDirectory(skill.path);
+    const provenance = projectProvenance(canonicalPath, probeMap);
     return safeParseExternal(SkillMetadataSchema, {
       id: metadataId(canonicalPath),
       name: skill.name,
@@ -102,6 +129,8 @@ function projectMetadata(source: unknown): SkillMetadata | null {
       hasScripts: skill.hasScripts,
       hasAssets: skill.hasAssets,
       pluginInfo: skill.pluginInfo ?? null,
+      installedVia: provenance.installedVia,
+      updatable: provenance.updatable,
     });
   } catch {
     return null;
@@ -115,18 +144,19 @@ export function createSkillService(
 ) {
   const discoverSkills = options.discoverSkills ?? listSkills;
   const validateSkill = options.validateSkill ?? validateCcskiSkill;
+  const skillsCliProbe = options.skillsCliProbe;
   return {
     list: (target: WorkspaceProviderTarget, includeDisabled = true) =>
-      list(workspaces, discoverSkills, target, includeDisabled),
+      list(workspaces, discoverSkills, target, includeDisabled, skillsCliProbe),
     resolve: (target: WorkspaceProviderTarget, skillId: SkillId) =>
-      resolveSkill(workspaces, discoverSkills, target, skillId),
+      resolveSkill(workspaces, discoverSkills, target, skillId, skillsCliProbe),
     skillFile,
     info: (target: WorkspaceProviderTarget, skillId: SkillId) =>
-      info(workspaces, discoverSkills, target, skillId),
+      info(workspaces, discoverSkills, target, skillId, skillsCliProbe),
     toggle: (target: WorkspaceProviderTarget, skillIds: SkillId[], mode: "enable" | "disable") =>
-      toggle(workspaces, discoverSkills, target, skillIds, mode),
+      toggle(workspaces, discoverSkills, target, skillIds, mode, skillsCliProbe),
     validate: (target: WorkspaceProviderTarget, skillId: SkillId) =>
-      validate(workspaces, discoverSkills, validateSkill, target, skillId),
+      validate(workspaces, discoverSkills, validateSkill, target, skillId, skillsCliProbe),
   };
 }
 
@@ -139,11 +169,15 @@ async function list(
   discoverSkills: SkillDiscoverer,
   target: WorkspaceProviderTarget,
   includeDisabled = true,
+  skillsCliProbe?: SkillsCliProbe,
 ): Promise<SkillMetadata[]> {
-  const skills = await discoverSkills(workspaces.resolve(target, includeDisabled).options);
+  const scope = workspaces.resolve(target, includeDisabled);
+  const skills = await discoverSkills(scope.options);
+  // 探测失败 / 无 npx 时返回空 map；按 D6，缓存命中避免每次 list 重跑 npx。
+  const probeMap = skillsCliProbe ? await skillsCliProbe.probe() : null;
   const byId = new Map<SkillId, SkillMetadata>();
   for (const skill of skills) {
-    const projected = projectMetadata(skill);
+    const projected = projectMetadata(skill, probeMap);
     if (!projected) continue;
     const existing = byId.get(projected.id);
     if (!existing || (existing.disabled && !projected.disabled)) byId.set(projected.id, projected);
@@ -157,8 +191,9 @@ async function resolveSkill(
   discoverSkills: SkillDiscoverer,
   target: WorkspaceProviderTarget,
   skillId: SkillId,
+  skillsCliProbe?: SkillsCliProbe,
 ): Promise<SkillMetadata> {
-  const skill = (await list(workspaces, discoverSkills, target, true)).find(
+  const skill = (await list(workspaces, discoverSkills, target, true, skillsCliProbe)).find(
     (candidate) => candidate.id === skillId,
   );
   if (!skill)
@@ -183,8 +218,9 @@ async function info(
   discoverSkills: SkillDiscoverer,
   target: WorkspaceProviderTarget,
   skillId: SkillId,
+  skillsCliProbe?: SkillsCliProbe,
 ): Promise<SkillInfo> {
-  const skill = await resolveSkill(workspaces, discoverSkills, target, skillId);
+  const skill = await resolveSkill(workspaces, discoverSkills, target, skillId, skillsCliProbe);
   const file = skillFile(skill);
   const content = fs.readFileSync(file, "utf8");
   return {
@@ -202,9 +238,13 @@ async function toggle(
   target: WorkspaceProviderTarget,
   skillIds: SkillId[],
   mode: "enable" | "disable",
+  skillsCliProbe?: SkillsCliProbe,
 ): Promise<ToggleSummary> {
   const discovered = new Map(
-    (await list(workspaces, discoverSkills, target, true)).map((skill) => [skill.id, skill]),
+    (await list(workspaces, discoverSkills, target, true, skillsCliProbe)).map((skill) => [
+      skill.id,
+      skill,
+    ]),
   );
   const results: ToggleSummary["results"] = [];
 
@@ -264,8 +304,9 @@ async function validate(
   validateSkill: SkillValidator,
   target: WorkspaceProviderTarget,
   skillId: SkillId,
+  skillsCliProbe?: SkillsCliProbe,
 ): Promise<ValidateResult> {
-  const skill = (await list(workspaces, discoverSkills, target, true)).find(
+  const skill = (await list(workspaces, discoverSkills, target, true, skillsCliProbe)).find(
     (candidate) => candidate.id === skillId,
   );
   if (!skill)

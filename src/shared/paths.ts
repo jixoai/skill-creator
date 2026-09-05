@@ -5,6 +5,7 @@
  * 2. 为 CLI 与 daemon 提供一致的 socket 和日志路径。
  * 3. 允许测试及开发进程隔离 home。
  */
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -14,6 +15,9 @@ export const APP_DIR_NAME = ".skill-creator";
 
 /** macOS 与 Linux 的 IPC socket 文件名。 */
 export const SOCKET_FILE = "skill-creator.sock";
+
+/** Windows named pipe 前缀；后缀按 home 隔离，避免不同 home 共用同一 pipe。 */
+const WINDOWS_PIPE_BASE = "skill-creator-sock";
 
 /** daemon 日志文件名。 */
 export const DAEMON_LOG_FILE = "daemon.log";
@@ -61,12 +65,14 @@ export function daemonLogPath(): string {
 
 /**
  * 返回当前平台的 IPC socket 路径。
- *  - macOS / linux: Unix Domain Socket at ~/.skill-creator/run/skill-creator.sock
- *  - Windows: Named Pipe at \\.\pipe\skill-creator-sock
+ *  - macOS / linux: Unix Domain Socket at <home>/.skill-creator/run/skill-creator.sock
+ *  - Windows: Named Pipe `\\.\pipe\skill-creator-sock-<home-digest>`，后缀按 home
+ *    digest 隔离，使生产 home 与开发 home 不会争抢同一 pipe（单实例锁仍由 bind 真相决定）。
  */
 export function socketPath(resolvedHome = homeDir()): string {
   if (process.platform === "win32") {
-    return "\\\\.\\pipe\\skill-creator-sock";
+    const suffix = createHash("sha256").update(resolvedHome).digest("hex").slice(0, 12);
+    return `\\\\.\\pipe\\${WINDOWS_PIPE_BASE}-${suffix}`;
   }
   return path.join(resolvedHome, APP_DIR_NAME, "run", SOCKET_FILE);
 }

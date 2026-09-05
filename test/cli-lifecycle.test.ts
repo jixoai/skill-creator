@@ -252,6 +252,40 @@ describe("CLI daemon lifecycle", () => {
     }
   });
 
+  it("downgrades open to a browser launch when the daemon is in web mode", async () => {
+    const home = await createTemporaryHome();
+    setHomeOverride(home);
+    let openAttempts = 0;
+    const url = "http://127.0.0.1:4567/#token=web-mode";
+    const openerMarker = path.join(home, "browser-opened.txt");
+    const openerDirectory =
+      process.platform === "win32" ? undefined : await writeBrowserOpener(home);
+    let daemon: IpcServer;
+    daemon = new IpcServer({
+      onStatus: () =>
+        daemonStatus({ version: currentVersion, tray: "web", port: 4567, webUrl: url }),
+      onOpen: async () => {
+        openAttempts += 1;
+      },
+      onStop: async () => async () => {
+        await daemon.stop();
+      },
+    });
+    expect(await daemon.start()).toBe(true);
+
+    try {
+      const result = await runCli(home, ["open"], {
+        ...(openerDirectory ? { PATH: prependPath(openerDirectory) } : {}),
+        TEST_BROWSER_MARKER: openerMarker,
+      });
+      expect(result.stdout).toContain(`Opening browser: ${url}`);
+      // web 模式下 open 不发 IPC（CLI 直接打开浏览器），onOpen 不被调用。
+      expect(openAttempts).toBe(0);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
   if (process.platform !== "win32") {
     it("opens the authenticated WebUI URL only through openinbrowser", async () => {
       const home = await createTemporaryHome();
@@ -388,7 +422,7 @@ describe("CLI daemon lifecycle", () => {
 
 function createDaemon(status: {
   version: string;
-  tray: "starting" | "mounted" | "headless";
+  tray: "starting" | "mounted" | "headless" | "web";
   trayError?: string;
   port?: number;
   webUrl?: string;
@@ -402,7 +436,7 @@ function createDaemon(status: {
 
 function daemonStatus(status: {
   version: string;
-  tray: "starting" | "mounted" | "headless";
+  tray: "starting" | "mounted" | "headless" | "web";
   trayError?: string;
   port?: number;
   webUrl?: string;

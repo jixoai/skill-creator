@@ -25,6 +25,9 @@ export const PluginInfoSchema = z.object({
   version: z.string(),
 });
 
+/** 技能安装来源的判别标签；缺失按 `unknown` 兜底。 */
+export const SkillInstalledViaSchema = z.enum(["skills-cli", "manual", "unknown"]);
+
 /** 技能列表项的运行时约束。 */
 export const SkillMetadataSchema = z.object({
   id: SkillIdSchema,
@@ -41,6 +44,16 @@ export const SkillMetadataSchema = z.object({
   hasScripts: z.boolean(),
   hasAssets: z.boolean(),
   pluginInfo: PluginInfoSchema.nullable(),
+  /**
+   * 安装来源 provenance 标签（可选）。
+   * daemon `skills.list` 投影时设置；老 daemon 缺省为 `unknown`。
+   */
+  installedVia: SkillInstalledViaSchema.optional(),
+  /**
+   * 是否存在可用的 skills-CLI lock 条目、可被 update-check/apply 处理（可选）。
+   * daemon `skills.list` 投影时设置；老 daemon 缺省为 `false`。
+   */
+  updatable: z.boolean().optional(),
 });
 /** 技能列表项。 */
 export type SkillMetadata = z.infer<typeof SkillMetadataSchema>;

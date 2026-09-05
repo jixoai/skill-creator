@@ -13,6 +13,7 @@ import { setHomeOverride } from "../shared/paths.js";
 import { readPackageVersion } from "./package-version.js";
 import { parseDevAppLaunch, SKILL_CREATOR_DEV_APP_LAUNCH_ENV } from "../shared/dev-app-launch.js";
 import { resolveDevHome } from "../shared/dev-runtime.js";
+import { webModeFromEnv } from "../shared/web-mode.js";
 
 async function main(): Promise<void> {
   const devHome = resolveDevHome();
@@ -22,12 +23,16 @@ async function main(): Promise<void> {
   // [2][3] 读 vite 插件注入的 env。
   const port = readOptionalPort(process.env.SKILL_CREATOR_DEV_DAEMON_PORT);
   const webviewUrl = process.env.SKILL_CREATOR_DEV_WEBVIEW_URL;
-  const appLaunch = parseDevAppLaunch(process.env[SKILL_CREATOR_DEV_APP_LAUNCH_ENV]);
+  const web = webModeFromEnv();
+  const appLaunch = web
+    ? undefined
+    : parseDevAppLaunch(process.env[SKILL_CREATOR_DEV_APP_LAUNCH_ENV]);
 
   const handles = await bootDaemon({
     cliVersion: readPackageVersion(),
     port,
     webviewUrl,
+    web,
     ...(process.env.SKILL_CREATOR_DEV_WEB_TOKEN
       ? { webToken: process.env.SKILL_CREATOR_DEV_WEB_TOKEN }
       : {}),
@@ -45,10 +50,16 @@ async function main(): Promise<void> {
 
   // [4] 孤儿清理：监视 vite 进程（supervisor），它退出则 daemon 自杀。
   const supervisorWatch = watchDevSupervisor();
-  console.log(
-    `\n[dev] daemon up. WebUI: ${webviewUrl?.replace(/token=[^#]+/, "token=<dev>") ?? "n/a"}`,
-  );
-  console.log(`[dev] dev home: ${devHome}\n`);
+  // dev 面向开发者：直接打印带真实 token 的可点击 URL，省去再跑 status 的步骤。
+  // viteUrl（5173，带 HMR）和 daemonUrl（直连 daemon）都给出，开发者按需选用。
+  const token = handles.webToken;
+  const viteUrl = webviewUrl
+    ? webviewUrl.replace("__SKILL_CREATOR_WEB_TOKEN__", encodeURIComponent(token))
+    : null;
+  const daemonUrl = `http://127.0.0.1:${handles.port}/#token=${encodeURIComponent(token)}`;
+  console.log(`\n[dev] daemon up. dev home: ${devHome}`);
+  console.log(`[dev] WebUI (vite + HMR): ${viteUrl ?? "n/a"}`);
+  console.log(`[dev] WebUI (daemon):     ${daemonUrl}\n`);
 
   process.on("SIGINT", () => {
     void supervisorWatch?.stop();

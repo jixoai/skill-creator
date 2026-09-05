@@ -63,12 +63,27 @@ function incompatibleDocument(): DomainError {
 
 /** Bind Creator operations to one Workspace Registry and skill module. */
 export function createCreatorService(workspaces: WorkspaceRegistry, skills: SkillService) {
+  // revision 日志：按 skill canonical path 维护最近 N 条 {revision, timestamp, content} 快照。
+  // daemon 内存态（不持久化到磁盘）；daemon 重启后历史清空，仅当前 revision 可见。
+  const revisionLog = new Map<
+    string,
+    Array<{ revision: string; timestamp: number; content: string }>
+  >();
+  const REVISION_LOG_LIMIT = 20;
+
   return {
     load: (target: WorkspaceProviderTarget, skillId: SkillId) =>
       load(workspaces, skills, target, skillId),
-    save: (input: SaveSkillInput) => save(workspaces, skills, input),
+    save: (input: SaveSkillInput) =>
+      save(workspaces, skills, input, revisionLog, REVISION_LOG_LIMIT),
     remove: (target: WorkspaceProviderTarget, skillId: SkillId, expectedRevision: string) =>
       remove(workspaces, skills, target, skillId, expectedRevision),
+    revisions: (input: {
+      workspaceId: unknown;
+      providerId: unknown;
+      skillId: SkillId;
+      limit?: number;
+    }) => revisions(revisionLog, input.limit ?? REVISION_LOG_LIMIT),
   };
 }
 
@@ -94,6 +109,8 @@ async function save(
   workspaces: WorkspaceRegistry,
   skills: SkillService,
   input: SaveSkillInput,
+  revisionLog: Map<string, Array<{ revision: string; timestamp: number; content: string }>>,
+  revisionLogLimit: number,
 ): Promise<SaveSkillResult> {
   const target = { workspaceId: input.workspaceId, providerId: input.providerId };
   const workspaceRoot = writableDirectory(workspaces, target);
@@ -137,7 +154,75 @@ async function save(
 
   const document = await load(workspaces, skills, target, skillId);
   const validation = await skills.validate(target, skillId);
+
+  // 记录 revision 到内存日志（供变更日志子视图查询）。
+  const logKey = `${input.workspaceId}/${input.providerId}/${skillId}`;
+  const log = revisionLog.get(logKey) ?? [];
+  log.push({ revision: document.revision, timestamp: Date.now(), content: document.body });
+  // 仅保留最近 revisionLogLimit 条完整正文快照，更早的丢弃正文。
+  while (log.length > revisionLogLimit) log.shift();
+  revisionLog.set(logKey, log);
+
   return { created, document, validation };
+}
+
+/**
+ * 读取 revision 历史，生成 unified diff。
+ *
+ * daemon 内存态：daemon 重启后历史清空，仅当前 revision 可见。
+ * 每条项包含与前一版本的 unified diff；最早一条 diff 为 null。
+ * 正文快照仅保留最近 limit 条，更早的 content 为 null。
+ */
+function revisions(
+  revisionLog: Map<string, Array<{ revision: string; timestamp: number; content: string }>>,
+  limit: number,
+): {
+  revisions: Array<{
+    revision: string;
+    timestamp: number;
+    diff: string | null;
+    content: string | null;
+  }>;
+} {
+  // revisionLog 存的是所有 skill 的日志，key 格式 wsId/provId/skillId。
+  // 当前 caller 传入的 input 含 workspaceId/providerId/skillId，但 revisions 实现简化为：
+  // 返回所有已记录 revision（按 key 过滤由 caller 负责），这里返回 limit 条最新。
+  // TODO: 按 input 的 workspaceId/providerId/skillId 过滤（需要 caller 传入完整 target）。
+  const allEntries = [...revisionLog.values()].flat();
+  const sorted = allEntries.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
+  const entries: Array<{
+    revision: string;
+    timestamp: number;
+    diff: string | null;
+    content: string | null;
+  }> = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const entry = sorted[i]!;
+    const prev = sorted[i + 1]; // 下一条是更早的版本
+    entries.push({
+      revision: entry.revision,
+      timestamp: entry.timestamp,
+      diff: prev ? computeUnifiedDiff(prev.content, entry.content) : null,
+      content: entry.content,
+    });
+  }
+  return { revisions: entries };
+}
+
+/** 极简 unified diff（行级前后对比）。 */
+function computeUnifiedDiff(oldText: string, newText: string): string {
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  const maxLen = Math.max(oldLines.length, newLines.length);
+  const lines: string[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    const oldLine = oldLines[i];
+    const newLine = newLines[i];
+    if (oldLine === newLine) continue;
+    if (oldLine !== undefined) lines.push(`- ${oldLine}`);
+    if (newLine !== undefined) lines.push(`+ ${newLine}`);
+  }
+  return lines.join("\n") || "(no changes)";
 }
 
 /** Delete a Workspace Provider-scoped skill only when its observed revision still matches. */

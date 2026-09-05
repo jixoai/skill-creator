@@ -146,3 +146,68 @@ export const RepositoryInstallInputSchema = z.object({
 });
 /** 对固定扫描会话执行安装的输入。 */
 export type RepositoryInstallInput = z.infer<typeof RepositoryInstallInputSchema>;
+
+/**
+ * 原始需求 [2026-07-27]：「把 Repository 改造成 Discover 体验：内置精选源目录 + 用户自定义源持久化。」
+ * 正交意图：
+ *   [1] 用户自定义源 ID 与 curated id 命名空间隔离（`user_` 前缀）。
+ *   [2] 用户源 gitUrl 仅 https、长度受限，外部输入经 Zod 严格校验。
+ *   [3] `sources.json` schema 版本化，破坏性更新按空值加载。
+ */
+
+/** 用户自定义源稳定 ID；以 `user_` 前缀与 curated 命名空间隔离。 */
+export const UserSourceIdSchema = z
+  .string()
+  .regex(/^user_[a-z0-9]{1,64}$/)
+  .brand<"UserSourceId">();
+/** 用户自定义源稳定 ID。 */
+export type UserSourceId = z.infer<typeof UserSourceIdSchema>;
+
+/** 仅 https、长度受限的 Git URL 形态。 */
+const HttpsGitUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2048)
+  .refine((value) => value.startsWith("https://"), "Git URL must use the https scheme.")
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.hostname.length > 0;
+    } catch {
+      return false;
+    }
+  }, "Git URL must be a valid https URL.");
+
+/** 一条用户自定义技能仓库源。 */
+export const UserSourceSchema = z.object({
+  id: UserSourceIdSchema,
+  label: z.string().trim().min(1).max(120),
+  gitUrl: HttpsGitUrlSchema,
+  description: z.string().trim().max(400).default(""),
+  addedAt: z.string().datetime(),
+});
+/** 一条用户自定义技能仓库源。 */
+export type UserSource = z.infer<typeof UserSourceSchema>;
+
+/** `sources.json` 落盘结构（schema 版本化，破坏性更新按空值加载）。 */
+export const SourcesFileSchema = z.object({
+  version: z.literal(1),
+  sources: z.array(UserSourceSchema).default([]),
+});
+/** `sources.json` 落盘结构。 */
+export type SourcesFile = z.infer<typeof SourcesFileSchema>;
+
+/** 增加用户自定义源的输入约束。 */
+export const AddUserSourceInputSchema = z.object({
+  label: z.string().trim().min(1).max(120),
+  gitUrl: HttpsGitUrlSchema,
+  description: z.string().trim().max(400).optional(),
+});
+/** 增加用户自定义源的输入。 */
+export type AddUserSourceInput = z.infer<typeof AddUserSourceInputSchema>;
+
+/** 移除用户自定义源的输入约束。 */
+export const RemoveUserSourceInputSchema = z.object({ id: UserSourceIdSchema });
+/** 移除用户自定义源的输入。 */
+export type RemoveUserSourceInput = z.infer<typeof RemoveUserSourceInputSchema>;

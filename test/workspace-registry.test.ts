@@ -350,3 +350,111 @@ describe("Workspace Registry", () => {
     expect(activeId(projected)).toBe(second.id);
   });
 });
+
+describe("Workspace Registry de-duplicated skill counts", () => {
+  /**
+   * 构造按 customDirs[0] 返回固定技能目录列表的 lister。
+   * 同一根目录被多次查询时返回同一份列表（模拟两个 Provider 共享同一物理根）。
+   */
+  function listerReturning(
+    skillsByRoot: Record<string, string[]>,
+  ): (options: ListOptions) => Promise<readonly { directoryName: string }[]> {
+    return async (options) => {
+      const root = options.customDirs?.[0] ?? "";
+      // 列表查询对根目录存在性不敏感（测试桩），直接按 key 返回。
+      const normalizedKey = Object.keys(skillsByRoot).find(
+        (key) => path.resolve(key) === path.resolve(root),
+      );
+      return (normalizedKey ? skillsByRoot[normalizedKey] : []).map((directoryName) => ({
+        directoryName,
+      }));
+    };
+  }
+
+  function counterFromList(
+    skillsByRoot: Record<string, string[]>,
+  ): (options: ListOptions) => Promise<number> {
+    const list = listerReturning(skillsByRoot);
+    return async (options) => (await list(options)).length;
+  }
+
+  it("counts a shared-root skill once at Workspace level but in each Provider", async () => {
+    // cline 与 codex 都把 workspacePath 解析到 .agents/skills —— 共享同一物理根。
+    const workspacePath = directory("shared-root");
+    fs.mkdirSync(path.join(workspacePath, ".agents", "skills"), { recursive: true });
+    // 根键用 realpath：importedProviderRoot 基于 canonical(realpath) 派生，需与之一致。
+    const sharedRoot = fs.realpathSync(path.join(workspacePath, ".agents", "skills"));
+
+    const skillsByRoot: Record<string, string[]> = {
+      [sharedRoot]: ["my-skill", "other-skill"],
+    };
+
+    const registry = createWorkspaceRegistry({
+      countSkills: counterFromList(skillsByRoot),
+      listSkills: listerReturning(skillsByRoot),
+    });
+    registry.import(workspacePath, "Shared");
+
+    const projected = await registry.list();
+    const imported = projected.find((ws) => ws.kind === "directory");
+    if (!imported || imported.kind !== "directory") throw new Error("Expected imported Workspace.");
+
+    // cline 与 codex 各自仍报告 2 个技能（Provider 级不去重）。
+    const cline = imported.providers.find((p) => p.id === "cline");
+    const codex = imported.providers.find((p) => p.id === "codex");
+    expect(cline?.skillCount).toBe(2);
+    expect(codex?.skillCount).toBe(2);
+
+    // Workspace 级按 canonical root 去重：两个 Provider 共享同一根，技能只计 2 次（不是 4）。
+    expect(imported.skillCount).toBe(2);
+  });
+
+  it("counts same-named skills separately when they live under different roots", async () => {
+    const workspacePath = directory("distinct-roots");
+    fs.mkdirSync(path.join(workspacePath, ".agents", "skills"), { recursive: true });
+    fs.mkdirSync(path.join(workspacePath, ".claude", "skills"), { recursive: true });
+    const agentsRoot = fs.realpathSync(path.join(workspacePath, ".agents", "skills"));
+    const claudeRoot = fs.realpathSync(path.join(workspacePath, ".claude", "skills"));
+
+    const skillsByRoot: Record<string, string[]> = {
+      [agentsRoot]: ["shared-tool"],
+      [claudeRoot]: ["shared-tool"],
+    };
+
+    const registry = createWorkspaceRegistry({
+      countSkills: counterFromList(skillsByRoot),
+      listSkills: listerReturning(skillsByRoot),
+    });
+    registry.import(workspacePath, "Distinct");
+
+    const projected = await registry.list();
+    const imported = projected.find((ws) => ws.kind === "directory");
+    if (!imported || imported.kind !== "directory") throw new Error("Expected imported Workspace.");
+
+    // 不同 canonical 根下的同名技能不去重：Workspace 级计为 2。
+    expect(imported.skillCount).toBe(2);
+  });
+
+  it("falls back to non-deduplicated sum when no lister is provided", async () => {
+    const workspacePath = directory("fallback-sum");
+    fs.mkdirSync(path.join(workspacePath, ".agents", "skills"), { recursive: true });
+    const agentsRoot = fs.realpathSync(path.join(workspacePath, ".agents", "skills"));
+
+    const skillsByRoot: Record<string, string[]> = {
+      [agentsRoot]: ["solo"],
+    };
+
+    // 仅提供 countSkills（覆盖默认），不提供 lister —— 回退到 sum。
+    const registry = createWorkspaceRegistry({
+      countSkills: counterFromList(skillsByRoot),
+    });
+    registry.import(workspacePath, "Fallback");
+
+    const projected = await registry.list();
+    const imported = projected.find((ws) => ws.kind === "directory");
+    if (!imported || imported.kind !== "directory") throw new Error("Expected imported Workspace.");
+
+    // cline 与 codex 共享根，各计 1；不去重时 Workspace 级为两者之和（≥ 2）。
+    expect(imported.skillCount).toBeGreaterThanOrEqual(2);
+  });
+});

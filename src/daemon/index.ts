@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { ensureAppDirs } from "../shared/paths.js";
 import { WEB_TOKEN_PLACEHOLDER } from "../shared/index.js";
+import { openUrlInBrowser } from "../shared/browser-launch.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
 import { createDaemonDomain, type DaemonDomain } from "./domain.js";
 import { IpcServer } from "./ipc-server.js";
@@ -30,6 +31,8 @@ export interface DaemonOptions {
   port?: number;
   /** Skip tray mount (tests / headless). */
   withTray?: boolean;
+  /** web 模式：只挂纯 tray（菜单+图标），主项打开浏览器，不创建原生窗口。 */
+  web?: boolean;
   /** Open the WebView inspector (dev only). */
   enableDevtools?: boolean;
   /** URL the tray window loads; defaults to the daemon's own WebServer URL. */
@@ -204,6 +207,8 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
         settleTeardown("web server", () => web.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("IPC server", () => ipc.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("repository sessions", () => domain.repository.dispose()),
+        // ACP 子进程池：有界杀光所有 agent 子进程，避免孤儿进程泄漏。
+        settleTeardown("acp bridge", () => domain.acpBridge.dispose()),
       ];
       await Promise.allSettled(tasks);
     } finally {
@@ -242,12 +247,23 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
   // Tray mount (best-effort). Headless when unavailable — WebUI stays browser-reachable.
   if (opts.withTray !== false) {
     const url = resolveWebviewUrl(opts.webviewUrl, web.webUiUrl(port), webToken);
+    const webMode = opts.web === true;
     const { result, host } = await (opts.trayMounter ?? mountTray)({
       url,
       packageVersion: opts.cliVersion,
       enableDevtools: opts.enableDevtools ?? false,
       webuiDir,
-      ...(opts.appLaunch === undefined ? {} : { appLaunch: opts.appLaunch }),
+      web: webMode,
+      // web 模式无原生窗口，不需要 Dock 冷启动向量；tray 菜单点击由 onOpenInBrowser 接管。
+      ...(webMode || opts.appLaunch === undefined ? {} : { appLaunch: opts.appLaunch }),
+      onOpenInBrowser: webMode
+        ? async () => {
+            const launched = await openUrlInBrowser(web.webUiUrl(port));
+            if (!launched.opened) {
+              log(`web-mode browser launch failed: ${launched.error ?? "unknown"}`);
+            }
+          }
+        : undefined,
       onQuit: async () => {
         const stop = await stopReady;
         await stop({ exit: true });
@@ -258,7 +274,8 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
       await Promise.allSettled([settleTeardown("late tray host", async () => host?.destroy())]);
     } else {
       handlesRef.trayHost = host;
-      status.tray = result.window ? "mounted" : "headless";
+      // windowed 成功 → mounted；web 模式 tray 挂载 → web；否则 headless。
+      status.tray = result.window ? "mounted" : webMode && result.tray ? "web" : "headless";
       if (result.failure) {
         status.trayError = `[${result.failure.kind}@${result.failure.stage}] ${
           result.failure.cause instanceof Error

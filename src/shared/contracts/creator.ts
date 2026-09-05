@@ -74,3 +74,36 @@ export const SaveSkillResultSchema = z.object({
 });
 /** Creator 保存命令结果。 */
 export type SaveSkillResult = z.infer<typeof SaveSkillResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Revision 历史（change 5：变更日志子视图）
+// ---------------------------------------------------------------------------
+
+/** creator.revisions 输入约束。 */
+export const CreatorRevisionsInputSchema = z.object({
+  ...WorkspaceProviderTargetSchema.shape,
+  skillId: SkillIdSchema,
+  /** 返回最近 N 条完整正文（含 diff）；默认 20。 */
+  limit: z.number().int().positive().max(100).optional(),
+});
+
+/** 单条 revision 历史项。 */
+export const CreatorRevisionEntrySchema = z.object({
+  /** SHA-256 content hash。 */
+  revision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  /** 保存时间戳（ms since epoch）。 */
+  timestamp: z.number().int().nonnegative(),
+  /** 与前一条的 unified diff（仅当可用时；最早一条为 null）。 */
+  diff: z.string().nullable(),
+  /** 完整正文快照（仅最近 N 条持久化，更早的为 null）。 */
+  content: z.string().nullable(),
+});
+/** 单条 revision 历史项。 */
+export type CreatorRevisionEntry = z.infer<typeof CreatorRevisionEntrySchema>;
+
+/** creator.revisions 输出约束。 */
+export const CreatorRevisionsResultSchema = z.object({
+  revisions: z.array(CreatorRevisionEntrySchema),
+});
+/** creator.revisions 输出。 */
+export type CreatorRevisionsResult = z.infer<typeof CreatorRevisionsResultSchema>;
