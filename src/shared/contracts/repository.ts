@@ -210,4 +210,3 @@ export type AddUserSourceInput = z.infer<typeof AddUserSourceInputSchema>;
 /** 移除用户自定义源的输入约束。 */
 export const RemoveUserSourceInputSchema = z.object({ id: UserSourceIdSchema });
 /** 移除用户自定义源的输入。 */
-export type RemoveUserSourceInput = z.infer<typeof RemoveUserSourceInputSchema>;

@@ -106,4 +106,3 @@ export const CreatorRevisionsResultSchema = z.object({
   revisions: z.array(CreatorRevisionEntrySchema),
 });
 /** creator.revisions 输出。 */
-export type CreatorRevisionsResult = z.infer<typeof CreatorRevisionsResultSchema>;

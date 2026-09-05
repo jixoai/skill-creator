@@ -13,8 +13,6 @@ export type {
 } from "$shared/contracts/creator.js";
 /** Repository 页面使用的共享扫描与安装类型。 */
 export type {
-  AddUserSourceInput,
-  InstallPreview,
   InstallResult,
   InstallSummary,
   RemoteRepoScan,
@@ -22,7 +20,6 @@ export type {
   RemoteSkillId,
   RemoteSkillPreview,
   UserSource,
-  UserSourceId,
 } from "$shared/contracts/repository.js";
 /** Workspace 页面使用的共享技能类型。 */
 export type {
@@ -35,8 +32,6 @@ export type {
 /** WebUI 导航使用的共享 workspace 类型。 */
 export type {
   ImportedWorkspace,
-  ImportedWorkspaceId,
-  ProviderId,
   Workspace,
   WorkspaceId,
   WorkspaceProvider,

@@ -63,7 +63,6 @@ export const AcpSessionCloseInputSchema = z.object({
   sessionId: AcpSessionIdSchema,
 });
 /** 关闭 ACP 会话的入参。 */
-export type AcpSessionCloseInput = z.infer<typeof AcpSessionCloseInputSchema>;
 
 /** agent 子进程异常退出时经 WS 推送的会话事件。 */
 export const AcpSessionExitedEventSchema = z.object({

@@ -55,7 +55,6 @@ export const UpdateCheckResultSchema = z.object({
   results: z.array(UpdateCheckResultEntrySchema),
 });
 /** update-check 的输出。 */
-export type UpdateCheckResult = z.infer<typeof UpdateCheckResultSchema>;
 
 /** apply-update 的输入：作用域 + 待升级的技能 ID 集合。 */
 export const ApplyUpdateInputSchema = z.object({
@@ -91,4 +90,3 @@ export const ApplyUpdateResultSchema = z.object({
   results: z.array(ApplyUpdateResultEntrySchema),
 });
 /** apply-update 的输出。 */
-export type ApplyUpdateResult = z.infer<typeof ApplyUpdateResultSchema>;

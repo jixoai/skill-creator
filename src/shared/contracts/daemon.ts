@@ -8,7 +8,6 @@ import { z } from "zod";
 /** tray 挂载状态的有限集合。 */
 export const TrayStatusSchema = z.enum(["starting", "mounted", "headless", "web"]);
 /** tray 挂载状态：starting 过渡，mounted 原生窗口，headless 完全无 tray，web 纯 tray+浏览器。 */
-export type TrayStatus = z.infer<typeof TrayStatusSchema>;
 
 /** daemon 状态的运行时约束。 */
 export const DaemonStatusSchema = z.object({
