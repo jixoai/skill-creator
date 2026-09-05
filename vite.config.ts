@@ -25,8 +25,17 @@ function resolveTypeScriptSources(): Plugin {
   };
 }
 
+const projectRoot = path.resolve(__dirname);
+
 export default defineConfig({
   fmt: { svelte: true },
+  resolve: {
+    // WebUI store 单测经 svelte 模块（$shared / $lib 别名）导入共享契约。
+    alias: {
+      $shared: path.join(projectRoot, "src/shared"),
+      $lib: path.join(projectRoot, "webui/src/lib"),
+    },
+  },
   test: {
     plugins: [resolveTypeScriptSources()],
     environment: "node",

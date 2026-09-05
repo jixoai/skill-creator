@@ -14,6 +14,8 @@ import type {
 import { ImportedWorkspaceIdSchema } from "$shared/contracts/workspaces.js";
 import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
+import { writableWorkspaceProviders as deriveWritableWorkspaceProviders } from "./workspace-targets";
+import type { WritableWorkspaceProvider } from "./workspace-targets";
 
 const workspaceRequests = createRequestGenerationGate(getConnectionGeneration);
 const workspaceMutationRequests = createRequestGenerationGate(getConnectionGeneration);
@@ -122,38 +124,12 @@ function isWritableWorkspace(workspace: Workspace): workspace is ImportedWorkspa
   return workspace.kind === "directory" && workspace.available;
 }
 
-/** 已投影的可写 Workspace Provider 目的地。 */
-export interface WritableWorkspaceProvider {
-  target: WorkspaceProviderTarget;
-  workspace: Workspace;
-  provider: WorkspaceProvider;
-  label: string;
-}
+export type { WritableWorkspaceProvider } from "./workspace-targets";
 
-/** 展开 Imported Workspaces 的所有可写 Provider 目的地。 */
+/** 展开 Imported Workspaces 的所有可写 Provider 目的地（纯逻辑见 workspace-targets.ts）。 */
 export function writableWorkspaceProviders(): WritableWorkspaceProvider[] {
-  const targets: WritableWorkspaceProvider[] = [];
-  for (const workspace of workspaceState.workspaces) {
-    if (workspace.kind !== "directory" || !workspace.available) continue;
-    for (const provider of workspace.providers) {
-      if (!provider.writable) continue;
-      targets.push({
-        target: { workspaceId: workspace.id, providerId: provider.id },
-        workspace,
-        provider,
-        label: `${workspace.label} / ${provider.label}`,
-      });
-    }
-  }
-  return targets;
+  return deriveWritableWorkspaceProviders(workspaceState.workspaces);
 }
 
-/** Workspace 在 Workspaces App 内的默认落点路径（首个 provider；无 provider 回 home）。 */
-export function workspaceEntryPath(workspace: Workspace): string {
-  if (workspace.kind === "directory" && workspace.providers.length > 0) {
-    const provider = workspace.providers[0];
-    if (!provider) return "/workspaces";
-    return `/workspaces/${encodeURIComponent(workspace.id)}/${encodeURIComponent(provider.id)}`;
-  }
-  return "/workspaces";
-}
+/** Workspace 在 Workspaces App 内的默认落点路径（纯逻辑见 workspace-targets.ts）。 */
+export { workspaceEntryPath } from "./workspace-targets";
