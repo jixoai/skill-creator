@@ -19,6 +19,10 @@ import { createRepositoryService, type RepositoryService } from "./repository-se
 import { createSourceRegistry, type SourceRegistry } from "./source-registry.js";
 import { createSkillsCliProbe, type SkillsCliProbe } from "./skills-cli-probe.js";
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
+import {
+  createSkillIntelligenceService,
+  type SkillIntelligenceService,
+} from "./skill-intelligence-service.js";
 import { createSkillService, type SkillService } from "./skill-service.js";
 import { createWorkspaceRegistry, type WorkspaceRegistry } from "./workspace-registry/index.js";
 
@@ -36,6 +40,8 @@ export interface DaemonDomain {
   skillsUpdate: SkillsUpdateService;
   /** ACP 子进程池 + stdio↔WS 帧桥 + 安全门。 */
   acpBridge: AcpBridgeService;
+  /** 只读技能分析 + proposal 草稿审批服务。 */
+  skillIntelligence: SkillIntelligenceService;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
@@ -45,14 +51,16 @@ export function createDaemonDomain(
   const skillsCliProbe = createSkillsCliProbe();
   const skills = createSkillService(workspaces, { skillsCliProbe });
   const repository = createRepositoryService(workspaces, skills);
+  const creator = createCreatorService(workspaces, skills);
   return {
     workspaces,
     skills,
-    creator: createCreatorService(workspaces, skills),
+    creator,
     repository,
     sourceRegistry: createSourceRegistry(),
     skillsCliProbe,
     skillsUpdate: createSkillsUpdateService(workspaces, skills, skillsCliProbe, repository),
     acpBridge: createAcpBridgeService(workspaces),
+    skillIntelligence: createSkillIntelligenceService(skills, creator),
   };
 }

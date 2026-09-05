@@ -41,6 +41,17 @@ import {
   UpdateCheckResultSchema,
 } from "./contracts/skills-update.js";
 import {
+  AnalyzeInputSchema,
+  AnalyzeResultSchema,
+  ApproveProposalInputSchema,
+  ApproveResultSchema,
+  ListProposalsResultSchema,
+  ProposeInputSchema,
+  ProposeResultSchema,
+  RejectProposalInputSchema,
+  RejectProposalResultSchema,
+} from "./contracts/skill-intelligence.js";
+import {
   SkillIdSchema,
   SkillInfoSchema,
   SkillMetadataSchema,
@@ -167,6 +178,18 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
   daemon: {
     /** Read the live daemon and tray status. */
     status: oc.input(z.object({})).output(DaemonStatusSchema),
+  },
+  skillIntelligence: {
+    /** Read-only multi-skill analysis locked to observed revisions. */
+    analyze: oc.input(AnalyzeInputSchema).output(AnalyzeResultSchema),
+    /** Store a Manager-owned proposal draft; never mutates Providers. */
+    propose: oc.input(ProposeInputSchema).output(ProposeResultSchema),
+    /** List pending proposal drafts (newest first). */
+    list: oc.input(z.object({})).output(ListProposalsResultSchema),
+    /** Delete one proposal draft. */
+    reject: oc.input(RejectProposalInputSchema).output(RejectProposalResultSchema),
+    /** Apply one proposal through existing revision-safe mutations. */
+    approve: oc.input(ApproveProposalInputSchema).output(ApproveResultSchema),
   },
   acp: {
     /** List ACP-capable agents installed on this machine (daemon-lifetime cached). */

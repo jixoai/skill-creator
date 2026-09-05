@@ -112,6 +112,21 @@ export function createRpcRouter(deps: RpcRouterDeps) {
     daemon: {
       status: rpc.daemon.status.handler(() => status()),
     },
+    skillIntelligence: {
+      analyze: rpc.skillIntelligence.analyze.handler(async ({ input }) =>
+        domain.skillIntelligence.analyze(input),
+      ),
+      propose: rpc.skillIntelligence.propose.handler(async ({ input }) =>
+        domain.skillIntelligence.propose(input),
+      ),
+      list: rpc.skillIntelligence.list.handler(() => domain.skillIntelligence.list()),
+      reject: rpc.skillIntelligence.reject.handler(async ({ input }) =>
+        domain.skillIntelligence.reject(input.proposalId),
+      ),
+      approve: rpc.skillIntelligence.approve.handler(async ({ input }) =>
+        domain.skillIntelligence.approve(input),
+      ),
+    },
     acp: {
       agents: {
         list: rpc.acp.agents.list.handler(async () => ({
