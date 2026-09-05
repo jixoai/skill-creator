@@ -1,8 +1,12 @@
 /**
  * 原始需求 [2026-07-14]：「我们还需要一个 `/repository/`，来支持远程仓库预览 skills 并安装 它们」。
+ * 用户原始需求 [2026-07-27]：「视图状态（选中 skills / targets / 当前源）→ URL search params；
+ * 持久态（scan session / install 记录 / sources）→ daemon RPC；不引入 TabScope。」
  * 正交意图：
- * 1. 按最新请求代次投影固定 commit 的仓库扫描与技能预览。
- * 2. 按连接所有权与最新请求代次管理安装操作状态。
+ *   1. 按最新请求代次投影固定 commit 的仓库扫描与技能预览（per-call gate，组件持结果）。
+ *   2. 按连接所有权与最新请求代次管理安装操作（per-call gate，组件持结果）。
+ * 妥协声明：scan / preview / install 结果不再缓存在全局单例跨渲染周期；调用方（组件）按需拉取并
+ * 持有当前视图所需结果，刷新会从 URL（sessionId / selected）重新拉取。
  */
 import type {
   InstallResult,
@@ -14,97 +18,76 @@ import type {
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 
-const scanRequests = createRequestGenerationGate(getConnectionGeneration);
-const previewRequests = createRequestGenerationGate(getConnectionGeneration);
-const installRequests = createRequestGenerationGate(getConnectionGeneration);
+/** per-call 代次令牌（组件持结果前用以识别 stale 响应）。 */
+interface RequestGeneration {
+  /** 当前请求是否仍为最新且所属连接未断。 */
+  isCurrent: () => boolean;
+}
 
-/** Repository 页面共享的扫描、预览与安装状态。 */
-export const repositoryState = $state<{
-  scan: RemoteRepoScan | null;
-  preview: RemoteSkillPreview | null;
-  scanning: boolean;
-  previewing: boolean;
-  installing: boolean;
-  error: string | null;
-}>({
-  scan: null,
-  preview: null,
-  scanning: false,
-  previewing: false,
-  installing: false,
-  error: null,
-});
+/** 绑定连接世代的 per-call 代次门（per-call 构造，组件卸载即 GC）。 */
+function bindGate(): { issue: () => RequestGeneration } {
+  const gate = createRequestGenerationGate(getConnectionGeneration);
+  return {
+    issue: () => {
+      const inner = gate.issue();
+      return { isCurrent: inner.isCurrent };
+    },
+  };
+}
 
-/** 扫描远程仓库并固定返回的 commit 会话。 */
-export async function scanRemoteRepo(source: string, ref?: string): Promise<void> {
-  const request = scanRequests.issue();
-  previewRequests.invalidate();
-  installRequests.invalidate();
-  repositoryState.scanning = true;
-  repositoryState.previewing = false;
-  repositoryState.installing = false;
-  repositoryState.scan = null;
-  repositoryState.preview = null;
-  repositoryState.error = null;
+/** 扫描远程仓库并固定返回的 commit 会话；结果交给调用方持有。 */
+export async function scanRemoteRepo(
+  source: string,
+  ref?: string,
+): Promise<{ scan: RemoteRepoScan | null; error: string | null }> {
+  const request = bindGate().issue();
   try {
     const scan = await requireRpc().repository.scan({ source, ref });
-    if (request.isCurrent()) repositoryState.scan = scan;
+    return request.isCurrent() ? { scan, error: null } : { scan: null, error: null };
   } catch (error) {
-    if (!request.isCurrent()) return;
-    repositoryState.error = error instanceof Error ? error.message : String(error);
-  } finally {
-    if (request.isLatest()) repositoryState.scanning = false;
+    if (!request.isCurrent()) return { scan: null, error: null };
+    return {
+      scan: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
-/** 从当前固定会话加载一个技能预览。 */
-export async function previewRemoteSkill(skillId: RemoteSkillId): Promise<void> {
-  const scan = repositoryState.scan;
-  if (!scan) throw new Error("Scan a repository first.");
-  const request = previewRequests.issue();
-  const canCommit = (): boolean =>
-    request.isCurrent() && repositoryState.scan?.sessionId === scan.sessionId;
-  repositoryState.previewing = true;
-  repositoryState.preview = null;
-  repositoryState.error = null;
+/** 从固定会话加载一个技能预览；结果交给调用方持有。 */
+export async function previewRemoteSkill(
+  sessionId: RemoteRepoScan["sessionId"],
+  skillId: RemoteSkillId,
+): Promise<{ preview: RemoteSkillPreview | null; error: string | null }> {
+  const request = bindGate().issue();
   try {
-    const preview = await requireRpc().repository.preview({
-      sessionId: scan.sessionId,
-      skillId,
-    });
-    if (canCommit()) repositoryState.preview = preview;
+    const preview = await requireRpc().repository.preview({ sessionId, skillId });
+    return request.isCurrent() ? { preview, error: null } : { preview: null, error: null };
   } catch (error) {
-    if (!canCommit()) return;
-    repositoryState.error = error instanceof Error ? error.message : String(error);
-  } finally {
-    if (request.isLatest()) repositoryState.previewing = false;
+    if (!request.isCurrent()) return { preview: null, error: null };
+    return {
+      preview: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
-/** 将当前固定会话中的技能安装或 dry-run 到显式 Workspace Providers。 */
+/** 将固定会话中的技能安装或 dry-run 到显式 Workspace Providers。 */
 export async function installRemoteSkills(input: {
+  sessionId: RemoteRepoScan["sessionId"];
   skillIds: RemoteSkillId[];
   targets: WorkspaceProviderTarget[];
   force?: boolean;
   dryRun?: boolean;
-}): Promise<InstallResult | null> {
-  const scan = repositoryState.scan;
-  if (!scan) throw new Error("Repository session expired. Scan again.");
-  const request = installRequests.issue();
-  const canCommit = (): boolean =>
-    request.isCurrent() && repositoryState.scan?.sessionId === scan.sessionId;
-  repositoryState.installing = true;
-  repositoryState.error = null;
+}): Promise<{ result: InstallResult | null; error: string | null }> {
+  const request = bindGate().issue();
   try {
-    const result = await requireRpc().repository.install({
-      sessionId: scan.sessionId,
-      ...input,
-    });
-    return canCommit() ? result : null;
+    const result = await requireRpc().repository.install(input);
+    return request.isCurrent() ? { result, error: null } : { result: null, error: null };
   } catch (error) {
-    if (!canCommit()) return null;
-    throw error;
-  } finally {
-    if (request.isLatest()) repositoryState.installing = false;
+    if (!request.isCurrent()) return { result: null, error: null };
+    return {
+      result: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }

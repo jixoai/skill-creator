@@ -145,6 +145,19 @@ export function filteredSkills(): SkillMetadata[] {
   );
 }
 
+/**
+ * 直接从 daemon RPC 拉取单个技能详情（含正文与 revision）。
+ *
+ * 与 `selectSkill` 不同：本函数不写入全局 `skillsState`，结果交由调用方在组件级
+ * `$state` 内持有（符合状态分层：技能正文不缓存在前端 memory 跨渲染周期）。
+ */
+export function fetchSkillInfo(
+  target: WorkspaceProviderTarget,
+  skillId: SkillId,
+): Promise<SkillInfo> {
+  return requireRpc().skills.info({ ...target, skillId, includeDisabled: true });
+}
+
 /** 派生技能总数、启停数与 Provider 分布。 */
 export function skillCounts(): {
   total: number;

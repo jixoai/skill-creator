@@ -19,7 +19,7 @@ export { rpcContract };
 const SESSION_TOKEN_KEY = "skill-creator-token";
 
 /** 从 URL hash capture token 到 sessionStorage，然后清掉 hash。幂等。 */
-function captureTokenFromHash(): void {
+export function captureTokenFromHash(): void {
   if (typeof window === "undefined") return;
   const hash = window.location.hash.replace(/^#/, "");
   const params = new URLSearchParams(hash);

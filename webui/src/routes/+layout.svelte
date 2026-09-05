@@ -1,48 +1,60 @@
+<!--
+  用户原始需求 [2026-07-27]：「三个导航意味着三个 ChromeTabs」「参考 gaubee.com AppShell 标准」。
+  正交意图：
+  1. 注册三个 App + 管理 daemon 连接生命周期。
+  2. 挂载 Shell（WindowDragRegion 顶部栏 + 左侧 App 导航 + 右侧 TabOutlet）。
+  3. 全局浮层（ImportWorkspaceDialog / CommandPalette / ToastContainer）。
+  妥协声明：左侧导航是 ChromeTabShell 简化版（三 App 图标 + 导入入口），AppSidebar 的完整功能后续迭代。
+-->
 <script lang="ts">
-  /**
-   * 原始需求 [2026-07-14]：「导航栏、顶部栏，都参考 pnpm-pub 进行创作」。
-   * 用户原始需求 [2026-07-21]：「窗口推荐尺寸……改进成最小推荐尺寸。」
-   * 正交意图：
-   * 1. 管理 daemon 连接生命周期。
-   * 2. 按路由确保 app mode 原生窗口最小推荐尺寸。
-   * 3. 组合工作台导航与全局浮层。
-   */
   import "./layout.css";
   import { onMount } from "svelte";
   import { page } from "$app/state";
-  import { connect, connectionState, disconnect, loadWorkspaces } from "$lib/store.svelte";
-  import type { ImportedWorkspace } from "$lib/types";
-  import { confirmRemoveWorkspace } from "$lib/workspace-removal";
   import { goto } from "$app/navigation";
+  import { registerApps } from "$lib/apps";
+  import { connect, connectionState, disconnect, loadWorkspaces } from "$lib/store.svelte";
+  import { captureTokenFromHash } from "$lib/rpc-client";
+  import { appRegistry, resolveTabIdentity, setNavControllerAdapter } from "$lib/shell";
+  import TabOutlet from "$lib/shell/TabOutlet.svelte";
   import WindowDragRegion from "$lib/components/window-drag-region.svelte";
-  import AppSidebar from "$lib/components/app-sidebar.svelte";
   import ImportWorkspaceDialog from "$lib/components/import-workspace-dialog.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
   import ToastContainer from "$lib/components/toast-container.svelte";
+  import { TooltipProvider } from "$lib/components/ui/tooltip";
   import {
     CREATOR_MINIMUM_WINDOW_SIZE,
     ensureMinimumWindowSize,
     HOME_MINIMUM_WINDOW_SIZE,
   } from "$lib/window-size";
-  import { TooltipProvider } from "$lib/components/ui/tooltip";
   import IconCommand from "@lucide/svelte/icons/command";
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
+  import IconPlus from "@lucide/svelte/icons/folder-plus";
+
+  // 顶层注册（在任何 $derived 之前执行，确保 appRegistry 在首次渲染时已填充）。
+  registerApps();
 
   let { children } = $props();
-  let importDialog: ImportWorkspaceDialog;
-
-  async function handleRemoveWorkspace(workspace: ImportedWorkspace): Promise<void> {
-    if (await confirmRemoveWorkspace(workspace)) {
-      if (page.url.pathname.startsWith(`/workspace/${workspace.id}`)) await goto("/workspace/~");
-    }
-  }
+  let importDialog = $state<ImportWorkspaceDialog>();
 
   onMount(() => {
+    // 在任何导航之前先 capture token 到 sessionStorage（防止 goto 清掉 hash）。
+    captureTokenFromHash();
+    if (page.url.pathname === "/") {
+      void goto("/workspaces", { replaceState: true });
+    }
+    setNavControllerAdapter({
+      navigate(path, action) {
+        if (action === "REPLACE") {
+          void import("$app/navigation").then(({ replaceState }) => replaceState(path, {}));
+        } else {
+          void goto(path);
+        }
+      },
+    });
     connect();
     return disconnect;
   });
 
-  // 路由变化时只补足 app window 的推荐下限；焦点、关闭与更大尺寸均由系统/操作者管理。
   let pathname = $derived(page.url.pathname);
   $effect(() => {
     if (pathname.startsWith("/creator")) {
@@ -51,16 +63,20 @@
       void ensureMinimumWindowSize(HOME_MINIMUM_WINDOW_SIZE);
     }
   });
-  // WS 连接后加载 workspaces。
+
   let connected = $derived(connectionState.status === "connected");
   $effect(() => {
-    if (connected) {
-      void loadWorkspaces();
-    }
+    if (connected) void loadWorkspaces();
   });
+
+  const apps = $derived(appRegistry.list());
+  const activeAppId = $derived(resolveTabIdentity(page.url.pathname)?.app ?? null);
+
+  function switchApp(appId: string): void {
+    void goto(`/${appId}`);
+  }
 </script>
 
-<!-- 品牌极小容器图标（resources/README.md §4 Monochrome Mini）：浏览器标签与原生窗口标题。 -->
 <svelte:head>
   <link rel="icon" href="/icons/monochrome-mini.png" type="image/png" />
   <link rel="apple-touch-icon" href="/icons/monochrome-mini.png" />
@@ -96,6 +112,7 @@
         </button>
       {/snippet}
     </WindowDragRegion>
+
     {#if connectionState.status === "disconnected"}
       <div
         class="flex min-h-8 items-center border-y border-destructive/30 bg-destructive/8 px-3 text-xs text-destructive"
@@ -105,14 +122,43 @@
       </div>
     {/if}
 
-    <!-- 主体：稳定侧栏 + 无装饰工作区 -->
+    <!-- 主体：左侧 App 导航 + 右侧 TabOutlet -->
     <div class="flex min-h-0 flex-1">
-      <AppSidebar onImport={() => importDialog.show()} onRemove={handleRemoveWorkspace} />
-      <main
-        id="main-content"
-        class="min-w-0 flex-1 overflow-hidden border-l border-border bg-background"
+      <nav
+        class="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-muted/30 py-3"
       >
-        {@render children()}
+        {#each apps as app (app.id)}
+          {@const Icon = app.icon}
+          <button
+            class="flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-muted {activeAppId ===
+            app.id
+              ? 'bg-primary/10 text-primary'
+              : 'text-muted-foreground'}"
+            title={app.name}
+            aria-label={app.name}
+            aria-current={activeAppId === app.id ? "page" : undefined}
+            onclick={() => switchApp(app.id)}
+          >
+            <Icon class="h-5 w-5" />
+          </button>
+        {/each}
+
+        <!-- 分隔线 + 导入 workspace 入口 -->
+        <div class="my-1 h-px w-8 bg-border"></div>
+        <button
+          class="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title="Import workspace"
+          aria-label="Import workspace"
+          onclick={() => importDialog?.show()}
+        >
+          <IconPlus class="h-5 w-5" />
+        </button>
+      </nav>
+
+      <!-- 右侧：Shell 内容区 -->
+      <main class="min-w-0 flex-1 overflow-hidden">
+        <TabOutlet />
+        {@render children?.()}
       </main>
     </div>
   </div>

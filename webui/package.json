@@ -11,6 +11,9 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
   },
+  "dependencies": {
+    "marked": "^18.0.7"
+  },
   "devDependencies": {
     "@fontsource-variable/inter": "^5.2.8",
     "@lucide/svelte": "^1.24.0",
