@@ -167,7 +167,9 @@ stop during tray mount --> bounded teardown --> late native handles arrive
                                                 `--> destroy; never retain
 ```
 
-`status.tray === "starting"` 是不可决策的过渡态：即使 HTTP 已可用，CLI `start` 也必须继续等待，不能提前决定原生窗口或 headless 提示。只有 `mounted` 与 `headless` 是 capability 终态；`mounted` 执行 retained-session `open`（show/focus），`headless` 只输出 `skill-creator openinbrowser` 的恢复提示。`open` 仅尝试原生窗口，在 headless 时失败并给出同一提示；唯有 `openinbrowser` 显式调用系统浏览器。OpenTray 是 Dashboard 模式：原生 tray 是 UX 加成，WebUI 始终浏览器可达。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
+`status.tray === "starting"` 是不可决策的过渡态：即使 HTTP 已可用，CLI `start` 也必须继续等待，不能提前决定原生窗口、web 或 headless 提示。`mounted`、`web` 与 `headless` 是 capability 终态：`mounted` 执行 retained-session `open`（show/focus）；`web` 表示已挂载纯 tray（菜单+图标）但无原生窗口，CLI `start`/`open` 在此态直接打开系统浏览器（CLI 端，不经 IPC），daemon 侧 tray 菜单点击由 daemon 自己打开浏览器；`headless` 完全无 tray，只输出 `skill-creator openinbrowser` 的恢复提示。`open` 在 `mounted` 发 IPC 显示窗口，在 `web` 降级为 CLI 端打开浏览器，在 `headless` 失败并给出同一提示；唯有 `openinbrowser` 显式调用系统浏览器。OpenTray 是 Dashboard 模式：原生 tray 是 UX 加成，WebUI 始终浏览器可达。IPC socket bind 是单例真相；只能在确认 endpoint 不接受连接后清理 stale Unix socket。
+
+Web 模式由 `--web`/`--no-web` CLI flag 或 `SKILL_CREATOR_WEB` env 控制；Linux 默认 `true`（`@opentray/ext-webview` 无 Linux 原生包），其他平台默认 `false`。Web 模式的 `mountTray` 走 `mountWebTray` 路径：只 `createTray`（菜单 + 图标），不 `import("@opentray/ext-webview")`、不 `createWebviewWindow`；`TrayHost` 以 `mode: "web"` 构造，主菜单项文案固定为「Open in Browser」，`show()`/`toggle()`/primaryEvent 点击都重定向到 daemon 注入的 `onOpenInBrowser`。Web 模式不传 `appLaunch`（无原生窗口，Dock 冷启动向量无意义）。`TrayMountResult.tray` 类型因此放宽为 `CreateTrayHandle | OpentrayTray | null`（web 返回 base tray，windowed 返回 extended tray）。
 
 Tray 采用 retained-session 模型：`createWebviewWindow` 仅 bootstrap 一次创建原生 session，之后所有激活用 `toVisible()`、隐藏用 `close()`，绝不重放 startup 宽高/style/native flags（OpenTray 当前 session 法则）。`isVisible()`/`visibleChange` 是原生操作可见性真相（含最小化），客户端不维护镜像猜测。tray 菜单主项按可见性切换 Show/Hide 文案。窗口以 `appMode: true`、`frameless: false`、`autoHide: false` 创建；启动完成后以 `WebviewPlacementKit.applyOnce(..., { placement: "screen-center" })` 按当前屏幕居中一次，不查询 tray bounds、不持续重定位；系统 Shell 负责窗口层级、焦点、最小化/最大化与关闭，daemon/WebUI 不再实现 opacity 动画、blur 倒计时、keep-on-top 偏好或窗口状态投影协议。
 
@@ -198,7 +200,7 @@ live Dock click -> reopenRequested -> latest retained appMode window
                                   -> toVisible() -> focus()
 ```
 
-OpenTray broker 是 caller-scoped single-session；生产、旧开发与新开发模式不得并发争抢同一 app identity。`pnpm dev` 在 Vite 监听前依次检测正式 endpoint 与开发 endpoint，对每个活 daemon 发送 stop，并同时等待其 IPC endpoint 释放与 daemon PID 退出；Windows 同名 pipe 必须去重。旧开发 daemon 退出会驱动其 Vite 监督器关闭，接管失败必须终止新 dev 启动，不能静默降级 headless。Vite 再使用绝对 Node 与绝对 `tsx` loader 启动源 daemon，完整开发树的任何子进程都不得依赖 Finder PATH。
+OpenTray broker 是 caller-scoped single-session；生产、旧开发与新开发模式不得并发争抢同一 app identity。`pnpm dev` 在 Vite 监听前依次检测正式 endpoint 与开发 endpoint，对每个活 daemon 发送 stop，并同时等待其 IPC endpoint 释放与 daemon PID 退出。Windows named pipe 按 home digest 后缀隔离（`\\.\pipe\skill-creator-sock-<digest>`），生产与开发 home 天然不争抢同一 pipe；Unix socket 路径本身就在各自 home 下。旧开发 daemon 退出会驱动其 Vite 监督器关闭，接管失败必须终止新 dev 启动，不能静默降级 headless。Vite 再使用绝对 Node 与绝对 `tsx` loader 启动源 daemon，完整开发树的任何子进程都不得依赖 Finder PATH。
 
 CLI `stop` 先探测当前正式 endpoint；若开发 endpoint 不同则继续探测并停止开发 daemon。开发 home 由 `SKILL_CREATOR_DEV_HOME` 显式覆盖，否则遵循当前 `SKILL_CREATOR_HOME` 或平台短路径默认值。任何“已有 daemon”诊断都必须输出 `pnpm skill-creator stop` 这一真实可执行恢复入口，不能指向只会检查另一 runtime 的命令。
 

@@ -73,9 +73,9 @@ Repository install
 - Bun `>=1.3`（开发与构建脚本）
 - pnpm `>=10`
 - Git，可被当前进程通过 `git` 命令调用
-- macOS 或 Windows，`arm64` / `x64`
+- macOS、Windows（`arm64` / `x64`）或 Linux
 
-桌面窗口依赖 `@opentray/ext-webview`，当前发布目标是 macOS 与 Windows。包元数据也仅声明这两个系统；Linux 不是当前发布目标。窗口使用 `appMode: true` 进入系统任务栏/Dock 与应用切换器；窗口焦点、层级和关闭由系统管理，不提供 keep-on-top 或 blur 倒计时关闭模式。
+macOS 与 Windows 使用 `@opentray/ext-webview` 承载原生应用窗口（`appMode: true` 进入任务栏/Dock 与应用切换器；窗口焦点、层级和关闭由系统管理）。Linux 上 `@opentray/ext-webview` 没有原生包，默认进入 **web 模式**：daemon 只挂载纯 opentray 通知栏图标（菜单 + 图标），WebUI 在系统浏览器中打开。任何平台都可用 `--web` / `--no-web` 显式覆盖。
 
 ## 安装与开发
 
@@ -88,10 +88,12 @@ pnpm install
 启动带 HMR 的 WebUI 与开发 daemon：
 
 ```bash
-pnpm dev
+pnpm dev              # 默认（macOS/Windows 用原生窗口）
+pnpm dev --web        # 强制 web 模式：纯 tray + 浏览器，无原生窗口
+pnpm dev --no-web     # 强制 windowed 模式（覆盖 Linux 默认）
 ```
 
-Vite 会先释放正式 daemon 与上一棵开发进程树，再分配 daemon 端口，于 SvelteKit SPA fallback 之前挂载 `/api/` 与 `/ws/` 代理，并挂载开发态 OpenTray。重复执行 `pnpm dev` 不需要手动清理旧 socket；接管会等待旧 daemon 的 PID 和 IPC endpoint 同时释放。daemon 启动窗口返回可重试 `503`，不会把 API 请求误回退为 `index.html`。macOS 开发态的 home 默认为 `/tmp/sc-v2`，因此应用状态位于 `/tmp/sc-v2/.skill-creator/`，不会读写正式用户状态。Windows 使用系统临时目录下的 `skill-creator-v2-dev`。
+`pnpm dev` 由 `scripts/dev.sh.ts` 包装：它拦截 `--web` / `--no-web` 转成 `SKILL_CREATOR_WEB` env（vite 本身不容忍未知 flag），其余参数原样透传给 vite。Vite 会先释放正式 daemon 与上一棵开发进程树，再分配 daemon 端口，于 SvelteKit SPA fallback 之前挂载 `/api/` 与 `/ws/` 代理，并挂载开发态 OpenTray。重复执行 `pnpm dev` 不需要手动清理旧 socket；接管会等待旧 daemon 的 PID 和 IPC endpoint 同时释放。daemon 启动窗口返回可重试 `503`，不会把 API 请求误回退为 `index.html`。macOS 开发态的 home 默认为 `/tmp/sc-v2`，因此应用状态位于 `/tmp/sc-v2/.skill-creator/`，不会读写正式用户状态。Windows 使用系统临时目录下的 `skill-creator-v2-dev`。
 
 构建与完整静态检查：
 
@@ -114,19 +116,21 @@ dist/
 
 构建后可在仓库内使用 `pnpm skill-creator <command>`；作为包安装后使用 `skill-creator <command>`。
 
-| Command         | 行为                                                                                                            |
-| --------------- | --------------------------------------------------------------------------------------------------------------- |
-| `start`         | 启动 daemon，等待 WebUI 与 tray 完成挂载，然后显示原生窗口；headless 时只提示 `openinbrowser`，不自动打开浏览器 |
-| `open`          | 显示并聚焦现有 tray 窗口；headless 时失败并提示 `openinbrowser`，绝不降级为浏览器                               |
-| `openinbrowser` | 显式在系统浏览器打开当前 daemon 的带 token WebUI URL                                                            |
-| `status`        | 输出 PID、版本、HTTP 端口、tray 状态和可用的 tray 错误                                                          |
-| `stop`          | 停止正式 daemon；若正式 endpoint 不存在则发现开发 daemon，并等待 endpoint 释放                                  |
-| `version`       | 输出包版本                                                                                                      |
-| `help`          | 输出命令帮助                                                                                                    |
+| Command         | 行为                                                                                                                          |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `start`         | 启动 daemon，等待 WebUI 与 tray 完成挂载，然后显示原生窗口；web 模式打开浏览器；headless 时只提示 `openinbrowser`，不自动打开 |
+| `start --web`   | 以 web 模式启动：只挂纯 tray 图标（菜单 + 图标），不创建原生窗口，WebUI 在系统浏览器打开（Linux 默认）                        |
+| `open`          | 显示并聚焦现有 tray 窗口；web 模式降级为打开浏览器；headless 时失败并提示 `openinbrowser`                                     |
+| `openinbrowser` | 显式在系统浏览器打开当前 daemon 的带 token WebUI URL                                                                          |
+| `status`        | 输出 PID、版本、HTTP 端口、tray 状态（mounted/web/headless）和可用的 tray 错误                                                |
+| `stop`          | 停止正式 daemon；若正式 endpoint 不存在则发现开发 daemon，并等待 endpoint 释放                                                |
+| `version`       | 输出包版本                                                                                                                    |
+| `help`          | 输出命令帮助                                                                                                                  |
 
 ```bash
 pnpm build
 pnpm skill-creator start
+pnpm skill-creator start --web   # 强制 web 模式（纯 tray + 浏览器）
 pnpm skill-creator status
 pnpm skill-creator open
 pnpm skill-creator openinbrowser
@@ -212,7 +216,7 @@ Git source + ref --> temporary clone --> commit SHA --> repo_<session>
 | 应用目录           | `~/.skill-creator/`                       | `%USERPROFILE%\.skill-creator\`                |
 | Workspace registry | `~/.skill-creator/workspaces.json`        | `%USERPROFILE%\.skill-creator\workspaces.json` |
 | Daemon log         | `~/.skill-creator/logs/daemon.log`        | `%USERPROFILE%\.skill-creator\logs\daemon.log` |
-| IPC                | `~/.skill-creator/run/skill-creator.sock` | `\\.\pipe\skill-creator-sock`                  |
+| IPC                | `~/.skill-creator/run/skill-creator.sock` | `\\.\pipe\skill-creator-sock-<home-digest>`    |
 
 `SKILL_CREATOR_HOME` 可覆盖当前命令的 home 根目录；应用仍在该目录下创建 `.skill-creator/`。`SKILL_CREATOR_DEV_HOME` 专门覆盖开发 runtime 的发现路径；macOS 默认对应 `/tmp/sc-v2/.skill-creator/`。
 
