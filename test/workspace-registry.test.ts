@@ -213,6 +213,27 @@ describe("Workspace Registry", () => {
     expect((await registry.list()).map((workspace) => workspace.id)).toEqual([GLOBAL_WORKSPACE_ID]);
   });
 
+  it("surfaces an unreadable Registry file as a hard error, not an empty Registry", async () => {
+    if (process.platform === "win32" || typeof process.getuid === "function" && process.getuid() === 0) {
+      return; // chmod cannot deny reads for root; the EACCES vector is untestable there
+    }
+    fs.mkdirSync(appDir(), { recursive: true });
+    const registryFile = path.join(appDir(), "workspaces.json");
+    fs.writeFileSync(registryFile, JSON.stringify({ schemaVersion: 2, workspaces: [] }), "utf8");
+    fs.chmodSync(registryFile, 0o000);
+
+    try {
+      expect(() => createWorkspaceRegistry({ countSkills: zeroCount })).toThrow(
+        /Cannot read workspace registry/,
+      );
+      // 原文件必须原样保留：数据不兼容才会投影为空 Registry，I/O 故障不能伪装。
+      fs.chmodSync(registryFile, 0o644);
+      expect(fs.existsSync(registryFile)).toBe(true);
+    } finally {
+      fs.chmodSync(registryFile, 0o644);
+    }
+  });
+
   it("rejects unknown IDs without changing the active Workspace", async () => {
     const registry = createWorkspaceRegistry({ countSkills: zeroCount });
     const known = registry.import(directory("known"));
