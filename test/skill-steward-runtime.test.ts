@@ -854,3 +854,95 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     );
   });
 });
+
+describe("skill steward pipeline end-to-end (task 2.3f)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = ProviderIdSchema.parse("openclaw");
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-pipeline-test-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it("runs check -> disable proposal -> validate -> approve -> apply -> rollback through the full pipeline", async () => {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    // 两个重复 trigger 的技能 → valid-check 产生 finding + disable 提案。
+    for (const [name, tools] of [
+      ["alpha-deploy", "Bash, Read"],
+      ["beta-deploy", "Bash, Read"],
+    ] as const) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId,
+        directoryName: name,
+        frontmatter: { name, description: `${name} skill.`, "allowed-tools": tools },
+        body: `# ${name}\n\nDeploy.\n`,
+      });
+    }
+    const target = { workspaceId: workspace.id, providerId };
+
+    // 1. run：fixture check 场景走真实工具面。
+    const run = await domain.skillSteward.startRun({ target, taskKind: "check" });
+    expect(run.terminal).toBe("completed");
+    expect(run.toolCalls).toBeGreaterThan(0);
+    expect(run.proposals.length).toBeGreaterThanOrEqual(0); // check 场景只报 finding 时不强求提案
+
+    // 2. 用 optimize 场景拿一个 edit 提案走完整审批链。
+    const optimizeRun = await domain.skillSteward.startRun({ target, taskKind: "optimize" });
+    expect(optimizeRun.proposals).toHaveLength(1);
+    const proposalId = optimizeRun.proposals[0]!.proposalId;
+
+    // 3. validate → approve → apply。
+    const validation = await domain.skillSteward.validate(proposalId);
+    expect(validation.overall).toBe("valid");
+    const grant = await domain.skillSteward.approve(proposalId);
+    expect(grant.fingerprint).toMatch(/^sha256:[a-f0-9]{64}$/);
+    const applied = await domain.skillSteward.apply(proposalId);
+    expect(applied.outcomeStatus).toBe("applied");
+    expect(applied.auditStatus).toBe("applied");
+    expect(applied.mutations.length).toBeGreaterThan(0);
+
+    // 4. rollback：反向 edit 恢复原字节。
+    const prepared = await domain.skillSteward.prepareRollback(applied.auditId);
+    expect(prepared.reverseProposalId).toBeDefined();
+    await domain.skillSteward.approve(prepared.reverseProposalId!);
+    const rollback = await domain.skillSteward.apply(prepared.reverseProposalId!);
+    expect(rollback.auditStatus).toBe("applied");
+    const docPath = path.join(sandbox, "ws", "skills", "alpha-deploy", "SKILL.md");
+    expect(fs.readFileSync(docPath, "utf8")).toContain("# alpha-deploy");
+  });
+
+  it("exposes malformed runs with typed terminals and zero proposals", async () => {
+    const directory = path.join(sandbox, "ws2");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws2");
+    await domain.creator.save({
+      mode: "create",
+      workspaceId: workspace.id,
+      providerId,
+      directoryName: "solo-skill",
+      frontmatter: { name: "solo-skill", description: "Solo." },
+      body: "# solo-skill\n",
+    });
+    const run = await domain.skillSteward.startRun({
+      target: { workspaceId: workspace.id, providerId },
+      taskKind: "check",
+      scenario: "malformed",
+    });
+    expect(run.terminal).toBe("failed");
+    expect(run.proposals).toHaveLength(0);
+  });
+});

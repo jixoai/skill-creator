@@ -143,6 +143,26 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         domain.steward.rejectProposal(input),
       ),
     },
+    skillSteward: {
+      startRun: rpc.skillSteward.startRun.handler(async ({ input }) =>
+        domain.skillSteward.startRun(input),
+      ),
+      validate: rpc.skillSteward.validate.handler(async ({ input }) =>
+        domain.skillSteward.validate(input.proposalId),
+      ),
+      approve: rpc.skillSteward.approve.handler(async ({ input }) =>
+        domain.skillSteward.approve(input.proposalId),
+      ),
+      apply: rpc.skillSteward.apply.handler(async ({ input }) =>
+        domain.skillSteward.apply(input.proposalId),
+      ),
+      prepareRollback: rpc.skillSteward.prepareRollback.handler(async ({ input }) =>
+        domain.skillSteward.prepareRollback(input.auditId),
+      ),
+      applyRollback: rpc.skillSteward.applyRollback.handler(async ({ input }) =>
+        domain.skillSteward.applyRollback(input.auditId),
+      ),
+    },
     acp: {
       agents: {
         list: rpc.acp.agents.list.handler(async () => ({

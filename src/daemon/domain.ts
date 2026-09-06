@@ -26,6 +26,10 @@ import {
 } from "./skill-intelligence-service.js";
 import { createSkillService, type SkillService } from "./skill-service.js";
 import { createStewardService, type StewardService } from "./steward-service.js";
+import {
+  createSkillStewardPipelineService,
+  type SkillStewardPipelineService,
+} from "./steward/pipeline-service.js";
 import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
 import { createDshHarnessAdapter } from "./steward/dsh-adapter.js";
 import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
@@ -62,6 +66,8 @@ export interface DaemonDomain {
   skillIntelligence: SkillIntelligenceService;
   /** Agent steward 编排：analyze→recommend→draft→validate→approval→apply。 */
   steward: StewardService;
+  /** Skill Steward 契约管线：snapshot→tool registry→proposal→grant→journal→audit。 */
+  skillSteward: SkillStewardPipelineService;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
@@ -91,5 +97,6 @@ export function createDaemonDomain(
     steward: createStewardService(workspaces, skills, skillIntelligence, {
       adapters: options.stewardAdapters ?? defaultStewardAdapters(),
     }),
+    skillSteward: createSkillStewardPipelineService({ workspaces, skills, creator }),
   };
 }

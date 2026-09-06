@@ -804,3 +804,84 @@ export function expectedRevisionsOfPatch(patch: SkillPatch): Map<SkillId, string
   }
   return pairs;
 }
+
+// ---------------------------------------------------------------------------
+// RPC IO（阶段 2 的 human-UI 面向 surface；agent 永远只能走 tool registry）
+// ---------------------------------------------------------------------------
+
+/** 启动一次 fixture 管家 run（backend 锁定 fixture；DSH 属后续阶段）。 */
+export const SkillStewardRunInputSchema = z.object({
+  target: WorkspaceProviderTargetSchema,
+  skillIds: z.array(SkillIdSchema).optional(),
+  taskKind: StewardTaskKindSchema,
+  scenario: z
+    .enum([
+      "valid-check",
+      "valid-optimize",
+      "valid-organize",
+      "malformed",
+      "stale",
+      "disconnect",
+      "cancel",
+      "late-event",
+      "approval-replay",
+    ])
+    .optional(),
+});
+/** run 输入。 */
+export type SkillStewardRunInput = z.infer<typeof SkillStewardRunInputSchema>;
+
+/** run 输出：终态 + 提案清单（审批由后续 RPC 完成）。 */
+export const SkillStewardRunResultSchema = z.object({
+  snapshotId: StewardSnapshotIdSchema,
+  terminal: z.string().min(1),
+  acceptedResponses: z.number().int().nonnegative(),
+  droppedLateResponses: z.number().int().nonnegative(),
+  toolCalls: z.number().int().nonnegative(),
+  proposals: z.array(
+    z.object({ proposalId: StewardProposalIdSchema, action: StewardPatchKindSchema }),
+  ),
+});
+/** run 结果。 */
+export type SkillStewardRunResult = z.infer<typeof SkillStewardRunResultSchema>;
+
+/** validation 输出直接复用 SkillValidationResultSchema。 */
+export const SkillStewardProposalInputSchema = z.object({
+  proposalId: StewardProposalIdSchema,
+});
+/** 单 proposal 输入。 */
+export type SkillStewardProposalInput = z.infer<typeof SkillStewardProposalInputSchema>;
+
+/** 人类批准输出：grant 事实（脱敏：不含消费状态之外的内部细节）。 */
+export const SkillStewardApproveResultSchema = z.object({
+  grantId: StewardGrantIdSchema,
+  fingerprint: ContentRevisionSchema,
+  issuedAt: z.string().datetime(),
+});
+/** 批准结果。 */
+export type SkillStewardApproveResult = z.infer<typeof SkillStewardApproveResultSchema>;
+
+/** apply 输出：事务终态 + 审计。 */
+export const SkillStewardApplyResultSchema = z.object({
+  outcomeStatus: z.enum(["applied", "compensated", "recovery-required"]),
+  failure: z.string().optional(),
+  auditId: StewardAuditIdSchema,
+  auditStatus: z.enum(["applied", "rolled-back", "recovery-required"]),
+  mutations: z.array(StewardMutationRecordSchema),
+});
+/** apply 结果。 */
+export type SkillStewardApplyResult = z.infer<typeof SkillStewardApplyResultSchema>;
+
+/** rollback 准备输入/输出。 */
+export const SkillStewardRollbackInputSchema = z.object({
+  auditId: StewardAuditIdSchema,
+});
+/** rollback 输入。 */
+export type SkillStewardRollbackInput = z.infer<typeof SkillStewardRollbackInputSchema>;
+
+export const SkillStewardRollbackResultSchema = z.object({
+  reverseProposalId: StewardProposalIdSchema.optional(),
+  note: z.string().min(1),
+});
+/** rollback 准备结果。 */
+export type SkillStewardRollbackResult = z.infer<typeof SkillStewardRollbackResultSchema>;

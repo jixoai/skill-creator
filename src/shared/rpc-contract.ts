@@ -30,6 +30,16 @@ import {
   StewardStartResultSchema,
 } from "./contracts/agent-steward.js";
 import {
+  SkillStewardApplyResultSchema,
+  SkillStewardApproveResultSchema,
+  SkillStewardProposalInputSchema,
+  SkillStewardRollbackInputSchema,
+  SkillStewardRollbackResultSchema,
+  SkillStewardRunInputSchema,
+  SkillStewardRunResultSchema,
+  SkillValidationResultSchema,
+} from "./contracts/skill-steward.js";
+import {
   SaveSkillInputSchema,
   SaveSkillResultSchema,
   SkillDocumentSchema,
@@ -225,6 +235,22 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     approveProposal: oc.input(StewardProposalInputSchema).output(StewardApproveResultSchema),
     /** Reject one run proposal (consumes the draft). */
     rejectProposal: oc.input(StewardProposalInputSchema).output(StewardRejectResultSchema),
+  },
+  skillSteward: {
+    /** Start a fixture steward run: snapshot -> tools -> proposals (task 2.3f). */
+    startRun: oc.input(SkillStewardRunInputSchema).output(SkillStewardRunResultSchema),
+    /** Validate one proposal: report only, never authorization. */
+    validate: oc.input(SkillStewardProposalInputSchema).output(SkillValidationResultSchema),
+    /** Human-only approval: mint the one-shot Manager grant. */
+    approve: oc.input(SkillStewardProposalInputSchema).output(SkillStewardApproveResultSchema),
+    /** Consume the grant and run the journaled apply transaction. */
+    apply: oc.input(SkillStewardProposalInputSchema).output(SkillStewardApplyResultSchema),
+    /** Prepare a Manager-derived reverse proposal or rollback grant. */
+    prepareRollback: oc
+      .input(SkillStewardRollbackInputSchema)
+      .output(SkillStewardRollbackResultSchema),
+    /** Consume a rollback grant and replay the journal in reverse. */
+    applyRollback: oc.input(SkillStewardRollbackInputSchema).output(SkillStewardApplyResultSchema),
   },
   acp: {
     /** List ACP-capable agents installed on this machine (daemon-lifetime cached). */
