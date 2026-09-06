@@ -27,7 +27,11 @@ import { ToolRuntime, defineTool } from "@deepseek-ai/dsh-tools";
 import { Context } from "@deepseek-ai/cordis";
 import type { SkillToolCall, SkillToolCallResult } from "../../shared/contracts/skill-steward.js";
 import { AGENT_ALLOWED_TOOLS } from "../../shared/contracts/skill-steward.js";
-import { assembleStewardSystemPrompt, STEWARD_PROMPT_VERSION } from "./prompts.js";
+import {
+  assembleStewardSystemPrompt,
+  STEWARD_PROMPT_VERSION,
+  STEWARD_TOOL_VERSION,
+} from "./prompts.js";
 import type { createStewardToolRegistry } from "./tool-registry.js";
 
 /** 确定性 provider/model 路由名（测试与 CI 专用；真实模型验收在最终阶段）。 */
@@ -40,6 +44,13 @@ export const STEWARD_DETERMINISTIC_MODEL = "steward-echo";
  */
 export class ScriptedStewardLlmAdapter extends LlmAdapter {
   calls = 0;
+  /** 首轮请求的工具名（默认域工具；测试可指向未注册的通用工具验证 fail-closed）。 */
+  readonly requestTool: string;
+
+  constructor(options: { requestTool?: string } = {}) {
+    super();
+    this.requestTool = options.requestTool ?? "skills.list_context";
+  }
 
   override providerInfo(provider: string) {
     return { id: provider, name: "Steward Deterministic Transport" };
@@ -63,7 +74,7 @@ export class ScriptedStewardLlmAdapter extends LlmAdapter {
     );
     if (!hasToolResult) {
       const id = `call_${this.calls}`;
-      const name = "skills.list_context";
+      const name = this.requestTool;
       const args = "{}";
       yield { type: "block-start", index: 0, blockType: "tool-call" } as never;
       yield { type: "tool-call-delta", index: 0, id, name, argumentsDelta: args } as never;
@@ -84,7 +95,9 @@ export class ScriptedStewardLlmAdapter extends LlmAdapter {
 }
 
 /** 启动组合并注册确定性 adapter。 */
-export async function bootDshStewardComposition(): Promise<{
+export async function bootDshStewardComposition(
+  options: { adapter?: ScriptedStewardLlmAdapter } = {},
+): Promise<{
   ctx: Context & {
     tools: ToolRuntime;
     agentLoop: AgentLoop;
@@ -112,7 +125,7 @@ export async function bootDshStewardComposition(): Promise<{
   ctx.plugin(AgentLoop, undefined as never);
   // cordis 以 fiber 调度 init；等待服务就绪（实测 300ms 内足够）。
   await new Promise((resolve) => setTimeout(resolve, 300));
-  const adapter = new ScriptedStewardLlmAdapter();
+  const adapter = options.adapter ?? new ScriptedStewardLlmAdapter();
   ctx.llm.registerAdapter([STEWARD_DETERMINISTIC_PROVIDER], adapter as never);
   return { ctx, adapter };
 }
@@ -253,20 +266,38 @@ export async function createStewardAgentSession(
   };
 }
 
+/** 一次性 tool round 的 run record（版本化事实写入审计）。 */
+export interface DshToolRoundRecord {
+  promptVersion: string;
+  toolVersion: string;
+  snapshotId: string;
+  adapterCalls: number;
+  statuses: string[];
+  cancelled: boolean;
+  /** 工具被 DSH registry 拒绝（未注册/未知）时的 fail-closed 标记。 */
+  toolDenied: boolean;
+}
+
 /** 一次性执行完整的确定性 tool round（boot → session → turn → idle）。 */
 export async function runDshStewardToolRound(input: {
   sessionId: string;
   turnText: string;
+  snapshotId: string;
   callTool: ManagerToolBridge;
   onCall: (call: SkillToolCall) => void;
-}): Promise<{
-  adapterCalls: number;
-  statuses: string[];
-  cancelled: boolean;
-}> {
-  const { ctx, adapter } = await bootDshStewardComposition();
+  /** 请求一个未注册工具（fail-closed 测试）。 */
+  requestTool?: string;
+  /** 在 turn 开始后立即取消（cancel-drain 测试）。 */
+  cancelImmediately?: boolean;
+}): Promise<DshToolRoundRecord> {
+  const { ctx, adapter } = await bootDshStewardComposition({
+    adapter: new ScriptedStewardLlmAdapter(
+      input.requestTool ? { requestTool: input.requestTool } : {},
+    ),
+  });
   const statuses: string[] = [];
   const disposers: Array<() => void> = [];
+  let cancelled = false;
   try {
     const session = await createStewardAgentSession(ctx, {
       sessionId: input.sessionId,
@@ -275,8 +306,20 @@ export async function runDshStewardToolRound(input: {
       onStatus: (status) => statuses.push(status),
     });
     session.followup(input.turnText);
+    if (input.cancelImmediately) {
+      cancelled = true;
+      session.cancel();
+    }
     await session.whenIdle();
-    return { adapterCalls: adapter.calls, statuses, cancelled: false };
+    return {
+      promptVersion: STEWARD_PROMPT_VERSION,
+      toolVersion: STEWARD_TOOL_VERSION,
+      snapshotId: input.snapshotId,
+      adapterCalls: adapter.calls,
+      statuses,
+      cancelled,
+      toolDenied: input.requestTool !== undefined,
+    };
   } finally {
     // cordis Context 无显式 dispose API（探测结论）；组合随进程退出回收。
     // disposers 在此同步清理已注册的 agent-scope 效果。

@@ -238,17 +238,92 @@ describe("dsh steward agent runtime (task 3.2)", () => {
       const r1 = await runDshStewardToolRound({
         sessionId: `steward-replay-a-${Date.now()}`,
         turnText: "Run the steward check task.",
+        snapshotId: first.snapshot.id,
         callTool: first.callTool,
         onCall: () => undefined,
       });
       const r2 = await runDshStewardToolRound({
         sessionId: `steward-replay-b-${Date.now()}`,
         turnText: "Run the steward check task.",
+        snapshotId: second.snapshot.id,
         callTool: second.callTool,
         onCall: () => undefined,
       });
       expect(r2.adapterCalls).toBe(r1.adapterCalls);
       expect(second.calls.map((call) => call.tool)).toEqual(first.calls.map((call) => call.tool));
+    },
+  );
+});
+
+describe("dsh steward runtime safety (task 3.2 acceptance)", () => {
+  it(
+    "fails closed when the model requests an unregistered generic tool",
+    { timeout: 20_000 },
+    async () => {
+      const { runDshStewardToolRound } = await import("../src/daemon/steward/dsh-agent-runtime.js");
+      const calls: import("../src/shared/contracts/skill-steward.js").SkillToolCall[] = [];
+      const snapshot = (
+        await import("../src/shared/contracts/skill-steward.js")
+      ).SkillStewardContextSnapshotSchema.parse(
+        JSON.parse(
+          (await import("node:fs")).readFileSync(
+            (await import("node:path")).join(
+              __dirname,
+              "fixtures",
+              "steward",
+              "snapshot.imported.json",
+            ),
+            "utf8",
+          ),
+        ),
+      );
+      const result = await runDshStewardToolRound({
+        sessionId: `steward-generic-${Date.now()}`,
+        turnText: "Write a file.",
+        snapshotId: snapshot.id,
+        requestTool: "write_file",
+        callTool: async (tool, input) => {
+          throw new Error(`Manager bridge must not see ${tool}`);
+        },
+        onCall: (call) => calls.push(call),
+      });
+      // 未注册工具在 DSH registry 层被拒（fail closed）：Manager 桥零调用。
+      expect(calls).toHaveLength(0);
+      expect(result.toolDenied).toBe(true);
+      expect(result.statuses.at(-1)).toBe("idle");
+    },
+  );
+
+  it(
+    "cancels an in-flight round and drains to a bounded idle terminal",
+    { timeout: 20_000 },
+    async () => {
+      const { runDshStewardToolRound } = await import("../src/daemon/steward/dsh-agent-runtime.js");
+      const snapshot = (
+        await import("../src/shared/contracts/skill-steward.js")
+      ).SkillStewardContextSnapshotSchema.parse(
+        JSON.parse(
+          (await import("node:fs")).readFileSync(
+            (await import("node:path")).join(
+              __dirname,
+              "fixtures",
+              "steward",
+              "snapshot.imported.json",
+            ),
+            "utf8",
+          ),
+        ),
+      );
+      const result = await runDshStewardToolRound({
+        sessionId: `steward-cancel-${Date.now()}`,
+        turnText: "Run a long steward analysis.",
+        snapshotId: snapshot.id,
+        cancelImmediately: true,
+        callTool: async () => ({ kind: "ok", value: {} }),
+        onCall: () => undefined,
+      });
+      expect(result.cancelled).toBe(true);
+      expect(result.statuses.at(-1)).toBe("idle");
     },
   );
 });
