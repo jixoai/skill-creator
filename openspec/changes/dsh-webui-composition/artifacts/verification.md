@@ -105,3 +105,13 @@
   - 启停：Disable → 磁盘 `SKILL.md` 变 `.SKILL.md`、UI 出现 Enable；Enable → 恢复 `SKILL.md`（前后 ls 磁盘证据；截图 dsh-web-3.1b-skill-detail-toggle.png / -workspaces-home.png）。
   - 溢出：island 面板（min(560px,92vw) 容器查询布局）scrollWidth=clientWidth，无横向溢出。
 - 3.1b 勾选；生产入口切换（daemon 默认 DSH host + SPA 仅恢复夹具）归 3.2/4.1。
+
+## 3.1c 实测注记（Creator/Repository surfaces 迁移）
+
+- 实现：`IslandRoot.svelte` 匹配面扩到三 App（workspaces/creator/repository manifest activities，复用 SPA 同源 matchRouteTree，无 manifest 改动）；`creator-editor.svelte.ts` 新增模块级跨卸载草稿缓存（`creatorDraftKey` route-identity 键 + `snapshotCreatorDraft` 拷贝隔离；卸载快照键取草稿自身身份——new 保存成功后草稿已切 edit 语义，不落 URL 的 new 键）与身份级 hydration 标记（同一身份只自动 hydrate 一次；显式 Reload/Retry 走 `resetDraftHydration`；delete 后 `dropCachedCreatorDraft`）。CreatorWorkspace 挂载恢复优先缓存并标记已 hydrate（FileBrowser 不重拉重置 baseline）；FileBrowser delete 成功清缓存与标记。
+- 浏览器验收（`pnpm exec tsx scripts/dsh-manager-island-live.sh.ts`，真实 skills 探测 + 真实网络 clone，0 JS 错误）：
+  - Creator：island palette（cmd+k）→ Creator → New skill（ws_bcafc73bcbac89a26a92417e / aider-desk）；dirty draft 四字段（directoryName/name/description/body）经 island 关闭（0 残留、connection idle）→ 重开 → 重导航完整恢复；Create 真实落盘 `ws/.aider-desk/skills/final-save-probe/SKILL.md`（frontmatter name/description + body 与表单一致）。
+  - Repository：Discover curated feed 可达；扫描 Anthropic 官方源 pinned commit `41bbe19d1a1a`（20 skills，真实 GitHub clone）；勾选 academy-guide + 安装目标 island-ws/AiderDesk → Install → `ws/.aider-desk/skills/academy-guide/SKILL.md`（真实官方 skill 内容）落盘。
+  - 溢出：Creator 编辑器与 Repository scan 视图在 1100px/680px 面板宽均 scrollWidth===clientWidth（截图 dsh-web-3.1c-creator-1100px.png / dsh-web-3.1c-repository-installed.png 等）。
+- 单测：`pnpm exec vitest run webui/src/lib/__tests__/creator-draft-cache.test.ts` 3/3（身份键语义、快照双向隔离、hydration 标记 reset）。
+- 工具限制（诚实声明）：bb-browser 合成 `input` 事件不触发 island 包内 Svelte bind（palette bits-ui 过滤例外）；表单输入改经 `document.execCommand('insertText')` 真实编辑管线完成，点击均走真实 DOM handler。revision conflict / session expiry / recovery 状态语义未在 island 内逐项重演——由 store 层代次门与 creator save CONFLICT 既有测试持有（本轮未改其逻辑，只加了缓存层）。

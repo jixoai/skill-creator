@@ -5,7 +5,8 @@
   2. 窄屏堆叠 + 顶部 toggle（对话/子视图）。
   3. 子视图通过 sub-view-tabs 组件切换，激活子视图编码到 URL search param。
   4. 通过 Svelte context 下发共享编辑草稿（File 写入 / Preview / Log / Validate 读取）。
-  视图状态：分栏比例 → 组件局部 $state（瞬时 UI）；子视图 → URL；草稿 → 共享 creator-editor context（$state）。
+  视图状态：分栏比例 → 组件局部 $state（瞬时 UI）；子视图 → URL；草稿 → 共享 creator-editor context（$state），
+  同一身份的草稿在卸载时快照进模块级缓存（island 关闭→重开 / 与官方 session 往返不丢 dirty draft）。
 -->
 <script lang="ts">
   import { useParams, useSearch } from "$lib/shell";
@@ -20,6 +21,10 @@
     placeholderDraft,
     editDraft,
     emptyDraft,
+    cacheCreatorDraft,
+    creatorDraftKey,
+    markDraftHydrated,
+    takeCachedCreatorDraft,
     type CreatorDraft,
   } from "$lib/stores/creator-editor.svelte";
   import { TEMPLATES } from "$lib/templates";
@@ -75,18 +80,45 @@
   // 下发共享编辑草稿 context（占位种子；真实初值由下方 $effect 同步进去）。
   const editor = provideCreatorEditor(placeholderDraft());
 
+  // 3.1c：草稿身份键（同一身份的跨卸载缓存归属）。
+  const draftKey = $derived(
+    creatorDraftKey(target, mode === "edit" ? "edit" : "new", skillId ?? null),
+  );
+
   // target/mode/skillId 变化时（含首次挂载）把派生草稿同步进共享 context。
+  // 同一身份存在跨卸载缓存（island 关闭→重开）时优先恢复缓存草稿，并标记该身份
+  // 已 hydrate——缓存草稿不比服务器旧，FileBrowser 不再自动重拉重置 baseline。
   $effect(() => {
+    const key = draftKey;
     const next = initialDraft;
-    editor.draft.mode = next.mode;
-    editor.draft.target = next.target;
-    editor.draft.skillId = next.skillId;
-    editor.draft.name = next.name;
-    editor.draft.description = next.description;
-    editor.draft.body = next.body;
-    editor.draft.revision = next.revision;
-    editor.draft.extraFrontmatter = next.extraFrontmatter;
-    editor.draft.directoryName = next.directoryName;
+    const restored = key === null ? null : takeCachedCreatorDraft(key);
+    const source: CreatorDraft = restored ?? next;
+    editor.draft.mode = source.mode;
+    editor.draft.target = source.target;
+    editor.draft.skillId = source.skillId;
+    editor.draft.name = source.name;
+    editor.draft.description = source.description;
+    editor.draft.body = source.body;
+    editor.draft.revision = source.revision;
+    editor.draft.extraFrontmatter = source.extraFrontmatter;
+    editor.draft.directoryName = source.directoryName;
+    if (restored !== null && key !== null) {
+      markDraftHydrated(key);
+    }
+  });
+
+  // 3.1c：卸载快照——tab 关闭 / island 关闭（与官方 session 往返）时保留当前草稿。
+  // 键取自草稿自身身份（new 保存成功后草稿已切 edit 语义，不能落在 URL 的 new 键下）；
+  // 占位 target 不缓存。同一 realm 内重开同一路由即恢复（显式新建/删除按原语义清缓存）。
+  $effect(() => {
+    return () => {
+      const snapshot = editor.draft;
+      if (snapshot.target.workspaceId === "~") return;
+      const key = creatorDraftKey(snapshot.target, snapshot.mode, snapshot.skillId);
+      if (key !== null) {
+        cacheCreatorDraft(key, snapshot);
+      }
+    };
   });
 
   function startDrag(e: MouseEvent): void {

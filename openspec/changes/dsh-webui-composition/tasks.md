@@ -39,11 +39,12 @@
   - Acceptance: DSH host 内可真实导入 workspace、浏览 skill、启停 skill；文件系统和 Manager RPC 证据与旧实现一致；1100px/680px 无横向溢出。旧 Svelte route 只作迁移夹具，不能继续作为生产 Agent 入口。
   - Evidence: island 挂载 SPA layout 的全局浮层（导入对话框/命令面板/toast，Portal 锚定 island 内）；修复 close/reopen 生命周期（插件现追踪 mount 的 panel 元素——此前 unmount 匹配 host 失败静默 no-op，残留 root 阻断重挂且跳过 disconnect）。浏览器验收（真实 skills 探测）：island 对话框真实导入 workspace（registry 落盘 `3p1b-ws`）；provider 视图浏览技能详情（frontmatter 表 + markdown 正文）；Disable/Enable 启停（磁盘 `SKILL.md → .SKILL.md → SKILL.md` 证据，截图 dsh-web-3.1b-*.png）；560px 容器查询面板无横向溢出（scrollWidth=clientWidth）；关闭/重开单 host 单 style。生产入口切换（daemon 默认挂 DSH host、SPA 仅恢复夹具）属 3.2/4.1 收尾。
 
-- [ ] 3.1c 迁移 Creator/Repository surfaces。
+- [x] 3.1c 迁移 Creator/Repository surfaces。
   - Files: `packages/skill-creator-dsh-client/src/manager/`, `webui/src/lib/apps/creator/`, `webui/src/lib/apps/repository/`, `src/shared/`。
   - Steps: 在同一 host 内迁移 Creator 编辑和 Repository pinned preview/install；保留 dirty draft、revision conflict、session expiry、recovery 状态，不重写 Manager authority。
   - Acceptance: DSH host 内 Creator 编辑和 Repository 预览安装可达；与官方 session 往返不丢 draft；实际文件树和 pinned commit 证据正确；1100px/680px 无横向溢出。
   - Ownership: 本阶段只实现挂载、路由、store bridge 与原有操作可达性；专属 workflow 控件和全部 action/recovery 用户流程由下一阶段 `steward-product-workflow` 唯一实现，不重复构建。
+  - Evidence: IslandRoot 匹配面从单一 Workspaces App 扩到三 App（manifest activities 复用 SPA 同源路由树，零 manifest 改动）；`creator-editor.svelte.ts` 新增跨卸载草稿缓存（route identity 键 + 快照隔离）与身份级 hydration 标记——同一身份只自动 hydrate 一次（子视图往返/断线重连/island 重开不重置 baseline，显式 Reload/Retry 走 reset；delete 清缓存）。浏览器验收（`scripts/dsh-manager-island-live.sh.ts` 真实 skills 探测）：island 内 Creator 编辑器可达（CreatorHome → New skill，ws_bcafc73bcbac89a26a92417e / aider-desk）；dirty draft（dir/name/desc/body 四字段）经 island 关闭→重开→重导航完整恢复；Create 保存真实落盘 `ws/.aider-desk/skills/final-save-probe/SKILL.md`（frontmatter+body）。Repository Discover 可达，扫描 Anthropic 官方源（pinned commit `41bbe19d1a1a`、20 skills、真实网络 clone），勾选 academy-guide + 目标 island-ws/AiderDesk → Install → `ws/.aider-desk/skills/academy-guide/SKILL.md` 落盘（截图 dsh-web-3.1c-*.png）；Creator/Repository 视图 1100px/680px 均 scrollWidth=clientWidth 无横向溢出；0 JS 错误。单测 `webui/src/lib/__tests__/creator-draft-cache.test.ts` 3/3（键语义/快照隔离/hydration 标记）。工具限制声明：bb-browser 合成 input 事件不触发 Svelte bind，表单输入用 `execCommand('insertText')` 真实编辑管线完成（dsh-web-3.1c-creator-saved.png 可见表单值）。
 
 - [ ] 3.2 删除双入口和旧 ACP 产品叙事。
   - Files: `webui/src/routes/`, `webui/src/lib/components/creator/acp-panel.svelte`, `README.md`, `src/shared/rpc-contract.ts`。

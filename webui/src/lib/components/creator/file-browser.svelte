@@ -8,7 +8,15 @@
   妥协声明：编辑器用 monospace textarea（CodeMirror 懒加载留待后续迭代）。
 -->
 <script lang="ts">
-  import { useCreatorEditor, draftToFrontmatter } from "$lib/stores/creator-editor.svelte";
+  import {
+    useCreatorEditor,
+    draftToFrontmatter,
+    creatorDraftKey,
+    dropCachedCreatorDraft,
+    isDraftHydrated,
+    markDraftHydrated,
+    resetDraftHydration,
+  } from "$lib/stores/creator-editor.svelte";
   import { loadSkillDoc, removeSkill, saveSkill } from "$lib/store.svelte";
   import { showToast } from "$lib/toast.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
@@ -33,8 +41,12 @@
   let saving = $state(false);
 
   // edit 模式：挂载或 skillId 变化时拉取文档并 hydrate 草稿。
+  // 3.1c：同一身份只自动 hydrate 一次——子视图往返 / 断线重连 / island 重开（缓存
+  // 草稿恢复）不重置 baseline；显式 Reload/Retry 走 resetDraftHydration 后重拉。
   $effect(() => {
     if (draft.mode !== "edit" || draft.skillId === null) return;
+    const key = creatorDraftKey(draft.target, "edit", draft.skillId);
+    if (key !== null && isDraftHydrated(key)) return;
     void loadDocument(draft.target, draft.skillId);
   });
 
@@ -49,6 +61,8 @@
       const document = await loadSkillDoc(target, skillId);
       if (!request.isCurrent()) return;
       editor.hydrateFromDocument(document);
+      const key = creatorDraftKey(target, "edit", skillId);
+      if (key !== null) markDraftHydrated(key);
     } catch (error) {
       if (!request.isCurrent()) return;
       loadError = error instanceof Error ? error.message : String(error);
@@ -57,9 +71,11 @@
     }
   }
 
-  /** 重载当前 edit 模式技能文档（null-safe 包装，供模板回调）。 */
+  /** 重载当前 edit 模式技能文档（conflict 恢复 / 手动 Retry；null-safe 包装）。 */
   function reloadCurrent(): void {
     if (draft.mode === "edit" && draft.skillId) {
+      const key = creatorDraftKey(draft.target, "edit", draft.skillId);
+      if (key !== null) resetDraftHydration(key);
       void loadDocument(draft.target, draft.skillId);
     }
   }
@@ -117,6 +133,9 @@
       });
       // 新建成功后切换到 edit 语义（后续保存走 update）。
       editor.hydrateFromDocument(result.document);
+      // 文档刚由服务器返回：标记新身份已 hydrate，避免 FileBrowser 立即重拉。
+      const createdKey = creatorDraftKey(draft.target, "edit", result.document.skillId);
+      if (createdKey !== null) markDraftHydrated(createdKey);
       showToast("Skill created.");
     } catch (error) {
       handleSaveError(error);
@@ -154,6 +173,12 @@
       await removeSkill({ target: draft.target, skillId, expectedRevision: revision });
       deleteOpen = false;
       showToast("Skill deleted.");
+      // 身份已消亡：清掉跨卸载缓存与 hydration 标记，防止重开残留死草稿。
+      const deletedKey = creatorDraftKey(draft.target, "edit", skillId);
+      if (deletedKey !== null) {
+        dropCachedCreatorDraft(deletedKey);
+        resetDraftHydration(deletedKey);
+      }
       await goto("/creator");
     } catch (error) {
       if (error instanceof ORPCError && error.code === "CONFLICT") {
