@@ -21,7 +21,6 @@ import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import { DomainError } from "../src/daemon/domain-error.js";
 import { createCodexAppServerAdapter } from "../src/daemon/steward/codex-adapter.js";
-import { createDshHarnessAdapter } from "../src/daemon/steward/dsh-adapter.js";
 import { createFixtureHarnessAdapter } from "../src/daemon/steward/fixture-adapter.js";
 import type { HarnessAdapter } from "../src/daemon/steward/harness-adapter.js";
 import type { RunEvent, StewardRun } from "../src/shared/contracts/agent-steward.js";
@@ -496,21 +495,6 @@ describe("approval one-shot semantics", () => {
     await expect(domain.steward.approveProposal({ runId, proposalId })).rejects.toThrow(
       /terminal/i,
     );
-  });
-});
-
-describe("dsh adapter availability", () => {
-  it("reports typed unavailable when the configured ACP command is missing", async () => {
-    const adapter = createDshHarnessAdapter({ commandSpec: "definitely-missing-dsh-acp" });
-    await expect(adapter.handshake()).rejects.toBeInstanceOf(DomainError);
-    await expect(adapter.handshake()).rejects.toThrow(/backend/i);
-    await adapter.dispose();
-  });
-
-  it("rejects empty command configuration as typed unavailable", async () => {
-    const adapter = createDshHarnessAdapter({ commandSpec: "   " });
-    await expect(adapter.handshake()).rejects.toThrow(/SKILL_CREATOR_STEWARD_DSH_ACP_CMD/);
-    await adapter.dispose();
   });
 });
 

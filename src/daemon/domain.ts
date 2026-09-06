@@ -31,7 +31,6 @@ import {
   type SkillStewardPipelineService,
 } from "./steward/pipeline-service.js";
 import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
-import { createDshHarnessAdapter } from "./steward/dsh-adapter.js";
 import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
 import type { HarnessAdapter } from "./steward/harness-adapter.js";
 import { createWorkspaceRegistry, type WorkspaceRegistry } from "./workspace-registry/index.js";
@@ -41,7 +40,9 @@ import { createWorkspaceRegistry, type WorkspaceRegistry } from "./workspace-reg
  * unavailable）；fixture 仅在显式 env 开关下注册（测试/演示确定性 backend）。
  */
 function defaultStewardAdapters(): HarnessAdapter[] {
-  const adapters: HarnessAdapter[] = [createDshHarnessAdapter(), createCodexAppServerAdapter()];
+  // 旧 dsh-acp backend 已按 GOAL 移除（DSH 走 package composition 路线，见
+  // dsh-runtime-integration）；旧 steward 面只保留 codex app-server 与显式 fixture。
+  const adapters: HarnessAdapter[] = [createCodexAppServerAdapter()];
   if (process.env.SKILL_CREATOR_STEWARD_ENABLE_FIXTURE === "1") {
     adapters.unshift(createFixtureHarnessAdapter());
   }
