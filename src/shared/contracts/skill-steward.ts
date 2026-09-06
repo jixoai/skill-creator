@@ -1160,6 +1160,8 @@ export type SkillStewardRunInput = z.infer<typeof SkillStewardRunInputSchema>;
 /** run 输出：终态 + 提案清单（审批由后续 RPC 完成）。 */
 export const SkillStewardRunResultSchema = z.object({
   snapshotId: StewardSnapshotIdSchema,
+  /** DSH session 绑定（宿主可用且绑定成功时存在；展示面，durable 事实在 Manager audit）。 */
+  dshSessionId: z.string().min(1).optional(),
   terminal: z.string().min(1),
   acceptedResponses: z.number().int().nonnegative(),
   droppedLateResponses: z.number().int().nonnegative(),

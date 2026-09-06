@@ -32,6 +32,8 @@ export interface PersistedRunRecord {
   snapshotId: string;
   terminal: string;
   endedAt: string;
+  /** DSH session 绑定（task 2.1；展示面关联键，缺失表示宿主不可用或绑定失败）。 */
+  dshSessionId?: string;
 }
 
 /** 打开的 store（目录布局：steward-store/{runs,audits,grants}.jsonl）。 */
@@ -111,6 +113,9 @@ export function createStewardAuditStore(): StewardAuditStore {
             snapshotId: record.snapshotId,
             terminal: record.terminal,
             endedAt: record.endedAt,
+            ...(typeof record.dshSessionId === "string"
+              ? { dshSessionId: record.dshSessionId }
+              : {}),
           };
         }
         return null;

@@ -34,6 +34,7 @@ import {
 import type { CreatorService } from "../creator-service.js";
 import type { SkillService } from "../skill-service.js";
 import type { WorkspaceRegistry } from "../workspace-registry/index.js";
+import type { DshSessionBinder } from "./dsh-session-binder.js";
 
 /** fixture 任务类别 → 默认场景。 */
 const TASK_SCENARIO: Record<SkillStewardRunInput["taskKind"], FixtureScenario> = {
@@ -47,6 +48,11 @@ export function createSkillStewardPipelineService(deps: {
   workspaces: WorkspaceRegistry;
   skills: SkillService;
   creator: CreatorService;
+  /**
+   * DSH session 绑定（task 2.1 可选面）：宿主可用时 run 绑定官方 session 并投影
+   * 终态叙述；缺失/失败不影响 Manager run 本身（展示面降级，audit 仍完整）。
+   */
+  dshSessionBinder?: DshSessionBinder;
 }) {
   const store = createStewardAuditStore();
   const approval = createStewardApprovalService({
@@ -76,6 +82,18 @@ export function createSkillStewardPipelineService(deps: {
       },
     });
     const runId = StewardRunIdSchema.parse(`sr_${randomBytes(12).toString("hex")}`);
+    // task 2.1：run ↔ DSH session 绑定（宿主可用时）。失败降级为无绑定，不阻塞 run。
+    let dshSessionId: string | undefined;
+    const binder = deps.dshSessionBinder;
+    if (binder) {
+      const workspaceDir = deps.workspaces.resolveWritable(input.target).directory;
+      const bound = await binder.openBoundSession({
+        runId,
+        workspaceDir,
+        taskText: `Skill Steward ${input.taskKind} run（Manager run id ${runId}${input.skillIds?.length ? `；选定 ${input.skillIds.length} 个技能` : "；全量快照"}）`,
+      });
+      if (bound.ok) dshSessionId = bound.dshSessionId;
+    }
     const proposals: SkillStewardRunResult["proposals"] = [];
     const sink = {
       store(proposal: SkillProposal): StewardProposalId {
@@ -104,9 +122,27 @@ export function createSkillStewardPipelineService(deps: {
       snapshotId: snapshot.id,
       terminal: output.result.terminalReason,
       endedAt: new Date().toISOString(),
+      ...(dshSessionId === undefined ? {} : { dshSessionId }),
     });
+    // task 2.1：run 终态投影到 DSH session（turn/end 语义对齐 agent-loop）。
+    if (binder && dshSessionId !== undefined) {
+      binder.completeBoundSession({
+        dshSessionId,
+        summary: {
+          terminal: output.result.terminalReason,
+          acceptedResponses: output.acceptedResponses.length,
+          droppedLateResponses: output.droppedLateResponses.length,
+          toolCalls: output.toolCalls.length,
+          proposals: proposals.length,
+        },
+        ...(output.result.terminalReason === "completed"
+          ? {}
+          : { failureMessage: `terminal: ${output.result.terminalReason}` }),
+      });
+    }
     return {
       snapshotId: snapshot.id,
+      ...(dshSessionId === undefined ? {} : { dshSessionId }),
       terminal: output.result.terminalReason,
       acceptedResponses: output.acceptedResponses.length,
       droppedLateResponses: output.droppedLateResponses.length,

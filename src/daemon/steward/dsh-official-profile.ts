@@ -65,6 +65,12 @@ export interface OfficialWebProfileOptions {
 export async function bootOfficialWebProfile(
   options: OfficialWebProfileOptions,
 ): Promise<MinimalDshWebHost> {
+  // 存储隔离（2026-09-06 实测教训）：dsh-session-persistence/workspace 等 storage 单元
+  // 经 resolveDshHome()（env DSH_HOME ?? ~/.dsh）定位 storages 目录，不看本函数的
+  // home 参数——不设 env 时嵌入式组合会污染用户真实 ~/.dsh/storages。宿主在 boot
+  // 前固定 env 到本次 home，dispose 恢复原值（含删除原值场景）。
+  const previousDshHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = options.home;
   const profileDir = resolveProfileDir("web", options.home);
   initProfile(profileDir, ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"], "startup");
   fs.writeFileSync(
@@ -134,6 +140,8 @@ export async function bootOfficialWebProfile(
         server.close(() => resolve());
       });
       await (ctx as unknown as { fiber?: { dispose: () => Promise<void> } }).fiber?.dispose();
+      if (previousDshHome === undefined) delete process.env.DSH_HOME;
+      else process.env.DSH_HOME = previousDshHome;
     },
   };
 }

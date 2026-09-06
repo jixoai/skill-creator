@@ -46,3 +46,24 @@
 - 1.2 边界：全量 362/362（46 files）。
 - 2.1 step1 边界（47739b7）：全量 365/365（47 files）；typecheck 0 错；webui check 0/0；fmt/diff-check 干净；openspec 9/9。
 - 2.1 step2/3 起未完成。
+
+## 2.1 实测注记（step 2：浏览器交互验证）
+
+- 宿主：`DSH_WEB_LIVE_HOME=/tmp/dsh-web-live-fixed pnpm exec tsx scripts/dsh-web-live.sh.ts`（常驻官方 profile；固定 home 复用模式，脚本已提交）。工作区记录为 server 侧 `storages/workspace.json`（dsh-workspace defineDomain v2：path/title/sessionIds/时间戳，id=randomUUID）——「添加工作区」按钮走 koffi 原生目录选择器（本仓 allowBuilds 显式拒绝），web 端以 server 侧预置工作区验证。
+- 关键根因修复（提交 6b3595c）：官方 agent-presets 的 standard/minimal 行引用 `@deepseek-ai/dsh-persona`/`@deepseek-ai/dsh-tool-ask-user`（ptc 另需 `@deepseek-ai/dsh-agent-tool-presentation`），不在 dsh-base 闭包内；heal 的 module fallback 只遍历根 manifest dependencies/peerDependencies。缺包时 `POST /api/session/create` 返回 200 包体 `agent-preset/invalid`（UI 静默不建会话）。三包已入根 dependencies。
+- 交互证据（内置浏览器，全程 0 JS 错误；POST /api/session/create、/api/session/prompt 均 200）：
+  - 首启：内测声明 modal → 选择工作区引导 → API Key 引导（稍后配置可跳过）。
+  - 设置面板：通用（权限默认模式/语言/外观/字号/对话显示/繁忙 Enter）/ 模型（DeepSeek 官方 provider 密钥 + 自定义提供方）/ 插件 / Agent 预设 tabs（dsh-web-2.1-settings*.png）。
+  - Agent 预设 tab：standard（当前使用）/PTC/minimal 全部挂载（修复前 2-3 行 unresolvable；修复后仅剩描述性提示，可选）。
+  - Composer 面：模型选择（当前 DeepSeek-V4-Flash + 推理等级 High）、Agent 预设选择（standard/PTC 菜单）、访问模式（仅可查看/工作区内修改/完全权限；完全权限有确认对话框文案）（-preset-menu/-access-modes/-model-menu.png）。
+  - 发送消息 → 真实 session 建立：侧边栏会话列表（标题+时间）、详情 tabs（对话/轨迹/系统提示词）、上下文注入行（AGENTS.md、@deepseek-ai/dsh-system-prompt、skill-catalog）、轮/步计数（dsh-web-2.1-session-transcript.png）。
+  - 无凭证运行失败呈现为类型化错误：`MISSING_CREDENTIAL` + 明确恢复指引（web Models 页写 key 或 DEEPSEEK_API_KEY）（dsh-web-2.1-missing-credential.png）——对齐 integration-contract「首次无凭证打开」行。
+- 待完成（step 3）：Steward run↔DSH session id 绑定（daemon 侧：packages/skill-creator-dsh-client/src/agent/ + rpc-contract + steward）；tool/permission 事件经 Manager 域工具流入官方 transcript；断线/取消/重连/daemon restart 恢复按钮。task 2.1 不勾。
+
+## 2.1 实测注记（step 3：run ↔ DSH session 绑定，daemon 侧）
+
+- 新模块 `src/daemon/steward/dsh-session-binder.ts`：`createDshSessionBinder({host})` 在官方组合内以 `ctx.sessions.create`（meta.cwd=workspace realpath）+ `workspaceRegistry.resolveByPath ?? create` + `attachSession`（cwd 对齐校验由官方 registry 执行）建立 workspace 归属 session；事件语法实测对齐 dsh-agent-loop：`session/title` → `turn/start` → `step/start` → `user/message`（`createUserMessage`，source kind "user"）→（run 终态）`assistant/message`（`createAssistantMessage`，source provider "skill-creator-steward"）→ `step/end` → `turn/end`（reason completed/error）。durable 事实仍只写 Manager audit-store；DSH 侧是纯展示投影（tools 逐 call 关联按任务归属归 2.2）。
+- 绑定链：`SkillStewardRunResultSchema` + 可选 `dshSessionId`；`PersistedRunRecord` 同步携带（listRuns 收窄透传）；`createSkillStewardPipelineService` 可注入 `dshSessionBinder`（宿主不可用/绑定失败 → run 正常完成、结果无绑定字段，无假成功）。生产 daemon 的 host 生命周期按任务归属归 3.1a，本步交付绑定面 + 注入测试。
+- 存储隔离教训（重要，已修复）：dsh storage 单元经 `resolveDshHome()`（env DSH_HOME ?? ~/.dsh）定位 storages，不看 boot 的 home 参数；`bootOfficialWebProfile` 现在在 boot 前固定 `process.env.DSH_HOME = home`、dispose 恢复（含删除原值）。修复前 binder 测试曾把两条临时 workspace 记录写进用户真实 `~/.dsh/storages/workspace.json`——已按 entry 精确清除（仅两条 /var/folders 测试路径），用户原有 4 条 workspace 记录未动，留 `.bak-zcode-pollution` 备份核对。
+- 测试 `test/dsh-session-binder.test.ts` 3/3：typed HOST_UNAVAILABLE；真实官方组合内 openBoundSession（workspace.json sessionIds 收录 + store 事件语法断言）+ completeBoundSession 终态；pipeline 注入后 startRun 结果与 runs.jsonl 均携带 dshSessionId 且 DSH 侧呈现终态叙述。`test/dsh-official-profile.test.ts` 3/3 复跑通过（env 隔离无回归）。
+- 门禁（step 3 边界）：全量 374/374（48 files）；typecheck 0；目标文件 fmt 绿；git diff --check 干净。
