@@ -31,9 +31,18 @@
 - 手写 JS 插件包（无构建链）：Loader 的 internal.import 是原生 ESM，node half 不能是 TS。
 - 单 RPC owner 语义在 factory 闭包内固化；传输（daemon loopback / DSH connection channel）归 3.1a。
 
+## 2.1 实测注记（step 1）
+
+- 路线决策：api-session-controller 的 peer 链 26 包（sessions/persistence/projection/agents/llm/jobs/subagent/...）证明子集拼装必然滚成完整 base 层——正路是官方 profile 机制（dsh-app-boot：initProfile/loadProfile/healProfilesModuleFallback/boot），bundles = dsh-base（85 rows 单包闭包）+ dsh-web-app。
+- 首次失败链：webserver row `inject: [webStartup]`（非仅 config 表达式）；disable web-startup 会级联 7 entries pending。正解 = prepare 钩子提供 cmdlineArgs launcher seam（等价 dsh-cmdline provideCmdline：ctx.provide("cmdlineArgs",{get}) + appExit），web-startup 真实解析 `--no-open --port 0` 并 provide webStartup。
+- healProfilesModuleFallback 把本仓 node_modules 闭包 symlink 进 $DSH_HOME/profiles/node_modules——profile rows 的裸包名经 Node parent-walk 解析，无需 profile 内 install。
+- 完整 profile 启动 ~4s：85+ rows 全激活（assertEntriesActivated）；index 注入完整 roster（337 个 dsh-client-* 引用；ui-settings/ui-session/ui-chat/ui-approval 全在）；combo scripts 可服务；干净 home dispose→重启 ready。
+- 待完成（step 2/3）：内置浏览器交互验证（model/profile 选择、session/tool/permission 事件、断线/取消/重连/重启恢复按钮）与 Steward run↔DSH session id 绑定面（daemon 侧）。task 2.1 不勾。
+
 ## 门禁状态
 
 - 0.1 边界：全量 354/354（44 files）。
 - 1.1 边界：全量 358/358（45 files）。
-- 1.2 边界：全量 362/362（46 files）；typecheck 0 错；webui check 0/0；fmt/diff-check 干净；openspec 9/9。
-- 2.1 起未完成。
+- 1.2 边界：全量 362/362（46 files）。
+- 2.1 step1 边界（47739b7）：全量 365/365（47 files）；typecheck 0 错；webui check 0/0；fmt/diff-check 干净；openspec 9/9。
+- 2.1 step2/3 起未完成。
