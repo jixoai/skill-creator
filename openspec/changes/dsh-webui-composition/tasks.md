@@ -27,10 +27,11 @@
   - Acceptance: 一次真实 DSH tool round 在 transcript 与 Manager audit 中可对应；重复渲染/重连不重新执行工具；领域白名单保持不变。
   - Evidence: `dsh-session-binder.recordToolRounds`（tool/call+tool/result 事件对，callId=SkillToolCall.id；幂等投影不重复不执行）+ `PersistedRunRecord.toolCalls` 关联清单 + pipeline 顺序投影；`test/dsh-tool-composition.test.ts` 2/2（callId 双侧对应、重复投影 projected:0、域白名单断言）；浏览器验收 `scripts/dsh-tool-round-live.sh.ts`（官方 UI transcript 呈现「2 次工具调用」折叠行 + 终态叙述，dsh-web-2.2-*.png，0 JS 错误）。
 
-- [ ] 3.1a 把 Manager host/island 挂载到同一 DSH host。
+- [x] 3.1a 把 Manager host/island 挂载到同一 DSH host。
   - Files: `packages/skill-creator-dsh-client/src/manager/`, `webui/src/lib/apps/`, `src/shared/`。
   - Steps: 只完成 root/slot、route identity、navigation adapter、single connection owner 和 island mount/unmount；保留现有 Manager 操作实现，不批量改写页面。
   - Acceptance: 一个可运行的 DSH host 同时显示一个原有 ProviderView 和一个 DSH session transcript；重连/卸载无第二 root、iframe 或重复 RPC owner。此任务不包含 Creator/Repository 迁移。
+  - Evidence: 652e0ed（`WebServer.mountDsh` 同源分区：Manager /ws/rpc + /api/health + /manager/* 资产前缀，DSH 官方 route HTTP/升级双代理，SPA 静态回退=恢复入口；test/dsh-manager-mount.test.ts 路由分区 + token 握手过代理 + 卸载恢复）+ 491b86b（插件 `sidebar.footer.action` Manager 入口 + `/manager/dsh-island.js` Svelte island：IslandRoot/IslandShell 复用 shell 路由树、NavControllerAdapter + $app/* shims、entry 等 Manager 连接再挂载；协议测试 apply/inject + owner 单例幂等）+ 本轮提交（升级代理 origin 改写修复：DSH connection 的 remote 流是 `/api/remote.mux` WebSocket，缺 origin 改写时 403 静默重连）。浏览器验收：同一 DSH 页面 transcript（绑定 Steward 会话「2 次工具调用」+ 终态）与原有 ProviderView island 同屏（dsh-web-3.1a-same-page-*.png / -final-same-page.png；0 JS 错误、0 连接重试）；island 关闭→0 残留、重开→1 host/1 style/1 link 无重复。插件包路径为 lib/（手写无构建链），src/manager/ 归并其内。
 
 - [ ] 3.1b 迁移 Workspaces/Provider/Skill surfaces。
   - Files: `packages/skill-creator-dsh-client/src/manager/`, `webui/src/lib/apps/`, `src/shared/`。

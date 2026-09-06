@@ -104,6 +104,23 @@ const dshServer = dsh.server();
 if (!dshServer) throw new Error("official profile booted without an HTTP server");
 web.mountDsh({ host: dsh.record.host, port: dsh.record.port, server: dshServer });
 
+// 同屏验收素材：跑一次绑定 DSH session 的 steward run（transcript 含 tool rounds）。
+const { createDshSessionBinder } = await import("../src/daemon/steward/dsh-session-binder.ts");
+const { createSkillStewardPipelineService } =
+  await import("../src/daemon/steward/pipeline-service.ts");
+const binder = createDshSessionBinder({ host: () => dsh });
+const pipeline = createSkillStewardPipelineService({
+  workspaces: domain.workspaces,
+  skills: domain.skills,
+  creator: domain.creator,
+  dshSessionBinder: binder,
+});
+const run = await pipeline.startRun({
+  target: { workspaceId: workspace.id, providerId: ProviderIdSchema.parse("openclaw") },
+  taskKind: "check",
+});
+console.log(`bound steward run: dshSession=${run.dshSessionId} toolCalls=${run.toolCalls}`);
+
 const dshToken = new URL(dsh.record.authenticatedUrl).searchParams.get("token") ?? "";
 const entry = `http://127.0.0.1:${port}/?token=${dshToken}#token=${encodeURIComponent(webToken)}`;
 fs.writeFileSync(path.join(root, "dsh-manager-island.url"), `${entry}\n`, "utf8");

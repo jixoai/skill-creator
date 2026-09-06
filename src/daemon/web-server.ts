@@ -293,13 +293,20 @@ export class WebServer {
       socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
       return;
     }
-    const headers = { ...request.headers, host: `${mount.host}:${mount.port}` };
+    // 与 HTTP 代理同源的 origin 改写：浏览器升级携带 daemon origin，DSH host 的
+    // Origin/Host 校验以自身 origin 为准（remote.mux 等通道在 403 下静默重连）。
+    const headers = {
+      ...request.headers,
+      host: `${mount.host}:${mount.port}`,
+      origin: `http://${mount.host}:${mount.port}`,
+      connection: "Upgrade",
+    };
     const proxy = http.request({
       host: mount.host,
       port: mount.port,
       method: request.method,
       path: request.url,
-      headers: { ...headers, connection: "Upgrade" },
+      headers,
     });
     proxy.on("upgrade", (upstream, upstreamSocket, upstreamHead) => {
       socket.write(
