@@ -1,0 +1,595 @@
+{
+  "generatedAt": "2026-09-06",
+  "snapshotId": "snap_0123456789abcdef",
+  "runId": "sr_0123456789abcdef01234567",
+  "note": "Deterministic fixture transcripts: same snapshot + scenario replays identically.",
+  "runs": {
+    "valid-check": {
+      "terminalReason": "completed",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "collecting"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.list_context",
+          "result": {
+            "kind": "ok",
+            "value": {
+              "snapshotId": "snap_0123456789abcdef",
+              "scopeKind": "imported",
+              "target": {
+                "workspaceId": "ws_0a1b2c3d4e5f6a7b8c9d0e1f",
+                "providerId": "openclaw"
+              },
+              "skills": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "name": "deploy-web",
+                  "directoryName": "deploy-web",
+                  "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                  "disabled": false,
+                  "byteSize": 133
+                },
+                {
+                  "skillId": "sk_b1b2c3d4e5f6a7b8c9d0e1f2",
+                  "name": "deploy-api",
+                  "directoryName": "deploy-api",
+                  "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+                  "disabled": false,
+                  "byteSize": 132
+                },
+                {
+                  "skillId": "sk_c1b2c3d4e5f6a7b8c9d0e1f2",
+                  "name": "audit-logs",
+                  "directoryName": "audit-logs",
+                  "revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                  "disabled": false,
+                  "byteSize": 98
+                }
+              ],
+              "resources": 2
+            }
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.relations",
+          "result": {
+            "kind": "ok",
+            "value": {
+              "edges": [
+                {
+                  "kind": "overlap",
+                  "skillIds": [
+                    "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                    "sk_b1b2c3d4e5f6a7b8c9d0e1f2"
+                  ],
+                  "findingIds": [
+                    "fn_139b2514139b2514"
+                  ]
+                }
+              ],
+              "findings": [
+                {
+                  "id": "fn_139b2514139b2514",
+                  "kind": "duplicate-trigger",
+                  "severity": "warning",
+                  "message": "Enabled skills share trigger tokens: Bash, Read.",
+                  "skillIds": [
+                    "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                    "sk_b1b2c3d4e5f6a7b8c9d0e1f2"
+                  ],
+                  "observedRevisions": {
+                    "sk_a1b2c3d4e5f6a7b8c9d0e1f2": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                    "sk_b1b2c3d4e5f6a7b8c9d0e1f2": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                  },
+                  "evidence": [
+                    {
+                      "label": "deploy-web allowed-tools",
+                      "snippet": "Bash, Read"
+                    },
+                    {
+                      "label": "deploy-api allowed-tools",
+                      "snippet": "Bash, Read"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "analyzing"
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "finding",
+            "finding": {
+              "contractVersion": "1.0.0",
+              "origin": "deterministic",
+              "severity": "warning",
+              "category": "duplicate-trigger",
+              "message": "Enabled skills share trigger tokens: Bash, Read.",
+              "skillIds": [
+                "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                "sk_b1b2c3d4e5f6a7b8c9d0e1f2"
+              ],
+              "observedRevisions": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                },
+                {
+                  "skillId": "sk_b1b2c3d4e5f6a7b8c9d0e1f2",
+                  "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                }
+              ],
+              "evidence": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "path": "SKILL.md",
+                  "snippet": "Bash, Read"
+                },
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "snippet": "Bash, Read"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "terminal",
+            "reason": "completed"
+          }
+        }
+      ],
+      "droppedLateResponses": 0
+    },
+    "valid-optimize": {
+      "terminalReason": "completed",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.inspect",
+          "result": {
+            "kind": "ok",
+            "value": {
+              "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+              "name": "deploy-web",
+              "directoryName": "deploy-web",
+              "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "disabled": false,
+              "content": "---\nname: deploy-web\ndescription: Deploy the web app.\nallowed-tools: Bash, Read\n---\n# deploy-web\n\nRuns `scripts/deploy-web.sh` and reads ./assets/web.env.\n",
+              "byteSize": 133
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "proposing"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.propose",
+          "result": {
+            "kind": "ok",
+            "value": {
+              "proposalId": "spp_0000000000000001"
+            }
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.validate_proposal",
+          "result": {
+            "kind": "ok",
+            "value": {
+              "overall": "valid",
+              "checks": [
+                {
+                  "name": "bind",
+                  "status": "passed"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "proposal",
+            "proposal": {
+              "contractVersion": "1.0.0",
+              "action": "edit",
+              "patch": {
+                "kind": "edit",
+                "snapshotId": "snap_0123456789abcdef",
+                "edits": [
+                  {
+                    "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                    "expectedRevision": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                    "frontmatter": {
+                      "name": "deploy-web",
+                      "description": "deploy-web maintenance optimized by the skill steward."
+                    },
+                    "body": "# deploy-web\n\nRuns `scripts/deploy-web.sh` and reads ./assets/web.env.\n<!-- steward-optimized snap_0123456789abcdef -->\n"
+                  }
+                ]
+              },
+              "rationale": "Deterministic optimize: description restated with explicit scope.",
+              "findingIds": [],
+              "evidence": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "path": "SKILL.md",
+                  "snippet": "---\nname: deploy-web\ndescription: Deploy the web app.\nallowe"
+                }
+              ],
+              "skillIds": [
+                "sk_a1b2c3d4e5f6a7b8c9d0e1f2"
+              ],
+              "observedRevisions": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "terminal",
+            "reason": "completed",
+            "message": "proposal awaits human approval"
+          }
+        }
+      ],
+      "droppedLateResponses": 0
+    },
+    "valid-organize": {
+      "terminalReason": "completed",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "proposing"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.propose",
+          "result": {
+            "kind": "ok",
+            "value": {
+              "proposalId": "spp_0000000000000001"
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "proposal",
+            "proposal": {
+              "contractVersion": "1.0.0",
+              "action": "split",
+              "patch": {
+                "kind": "split",
+                "snapshotId": "snap_0123456789abcdef",
+                "source": {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "expectedRevision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                },
+                "targets": [
+                  {
+                    "directoryName": "deploy-web-plan",
+                    "frontmatter": {
+                      "name": "deploy-web-plan",
+                      "description": "Plan deploy-web work."
+                    },
+                    "body": "# deploy-web-plan\n\nPlanning half of deploy-web.\n",
+                    "resources": []
+                  },
+                  {
+                    "directoryName": "deploy-web-exec",
+                    "frontmatter": {
+                      "name": "deploy-web-exec",
+                      "description": "Execute deploy-web work."
+                    },
+                    "body": "# deploy-web-exec\n\nExecution half of deploy-web.\n",
+                    "resources": []
+                  }
+                ]
+              },
+              "rationale": "Deterministic organize: split planning from execution.",
+              "findingIds": [],
+              "evidence": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "path": "SKILL.md",
+                  "snippet": "---\nname: deploy-web\ndescription: Deploy the web app.\nallowe"
+                }
+              ],
+              "skillIds": [
+                "sk_a1b2c3d4e5f6a7b8c9d0e1f2"
+              ],
+              "observedRevisions": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "terminal",
+            "reason": "completed",
+            "message": "proposal awaits human approval"
+          }
+        }
+      ],
+      "droppedLateResponses": 0
+    },
+    "malformed": {
+      "terminalReason": "failed",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.propose",
+          "result": {
+            "kind": "failed",
+            "code": "INVALID_OPERATION",
+            "message": "Proposal failed contract validation: contractVersion Invalid input: expected string, received undefined"
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "terminal",
+            "reason": "failed",
+            "message": "malformed proposal rejected as expected"
+          }
+        }
+      ],
+      "droppedLateResponses": 0
+    },
+    "stale": {
+      "terminalReason": "failed",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.propose",
+          "result": {
+            "kind": "failed",
+            "code": "STALE",
+            "message": "Skill sk_a1b2c3d4e5f6a7b8c9d0e1f2 expected sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff but snapshot holds sha256:1111111111111111111111111111111111111111111111111111111111111111."
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "terminal",
+            "reason": "failed",
+            "message": "stale revision rejected as expected"
+          }
+        }
+      ],
+      "droppedLateResponses": 0
+    },
+    "disconnect": {
+      "terminalReason": "disconnected",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "analyzing",
+            "note": "connection lost mid-analysis"
+          }
+        }
+      ],
+      "droppedLateResponses": 0
+    },
+    "cancel": {
+      "terminalReason": "cancelled",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "analyzing",
+            "note": "long analysis"
+          }
+        }
+      ],
+      "droppedLateResponses": 0
+    },
+    "late-event": {
+      "terminalReason": "completed",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.propose",
+          "result": {
+            "kind": "ok",
+            "value": {
+              "proposalId": "spp_0000000000000001"
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "proposal",
+            "proposal": {
+              "contractVersion": "1.0.0",
+              "action": "edit",
+              "patch": {
+                "kind": "edit",
+                "snapshotId": "snap_0123456789abcdef",
+                "edits": [
+                  {
+                    "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                    "expectedRevision": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                    "frontmatter": {
+                      "name": "deploy-web",
+                      "description": "deploy-web maintenance optimized by the skill steward."
+                    },
+                    "body": "# deploy-web\n\nRuns `scripts/deploy-web.sh` and reads ./assets/web.env.\n<!-- steward-optimized snap_0123456789abcdef -->\n"
+                  }
+                ]
+              },
+              "rationale": "Deterministic optimize: description restated with explicit scope.",
+              "findingIds": [],
+              "evidence": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "path": "SKILL.md",
+                  "snippet": "---\nname: deploy-web\ndescription: Deploy the web app.\nallowe"
+                }
+              ],
+              "skillIds": [
+                "sk_a1b2c3d4e5f6a7b8c9d0e1f2"
+              ],
+              "observedRevisions": [
+                {
+                  "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+                  "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "terminal",
+            "reason": "completed",
+            "message": "terminal before late events"
+          }
+        }
+      ],
+      "droppedLateResponses": 1
+    },
+    "approval-replay": {
+      "terminalReason": "completed",
+      "transcript": [
+        {
+          "type": "response",
+          "response": {
+            "kind": "stage",
+            "stage": "started"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.apply_proposal",
+          "result": {
+            "kind": "denied",
+            "reason": "principal-forbidden",
+            "requestedOperation": "skills.apply_proposal"
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "skills.apply_proposal",
+          "result": {
+            "kind": "denied",
+            "reason": "principal-forbidden",
+            "requestedOperation": "skills.apply_proposal"
+          }
+        },
+        {
+          "type": "response",
+          "response": {
+            "kind": "terminal",
+            "reason": "completed",
+            "message": "agent apply denied twice as expected"
+          }
+        }
+      ],
+      "droppedLateResponses": 0
+    }
+  },
+  "determinismVerified": [
+    "valid-check",
+    "late-event"
+  ]
+}
