@@ -1,0 +1,64 @@
+{
+  "id": "snap_0123456789abcdef",
+  "createdAt": "2026-09-06T00:00:00.000Z",
+  "target": {
+    "workspaceId": "~",
+    "providerId": "claude-code"
+  },
+  "scopeKind": "global",
+  "skills": [
+    {
+      "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+      "name": "deploy-web",
+      "directoryName": "deploy-web",
+      "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "disabled": false,
+      "content": "---\nname: deploy-web\ndescription: Deploy the web app.\nallowed-tools: Bash, Read\n---\n# deploy-web\n\nRuns `scripts/deploy-web.sh` and reads ./assets/web.env.\n",
+      "byteSize": 133
+    },
+    {
+      "skillId": "sk_b1b2c3d4e5f6a7b8c9d0e1f2",
+      "name": "deploy-api",
+      "directoryName": "deploy-api",
+      "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "disabled": false,
+      "content": "---\nname: deploy-api\ndescription: Deploy the api app.\nallowed-tools: Bash, Read\n---\n# deploy-api\n\nRuns `scripts/deploy-api.sh` and reads ./assets/api.env.\n",
+      "byteSize": 132
+    },
+    {
+      "skillId": "sk_c1b2c3d4e5f6a7b8c9d0e1f2",
+      "name": "audit-logs",
+      "directoryName": "audit-logs",
+      "revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "disabled": false,
+      "content": "---\nname: audit-logs\ndescription: Audit log exports.\nallowed-tools: Grep\n---\n# audit-logs\n\nReads ./references/fields.md.\n",
+      "byteSize": 98
+    }
+  ],
+  "resources": [
+    {
+      "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+      "relPath": "scripts/deploy-web.sh",
+      "hash": "aaaaaaaabbbbbbbbccccccccddddddddaaaaaaaabbbbbbbbccccccccdddddddd",
+      "byteSize": 420,
+      "kind": "file"
+    },
+    {
+      "skillId": "sk_b1b2c3d4e5f6a7b8c9d0e1f2",
+      "relPath": "assets/api.env",
+      "hash": "bbbbbbbbaaaaaaaaccccccccddddddddbbbbbbbbaaaaaaaaccccccccdddddddd",
+      "byteSize": 64,
+      "kind": "file"
+    }
+  ],
+  "promptVersion": "1.0.0",
+  "toolVersion": "1.0.0",
+  "capabilities": {
+    "backendId": "fixture",
+    "version": "fixture-1",
+    "streamingEvents": true,
+    "cancellation": true,
+    "permissionRequests": true,
+    "executionRoot": "isolated"
+  }
+}

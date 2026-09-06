@@ -1,0 +1,29 @@
+{
+  "contractVersion": "1.0.0",
+  "action": "disable",
+  "patch": {
+    "kind": "disable",
+    "snapshotId": "snap_0123456789abcdef",
+    "selections": [
+      {
+        "skillId": "sk_b1b2c3d4e5f6a7b8c9d0e1f2",
+        "expectedRevision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    ],
+    "reason": "deploy-api duplicates deploy-web's trigger set and asset pipeline; keeping both causes the manager to run conflicting deployments."
+  },
+  "rationale": "Both skills share the exact allowed-tools surface and script layout; the evidence cites both triggers and the shared script path.",
+  "findingIds": [],
+  "evidence": [],
+  "skillIds": ["sk_b1b2c3d4e5f6a7b8c9d0e1f2"],
+  "observedRevisions": [
+    {
+      "skillId": "sk_b1b2c3d4e5f6a7b8c9d0e1f2",
+      "revision": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+      "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  ]
+}

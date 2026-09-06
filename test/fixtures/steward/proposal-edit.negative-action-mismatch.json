@@ -1,0 +1,35 @@
+{
+  "contractVersion": "1.0.0",
+  "action": "disable",
+  "patch": {
+    "kind": "edit",
+    "snapshotId": "snap_0123456789abcdef",
+    "edits": [
+      {
+        "skillId": "sk_c1b2c3d4e5f6a7b8c9d0e1f2",
+        "expectedRevision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "frontmatter": {
+          "name": "audit-logs",
+          "description": "Audit and export structured log records for supported services."
+        },
+        "body": "# audit-logs\n\nReads ./references/fields.md and exports the documented field set.\n"
+      }
+    ]
+  },
+  "rationale": "The description is too vague to route correctly; the edited description states the concrete scope while behavior stays unchanged.",
+  "findingIds": [],
+  "evidence": [
+    {
+      "skillId": "sk_c1b2c3d4e5f6a7b8c9d0e1f2",
+      "path": "SKILL.md",
+      "snippet": "description: Audit log exports."
+    }
+  ],
+  "skillIds": ["sk_c1b2c3d4e5f6a7b8c9d0e1f2"],
+  "observedRevisions": [
+    {
+      "skillId": "sk_c1b2c3d4e5f6a7b8c9d0e1f2",
+      "revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  ]
+}
