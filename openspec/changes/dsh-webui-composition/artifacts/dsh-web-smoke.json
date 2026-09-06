@@ -1,0 +1,95 @@
+{
+  "artifactVersion": 1,
+  "generatedAt": "2026-09-06T13:45:46.323Z",
+  "generator": "scripts/dsh-web-smoke.sh.ts",
+  "cleanHome": "mkdtemp sandbox (SKILL_CREATOR_HOME + DSH_HOME isolated)",
+  "primary": {
+    "label": "primary",
+    "host": "127.0.0.1",
+    "port": 53671,
+    "entries": [
+      {
+        "id": "52000473",
+        "name": "@deepseek-ai/dsh-host-webserver"
+      },
+      {
+        "id": "415c42d9",
+        "name": "@deepseek-ai/dsh-credentials-local"
+      },
+      {
+        "id": "5ceeee9f",
+        "name": "@deepseek-ai/dsh-client-connection"
+      },
+      {
+        "id": "39370449",
+        "name": "@deepseek-ai/dsh-client-modules"
+      },
+      {
+        "id": "07e8f2c4",
+        "name": "@deepseek-ai/dsh-web-app"
+      }
+    ],
+    "activationOrder": [
+      "@deepseek-ai/dsh-host-webserver",
+      "@deepseek-ai/dsh-credentials-local",
+      "@deepseek-ai/dsh-client-connection",
+      "@deepseek-ai/dsh-client-modules",
+      "@deepseek-ai/dsh-web-app"
+    ],
+    "http": {
+      "unauthenticatedStatus": 401,
+      "tokenHandshakeStatus": 303,
+      "sessionCookieMinted": true,
+      "indexStatusWithSession": 200,
+      "indexBytes": 2991,
+      "bootManifestInjected": true,
+      "clientModuleReferences": 16,
+      "apiFencedStatus": 401
+    }
+  },
+  "recovery": {
+    "label": "recovered",
+    "host": "127.0.0.1",
+    "port": 53674,
+    "entries": [
+      {
+        "id": "97480353",
+        "name": "@deepseek-ai/dsh-host-webserver"
+      },
+      {
+        "id": "2cef0178",
+        "name": "@deepseek-ai/dsh-credentials-local"
+      },
+      {
+        "id": "2425513f",
+        "name": "@deepseek-ai/dsh-client-connection"
+      },
+      {
+        "id": "52ddc2b4",
+        "name": "@deepseek-ai/dsh-client-modules"
+      },
+      {
+        "id": "7c83b014",
+        "name": "@deepseek-ai/dsh-web-app"
+      }
+    ],
+    "activationOrder": [
+      "@deepseek-ai/dsh-host-webserver",
+      "@deepseek-ai/dsh-credentials-local",
+      "@deepseek-ai/dsh-client-connection",
+      "@deepseek-ai/dsh-client-modules",
+      "@deepseek-ai/dsh-web-app"
+    ],
+    "http": {
+      "unauthenticatedStatus": 401,
+      "tokenHandshakeStatus": 303,
+      "sessionCookieMinted": true,
+      "indexStatusWithSession": 200,
+      "indexBytes": 2991,
+      "bootManifestInjected": true,
+      "clientModuleReferences": 16,
+      "apiFencedStatus": 401
+    }
+  },
+  "recoveryReachedReady": true
+}
