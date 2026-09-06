@@ -73,3 +73,12 @@
 - 宿主进程整体死亡：浏览器层 ERR_CONNECTION_REFUSED + 重新加载入口（dsh-web-2.1-disconnected.png）；进程内 WS 断连横幅属官方 client-connection 自带行为（复用，不改写）。
 - 宿主重启（dispose → 同一固定 home 重启，端口/token 轮换）：workspace 与既有 session 列表完整恢复（「hello, this is a skill-creator · 12分钟」仍在侧边栏；dsh-web-2.1-restarted.png / -restarted-session-detail.png）——session persistence + workspace storage 的重启可验证状态成立；干净 home 的 dispose→二次 boot ready 已由 official-profile 测试与 smoke 脚本覆盖。
 - 2.1 勾选状态（诚实边界）：settings/model/preset/permission 选择面、session list/detail、transcript、类型化 MISSING_CREDENTIAL、断线/重启恢复均已有真实证据；「tool 事件进 transcript」与「运行中取消控件」按任务归属由 2.2 的 Manager tools 逐 call 关联（确定性、无需 LLM 凭据）与后续 Agent 运行面交付——2.1 checkbox 暂不勾，待 2.2 落地后合并浏览器验收再勾。
+
+## 2.2 实测注记（Manager tools → 官方 transcript）
+
+- 实现：`dsh-session-binder.recordToolRounds(dshSessionId, calls)`——每个 Manager `SkillToolCall` 一对官方事件 `tool/call`（{turn,step,callId,name,arguments}）+ `tool/result`（`createToolResultMessage`，`sourceEventSeqs` 引用 call 事件；failed 附 error code/message），callId 即 Manager 调用 id（跨体系关联键；brand 为零成本编译标记，边界一处显式转换）。纯投影：不注册工具、无执行入口；per-session callId 集合幂等（重连/重渲染再投影 → projected:0，不追加第二份事件，执行更不会重放）。
+- Manager 侧关联：`PersistedRunRecord.toolCalls`（id/tool/resultKind，denied 非域调用照实入档）随 runs.jsonl 落盘，listRuns 收窄透传；pipeline 在 completeBoundSession 前投影工具轮，事件顺序 user → tool rounds → assistant → step/end → turn/end 与 agent-loop 一致。
+- 测试 `test/dsh-tool-composition.test.ts` 2/2：(a) 真实 pipeline run（官方组合）——runs.jsonl 的每个 toolCalls[].id 都出现在 DSH session log 的 tool/call data.callId，tool/call 与 tool/result 数量配对，顺序断言，域调用全部落在 `AGENT_ALLOWED_TOOLS` 白名单；(b) 同批调用重复投影幂等（1 对事件，projected 1→0）。
+- 浏览器验收（`scripts/dsh-tool-round-live.sh.ts`：干净 home 官方 profile + daemon Workspace/技能 + binder 化 pipeline.startRun，terminal completed、toolCalls 2）：官方 UI 侧边栏出现绑定会话「Steward sr_67db76a7218049aa57a1f4db」；会话详情 transcript 呈现 user turn（含 Manager run id）、「2 次工具调用」折叠行、终态 assistant 叙述（responses/toolCalls/proposals 计数）、「1 轮 · 1 步」统计（dsh-web-2.2-tool-round-transcript.png / -tool-calls-expanded.png / -trace-tab.png；全程 0 JS 错误）。
+- 诚实边界：permission/approval 的交互对话框属官方 agent 运行面（需 LLM 凭据，最终产品阶段验收）；本 change 会话事件流已含 permission/preset + sandbox/mode + approval/policy（官方组合在 session 创建时自动附加，探针实证 seq 0-2），权限输入面（默认模式设置/会话访问模式三档+完全权限确认文案）已浏览器取证。
+- 门禁（2.2 边界）：全量 376/376（49 files）；typecheck 0；webui check 0/0；目标文件 fmt 绿；git diff --check 干净。

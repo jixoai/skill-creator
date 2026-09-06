@@ -13,13 +13,22 @@
  *       audit-store，DSH 侧不落任何审批/变更真相。
  *   [2] 生命周期投影：run 完成/失败各有一条终态事件路径（turn/end reason 语义对齐
  *       agent-loop：completed / error）。
- *   [3] 可选宿主：host 未启动时返回 typed HOST_UNAVAILABLE，pipeline 不因缺宿主失败。
- * 妥协声明：跨 cordis 服务访问按结构化 unknown 收窄（宿主服务形状无公开 TS 面）；
- *      Manager tools 事件与 transcript 的逐 call 关联按任务归属归 2.2，本模块不注册工具。
+ *   [3] tool round 投影（task 2.2）：Manager 域工具调用以 tool/call + tool/result
+ *       事件进入官方 transcript，callId 即 Manager SkillToolCall.id（关联键）；
+ *       纯投影——不注册工具、不建立执行入口，重复投影按 callId 幂等跳过。
+ *   [4] 可选宿主：host 未启动时返回 typed HOST_UNAVAILABLE，pipeline 不因缺宿主失败。
+ * 妥协声明：跨 cordis 服务访问按结构化 unknown 收窄（宿主服务形状无公开 TS 面）。
  */
 import fs from "node:fs/promises";
-import { createAssistantMessage, createUserMessage } from "@deepseek-ai/dsh-llm";
-import type { SkillStewardRunResult } from "../../shared/contracts/skill-steward.js";
+import {
+  createAssistantMessage,
+  createToolResultMessage,
+  createUserMessage,
+} from "@deepseek-ai/dsh-llm";
+import {
+  type SkillStewardRunResult,
+  type SkillToolCall,
+} from "../../shared/contracts/skill-steward.js";
 import type { MinimalDshWebHost } from "./dsh-web-host.js";
 
 /** 绑定失败（闭合 union；缺宿主不是错误路径）。 */
@@ -56,7 +65,11 @@ export interface StewardSessionCompleteInput {
 /** DSH Session 的最小结构面（append 返回含 seq 的事件记录）。 */
 interface DshSessionLike {
   id: string;
-  append(type: string, data: unknown, opts?: { surfaceOp?: "append" }): { seq: number };
+  append(
+    type: string,
+    data: unknown,
+    opts?: { surfaceOp?: "append"; sourceEventSeqs?: number[] },
+  ): { seq: number };
 }
 
 /** DSH workspace 实体的最小结构面。 */
@@ -111,6 +124,9 @@ export interface DshSessionBinderOptions {
 
 /** 创建绑定服务。 */
 export function createDshSessionBinder(options: DshSessionBinderOptions) {
+  /** 已投影的 tool call id（per session；重连/重渲染幂等，不重复投影）。 */
+  const recordedToolCallIds = new Map<string, Set<string>>();
+
   /** 打开一个绑定 run 的 DSH session（workspace 归属 + title + 单 turn user 侧）。 */
   async function openBoundSession(
     input: StewardSessionOpenInput,
@@ -206,7 +222,82 @@ export function createDshSessionBinder(options: DshSessionBinderOptions) {
     return { ok: true };
   }
 
-  return { openBoundSession, completeBoundSession };
+  /**
+   * 投影 Manager 域工具调用轮（task 2.2）：每个 SkillToolCall 一对
+   * tool/call + tool/result 事件，callId = Manager 调用 id（关联键）。
+   * 事件语法实测对齐 dsh-agent-loop（result 经 sourceEventSeqs 引用 call 事件）。
+   * 纯展示投影：这里不执行任何工具；同一 callId 重复投影幂等跳过
+   * （重连/重渲染不得产生第二份事件，更不得重新执行）。
+   */
+  function recordToolRounds(
+    dshSessionId: string,
+    calls: readonly SkillToolCall[],
+  ): { ok: true; projected: number } | { ok: false; failure: StewardSessionBindingFailure } {
+    const host = options.host();
+    if (!host) return { ok: false, failure: { kind: "HOST_UNAVAILABLE" } };
+    const surface = narrowHostSurface(host.ctx);
+    if ("kind" in surface) return { ok: false, failure: surface };
+    const session = surface.sessions.get(dshSessionId);
+    if (!session) {
+      return {
+        ok: false,
+        failure: { kind: "SERVICE_MISSING", service: `session:${dshSessionId}` },
+      };
+    }
+
+    let projected = 0;
+    for (const call of calls) {
+      let seen = recordedToolCallIds.get(dshSessionId);
+      if (!seen) {
+        seen = new Set<string>();
+        recordedToolCallIds.set(dshSessionId, seen);
+      }
+      if (seen.has(call.id)) continue;
+      const callSeq = session.append("tool/call", {
+        turn: 1,
+        step: 1,
+        callId: call.id,
+        name: call.tool,
+        arguments: {},
+      }).seq;
+      const isError = call.result.kind !== "ok";
+      session.append(
+        "tool/result",
+        {
+          turn: 1,
+          step: 1,
+          // 跨体系关联键：Manager SkillToolCall.id 直接充当 DSH 展示 callId
+          // （brand 是零成本编译标记；运行时就是同一字符串）。
+          message: createToolResultMessage({
+            callId: call.id as unknown as Parameters<typeof createToolResultMessage>[0]["callId"],
+            content: [{ type: "text", text: summarizeToolResult(call) }],
+            isError,
+          }),
+          ...(isError && call.result.kind === "failed"
+            ? { error: { code: call.result.code, message: call.result.message } }
+            : {}),
+        },
+        { surfaceOp: "append", sourceEventSeqs: [callSeq] },
+      );
+      seen.add(call.id);
+      projected += 1;
+    }
+    return { ok: true, projected };
+  }
+
+  return { openBoundSession, completeBoundSession, recordToolRounds };
+}
+
+/** 工具结果的一行摘要（transcript 折叠行文案；完整事实在 Manager audit）。 */
+function summarizeToolResult(call: SkillToolCall): string {
+  switch (call.result.kind) {
+    case "ok":
+      return `ok (${call.tool})`;
+    case "denied":
+      return `denied (${call.tool}): ${call.result.reason} — ${call.result.requestedOperation}`;
+    case "failed":
+      return `failed (${call.tool}): ${call.result.code} — ${call.result.message}`;
+  }
 }
 
 /** 绑定服务实例接口。 */

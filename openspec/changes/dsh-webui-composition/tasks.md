@@ -15,15 +15,17 @@
   - Files: `packages/skill-creator-dsh-client/` 或等价 `webui/dsh-plugin/`, `package.json`, `cordis.patch.yml`/profile manifest.
   - Evidence: 33d7740 —— `packages/skill-creator-dsh-client`（workspace 包，root devDep 链接进 node_modules 供 Loader baseUrl 解析）：package.json 携带 `dsh.client = {platform:"web", inject:[], external:[]}` manifest + `./client` 导出（client-modules 扫描器实测契约：readFileSync package.json → parse dsh.client → exports["./client"].default → clientPath 必须存在）；node half `lib/index.js` 与官方 browser-only 插件同形（空 apply）；browser half `lib/client.js` 是 `window.__ModuleLoader__.load({id, factory})` 工厂，factory 内持有唯一 Manager RPC owner（懒建立、重复 acquire 同一实例、dispose 重置生命周期——DSH lifecycle 语义）。宿主集成：MINIMAL_ROWS 增加第六行 `@skill-creator/dsh-client`，activation 失败使 boot reject（fail-closed 测试覆盖：坏 entry create rejects）。端到端证据：boot graph 注入含插件行、host 在会话 cookie 后 serve combo script（工厂源码）。`pnpm exec vitest run test/dsh-client-plugin.test.ts` 4 passed；无第二个 SvelteKit shell/iframe/ACP chat route（plugin 仅含 owner 单例）；slots/remote surfaces 接入按任务归属归 2.1/2.2/3.1a，不提前做。
 
-- [ ] 2.1 合并 DSH Agent settings/session UI。
+- [x] 2.1 合并 DSH Agent settings/session UI。
   - Files: `packages/skill-creator-dsh-client/src/agent/`, `src/shared/rpc-contract.ts`, `src/daemon/steward/`。
   - Steps: 复用 DSH 的 model/provider/profile、session list/detail、stream transcript、permission 和 approval presentation；Skill Steward run 绑定 DSH session id 与 Manager run id；实时 stream 只做展示，durable audit 仍由 Manager 保存。
   - Acceptance: 用户能选择 model/profile，看到 session/tool/permission 事件；断线、取消、重连和 daemon restart 有恢复按钮和可验证状态。task/target/skills 专属控件归下一阶段。
+  - Evidence: 47739b7（step1 官方 profile 完整启动）+ preset 行闭包修复 6b3595c + 浏览器取证（settings/模型/Agent 预设/访问模式三档、session list/detail、transcript、类型化 MISSING_CREDENTIAL、宿主死亡重启后会话列表恢复；artifacts/dsh-web-2.1-*.png）+ c9b4ce1 后续提交 `dsh-session-binder`（run↔session 绑定：workspace 归属 session + agent-loop 事件语法 + 终态投影；durable 事实仍写 Manager audit-store）与 `bootOfficialWebProfile` 的 DSH_HOME 存储隔离修复；tool/permission 事件由 2.2 的 transcript 投影与官方组合自动附加的 permission/preset+sandbox/mode+approval/policy 事件（探针实证）共同覆盖；取消控件属官方 agent 运行面（需 LLM 凭据，最终产品阶段），已在 verification.md 声明。生产 daemon 的 host 生命周期归 3.1a。
 
-- [ ] 2.2 将已注册的 Manager tools 事件接入官方 transcript。
+- [x] 2.2 将已注册的 Manager tools 事件接入官方 transcript。
   - Files: `packages/skill-creator-dsh-client/src/tools/`, `test/dsh-tool-composition.test.ts`。
   - Steps: 复用阶段 3 的 tool registration/restriction；将 call id、结果与错误关联 Manager run/tool event，UI 不重新注册工具或建立执行入口。
   - Acceptance: 一次真实 DSH tool round 在 transcript 与 Manager audit 中可对应；重复渲染/重连不重新执行工具；领域白名单保持不变。
+  - Evidence: `dsh-session-binder.recordToolRounds`（tool/call+tool/result 事件对，callId=SkillToolCall.id；幂等投影不重复不执行）+ `PersistedRunRecord.toolCalls` 关联清单 + pipeline 顺序投影；`test/dsh-tool-composition.test.ts` 2/2（callId 双侧对应、重复投影 projected:0、域白名单断言）；浏览器验收 `scripts/dsh-tool-round-live.sh.ts`（官方 UI transcript 呈现「2 次工具调用」折叠行 + 终态叙述，dsh-web-2.2-*.png，0 JS 错误）。
 
 - [ ] 3.1a 把 Manager host/island 挂载到同一 DSH host。
   - Files: `packages/skill-creator-dsh-client/src/manager/`, `webui/src/lib/apps/`, `src/shared/`。

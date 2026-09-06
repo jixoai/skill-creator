@@ -34,6 +34,8 @@ export interface PersistedRunRecord {
   endedAt: string;
   /** DSH session 绑定（task 2.1；展示面关联键，缺失表示宿主不可用或绑定失败）。 */
   dshSessionId?: string;
+  /** 工具调用关联清单（task 2.2；id 与 DSH transcript 的 tool/call callId 对应）。 */
+  toolCalls?: Array<{ id: string; tool: string; resultKind: string }>;
 }
 
 /** 打开的 store（目录布局：steward-store/{runs,audits,grants}.jsonl）。 */
@@ -115,6 +117,18 @@ export function createStewardAuditStore(): StewardAuditStore {
             endedAt: record.endedAt,
             ...(typeof record.dshSessionId === "string"
               ? { dshSessionId: record.dshSessionId }
+              : {}),
+            ...(Array.isArray(record.toolCalls)
+              ? {
+                  toolCalls: record.toolCalls.filter(
+                    (call): call is { id: string; tool: string; resultKind: string } =>
+                      typeof call === "object" &&
+                      call !== null &&
+                      typeof (call as Record<string, unknown>).id === "string" &&
+                      typeof (call as Record<string, unknown>).tool === "string" &&
+                      typeof (call as Record<string, unknown>).resultKind === "string",
+                  ),
+                }
               : {}),
           };
         }

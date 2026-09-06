@@ -116,16 +116,24 @@ export function createSkillStewardPipelineService(deps: {
       },
     });
     runProposals.set(snapshot.id, proposals);
-    // terminal run 持久投影（重启可读）。
+    // terminal run 持久投影（重启可读）。toolCalls 携带关联 id（task 2.2：与 DSH
+    // transcript 的 tool/call callId 一一对应；denied 的非域调用也如实入档）。
     await store.appendRun({
       runId,
       snapshotId: snapshot.id,
       terminal: output.result.terminalReason,
       endedAt: new Date().toISOString(),
       ...(dshSessionId === undefined ? {} : { dshSessionId }),
+      toolCalls: output.toolCalls.map((call) => ({
+        id: call.id,
+        tool: call.tool,
+        resultKind: call.result.kind,
+      })),
     });
     // task 2.1：run 终态投影到 DSH session（turn/end 语义对齐 agent-loop）。
     if (binder && dshSessionId !== undefined) {
+      // task 2.2：先投影 Manager 域工具轮（callId 关联），再收束 turn。
+      binder.recordToolRounds(dshSessionId, output.toolCalls);
       binder.completeBoundSession({
         dshSessionId,
         summary: {
