@@ -1217,3 +1217,159 @@ describe("resource mapping source identity at apply time (Codex R2 P1-2)", () =>
     expect(fs.existsSync(path.join(sandbox, "ws", "skills", "merged-skill"))).toBe(false);
   });
 });
+
+describe("apply-side resource defenses (Codex R3 P1-2/P2-2)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = ProviderIdSchema.parse("openclaw");
+  const capabilities = {
+    backendId: "fixture",
+    version: "fixture-1",
+    streamingEvents: true,
+    cancellation: true,
+    permissionRequests: true,
+    executionRoot: "isolated" as const,
+  };
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-apply-defense-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function seedTwoSources(): Promise<{
+    snapshot: SkillStewardContextSnapshot;
+    sourceA: SkillStewardContextSnapshot["skills"][number];
+    sourceB: SkillStewardContextSnapshot["skills"][number];
+  }> {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    for (const name of ["merge-left", "merge-right"]) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId,
+        directoryName: name,
+        frontmatter: { name, description: `${name} skill.` },
+        body: `# ${name}\n`,
+      });
+      fs.mkdirSync(path.join(directory, "skills", name, "shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(directory, "skills", name, "shared", "notes.md"),
+        name === "merge-left" ? "left-origin\n" : "right-origin\n",
+        "utf8",
+      );
+    }
+    const target = { workspaceId: workspace.id, providerId };
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const sourceA = snapshot.skills.find((skill) => skill.directoryName === "merge-left")!;
+    const sourceB = snapshot.skills.find((skill) => skill.directoryName === "merge-right")!;
+    return { snapshot, sourceA, sourceB };
+  }
+
+  function duplicateTargetProposal(
+    snapshot: SkillStewardContextSnapshot,
+    sourceA: SkillStewardContextSnapshot["skills"][number],
+    sourceB: SkillStewardContextSnapshot["skills"][number],
+  ): SkillProposal {
+    return {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "merge",
+      patch: {
+        kind: "merge",
+        snapshotId: snapshot.id,
+        sources: [
+          { skillId: sourceA.skillId, expectedRevision: sourceA.revision },
+          { skillId: sourceB.skillId, expectedRevision: sourceB.revision },
+        ],
+        target: {
+          directoryName: "merged-skill",
+          frontmatter: { name: "merged-skill", description: "Merged." },
+          body: "# merged-skill\n",
+          // 契约层（1.4.0）拒绝该形状；本测试以手工构造值直达 apply，
+          // 验证防御层在绕过解析时仍以后写覆盖拒绝并零残留。
+          resources: [
+            {
+              sourceSkillId: sourceA.skillId,
+              sourcePath: "shared/notes.md",
+              targetPath: "shared/notes.md",
+              strategy: "copy",
+            },
+            {
+              sourceSkillId: sourceB.skillId,
+              sourcePath: "shared/notes.md",
+              targetPath: "shared/notes.md",
+              strategy: "copy",
+            },
+          ],
+        },
+      },
+      rationale: "duplicate target paths",
+      findingIds: [],
+      evidence: [{ skillId: sourceA.skillId, snippet: "overlap" }],
+      skillIds: [sourceA.skillId, sourceB.skillId],
+      observedRevisions: [
+        { skillId: sourceA.skillId, revision: sourceA.revision },
+        { skillId: sourceB.skillId, revision: sourceB.revision },
+      ],
+    };
+  }
+
+  it("rejects duplicate targetPath at the apply defense layer with zero residue", async () => {
+    const { snapshot, sourceA, sourceB } = await seedTwoSources();
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(
+      duplicateTargetProposal(snapshot, sourceA, sourceB),
+      snapshot,
+      {
+        workspaces: domain.workspaces,
+        skills: domain.skills,
+        creator: domain.creator,
+        store: createStewardAuditStore(),
+        journalPath: path.join(sandbox, "journal", "dup.jsonl"),
+      },
+    );
+    expect(outcome.status).toBe("compensated");
+    expect(outcome.failure).toContain("Duplicate resource targetPath");
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "merged-skill"))).toBe(false);
+  });
+
+  it("rejects a symlinked source even when its bytes match the manifest hash", async () => {
+    const { snapshot, sourceA, sourceB } = await seedTwoSources();
+    const outside = path.join(sandbox, "outside-secret.md");
+    fs.writeFileSync(outside, "right-origin\n", "utf8");
+    const liveSource = path.join(sandbox, "ws", "skills", "merge-right", "shared", "notes.md");
+    fs.rmSync(liveSource);
+    fs.symlinkSync(outside, liveSource);
+
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+    });
+    const proposal = duplicateTargetProposal(snapshot, sourceA, sourceB);
+    proposal.patch.target.resources = [proposal.patch.target.resources[1]!];
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("compensated");
+    expect(outcome.failure).toContain("not a regular file");
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "merged-skill"))).toBe(false);
+  });
+});

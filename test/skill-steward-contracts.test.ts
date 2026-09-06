@@ -605,3 +605,72 @@ describe("codex round-2 review probes (contract 1.3.0)", () => {
     expect(mergeBound).toMatchObject({ ok: false, failure: { code: "TARGET_COLLISION" } });
   });
 });
+
+describe("codex round-3 review probes (contract 1.4.0)", () => {
+  it("P1-1: an observation outside proposal.skillIds fails at parse time", () => {
+    const raw = loadFixture<unknown>("proposal-disable.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    const outsider = importedSnapshot.skills.find(
+      (skill) => !edited.skillIds.includes(skill.skillId),
+    )!;
+    edited.observedRevisions.push({
+      skillId: outsider.skillId,
+      revision: outsider.revision,
+    });
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+    // 同一身份但 revision 与 patch 期望不符的 outsider 组合也被拒绝。
+    const duplicateScope = structuredClone(raw);
+    duplicateScope.observedRevisions.push({
+      skillId: edited.skillIds[0]!,
+      revision: "sha256:" + "f".repeat(64),
+    });
+    expect(SkillProposalSchema.safeParse(duplicateScope).success).toBe(false);
+  });
+
+  it("P1-2: duplicate targetPath inside one target fails at parse time", () => {
+    const raw = loadFixture<unknown>("proposal-merge.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    const [first] = edited.patch.target.resources;
+    if (first) {
+      edited.patch.target.resources.push({
+        sourceSkillId: edited.patch.sources[1]!.skillId,
+        sourcePath: "assets/web.env",
+        targetPath: first.targetPath,
+        strategy: "copy",
+      });
+    }
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+  });
+
+  it("P2-1: finding evidence outside the finding skillIds fails at parse time", () => {
+    const finding = {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      origin: "agent-semantic",
+      severity: "warning",
+      category: "unclear-description",
+      message: "Description does not state the scope.",
+      skillIds: [importedSnapshot.skills[0]!.skillId],
+      observedRevisions: [
+        {
+          skillId: importedSnapshot.skills[0]!.skillId,
+          revision: importedSnapshot.skills[0]!.revision,
+        },
+      ],
+      evidence: [{ skillId: importedSnapshot.skills[1]!.skillId, snippet: "outsider" }],
+    };
+    expect(StewardFindingSchema.safeParse(finding).success).toBe(false);
+  });
+
+  it("regression: realigned fixtures parse and bind under 1.4.0", () => {
+    for (const name of [
+      "proposal-disable.valid.json",
+      "proposal-edit.valid.json",
+      "proposal-split.valid.json",
+      "proposal-merge.valid.json",
+    ]) {
+      const result = parseProposal(name);
+      expect(result.ok).toBe(true);
+      expect(bindProposalToSnapshot(result.proposal!, importedSnapshot)).toEqual({ ok: true });
+    }
+  });
+});

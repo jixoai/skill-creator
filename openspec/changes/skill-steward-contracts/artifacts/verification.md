@@ -44,7 +44,16 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - P2-1 evidence 范围 / P2-2 target 碰撞 / P2-4 模板渲染不强制 bind → 一并修复（df75447）。
   - P2-6 verification 过期 → 本文件即整改。
   - R2 task 表补充说明：enable 正反例以程序化 fixture 存在于 P1-3 探针测试（agent 拒绝 / manager binder 接受），不属 Agent fixture 文件集合——enable 按 1.1.0 设计即 Manager 派生专用。
-- R3 复审已随 df75447 提交（结论待出）。
+- R3（6.5/10，不通过，报告 /tmp/stage1-contracts-review-round3.md；独立工作树 53bd73c）：
+  - P1-1 observedRevisions 允许额外身份 → 修复：proposal superRefine 要求观察身份 ⊆ skillIds（与既有 exact 覆盖检查合成精确相等），1.4.0。
+  - P1-2 同 target 重复 targetPath 静默覆盖 → 修复：`StewardPatchTargetDocumentSchema` 解析层拒绝 duplicate targetPath；apply 增加 seen-target 防御（手工构造/重放绕过解析时 typed 失败 + 补偿零残留）。
+  - P2-1 finding evidence 身份未闭合 → 修复：finding superRefine 要求 evidence.skillId ∈ finding.skillIds。
+  - P2-2 symlink/type/size 语义（原判 runtime-stage 延期）→ 提前关闭：apply 前 `lstat` 严格 regular file + manifest `kind:"file"` + `byteSize` 活体比对；负例（symlink 同字节换体）进 runtime 测试。
+  - P2-3 Manager binder authority 依赖调用纪律 → 维持延期（capability 化归 steward-product-workflow；产品调用链 managerDerived 标记正确）。
+  - P2-4 per-tool typing / P2-5 grant/audit/journal 形状 → 维持原 Deferred owner（见下节）。
+  - 两个 disable fixture 自带的 patch 外观察（R3 探针起点）已重排为精确集合。
+  - 门禁（整改后）：contracts 38/38、runtime 36/36、全量 371/371（47 files）、typecheck 0、webui check 0/0、目标文件 fmt 绿、`git diff --check` 干净、openspec 9/9。
+- R4 复审已随 1.4.0 整改提交（结论待出）。
 
 ## Deferred（owner 与完成边界）
 
@@ -54,5 +63,5 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
 
 ## 未验证项（诚实声明）
 
-- 本 change 仅契约层：Agent runtime 接入、WebUI、daemon RPC 暴露属后续阶段（R2 复审时 dsh-runtime-integration 3.1-3.4 已并行推进，但不作为本 change 完成证据）。按 tasks.md Review gate，契约 ready 以复核通过为准（R3 待出）。
+- 本 change 仅契约层：Agent runtime 接入、WebUI、daemon RPC 暴露属后续阶段（R2 复审时 dsh-runtime-integration 3.1-3.4 已并行推进，但不作为本 change 完成证据）。按 tasks.md Review gate，契约 ready 以复核通过为准（R4 待出）。
 - `demo/contracts-reference.html` 未作为任何实现依据（`rg -rn "contracts-reference" src webui/src test` 零引用）。

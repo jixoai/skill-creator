@@ -30,6 +30,10 @@ import { WorkspaceProviderTargetSchema } from "./workspaces.js";
 
 /**
  * 本模块契约版本；Agent 输出必须携带同一版本才可解析。
+ * 1.4.0（Codex R3 复核整改）：proposal.observedRevisions 与 proposal.skillIds
+ * 精确相等（P1-1，额外观察身份在解析层拒绝）；split/merge 目标资源映射拒绝
+ * 重复 targetPath（P1-2，杜绝 apply 顺序性静默覆盖）；finding.evidence.skillId
+ * 必须属于 finding.skillIds（P2-1）。
  * 1.3.0（Codex R2 复核整改）：快照资源清单 relPath 复用共享安全路径校验
  * （P1-1）；资源映射 sourceSkillId 按 patch kind 闭合且 bind 对齐 snapshot
  * 资源 manifest（P1-2）；enable 收敛为 Manager 派生专用——普通 agent bind 在
@@ -45,7 +49,7 @@ import { WorkspaceProviderTargetSchema } from "./workspaces.js";
  * audit 禁 agent principal；资源映射绑定 sourceSkillId；新增 bindTaskToSnapshot。
  * 1.1.0：patch union 增加 enable（rollback-of-disable 的逆操作语义）。
  */
-export const SKILL_STEWARD_CONTRACT_VERSION = "1.3.0" as const;
+export const SKILL_STEWARD_CONTRACT_VERSION = "1.4.0" as const;
 /** 契约版本字符串约束（稳定语义化字符串）。 */
 export const ContractVersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/);
 /** 契约版本。 */
@@ -469,6 +473,16 @@ export const StewardFindingSchema = z
         message: "Finding observedRevisions must equal skillIds exactly.",
       });
     }
+    // Codex R3 P2-1：证据身份必须落在 finding 自己的 skillIds 内（与 proposal 证据同规则）。
+    const findingScope = new Set(finding.skillIds);
+    for (const evidence of finding.evidence) {
+      if (!findingScope.has(evidence.skillId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Finding evidence references skill ${evidence.skillId} outside the finding skillIds scope.`,
+        });
+      }
+    }
   });
 /** 结构化 finding。 */
 export type StewardFinding = z.infer<typeof StewardFindingSchema>;
@@ -500,6 +514,15 @@ export const StewardPatchTargetDocumentSchema = z
       ctx.addIssue({
         code: "custom",
         message: `Target frontmatter name "${target.frontmatter.name}" must equal directoryName "${target.directoryName}".`,
+      });
+    }
+    // Codex R3 P1-2：同一目标内重复 targetPath 会让真实 apply 以后写静默覆盖先写，
+    // 属于 mutation 语义未定义；契约层直接拒绝（overwrite 若成为产品策略必须显式建模）。
+    const targetPaths = new Set(target.resources.map((mapping) => mapping.targetPath));
+    if (targetPaths.size !== target.resources.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Target resource mappings contain duplicate targetPath.",
       });
     }
   });
@@ -665,6 +688,16 @@ export const SkillProposalSchema = z
         code: "custom",
         message: "Proposal observedRevisions contain duplicate skill ids.",
       });
+    }
+    // Codex R3 P1-1：观察身份与 proposal.skillIds 精确相等——额外身份不受 patch
+    // expected set 约束，等于允许审计声称观察了未被本 proposal 修改的技能。
+    for (const skillId of observedMap.keys()) {
+      if (!declared.has(skillId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Proposal observes skill ${skillId} outside the proposal skillIds scope.`,
+        });
+      }
     }
     for (const skillId of proposal.skillIds) {
       if (!observedMap.has(skillId)) {

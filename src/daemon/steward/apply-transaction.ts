@@ -238,6 +238,9 @@ export async function applyProposalTransaction(
           // ---- 资源映射（copy/move/reference），逐条记账。 ----
           // Codex R2 P1-2：每条映射按自己的 sourceSkillId 解析源目录（不再吃 primarySourceId），
           // 复制前对源文件做存在性 + sha256 复核（对齐快照 manifest）。
+          // Codex R3 P1-2：apply 侧 seen-target 防御——契约层已拒绝重复 targetPath，
+          // 这里对绕过（手工构造的 journal 重放等）断然失败并交给 rollback 清残留。
+          const seenTargetPaths = new Set<string>();
           for (const mapping of target.resources) {
             const mappingSource = snapshot.skills.find(
               (skill) => skill.skillId === mapping.sourceSkillId,
@@ -253,6 +256,14 @@ export async function applyProposalTransaction(
             assertPathInside(root, from);
             assertPathInside(root, to);
             assertPathInside(path.join(root, target.directoryName), to);
+            const seenKey = `${target.directoryName}/${mapping.targetPath}`;
+            if (seenTargetPaths.has(seenKey)) {
+              throw new DomainError(
+                "INVALID_OPERATION",
+                `Duplicate resource targetPath in transaction: ${seenKey}`,
+              );
+            }
+            seenTargetPaths.add(seenKey);
             const manifestEntry = snapshot.resources.find(
               (resource) =>
                 resource.skillId === mapping.sourceSkillId &&
@@ -262,6 +273,27 @@ export async function applyProposalTransaction(
               throw new DomainError(
                 "INVALID_OPERATION",
                 `Resource ${mapping.sourcePath} of skill ${mapping.sourceSkillId} is not in the snapshot manifest.`,
+              );
+            }
+            // Codex R3 P2-2：源必须是普通文件（拒绝 symlink 换体读取 Provider 外内容），
+            // 且 manifest 的 kind/byteSize 与活体一致；任何漂移都按类型化失败处理。
+            const sourceStat = await fs.lstat(from);
+            if (!sourceStat.isFile()) {
+              throw new DomainError(
+                "INVALID_OPERATION",
+                `Resource source is not a regular file: ${mappingSource.directoryName}/${mapping.sourcePath}`,
+              );
+            }
+            if (manifestEntry.kind !== "file") {
+              throw new DomainError(
+                "INVALID_OPERATION",
+                `Resource ${mapping.sourcePath} of skill ${mapping.sourceSkillId} is not a file-kind manifest entry.`,
+              );
+            }
+            if (sourceStat.size !== manifestEntry.byteSize) {
+              throw new DomainError(
+                "CONFLICT",
+                `Resource ${mapping.sourcePath} live size ${sourceStat.size} differs from the snapshot manifest byteSize ${manifestEntry.byteSize}.`,
               );
             }
             let sourceBytes: Buffer;
