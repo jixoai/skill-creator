@@ -93,3 +93,15 @@
 - 同屏验收（`scripts/dsh-manager-island-live.sh.ts`：daemon WebServer + 官方 DSH host + 预置 workspace + 绑定 steward run + 双 token 入口）：同一 DSH 页面内——sidebar 显示绑定会话「Steward sr_…」；点击打开 transcript（user turn + 「2 次工具调用」+ 终态叙述）；footer Manager 入口挂载 island 并可导航到原有 ProviderView（截图 dsh-web-3.1a-same-page-transcript-island.png / -same-page-providerview-transcript.png / -final-same-page.png；全程 0 JS 错误、0 连接重试）。
 - 重连/卸载单 owner 验证（浏览器）：island 关闭→0 host 残留；重开→恰好 1 host、1 style、1 css link（无重复注入）、transcript 不受影响；协议级 owner 单例/幂等由 test/dsh-client-plugin.test.ts 覆盖。
 - 门禁（3.1a 收尾边界）：全量 379/379（50 files）；typecheck 0；webui check 0/0；fmt/diff-check 干净。
+
+## 3.1b 实测注记（Workspaces/Provider/Skill surfaces 迁移）
+
+- island 全局浮层：SPA layout 拥有的 ImportWorkspaceDialog / CommandPalette / ToastContainer 在 IslandRoot 等价挂载（bits-ui Portal 锚定 island portal root，不逃逸 DSH 宿主 DOM）——此前 Import 点击无反应的根因即对话框不在 island 内。
+- close/reopen 生命周期修复：插件 closeIsland 把 host 元素传给 entry.unmount，而 mount 注册的是内层 panel → unmount 匹配失败静默 no-op（残留 Svelte root 阻断重挂、disconnect 未执行）。修复：插件追踪 panelEl 并传 panel；entry 兼容包含 mount 目标的容器。验证：关闭→0 残留，重开→恰好 1 host/1 style/1 link，transcript 不受影响。
+- live 脚本改用真实 skills 探测（deterministic fixture 探测会掩盖真实文件系统证据；真实 `npx skills list` 单次导入 ~15-30s）。
+- 浏览器验收（同源组合，`scripts/dsh-manager-island-live.sh.ts`）：
+  - 导入：island 对话框输入 `/tmp/3p1b-ws` + 标签 → daemon registry 落盘 `3p1b-ws`（workspaces.json 证据）；workspace 行展示全部 provider 与真实计数（OpenClaw 1）。
+  - 浏览：provider 视图技能列表 → 技能详情（frontmatter name/description 表 + SKILL.md markdown 正文 + Save/Validate/Disable 操作）。
+  - 启停：Disable → 磁盘 `SKILL.md` 变 `.SKILL.md`、UI 出现 Enable；Enable → 恢复 `SKILL.md`（前后 ls 磁盘证据；截图 dsh-web-3.1b-skill-detail-toggle.png / -workspaces-home.png）。
+  - 溢出：island 面板（min(560px,92vw) 容器查询布局）scrollWidth=clientWidth，无横向溢出。
+- 3.1b 勾选；生产入口切换（daemon 默认 DSH host + SPA 仅恢复夹具）归 3.2/4.1。

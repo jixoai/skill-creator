@@ -33,10 +33,11 @@
   - Acceptance: 一个可运行的 DSH host 同时显示一个原有 ProviderView 和一个 DSH session transcript；重连/卸载无第二 root、iframe 或重复 RPC owner。此任务不包含 Creator/Repository 迁移。
   - Evidence: 652e0ed（`WebServer.mountDsh` 同源分区：Manager /ws/rpc + /api/health + /manager/* 资产前缀，DSH 官方 route HTTP/升级双代理，SPA 静态回退=恢复入口；test/dsh-manager-mount.test.ts 路由分区 + token 握手过代理 + 卸载恢复）+ 491b86b（插件 `sidebar.footer.action` Manager 入口 + `/manager/dsh-island.js` Svelte island：IslandRoot/IslandShell 复用 shell 路由树、NavControllerAdapter + $app/* shims、entry 等 Manager 连接再挂载；协议测试 apply/inject + owner 单例幂等）+ 本轮提交（升级代理 origin 改写修复：DSH connection 的 remote 流是 `/api/remote.mux` WebSocket，缺 origin 改写时 403 静默重连）。浏览器验收：同一 DSH 页面 transcript（绑定 Steward 会话「2 次工具调用」+ 终态）与原有 ProviderView island 同屏（dsh-web-3.1a-same-page-*.png / -final-same-page.png；0 JS 错误、0 连接重试）；island 关闭→0 残留、重开→1 host/1 style/1 link 无重复。插件包路径为 lib/（手写无构建链），src/manager/ 归并其内。
 
-- [ ] 3.1b 迁移 Workspaces/Provider/Skill surfaces。
+- [x] 3.1b 迁移 Workspaces/Provider/Skill surfaces。
   - Files: `packages/skill-creator-dsh-client/src/manager/`, `webui/src/lib/apps/`, `src/shared/`。
   - Steps: 在 3.1a 的宿主和连接边界内迁移 Workspaces、Provider、Skill；保留 URL identity、loading/error/conflict/recovery 状态。
   - Acceptance: DSH host 内可真实导入 workspace、浏览 skill、启停 skill；文件系统和 Manager RPC 证据与旧实现一致；1100px/680px 无横向溢出。旧 Svelte route 只作迁移夹具，不能继续作为生产 Agent 入口。
+  - Evidence: island 挂载 SPA layout 的全局浮层（导入对话框/命令面板/toast，Portal 锚定 island 内）；修复 close/reopen 生命周期（插件现追踪 mount 的 panel 元素——此前 unmount 匹配 host 失败静默 no-op，残留 root 阻断重挂且跳过 disconnect）。浏览器验收（真实 skills 探测）：island 对话框真实导入 workspace（registry 落盘 `3p1b-ws`）；provider 视图浏览技能详情（frontmatter 表 + markdown 正文）；Disable/Enable 启停（磁盘 `SKILL.md → .SKILL.md → SKILL.md` 证据，截图 dsh-web-3.1b-*.png）；560px 容器查询面板无横向溢出（scrollWidth=clientWidth）；关闭/重开单 host 单 style。生产入口切换（daemon 默认挂 DSH host、SPA 仅恢复夹具）属 3.2/4.1 收尾。
 
 - [ ] 3.1c 迁移 Creator/Repository surfaces。
   - Files: `packages/skill-creator-dsh-client/src/manager/`, `webui/src/lib/apps/creator/`, `webui/src/lib/apps/repository/`, `src/shared/`。
