@@ -53,7 +53,13 @@ export type FixtureTranscriptEntry =
 /** fixture run 结果。 */
 export interface FixtureAgentResult {
   transcript: FixtureTranscriptEntry[];
-  terminalReason: "completed" | "needs-review" | "scope-limit" | "failed" | "cancelled" | "disconnected";
+  terminalReason:
+    | "completed"
+    | "needs-review"
+    | "scope-limit"
+    | "failed"
+    | "cancelled"
+    | "disconnected";
 }
 
 /** abort 感知等待。 */
@@ -114,9 +120,9 @@ function buildDeterministicEditProposal(
 }
 
 /** 从快照确定性构造一个 split proposal（organize 场景）。 */
-function buildDeterministicSplitProposal(
-  snapshot: SkillStewardContextSnapshot,
-): { proposal: SkillProposal } {
+function buildDeterministicSplitProposal(snapshot: SkillStewardContextSnapshot): {
+  proposal: SkillProposal;
+} {
   const skill = snapshot.skills[0]!;
   const base = skill.directoryName;
   return {
@@ -174,7 +180,12 @@ export async function runFixtureAgent(
     terminalReason: FixtureAgentResult["terminalReason"],
     message?: string,
   ): FixtureAgentResult => {
-    if (terminalReason === "completed" || terminalReason === "needs-review" || terminalReason === "scope-limit" || terminalReason === "failed") {
+    if (
+      terminalReason === "completed" ||
+      terminalReason === "needs-review" ||
+      terminalReason === "scope-limit" ||
+      terminalReason === "failed"
+    ) {
       emit({ kind: "terminal", reason: terminalReason, ...(message ? { message } : {}) });
     }
     return { transcript, terminalReason };
@@ -219,9 +230,8 @@ export async function runFixtureAgent(
               .filter((skill) => finding.skillIds.includes(skill.skillId))
               .map((skill) => ({ skillId: skill.skillId, revision: skill.revision })),
             evidence: finding.evidence.map((item, index) => ({
-              skillId:
-                snapshot.skills.find((skill) => finding.skillIds.includes(skill.skillId))!
-                  .skillId,
+              skillId: snapshot.skills.find((skill) => finding.skillIds.includes(skill.skillId))!
+                .skillId,
               path: index === 0 ? "SKILL.md" : undefined,
               snippet: item.snippet,
             })),

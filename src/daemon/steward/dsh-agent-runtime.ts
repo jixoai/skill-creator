@@ -285,6 +285,8 @@ export async function runDshStewardToolRound(input: {
   snapshotId: string;
   callTool: ManagerToolBridge;
   onCall: (call: SkillToolCall) => void;
+  /** 状态透传（session stream 投影消费；同时进入 record.statuses）。 */
+  onStatus?: (status: string) => void;
   /** 请求一个未注册工具（fail-closed 测试）。 */
   requestTool?: string;
   /** 在 turn 开始后立即取消（cancel-drain 测试）。 */
@@ -303,7 +305,10 @@ export async function runDshStewardToolRound(input: {
       sessionId: input.sessionId,
       callTool: input.callTool,
       onCall: input.onCall,
-      onStatus: (status) => statuses.push(status),
+      onStatus: (status) => {
+        statuses.push(status);
+        input.onStatus?.(status);
+      },
     });
     session.followup(input.turnText);
     if (input.cancelImmediately) {

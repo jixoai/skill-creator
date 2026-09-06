@@ -15,6 +15,16 @@ import {
   AcpSessionOpenResultSchema,
 } from "./contracts/acp.js";
 import {
+  DshCredentialClearInputSchema,
+  DshCredentialSetInputSchema,
+  DshCredentialSetResultSchema,
+  DshSessionStreamFrameSchema,
+  DshSessionStreamsInputSchema,
+  DshSettingsUpdateResultSchema,
+  DshSettingsUpdateSchema,
+  DshStewardSettingsViewSchema,
+} from "./contracts/dsh-runtime.js";
+import {
   StewardApproveResultSchema,
   StewardBackendsResultSchema,
   StewardCancelInputSchema,
@@ -251,6 +261,26 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       .output(SkillStewardRollbackResultSchema),
     /** Consume a rollback grant and replay the journal in reverse. */
     applyRollback: oc.input(SkillStewardRollbackInputSchema).output(SkillStewardApplyResultSchema),
+  },
+  dsh: {
+    /** Steward DSH runtime settings（task 3.3）：model/preset/permission/session controls。 */
+    settings: {
+      /** 当前 settings 投影 + provider 凭据状态（永不包含凭据值）。 */
+      get: oc.input(z.object({})).output(DshStewardSettingsViewSchema),
+      /** 应用补丁；revision 只在真实变更时 +1；类型化 rejected 见契约 union。 */
+      update: oc.input(DshSettingsUpdateSchema).output(DshSettingsUpdateResultSchema),
+    },
+    /** provider 凭据写入/清除（0600 私有文件；视图只回显 configured 状态）。 */
+    credentials: {
+      set: oc.input(DshCredentialSetInputSchema).output(DshCredentialSetResultSchema),
+      clear: oc.input(DshCredentialClearInputSchema).output(DshStewardSettingsViewSchema),
+    },
+    sessions: {
+      /** 脱敏 session stream 帧（后续 DSH client plugin 的实时投影入口）。 */
+      streams: oc
+        .input(DshSessionStreamsInputSchema)
+        .output(z.object({ frames: z.array(DshSessionStreamFrameSchema) })),
+    },
   },
   acp: {
     /** List ACP-capable agents installed on this machine (daemon-lifetime cached). */

@@ -163,6 +163,27 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         domain.skillSteward.applyRollback(input.auditId),
       ),
     },
+    dsh: {
+      settings: {
+        get: rpc.dsh.settings.get.handler(async () => domain.dshSettings.getView()),
+        update: rpc.dsh.settings.update.handler(async ({ input }) =>
+          domain.dshSettings.update(input),
+        ),
+      },
+      credentials: {
+        set: rpc.dsh.credentials.set.handler(async ({ input }) =>
+          domain.dshSettings.setCredential(input),
+        ),
+        clear: rpc.dsh.credentials.clear.handler(async ({ input }) =>
+          domain.dshSettings.clearCredential(input),
+        ),
+      },
+      sessions: {
+        streams: rpc.dsh.sessions.streams.handler(async ({ input }) => ({
+          frames: await domain.dshSettings.listStreamFrames(input),
+        })),
+      },
+    },
     acp: {
       agents: {
         list: rpc.acp.agents.list.handler(async () => ({

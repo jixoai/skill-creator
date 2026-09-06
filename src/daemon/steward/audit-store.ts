@@ -6,7 +6,8 @@
  * consumed grants or automatically resume writes.」
  *
  * 正交意图：
- *   [1] append-only JSONL 持久化：audit 记录、run 终态投影、grant 事实。
+ *   [1] append-only JSONL 持久化：audit 记录、run 终态投影、grant 事实；
+ *       run/audit 落盘前过 redactDshPayload（task 3.3 凭据不变量，grant 除外）。
  *   [2] 重启读取：terminal run / audit 可回读；行级 safeParse 丢坏行，I/O 故障 hard error
  *       （不兼容 ≠ 故障，AGENTS 持久化载入法则）。
  *   [3] 消费事实幂等：grant 消费记录让重启后不能重放已消费授权。
@@ -21,6 +22,7 @@ import {
   type StewardApprovalGrant,
   type StewardAuditRecord,
 } from "../../shared/contracts/skill-steward.js";
+import { redactDshPayload } from "../../shared/contracts/dsh-runtime.js";
 import { DomainError } from "../domain-error.js";
 import { stewardStoreDir } from "./context-snapshot.js";
 
@@ -88,9 +90,11 @@ async function readLines<T>(file: string, parse: (value: unknown) => T | null): 
 
 /** 创建持久 store（home 目录由 setHomeOverride 隔离测试）。 */
 export function createStewardAuditStore(): StewardAuditStore {
+  // task 3.3 不变量：run/audit 载荷落盘前强制脱敏（凭据形状键 → "[redacted]"）。
+  // grant 不做脱敏——它是幂等回放协议，且字段全部为受控 ID/哈希，无自由文本。
   return {
-    appendRun: (record) => appendLine(storeFile("runs"), record),
-    appendAudit: (record) => appendLine(storeFile("audits"), record),
+    appendRun: (record) => appendLine(storeFile("runs"), redactDshPayload(record)),
+    appendAudit: (record) => appendLine(storeFile("audits"), redactDshPayload(record)),
     appendGrant: (grant) => appendLine(storeFile("grants"), grant),
     listRuns: () =>
       readLines<PersistedRunRecord>(storeFile("runs"), (value) => {
@@ -102,7 +106,12 @@ export function createStewardAuditStore(): StewardAuditStore {
           typeof record.terminal === "string" &&
           typeof record.endedAt === "string"
         ) {
-          return { runId: record.runId, snapshotId: record.snapshotId, terminal: record.terminal, endedAt: record.endedAt };
+          return {
+            runId: record.runId,
+            snapshotId: record.snapshotId,
+            terminal: record.terminal,
+            endedAt: record.endedAt,
+          };
         }
         return null;
       }),
@@ -118,4 +127,3 @@ export function createStewardAuditStore(): StewardAuditStore {
       }),
   };
 }
-

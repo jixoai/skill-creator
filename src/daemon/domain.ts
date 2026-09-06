@@ -30,6 +30,7 @@ import {
   createSkillStewardPipelineService,
   type SkillStewardPipelineService,
 } from "./steward/pipeline-service.js";
+import { createDshSettingsService, type DshSettingsService } from "./steward/dsh-settings.js";
 import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
 import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
 import type { HarnessAdapter } from "./steward/harness-adapter.js";
@@ -69,6 +70,8 @@ export interface DaemonDomain {
   steward: StewardService;
   /** Skill Steward 契约管线：snapshot→tool registry→proposal→grant→journal→audit。 */
   skillSteward: SkillStewardPipelineService;
+  /** Steward DSH settings/credentials/session-stream（task 3.3）。 */
+  dshSettings: DshSettingsService;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
@@ -99,5 +102,6 @@ export function createDaemonDomain(
       adapters: options.stewardAdapters ?? defaultStewardAdapters(),
     }),
     skillSteward: createSkillStewardPipelineService({ workspaces, skills, creator }),
+    dshSettings: createDshSettingsService(),
   };
 }
