@@ -320,19 +320,27 @@ export async function applyProposalTransaction(
             // 旁 .backups/），write-ahead 记账携带 backupPath + sha256——同进程补偿、
             // 正常 rollback 与重启恢复共用同一事实源；无备份不得删除源。
             const label = `${target.directoryName}/${mapping.targetPath}`;
-            let backupPath: string | undefined;
+            let backupRef: string | undefined;
             if (mapping.strategy === "move") {
-              const backupDir = `${deps.journalPath}.backups`;
-              backupPath = path.join(backupDir, `${seq + 1}-${liveHash.slice(0, 12)}.bin`);
-              await fs.mkdir(backupDir, { recursive: true });
-              await fs.writeFile(backupPath, sourceBytes);
+              // Codex R6 P1-2：backup 根由 canonical journalPath 派生且 containment
+              // 校验（拒绝预置 symlink 换体把备份写到外部）；journal 只记 Manager
+              // 生成的相对文件名，replay 拒绝任意路径。
+              const backupDir = await prepareBackupRoot(deps.journalPath);
+              backupRef = `${seq + 1}-${liveHash.slice(0, 12)}.bin`;
+              await writeResourceFileStrict(
+                path.join(backupDir, backupRef),
+                backupDir,
+                sourceBytes,
+                `backup:${backupRef}`,
+              );
+              await syncDir(backupDir);
             }
             await recordStep("resource", {
               kind: "resource",
               strategy: mapping.strategy,
               from: `${mappingSource.directoryName}/${mapping.sourcePath}`,
               to: label,
-              ...(backupPath === undefined ? {} : { backupPath, sourceSha256: liveHash }),
+              ...(backupRef === undefined ? {} : { backupRef, sourceSha256: liveHash }),
             });
             await fs.mkdir(path.dirname(to), { recursive: true });
             // Codex R4/R5 P1-1（目标侧）：mkdir 后校验目标父链无 symlink 换体，
@@ -354,10 +362,28 @@ export async function applyProposalTransaction(
                 // Codex R4 P2-3 / R5 P1-2：真实移动——目标写入 + 备份落盘 +
                 // journal 记账完成后才删除源；恢复路径优先内存表、回退持久备份。
                 movedRestore.set(seq, { from, bytes: sourceBytes });
-                // Codex R5 P1-1：删除前再次校验父链（缩小换体窗口；经 symlink 的
-                // unlink 会打到外部文件）。
+                // Codex R5/R6 P1-1：身份绑定删除——父链校验 + lstat 捕获 {dev,ino}
+                // 后立即 unlink，删除后验证该路径已不存在；任何一步身份漂移或
+                // 删除后仍存在，按恢复必需处理（Node 无 openat/unlinkat 的平台
+                // 等价：宁可 recovery-required，绝不确定地删除外部文件）。
                 await assertNoSymlinkAncestors(from, root);
+                const preDelete = await lstatSource(
+                  from,
+                  `${mappingSource.directoryName}/${mapping.sourcePath}`,
+                  manifestEntry.byteSize,
+                );
                 await fs.rm(from, { force: true });
+                const stillExists = await fs.lstat(from).then(
+                  () => true,
+                  () => false,
+                );
+                if (stillExists) {
+                  throw new DomainError(
+                    "UNAVAILABLE",
+                    `move source path raced during delete (identity changed); recovery required: ${mappingSource.directoryName}/${mapping.sourcePath}`,
+                  );
+                }
+                void preDelete;
               }
             }
             mutations.push({
@@ -451,6 +477,8 @@ export interface UndoContext {
   deps: ApplyTransactionDeps;
   root: string;
   mutations: StewardMutationRecord[];
+  /** Codex R6 P1-2：move 备份根的原事务 journal 路径（缺省用 deps.journalPath）。 */
+  backupJournalPath?: string;
 }
 
 /** 逆序撤销一组 journal 步骤（补偿与 rollback 共用）；失败抛错由调用方定级。 */
@@ -474,6 +502,8 @@ async function undoStep(
     mutations: StewardMutationRecord[];
     /** Codex R4 P2-3：move 步骤的源字节还原表（可选：undoJournalSteps 复放路径无）。 */
     movedRestore?: Map<number, { from: string; bytes: Buffer }>;
+    /** Codex R6 P1-2：move 备份根的原事务 journal 路径。 */
+    backupJournalPath?: string;
   },
 ): Promise<void> {
   const { deps, snapshot, root } = context;
@@ -530,22 +560,38 @@ async function undoStep(
           await restoreResourceBytesStrict(moved.from, root, moved.bytes, fromRel);
           restored = true;
         } else {
-          const backupPath = entry.detail.backupPath as string | undefined;
+          // Codex R6 P1-2：journal 只信 Manager 生成的相对 backupRef；绝对路径/
+          // `..`/换体 backup 根一律拒绝（回放数据不可指向任意外部路径）。
+          const backupRef = entry.detail.backupRef as string | undefined;
           const expectedSha = entry.detail.sourceSha256 as string | undefined;
-          if (!backupPath) {
+          if (!backupRef || !isValidBackupRef(backupRef)) {
             throw new Error(
-              `move rollback has no source backup for step ${entry.seq} (${fromRel})`,
+              `move rollback has no valid backupRef for step ${entry.seq} (${fromRel})`,
             );
           }
-          const backup = await fs.readFile(backupPath).catch(() => null);
+          const backupRoot = await prepareBackupRoot(
+            context.backupJournalPath ?? context.deps.journalPath,
+          );
+          const backupPath = path.join(backupRoot, backupRef);
+          let backup: Buffer | null;
+          try {
+            backup = await readResourceBytesStrict(
+              backupPath,
+              backupRoot,
+              (await fs.stat(backupPath)).size,
+              `backup:${backupRef}`,
+            );
+          } catch {
+            backup = null;
+          }
           if (backup === null) {
             throw new Error(
-              `move rollback backup missing on disk for step ${entry.seq}: ${backupPath}`,
+              `move rollback backup missing on disk for step ${entry.seq}: ${backupRef}`,
             );
           }
           if (expectedSha && createHash("sha256").update(backup).digest("hex") !== expectedSha) {
             throw new Error(
-              `move rollback backup hash mismatch for step ${entry.seq}: ${backupPath}`,
+              `move rollback backup hash mismatch for step ${entry.seq}: ${backupRef}`,
             );
           }
           await fs.mkdir(path.dirname(from), { recursive: true });
@@ -688,6 +734,47 @@ async function assertNoSymlinkAncestors(to: string, root: string): Promise<void>
 }
 
 /**
+ * Codex R6 P1-2：backup 根目录——由 canonical journalPath 派生（`<journal>.backups`），
+ * 每次使用前校验 canonical containment（预置 symlink 换体直接拒绝）。
+ */
+async function prepareBackupRoot(journalPath: string): Promise<string> {
+  const backupDir = `${journalPath}.backups`;
+  const canonicalParent = await fs.realpath(path.dirname(journalPath));
+  await fs.mkdir(backupDir, { recursive: true }).catch(() => undefined);
+  const realBackup = await fs.realpath(backupDir);
+  const lexicalBackup = path.join(canonicalParent, path.basename(backupDir));
+  if (realBackup !== lexicalBackup) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `move backup root escaped its manager-owned location (path race); recovery required: ${backupDir}`,
+    );
+  }
+  return realBackup;
+}
+
+/** Codex R6 P1-2：合法 backupRef 是 Manager 生成的安全相对文件名（无路径分隔/遍历）。 */
+function isValidBackupRef(ref: string): boolean {
+  return /^\d+-[0-9a-f]{12}\.bin$/.test(ref);
+}
+
+/** Codex R6 P2-1：目录 fsync（崩溃持久化栅栏；平台不支持时记录并放行）。 */
+async function syncDir(dir: string): Promise<void> {
+  try {
+    const handle = await fs.open(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  } catch (error) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `durability sync failed for ${dir} (${error instanceof Error ? error.message : String(error)}); recovery required`,
+    );
+  }
+}
+
+/**
  * Codex R5 P1-1（恢复侧写入）：move 补偿/rollback 的源字节还原——父链 canonical
  * 校验 + exclusive 写（已存在则要求字节一致），杜绝恢复路径经换体 symlink 写到
  * Provider 外部。
@@ -699,11 +786,18 @@ async function restoreResourceBytesStrict(
   label: string,
 ): Promise<void> {
   await assertNoSymlinkAncestors(to, root);
-  const exists = await fs.stat(to).then(
-    () => true,
-    () => false,
-  );
-  if (exists) {
+  let stat: import("node:fs").Stats | null = null;
+  try {
+    stat = await fs.lstat(to);
+  } catch {
+    stat = null;
+  }
+  if (stat !== null) {
+    // Codex R6 P1-2：现存 leaf 必须是 regular file——symlink（即便字节相同）
+    // 不是恢复成功，是外部可控制的路径身份。
+    if (!stat.isFile()) {
+      throw new Error(`move restore target exists but is not a regular file: ${label}`);
+    }
     const current = await fs.readFile(to);
     if (!current.equals(bytes)) {
       throw new Error(`move restore target exists with different bytes (external drift): ${label}`);
@@ -751,11 +845,11 @@ async function writeResourceFileStrict(
   // 写后复核：canonical 位置一致 + 同一 inode（父目录换体会让 realpath 指向外部）。
   const realTo = await fs.realpath(to);
   if (realTo !== lexicalPosition) {
-    // 逃逸：尽力把外部文件清零（通过 canonical 路径），然后按恢复必需上报。
-    await fs.writeFile(realTo, Buffer.alloc(0)).catch(() => undefined);
+    // Codex R6 P1-1：逃逸只报告，不触碰外部路径——canonical 位置可能指向任何
+    // 无关外部文件，Manager 无权清零/修改它（外部文件保持原状，恢复由人处理）。
     throw new DomainError(
       "UNAVAILABLE",
-      `Resource target escaped the provider root (path race); escaped file neutralized, recovery required: ${label}`,
+      `Resource target escaped the provider root (path race); external path untouched, recovery required: ${label}`,
     );
   }
   const after = await fs.lstat(to);

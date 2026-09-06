@@ -1,6 +1,6 @@
 # skill-steward-contracts verification
 
-记录日期：2026-09-06（R2 整改后更新）。实现边界：`d18c148 → df75447`（R1 整改 `5727598`，R2 整改 `df75447`，契约版本 1.3.0）。运行环境：本仓 dev 主分支，macOS arm64。
+记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `f2519cc → R6 整改提交`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
 
 ## 责任矩阵
 
@@ -69,7 +69,16 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - 测试（R5 负例）：apply→prepareRollback→applyRollback 源字节恢复；undoJournalSteps 重启等价 replay 从持久备份恢复（断言 .backups/ 落盘 1 份）；12 轮并发换体 chaos——成功轮字节必为真实源、外部文件内容永不变化（swapper 在 realStore/outside 双 symlink 间高频切换，×3 稳定）。
   - P2-4 修复：本文件边界与门禁事实同步（1.5.0；全量 390/390）。
   - 门禁（R5 整改后）：contracts 42/42、runtime 43/43、全量 390/390（50 files，两次串行全绿）、typecheck 0、webui check 0/0、openspec 9/9。
-- R6 复审已随本整改提交（结论待出；复核回调为后台 codex-callback.sh 模式）。
+- R6（4.0/10，不通过，报告 /tmp/stage1-contracts-review-round6.md；独立 worktree f2519cc）：
+  - 判定：R5 源读取身份链与 chaos 关闭了"读到外部字节"窗口（独立复跑通过）；新三个 P1——检查后换体仍可删/清零外部文件（源 rm 与目标逃逸分支）、backup/journal 路径 authority 未封闭（backup 目录预置 symlink、journal 任意 backupPath、symlink leaf 同字节假恢复）、journal 缺失被空回放伪造 rolled-back。
+  - P1-1 修复：目标逃逸分支**不再触碰外部路径**（去掉清零，仅 UNAVAILABLE/recovery-required，外部文件保持原状）；move 源删除改为身份绑定删除（父链校验 + lstat 身份捕获 → rm → 删除后存在性验证，任何漂移 recovery-required——Node 无 unlinkat 的平台等价语义）。
+  - P1-2 修复：backup 根由 canonical journalPath 派生且每次使用前 canonical containment（预置 symlink 拒绝，备份 exclusive fd 写 + 目录 fsync）；journal 只记 Manager 生成的相对 backupRef（`\d+-[a-f0-9]{12}.bin` 白名单），replay 拒绝绝对/遍历路径并经 strict fd 读取校验；恢复对现存 leaf 强制 lstat regular（symlink 同字节≠恢复成功）。
+  - P1-3 修复：readJournal 区分 ENOENT（NOT_FOUND）/不可读/坏行（UNAVAILABLE）——不再投影为空；applyRollback 将 readJournal 与空 journal 纳入 recovery 捕获，audit 如实 recovery-required，绝不 rolled-back。
+  - P2-1 部分修复：backup 写后目录 fsync（syncDir，失败→UNAVAILABLE）；journal append 仍为普通 append（进程内单写者），崩溃栅栏完整化（fd append + fsync）归 runtime 收尾轮。
+  - P2-2 修复：verification 顶部边界更新为 1.5.0/当前提交；fmt 失败计数以复核独立运行为准（R6 列 7 个跨 change 文件，本 change 目标文件不在其列）。
+  - 测试（R6 负例 ×4）：journal 删除 → applyRollback recovery-required（非假 rolled-back）；journal backupRef 篡改为外部绝对路径 → replay 拒绝且源不被外部字节污染；backup 根预置 symlink → apply fail-closed 且外部目录零写入；源位置预置同字节 symlink → replay 拒绝（not a regular file）且外部文件不被触碰。
+  - 门禁（R6 整改后）：contracts 42/42、runtime 47/47、全量 394/394（50 files）、typecheck 0、webui check 0/0、openspec 9/9。
+- R7 复审已随本整改提交（结论待出；复核回调为后台 codex-callback.sh 模式）。
 
 ## Deferred（owner 与完成边界）
 

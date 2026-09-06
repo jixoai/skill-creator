@@ -435,10 +435,18 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       throw new DomainError("CONFLICT", "Patch fingerprint drifted since the rollback grant.");
     }
     const journalPath = path.join(stewardStoreDir(), "journal", `${audit.proposalId}.jsonl`);
-    const entries = await readJournal(journalPath);
     const root = deps.workspaces.resolveWritable(entry.snapshot.target).directory;
     const mutations: StewardMutationRecord[] = [];
     try {
+      // Codex R6 P1-3：journal 缺失/损坏/为空都进 recovery 审计——没有可回放的
+      // 事实就不能宣称 rolled-back（readJournal 抛 typed 错；空 journal 显式拒绝）。
+      const entries = await readJournal(journalPath);
+      if (entries.length === 0) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `Rollback journal is empty (nothing to replay): ${journalPath}`,
+        );
+      }
       await undoJournalSteps(entries, {
         proposal: entry.proposal,
         snapshot: entry.snapshot,
@@ -451,6 +459,9 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
         },
         root,
         mutations,
+        // Codex R6 P1-2：备份根按原事务 journal 派生（deps.journalPath 是 rollback
+        // 自己的 journal）。
+        backupJournalPath: journalPath,
       });
     } catch (error) {
       const recovery: StewardAuditRecord = {

@@ -1796,3 +1796,232 @@ describe("move durability and path races (Codex R5 P1-1/P1-2)", () => {
     expect(fs.readFileSync(path.join(outsideDir, "notes.md"), "utf8")).toBe("left-origin\n");
   });
 });
+
+describe("journal and backup authority (Codex R6 P1-2/P1-3)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = ProviderIdSchema.parse("openclaw");
+  const capabilities = {
+    backendId: "fixture",
+    version: "fixture-1",
+    streamingEvents: true,
+    cancellation: true,
+    permissionRequests: true,
+    executionRoot: "isolated" as const,
+  };
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-r6-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function seedMergePair() {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    for (const name of ["merge-left", "merge-right"]) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId,
+        directoryName: name,
+        frontmatter: { name, description: `${name} skill.` },
+        body: `# ${name}\n`,
+      });
+      fs.mkdirSync(path.join(directory, "skills", name, "shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(directory, "skills", name, "shared", "notes.md"),
+        name === "merge-left" ? "left-origin\n" : "right-origin\n",
+        "utf8",
+      );
+    }
+    const target = { workspaceId: workspace.id, providerId };
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const sourceB = snapshot.skills.find((skill) => skill.directoryName === "merge-right")!;
+    const sources = snapshot.skills.filter((skill) => skill.directoryName.startsWith("merge-"));
+    const proposal: SkillProposal = {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "merge",
+      patch: {
+        kind: "merge",
+        snapshotId: snapshot.id,
+        sources: sources.map((skill) => ({
+          skillId: skill.skillId,
+          expectedRevision: skill.revision,
+        })),
+        target: {
+          directoryName: "merged-skill",
+          frontmatter: { name: "merged-skill", description: "Merged." },
+          body: "# merged-skill\n",
+          resources: [
+            {
+              sourceSkillId: sourceB.skillId,
+              sourcePath: "shared/notes.md",
+              targetPath: "shared/moved.md",
+              strategy: "move",
+            },
+          ],
+        },
+      },
+      rationale: "r6 authority probe",
+      findingIds: [],
+      evidence: [{ skillId: sourceB.skillId, snippet: "probe" }],
+      skillIds: sources.map((skill) => skill.skillId),
+      observedRevisions: sources.map((skill) => ({
+        skillId: skill.skillId,
+        revision: skill.revision,
+      })),
+    };
+    return { directory, snapshot, sourceB, proposal };
+  }
+
+  it("P1-3: a deleted journal makes applyRollback fail typed, never fake rolled-back", async () => {
+    const { snapshot, sourceB, proposal } = await seedMergePair();
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    // 删除 journal：回滚必须 typed 失败（recovery-required），audit 不得变 rolled-back。
+    await service.prepareRollback(audit.id, "human-ui");
+    const journalPath = path.join(
+      sandbox,
+      "home",
+      "steward-store",
+      "journal",
+      `${proposalId}.jsonl`,
+    );
+    expect(fs.existsSync(journalPath)).toBe(true);
+    fs.rmSync(journalPath);
+    const rolled = await service.applyRollback(audit.id, "human-ui");
+    expect(rolled.audit.status).toBe("recovery-required");
+  });
+
+  it("P1-2: a journal backupRef pointing outside the manager backup root is rejected", async () => {
+    const { directory, snapshot, sourceB, proposal } = await seedMergePair();
+    const journalPath = path.join(sandbox, "journal", "evil.jsonl");
+    const { applyProposalTransaction, readJournal } =
+      await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).toBe("applied");
+    // 篡改 journal：backupRef 换成绝对外部路径。
+    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    const tampered = lines.map((line) => {
+      const entry = JSON.parse(line) as { detail?: { backupRef?: string } };
+      if (entry.detail?.backupRef) entry.detail.backupRef = "/tmp/evil-outside.bin";
+      return JSON.stringify(entry);
+    });
+    fs.writeFileSync(journalPath, tampered.join("\n") + "\n", "utf8");
+
+    const { undoJournalSteps } = await import("../src/daemon/steward/apply-transaction.js");
+    const entries = await readJournal(journalPath);
+    const sourceFile = path.join(directory, "skills", "merge-right", "shared", "notes.md");
+    await expect(
+      undoJournalSteps(entries, {
+        proposal,
+        snapshot,
+        deps: {
+          workspaces: domain.workspaces,
+          skills: domain.skills,
+          creator: domain.creator,
+          store: createStewardAuditStore(),
+          journalPath,
+        },
+        root: path.join(directory, "skills"),
+        mutations: [],
+      }),
+    ).rejects.toThrow(/no valid backupRef/);
+    // 源未被外部文件内容污染（仍不存在——拒绝恢复而不是写外部字节）。
+    expect(fs.existsSync(sourceFile)).toBe(false);
+  });
+
+  it("P1-2: a pre-symlinked backup root makes the apply fail closed", async () => {
+    const { snapshot, sourceB, proposal } = await seedMergePair();
+    const journalPath = path.join(sandbox, "journal", "evilroot.jsonl");
+    // 预置 backup 根为指向外部的 symlink。
+    const outsideBackups = path.join(sandbox, "outside-backups");
+    fs.mkdirSync(outsideBackups, { recursive: true });
+    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+    fs.symlinkSync(outsideBackups, `${journalPath}.backups`);
+
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).not.toBe("applied");
+    expect(outcome.status === "compensated" || outcome.status === "recovery-required").toBe(true);
+    // 外部目录不出现备份文件。
+    expect(fs.readdirSync(outsideBackups).length).toBe(0);
+  });
+
+  it("P1-2: restoring onto a symlink leaf is rejected (same bytes are not a restore)", async () => {
+    const { directory, snapshot, sourceB, proposal } = await seedMergePair();
+    const journalPath = path.join(sandbox, "journal", "symlink-leaf.jsonl");
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).toBe("applied");
+    // 把源位置预置为指向外部同字节文件的 symlink，replay 恢复必须拒绝。
+    const outsideFile = path.join(sandbox, "outside-leaf.md");
+    fs.writeFileSync(outsideFile, "right-origin\n", "utf8");
+    const sourceFile = path.join(directory, "skills", "merge-right", "shared", "notes.md");
+    fs.symlinkSync(outsideFile, sourceFile);
+
+    const { readJournal, undoJournalSteps } =
+      await import("../src/daemon/steward/apply-transaction.js");
+    const entries = await readJournal(journalPath);
+    await expect(
+      undoJournalSteps(entries, {
+        proposal,
+        snapshot,
+        deps: {
+          workspaces: domain.workspaces,
+          skills: domain.skills,
+          creator: domain.creator,
+          store: createStewardAuditStore(),
+          journalPath,
+        },
+        root: path.join(directory, "skills"),
+        mutations: [],
+      }),
+    ).rejects.toThrow(/not a regular file/);
+    // symlink 仍在（没有被当作已恢复而清除），外部文件未被触碰。
+    expect(fs.readFileSync(outsideFile, "utf8")).toBe("right-origin\n");
+  });
+});
