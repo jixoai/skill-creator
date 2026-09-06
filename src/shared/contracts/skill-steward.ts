@@ -140,11 +140,18 @@ export const SNAPSHOT_MAX_SKILLS = 100;
 export const SNAPSHOT_MAX_CONTENT_BYTES_PER_SKILL = 256 * 1024;
 export const SNAPSHOT_MAX_TOTAL_CONTENT_BYTES = 2 * 1024 * 1024;
 
-/** 快照内单个技能的只读条目。 */
+/** 快照读取容忍的既有目录名：任意单段名称，仅禁止穿越（.. / 分隔符）。 */
+export const SnapshotDirectoryNameSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^(?!\.\.$)[^/\\\0]+$/, "Snapshot directory name must be one plain path segment.");
+
+/** 快照内单个技能的只读条目（读取容忍：新目的地仍由 SkillDirectoryNameSchema 严格约束）。 */
 export const StewardSkillSnapshotEntrySchema = z.object({
   skillId: SkillIdSchema,
   name: z.string().min(1).max(200),
-  directoryName: SkillDirectoryNameSchema,
+  directoryName: SnapshotDirectoryNameSchema,
   revision: ContentRevisionSchema,
   disabled: z.boolean(),
   /** SKILL.md 全文（UTF-8；builder 保证字节预算）。 */

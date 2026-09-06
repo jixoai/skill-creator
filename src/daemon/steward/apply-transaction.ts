@@ -448,3 +448,39 @@ function coerceYamlScalar(raw: string): unknown {
   if (raw !== "" && !Number.isNaN(Number(raw))) return Number(raw);
   return raw;
 }
+
+/**
+ * 重启恢复扫描（task 2.3e）：journal 目录中「有记账无终态审计」的 operation
+ * 即为崩溃残留；恢复前必须封锁对应 target 的后续写入。
+ */
+export interface UnfinishedOperation {
+  proposalId: string;
+  journalPath: string;
+  steps: number;
+  lastStep: string | null;
+}
+
+/** 扫描未完成 journal（重启第一步；只读，不自动重放写操作）。 */
+export async function scanUnfinishedJournals(storeDir: string): Promise<UnfinishedOperation[]> {
+  const journalDir = path.join(storeDir, "journal");
+  let files: string[];
+  try {
+    files = await fs.readdir(journalDir);
+  } catch {
+    return [];
+  }
+  const unfinished: UnfinishedOperation[] = [];
+  for (const file of files) {
+    if (!file.endsWith(".jsonl") || file.endsWith("-rollback.jsonl")) continue;
+    const journalPath = path.join(journalDir, file);
+    const entries = await readJournal(journalPath);
+    if (entries.length === 0) continue;
+    unfinished.push({
+      proposalId: file.replace(/\.jsonl$/, ""),
+      journalPath,
+      steps: entries.length,
+      lastStep: entries[entries.length - 1]!.step,
+    });
+  }
+  return unfinished;
+}

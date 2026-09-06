@@ -145,7 +145,13 @@ export async function buildContextSnapshot(
       const relFiles = await walkRegularFiles(skill.path);
       for (const rel of relFiles) {
         const { hash, byteSize: resourceBytes } = await sha256File(path.join(skill.path, rel));
-        resources.push({ skillId: skill.id, relPath: rel, hash, byteSize: resourceBytes, kind: "file" });
+        resources.push({
+          skillId: skill.id,
+          relPath: rel,
+          hash,
+          byteSize: resourceBytes,
+          kind: "file",
+        });
       }
     } catch (error) {
       throw new DomainError(
@@ -155,10 +161,13 @@ export async function buildContextSnapshot(
     }
   }
   if (entries.length === 0) {
-    throw new DomainError("INVALID_OPERATION", "All selected skills disappeared before the snapshot read.");
+    throw new DomainError(
+      "INVALID_OPERATION",
+      "All selected skills disappeared before the snapshot read.",
+    );
   }
 
-  const snapshot = SkillStewardContextSnapshotSchema.parse({
+  const candidate = {
     id: snapshotId,
     createdAt: new Date().toISOString(),
     target: input.target,
@@ -168,7 +177,16 @@ export async function buildContextSnapshot(
     promptVersion: input.promptVersion,
     toolVersion: input.toolVersion,
     capabilities: input.capabilities,
-  });
+  };
+  const parsedSnapshot = SkillStewardContextSnapshotSchema.safeParse(candidate);
+  if (!parsedSnapshot.success) {
+    // 预算/清单上限命中真实 Provider 规模：类型化拒绝 + 可操作信息（不截断、不裸抛 ZodError）。
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Snapshot exceeds contract limits (${parsedSnapshot.error.issues[0]?.path.join(".")}: ${parsedSnapshot.error.issues[0]?.message}); narrow the skill scope.`,
+    );
+  }
+  const snapshot = parsedSnapshot.data;
 
   // ---- 持久化（原子写；故障 hard error，不静默丢快照） ----
   try {

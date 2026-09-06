@@ -35,6 +35,8 @@ import {
 } from "../src/daemon/steward/context-snapshot.js";
 import { createStewardAuditStore } from "../src/daemon/steward/audit-store.js";
 import { createStewardApprovalService } from "../src/daemon/steward/approval-service.js";
+import { scanUnfinishedJournals } from "../src/daemon/steward/apply-transaction.js";
+import { stewardStoreDir } from "../src/daemon/steward/context-snapshot.js";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import { setHomeOverride } from "../src/shared/paths.js";
@@ -944,5 +946,73 @@ describe("skill steward pipeline end-to-end (task 2.3f)", () => {
     });
     expect(run.terminal).toBe("failed");
     expect(run.proposals).toHaveLength(0);
+  });
+});
+
+describe("restart recovery (task 2.3e)", () => {
+  let sandbox = "";
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-recovery-test-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+  });
+  afterEach(() => {
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it("scans crash-leftover journals and does not replay writes", async () => {
+    const journalDir = path.join(stewardStoreDir(), "journal");
+    fs.mkdirSync(journalDir, { recursive: true });
+    // 模拟崩溃：split 在 create-target 后进程退出（无终态审计）。
+    fs.writeFileSync(
+      path.join(journalDir, "spp_deadbeefdeadbeef.jsonl"),
+      [
+        JSON.stringify({
+          seq: 1,
+          step: "precheck",
+          detail: { kind: "precheck", targets: ["b-plan"] },
+        }),
+        JSON.stringify({
+          seq: 2,
+          step: "create-target",
+          detail: { kind: "content", directoryName: "b-plan" },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(journalDir, "spp_cafef00dcafef00d-rollback.jsonl"),
+      JSON.stringify({ seq: 1, step: "disable", detail: { kind: "enablement" } }) + "\n",
+      "utf8",
+    );
+    const unfinished = await scanUnfinishedJournals(stewardStoreDir());
+    expect(unfinished).toHaveLength(1);
+    expect(unfinished[0]!.proposalId).toBe("spp_deadbeefdeadbeef");
+    expect(unfinished[0]!.steps).toBe(2);
+    expect(unfinished[0]!.lastStep).toBe("create-target");
+  });
+
+  it("Global workspace rejects optimize writes with unsupported scope", async () => {
+    const domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+    try {
+      const globalTarget = {
+        workspaceId: "~" as const,
+        providerId: ProviderIdSchema.parse("claude-code"),
+      };
+      const discovered = await domain.skills.list(globalTarget);
+      expect(discovered.length).toBeGreaterThan(0);
+      const run = await domain.skillSteward.startRun({
+        target: globalTarget,
+        taskKind: "optimize",
+        skillIds: [discovered[0]!.id],
+      });
+      // Global 快照可以建立（只读分析），但 edit 提案在 bind 层被拒 → 场景失败终态。
+      expect(run.terminal).toBe("failed");
+      expect(run.proposals).toHaveLength(0);
+    } finally {
+      await domain.steward.dispose();
+      await domain.repository.dispose();
+    }
   });
 });
