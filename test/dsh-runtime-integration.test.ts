@@ -168,3 +168,87 @@ describe("dsh composition boot (task 3.2 step 1)", () => {
     ).toThrow(/output/);
   });
 });
+
+describe("dsh steward agent runtime (task 3.2)", () => {
+  /** 构造真实 Manager tool registry 桥（快照 fixture + 内存 sink）。 */
+  async function makeManagerBridge() {
+    const { createStewardToolRegistry } = await import("../src/daemon/steward/tool-registry.js");
+    const snapshotP = (await import("../src/shared/contracts/skill-steward.js"))
+      .SkillStewardContextSnapshotSchema;
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const snapshot = snapshotP.parse(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(__dirname, "fixtures", "steward", "snapshot.imported.json"),
+          "utf8",
+        ),
+      ),
+    );
+    const calls: import("../src/shared/contracts/skill-steward.js").SkillToolCall[] = [];
+    const registry = createStewardToolRegistry({
+      runId: (await import("../src/shared/contracts/skill-steward.js")).StewardRunIdSchema.parse(
+        "sr_0123456789abcdef01234567",
+      ),
+      snapshot,
+      proposals: {
+        store: () => {
+          throw new Error("not used in this round");
+        },
+        get: () => null,
+      },
+      validate: () => ({ overall: "valid", checks: [{ name: "bind", status: "passed" }] }),
+      onCall: (call) => calls.push(call),
+    });
+    return {
+      snapshot,
+      calls,
+      callTool: (tool: string, input: unknown) => registry.call(tool, input, "agent"),
+    };
+  }
+
+  it("runs a real tool round through the Manager registry", { timeout: 20_000 }, async () => {
+    const { runDshStewardToolRound } = await import("../src/daemon/steward/dsh-agent-runtime.js");
+    const manager = await makeManagerBridge();
+    const result = await runDshStewardToolRound({
+      sessionId: `steward-round-${Date.now()}`,
+      turnText: "Run the steward check task.",
+      callTool: manager.callTool,
+      onCall: () => undefined,
+    });
+    // 真实链路：deterministic LLM 发起 tool-call → 域工具执行回到 Manager registry
+    // → 第二轮收尾 → idle。
+    expect(result.adapterCalls).toBe(2);
+    expect(result.statuses).toContain("running");
+    expect(result.statuses.at(-1)).toBe("idle");
+    expect(manager.calls.length).toBeGreaterThanOrEqual(1);
+    const listCall = manager.calls.find((call) => call.tool === "skills.list_context");
+    expect(listCall).toBeDefined();
+    expect(listCall!.principal).toBe("agent");
+    expect(listCall!.result.kind).toBe("ok");
+  });
+
+  it(
+    "replays identically: a second round re-executes the same scripted tool sequence",
+    { timeout: 20_000 },
+    async () => {
+      const { runDshStewardToolRound } = await import("../src/daemon/steward/dsh-agent-runtime.js");
+      const first = await makeManagerBridge();
+      const second = await makeManagerBridge();
+      const r1 = await runDshStewardToolRound({
+        sessionId: `steward-replay-a-${Date.now()}`,
+        turnText: "Run the steward check task.",
+        callTool: first.callTool,
+        onCall: () => undefined,
+      });
+      const r2 = await runDshStewardToolRound({
+        sessionId: `steward-replay-b-${Date.now()}`,
+        turnText: "Run the steward check task.",
+        callTool: second.callTool,
+        onCall: () => undefined,
+      });
+      expect(r2.adapterCalls).toBe(r1.adapterCalls);
+      expect(second.calls.map((call) => call.tool)).toEqual(first.calls.map((call) => call.tool));
+    },
+  );
+});
