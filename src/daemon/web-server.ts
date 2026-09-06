@@ -1,9 +1,13 @@
 /**
  * 原始需求 [2026-07-14]：「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)」。
+ * 2026-09-06（openspec dsh-webui-composition 3.1a）：同源挂载 DSH web host——
+ * Manager 保留 /ws/rpc、/ws/acp/* 与 /api/health，DSH 走自身官方 route
+ * （/api/*、/plugins/*、index），SPA 静态回退仅在 DSH host 未挂载时生效（恢复入口）。
  * 正交意图：
  *   [1] 提供健康检查、SPA 静态资源与路由回退。
  *   [2] 在协议升级前拒绝未授权 WebSocket。
  *   [3] 通过受权 socket 承载共享 oRPC router，并有界回收完整连接生命周期。
+ *   [4] 同源代理 DSH host 的 HTTP 与协议升级（单 loopback origin 双 surface）。
  */
 import { existsSync, promises as fs } from "node:fs";
 import http from "node:http";
@@ -17,6 +21,13 @@ import type { DaemonStatus } from "../shared/contracts/daemon.js";
 import type { DaemonDomain } from "./domain.js";
 import { log } from "./log.js";
 import { createRpcRouter } from "./rpc-router.js";
+
+/** 已挂载的 DSH web host（loopback HTTP server 句柄）。 */
+export interface DshMountHandle {
+  host: string;
+  port: number;
+  server: http.Server;
+}
 
 /** WebUI 静态服务和 RPC 通道的启动配置。 */
 export interface WebServerOptions {
@@ -59,6 +70,14 @@ export class WebServer {
   private readonly rpcHandler: RPCHandler<Record<never, never>>;
   /** 订阅 agent 子进程异常退出事件，断开时由 dispose 自动取消。 */
   private readonly unsubscribeExited: () => void;
+  /** 已挂载的 DSH web host（null = 未挂载，SPA 静态回退是唯一 WebUI 入口）。 */
+  private dshMount: DshMountHandle | null = null;
+
+  /** 挂载/卸载 DSH web host（同源路由分区见 handleHttp/handleUpgrade）。 */
+  mountDsh(handle: DshMountHandle | null): void {
+    this.dshMount = handle;
+    log(handle ? `dsh web host mounted: 127.0.0.1:${handle.port}` : "dsh web host unmounted");
+  }
 
   constructor(private readonly options: WebServerOptions) {
     this.rpcHandler = new RPCHandler(
@@ -208,12 +227,95 @@ export class WebServer {
         response.end(JSON.stringify({ ok: true }));
         return;
       }
+      // Manager 保留资产前缀（task 3.1a）：DSH host 挂载时，Manager island 资产
+      // （/manager/dsh-island.js 等）仍从本 server 静态目录服务，保证单 origin 内
+      // island bundle 与 DSH 页面同源可达。
+      if (url.pathname.startsWith("/manager/")) {
+        await this.serveStatic(response, `/${url.pathname.slice("/manager/".length)}`);
+        return;
+      }
+      // DSH host 挂载时：其官方 route（/api/*、/plugins/*、index 等）优先，
+      // Manager SPA 静态回退退居 DSH 不可用时的恢复入口。
+      if (this.dshMount) {
+        this.proxyToDsh(request, response);
+        return;
+      }
       await this.serveStatic(response, url.pathname);
     } catch (error) {
       log(`web handle error: ${error instanceof Error ? error.message : String(error)}`);
       if (!response.headersSent) response.writeHead(500, { "content-type": "text/plain" });
       response.end("internal error");
     }
+  }
+
+  /** 把请求原样转发给已挂载的 DSH host（流式 pipe；连接错误映射 502）。 */
+  private proxyToDsh(request: http.IncomingMessage, response: http.ServerResponse): void {
+    const mount = this.dshMount;
+    if (!mount) {
+      response.writeHead(503, { "content-type": "text/plain" });
+      response.end("dsh host unmounted");
+      return;
+    }
+    const headers = { ...request.headers, host: `${mount.host}:${mount.port}` };
+    const proxy = http.request(
+      { host: mount.host, port: mount.port, method: request.method, path: request.url, headers },
+      (upstream) => {
+        response.writeHead(upstream.statusCode ?? 502, upstream.headers);
+        upstream.pipe(response);
+      },
+    );
+    proxy.on("error", (error) => {
+      log(`dsh proxy error: ${error instanceof Error ? error.message : String(error)}`);
+      if (!response.headersSent) response.writeHead(502, { "content-type": "text/plain" });
+      response.end("dsh host unavailable");
+    });
+    request.pipe(proxy);
+  }
+
+  /** 把协议升级原样桥接给 DSH host（官方 connection 通道；双向 socket pipe）。 */
+  private proxyUpgradeToDsh(request: http.IncomingMessage, socket: Duplex, head: Buffer): void {
+    const mount = this.dshMount;
+    if (!mount) {
+      socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    const headers = { ...request.headers, host: `${mount.host}:${mount.port}` };
+    const proxy = http.request({
+      host: mount.host,
+      port: mount.port,
+      method: request.method,
+      path: request.url,
+      headers: { ...headers, connection: "Upgrade" },
+    });
+    proxy.on("upgrade", (upstream, upstreamSocket, upstreamHead) => {
+      socket.write(
+        `HTTP/1.1 101 Switching Protocols\r\n` +
+          Object.entries(upstream.headers)
+            .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : value}`)
+            .join("\r\n") +
+          "\r\n\r\n",
+      );
+      if (upstreamHead.length > 0) socket.write(upstreamHead);
+      if (head.length > 0) upstreamSocket.write(head);
+      upstreamSocket.pipe(socket);
+      socket.pipe(upstreamSocket);
+      const drop = (): void => {
+        upstreamSocket.destroy();
+        socket.destroy();
+      };
+      upstreamSocket.on("error", drop);
+      socket.on("error", drop);
+    });
+    proxy.on("response", (upstream) => {
+      // DSH host 拒绝升级（非 101）：回写状态后关闭。
+      socket.end(
+        `HTTP/1.1 ${upstream.statusCode ?? 502} ${upstream.statusMessage ?? ""}\r\nConnection: close\r\n\r\n`,
+      );
+    });
+    proxy.on("error", () => {
+      socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+    });
+    proxy.end();
   }
 
   private handleUpgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer): void {
@@ -224,6 +326,11 @@ export class WebServer {
       return;
     }
     if (url.pathname !== "/ws/rpc") {
+      // Manager WS 端点之外：DSH host 挂载时桥接官方升级通道，否则 404。
+      if (this.dshMount) {
+        this.proxyUpgradeToDsh(request, socket, head);
+        return;
+      }
       socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       return;
     }
