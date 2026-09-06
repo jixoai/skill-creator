@@ -6,8 +6,9 @@
   - Files: `src/daemon/steward/dsh-adapter.ts`, `src/shared/contracts/dsh-runtime.ts`.
   - Acceptance: missing packages, version mismatch and missing plugin rows return typed unavailable; no implicit fallback. 使用实际 package composition，不要求另装 dsh-acp 可执行文件。
   - Evidence: db13aa8 —— @deepseek-ai/* 五包精确锁定 0.1.2-rc.1（devDependencies），审计 commit d347e703 写入契约；handshake 真实 require 逐包校验版本与组合行导出（AgentRegistry/AgentLoop/ToolRuntime/SystemPrompt/SessionStore），能力矩阵由已解析 rows 派生；注入式负例覆盖 MISSING_PACKAGE/VERSION_MISMATCH/COMPOSITION_ROW_MISSING（`pnpm exec vitest run test/dsh-runtime-integration.test.ts` 4 passed）；旧 dsh-acp backend 及其测试已移除。
-- [ ] 3.2 适配 DSH agent/session/stream/tool callback。
+- [x] 3.2 适配 DSH agent/session/stream/tool callback。
   - Files: `src/daemon/steward/dsh-adapter.ts`, `src/daemon/steward/dsh-events.ts`.
+  - Evidence: 79b304f/bf5425b/5701718 —— 组合内 `dsh-agent-runtime.ts`（实测文件名与 tasks 列表偏差已在 verification 注记）：ScriptedStewardLlmAdapter 注册真实 LlmRuntime；agentLoop.createAgent + setup 在 agent scope 注册五个 agent 可调用域工具（defineTool output {schema,render}，execute 全部回到 Manager tool registry 审计，principal=agent），版本化 prompt section（STEWARD_PROMPT_VERSION）；最小能力集由 scoped registration 构成（全局注册表为空，实测 restrict({allow}) 校验全局名）；tool round（followup→running→工具执行→第二轮→idle）、replay 一致、cancel 有界收敛、未注册通用工具 fail-closed（Manager 桥零调用）、run record 记录 promptVersion/toolVersion/snapshotId 全部有测试（10 passed）。
   - Steps: 通过实际 DSH tools.register 接入阶段 2 的七个领域工具，restriction 仅允许该白名单；注册版本化 prompt sections；所有执行回到 Manager，不注册通用文件或 shell 工具。外部响应和通知先以 `unknown` 解析并经 schema/narrowing 收窄，不使用未经验证的对象断言。
   - Acceptance: promptVersion/toolVersion/snapshot id are recorded; every domain tool call returns to Manager registry; cancellation drains child/session resources；未知帧、未知 tool request、错误 capability declaration 均 fail closed。
 - [ ] 3.3 适配 model/preset/permission/session controls 与 DSH client stream projection。
