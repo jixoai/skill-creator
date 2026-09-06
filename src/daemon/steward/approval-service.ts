@@ -309,6 +309,35 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
     const entry = requireProposal(audit.proposalId);
     const patch = entry.proposal.patch;
     if (patch.kind === "disable") {
+      // Codex R10 P1-3：no-op disable（apply 前已是 disabled，journal 记录 wasDisabled）
+      // 没有可回滚的 mutation——派生 reverse enable 只会把原状态改坏。
+      const journalPathForProbe = path.join(
+        stewardStoreDir(),
+        "journal",
+        `${audit.proposalId}.jsonl`,
+      );
+      const entries = await readJournal(journalPathForProbe).catch(() => null);
+      const enablementSteps =
+        entries?.filter((step) => step.step === "disable" || step.step === "enable") ?? [];
+      const allNoOps =
+        enablementSteps.length > 0 &&
+        enablementSteps.every(
+          (step) =>
+            (step.step === "disable" && step.detail.wasDisabled) ||
+            (step.step === "enable" && step.detail.wasEnabled),
+        );
+      if (
+        allNoOps &&
+        (entries?.some((step) => step.step !== "commit") ?? false) &&
+        entries?.every(
+          (step) => step.step === "commit" || step.step === "disable" || step.step === "enable",
+        )
+      ) {
+        return {
+          reverseProposalId: StewardProposalIdSchema.parse(`spp_${"0".repeat(16)}`),
+          note: "Disable was a no-op (skills were already disabled); original state preserved, nothing to roll back.",
+        };
+      }
       const reverse = structuredClone(entry.proposal);
       reverse.action = "enable";
       reverse.patch = {

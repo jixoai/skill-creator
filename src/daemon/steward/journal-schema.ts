@@ -13,6 +13,7 @@
  *       行是回放闸——没有完整 journal 就没有 rolled-back。
  */
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import {
   ContentRevisionSchema,
@@ -22,6 +23,7 @@ import {
 import { SkillIdSchema } from "../../shared/contracts/skills.js";
 import { SkillDirectoryNameSchema } from "../../shared/contracts/creator.js";
 import { DomainError } from "../domain-error.js";
+import { assertCanonicalDirectory, verifyDirIdentity } from "./dir-identity.js";
 
 /** Manager 生成的 move 备份文件名（`<seq>-<sha12>.bin`；manifest 与 journal 共用）。 */
 export const BackupRefSchema = z.string().regex(/^\d+-[0-9a-f]{12}\.bin$/, {
@@ -37,6 +39,8 @@ const ResourceDetailSchema = z
     strategy: z.enum(["copy", "move", "reference"]),
     from: RelPathSchema,
     to: RelPathSchema,
+    /** Codex R10 P1-2/P1-7：apply 时记录的落盘字节 sha256（回滚删除前逐项校验）。 */
+    sha256: Sha256HexSchema,
     backupRef: BackupRefSchema.optional(),
     sourceSha256: Sha256HexSchema.optional(),
   })
@@ -83,7 +87,8 @@ export const JournalEntrySchema = z.discriminatedUnion("step", [
     detail: z.strictObject({
       kind: z.literal("enablement"),
       skillId: SkillIdSchema,
-      wasDisabled: z.boolean().optional(),
+      /** Codex R10 P1-3：apply 捕获的启停前态——undo 只恢复捕获状态。 */
+      wasDisabled: z.boolean(),
       revision: ContentRevisionSchema.optional(),
     }),
   }),
@@ -93,7 +98,8 @@ export const JournalEntrySchema = z.discriminatedUnion("step", [
     detail: z.strictObject({
       kind: z.literal("enablement"),
       skillId: SkillIdSchema,
-      wasEnabled: z.boolean().optional(),
+      /** Codex R10 P1-3：apply 捕获的启停前态——undo 只恢复捕获状态。 */
+      wasEnabled: z.boolean(),
       revision: ContentRevisionSchema.optional(),
     }),
   }),
@@ -103,6 +109,8 @@ export const JournalEntrySchema = z.discriminatedUnion("step", [
     detail: z.strictObject({
       kind: z.literal("content"),
       directoryName: SkillDirectoryNameSchema,
+      /** Codex R10 P1-2：创建后 SKILL.md 的 revision（sha256:…，回滚删除前校验）。 */
+      revision: ContentRevisionSchema,
     }),
   }),
   z.strictObject({
@@ -132,8 +140,9 @@ export type JournalEntry = z.infer<typeof JournalEntrySchema>;
  * 只有完整、连续、可解析的 journal 才允许进入回放（部分回放 = 假 rolled-back）。
  */
 export async function readJournal(journalPath: string): Promise<JournalEntry[]> {
-  // Codex R9 P1-4：事实源 leaf 读取走 O_NOFOLLOW fd——预置 symlink journal（指向
-  // 外部可控 JSONL）在 open 即 ELOOP 拒绝；fd 打开后校验 regular file 并从 fd 读取。
+  // Codex R9 P1-4 / R10 P1-4：事实源读取先校验 journal 所在目录 canonical（parent
+  // symlink 下的外部 JSONL 不是 Manager 事实），leaf 走 O_NOFOLLOW fd。
+  const parentIdentity = await assertCanonicalDirectory(path.dirname(journalPath));
   let raw: string;
   let leafIdentity: { dev: number; ino: number };
   try {
@@ -177,6 +186,7 @@ export async function readJournal(journalPath: string): Promise<JournalEntry[]> 
       `Journal leaf identity drifted after read; recovery required: ${journalPath}`,
     );
   }
+  await verifyDirIdentity(path.dirname(journalPath), parentIdentity);
   const entries: JournalEntry[] = [];
   const lines = raw.split("\n");
   for (let index = 0; index < lines.length; index += 1) {

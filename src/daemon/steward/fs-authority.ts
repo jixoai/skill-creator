@@ -24,69 +24,19 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { DomainError } from "../domain-error.js";
 import { BackupRefSchema, type JournalEntry } from "./journal-schema.js";
+import { assertCanonicalDirectory, verifyDirIdentity, type DirIdentity } from "./dir-identity.js";
+import { assertPathInside } from "../path-safety.js";
+
+export { assertCanonicalDirectory, verifyDirIdentity };
+export type { DirIdentity };
+
+/** alias：Provider root 校验（与 Manager 事实目录同规则）。 */
+export const assertRealRoot = assertCanonicalDirectory;
 
 const O_NOFOLLOW = (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
 
 export function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
-}
-
-/**
- * Codex R8 P1-3 整改：root 必须是 Manager 持有的 canonical 目录。
- * 要求：lstat 为真实目录（非 symlink），且 realpath(root) 与 root 全等——任何一级
- * 被换成 symlink 都会破坏全等（symlink root 的 canonical 目标不再是调用方声称的
- * root，全部下游防线随之失效）。唯一豁免：darwin 的 /var ↔ /private/var 前缀
- * （系统级 alias，mkdtemp 沙箱天然携带；非攻击面）。
- */
-export async function assertRealRoot(root: string): Promise<DirIdentity> {
-  const stat = await fs.lstat(root).catch(() => null);
-  if (stat === null || !stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new DomainError(
-      "INVALID_OPERATION",
-      `manager root is not a real directory (symlinked or missing): ${root}`,
-    );
-  }
-  const real = await fs.realpath(root);
-  const darwinAlias =
-    process.platform === "darwin" && root.startsWith("/var/") ? `/private${root}` : null;
-  if (real !== root && real !== darwinAlias) {
-    throw new DomainError(
-      "INVALID_OPERATION",
-      `manager root is not canonical (realpath ${real} differs from the given root): ${root}`,
-    );
-  }
-  return { dev: stat.dev, ino: stat.ino };
-}
-
-/** 目录身份（dev/ino 绑定，检测同 lexical 路径的目录换体）。 */
-export interface DirIdentity {
-  dev: number;
-  ino: number;
-}
-
-/** 复验目录身份：同 lexical 路径上的任何换体（rename 顶替）都会使 inode 失配。 */
-export async function verifyDirIdentity(dir: string, identity: DirIdentity): Promise<void> {
-  const stat = await fs.lstat(dir).catch(() => null);
-  if (
-    stat === null ||
-    !stat.isDirectory() ||
-    stat.dev !== identity.dev ||
-    stat.ino !== identity.ino
-  ) {
-    throw new DomainError(
-      "UNAVAILABLE",
-      `manager directory identity drifted (path race or replacement); recovery required: ${dir}`,
-    );
-  }
-}
-
-/**
- * Codex R9 P1-1 整改：Manager 事实目录（journal 目录 / backup 父目录）同样要求
- * canonical——lstat 真实目录且 realpath 与自身全等（darwin /var 豁免同前）。
- * 预置 symlink 父目录（journal-link -> outside）在此拒绝。
- */
-export async function assertCanonicalDirectory(dir: string): Promise<DirIdentity> {
-  return assertRealRoot(dir);
 }
 
 /**
@@ -163,6 +113,7 @@ export async function readResourceBytesStrict(
   expectedByteSize: number,
   label: string,
 ): Promise<Buffer> {
+  assertPathInside(root, from);
   const rootIdentity = await assertRealRoot(root);
   const realRoot = await fs.realpath(root);
   const lexicalPosition = path.join(realRoot, path.relative(root, from));
@@ -234,6 +185,7 @@ export async function writeFileExclusiveVerified(
   bytes: Buffer,
   label: string,
 ): Promise<void> {
+  assertPathInside(root, to);
   const rootIdentity = await assertRealRoot(root);
   const realRoot = await fs.realpath(root);
   const lexicalPosition = path.join(realRoot, path.relative(root, to));
@@ -269,6 +221,8 @@ export async function writeFileExclusiveVerified(
         `Resource target identity drifted before write (path race); recovery required: ${label}`,
       );
     }
+    // Codex R10 P1-1：写前复验 root 身份——同路径目录换体在 payload 落盘前拦截。
+    await verifyDirIdentity(root, rootIdentity);
     await handle.writeFile(bytes);
     await handle.sync();
   } finally {
@@ -302,8 +256,8 @@ export async function restoreResourceBytesStrict(
   bytes: Buffer,
   label: string,
 ): Promise<void> {
-  // Codex R9 P1-2：restore 全入口 root canonical 校验（symlink root 下「现存 leaf
-  // 读取」防线全部建立在不可信 root 上）。
+  // Codex R9 P1-2 / R10 P1-5：restore 全入口 root canonical + root 内 containment。
+  assertPathInside(root, to);
   const rootIdentity = await assertRealRoot(root);
   await assertNoSymlinkAncestors(to, root);
   let stat: import("node:fs").Stats | null = null;
@@ -365,6 +319,7 @@ export async function unlinkFileVerified(
   label: string,
   quarantineJournalPath: string,
 ): Promise<void> {
+  assertPathInside(root, leaf);
   await assertRealRoot(root);
   await assertNoSymlinkAncestors(leaf, root);
   const identity = await captureLeafIdentity(leaf, label);
@@ -427,7 +382,9 @@ export async function unlinkFileVerified(
         `Resource source nlink drifted during quarantine (${after.nlink}); recovery required: ${label}`,
       );
     }
-    await syncDir(quarantineRoot).catch(() => undefined);
+    // Codex R10 P1-6：隔离 rename 的 durability barrier 失败必须中断（不吞）——
+    // 未持久化的 rename 不得推进 journal/commit。
+    await syncDir(quarantineRoot);
     await verifyDirIdentity(quarantineRoot, quarantineIdentity);
   } finally {
     await handle.close().catch(() => undefined);
@@ -488,6 +445,8 @@ export async function writeBackupWithManifest(options: {
   await verifyDirIdentity(root, rootIdentity);
   // Codex R8 独立探针整改：manifest leaf 用 O_NOFOLLOW 追加——预置 symlink 直连
   // 外部文件时 open 失败（ELOOP），manager 字节不越界落地。
+  // Codex R10 P1-1：manifest 追加前复验 backup root 身份（跨写事务持有）。
+  await verifyDirIdentity(root, rootIdentity);
   const manifestHandle = await fs.open(
     path.join(root, "manifest.jsonl"),
     fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | O_NOFOLLOW,

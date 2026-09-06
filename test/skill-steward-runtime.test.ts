@@ -1013,7 +1013,11 @@ describe("restart recovery (task 2.3e)", () => {
         JSON.stringify({
           seq: 2,
           step: "create-target",
-          detail: { kind: "content", directoryName: "b-plan" },
+          detail: {
+            kind: "content",
+            directoryName: "b-plan",
+            revision: `sha256:${"a".repeat(64)}`,
+          },
         }),
       ].join("\n") + "\n",
       "utf8",
@@ -2305,6 +2309,7 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
               strategy: "move",
               from: "../../outside-r8/escaped.md",
               to: "merged-skill/shared/moved.md",
+              sha256: "a".repeat(64),
               backupRef: "1-aaaaaaaaaaaa.bin",
               sourceSha256: "a".repeat(64),
             },
@@ -2323,7 +2328,11 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
           {
             seq: 1,
             step: "create-target",
-            detail: { kind: "content", directoryName: "../outside-r8" },
+            detail: {
+              kind: "content",
+              directoryName: "../outside-r8",
+              revision: `sha256:${"a".repeat(64)}`,
+            },
           },
         ],
         replayContext(ctx),
@@ -2338,7 +2347,11 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
           {
             seq: 1,
             step: "create-target",
-            detail: { kind: "content", directoryName: "merge-left" },
+            detail: {
+              kind: "content",
+              directoryName: "merge-left",
+              revision: `sha256:${"a".repeat(64)}`,
+            },
           },
         ],
         replayContext(ctx),
@@ -2498,6 +2511,85 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
       "keep\n",
     );
     void directory;
+  });
+
+  it("R11 P1-2: external edits inside a created target block rollback deletion (recovery)", async () => {
+    const { directory, snapshot, proposal } = await seedMergePair();
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    // 用户在 apply 后向目标目录写入外部编辑文件。
+    fs.writeFileSync(
+      path.join(directory, "skills", "merged-skill", "EXTERNAL-EDIT.txt"),
+      "keep\n",
+      "utf8",
+    );
+    await service.prepareRollback(audit.id, "human-ui");
+    const rolled = await service.applyRollback(audit.id, "human-ui");
+    expect(rolled.audit.status).toBe("recovery-required");
+    // 外部编辑保全（目录未被删除）。
+    expect(
+      fs.readFileSync(path.join(directory, "skills", "merged-skill", "EXTERNAL-EDIT.txt"), "utf8"),
+    ).toBe("keep\n");
+  });
+
+  it("R11 P1-3: disabling an already-disabled skill rolls back as a no-op (state preserved)", async () => {
+    const { directory } = await seedMergePair();
+    const skillDir = path.join(directory, "skills", "merge-right");
+    // 预置 disabled（SKILL.md → .SKILL.md）。
+    fs.renameSync(path.join(skillDir, "SKILL.md"), path.join(skillDir, ".SKILL.md"));
+    const ws = domain.workspaces.import(directory, "ws");
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.ts");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target: { workspaceId: ws.id, providerId },
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const victim = snapshot.skills.find((skill) => skill.directoryName === "merge-right")!;
+    expect(victim.disabled).toBe(true);
+    const { SKILL_STEWARD_CONTRACT_VERSION } =
+      await import("../src/shared/contracts/skill-steward.js");
+    const disableProposal: SkillProposal = {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "disable",
+      patch: {
+        kind: "disable",
+        snapshotId: snapshot.id,
+        reason: "r11 no-op probe",
+        selections: [{ skillId: victim.skillId, expectedRevision: victim.revision }],
+      },
+      rationale: "r11 no-op probe",
+      findingIds: [],
+      evidence: [{ skillId: victim.skillId, snippet: "probe" }],
+      skillIds: [victim.skillId],
+      observedRevisions: [{ skillId: victim.skillId, revision: victim.revision }],
+    };
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(disableProposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    // no-op disable 不派生 reverse enable（原状态保持，无 mutation 可回滚）。
+    const prepared = await service.prepareRollback(audit.id, "human-ui");
+    expect(prepared.note).toContain("no-op");
+    // 原 disabled 状态保持（.SKILL.md 仍在）。
+    expect(fs.existsSync(path.join(skillDir, ".SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(skillDir, "SKILL.md"))).toBe(false);
   });
 
   it("R10 P1-3: a forged mutationCount with renumbered lines still fails the rollback gate", async () => {

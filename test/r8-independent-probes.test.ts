@@ -132,7 +132,11 @@ describe("Codex R8 independent probes (regression-ized)", () => {
       {
         seq: 2,
         step: "create-target",
-        detail: { kind: "content", directoryName: "merged-skill" },
+        detail: {
+          kind: "content",
+          directoryName: "merged-skill",
+          revision: `sha256:${"a".repeat(64)}`,
+        },
       },
       {
         seq: 3,
@@ -351,6 +355,62 @@ describe("Codex R8 independent probes (regression-ized)", () => {
     fsSync.renameSync(dirA, path.join(root, "moved-away"));
     fsSync.renameSync(dirB, dirA);
     await expect(verifyDirIdentity(dirA, identity)).rejects.toThrow(/identity drifted/i);
+  });
+
+  it("[R10-4] a symlinked journal parent is rejected as a truth source on read", async () => {
+    const root = tmp();
+    const outside = path.join(root, "outside");
+    fsSync.mkdirSync(outside, { recursive: true });
+    fsSync.writeFileSync(
+      path.join(outside, "op.jsonl"),
+      JSON.stringify({
+        seq: 1,
+        step: "commit",
+        detail: {
+          kind: "commit",
+          proposalId: "spp_0123456789abcdef",
+          status: "applied",
+          mutationCount: 0,
+        },
+      }) + "\n",
+      "utf8",
+    );
+    const journalLink = path.join(root, "journal-link");
+    fsSync.symlinkSync(outside, journalLink);
+    const { readJournal } = await import("../src/daemon/steward/journal-schema.js");
+    await expect(readJournal(path.join(journalLink, "op.jsonl"))).rejects.toThrow(
+      /not a real directory|not canonical/i,
+    );
+  });
+
+  it("[R10-5] fs authority primitives refuse paths outside the root", async () => {
+    const root = tmp();
+    const outside = path.join(root, "outside");
+    fsSync.mkdirSync(outside, { recursive: true });
+    const leaf = path.join(outside, "x.bin");
+    fsSync.writeFileSync(leaf, "payload\n", "utf8");
+    const rootDir = path.join(root, "managed");
+    fsSync.mkdirSync(rootDir, { recursive: true });
+    const {
+      writeFileExclusiveVerified,
+      readResourceBytesStrict,
+      restoreResourceBytesStrict,
+      unlinkFileVerified,
+    } = await import("../src/daemon/steward/fs-authority.js");
+    const bytes = Buffer.from("payload\n", "utf8");
+    await expect(writeFileExclusiveVerified(leaf, rootDir, bytes, "probe")).rejects.toThrow(
+      /escapes its allowed root/i,
+    );
+    await expect(readResourceBytesStrict(leaf, rootDir, 8, "probe")).rejects.toThrow(
+      /escapes its allowed root/i,
+    );
+    await expect(restoreResourceBytesStrict(leaf, rootDir, bytes, "probe")).rejects.toThrow(
+      /escapes its allowed root/i,
+    );
+    await expect(
+      unlinkFileVerified(leaf, rootDir, "probe", path.join(root, "journal", "op.jsonl")),
+    ).rejects.toThrow(/escapes its allowed root/i);
+    expect(fsSync.readFileSync(leaf, "utf8")).toBe("payload\n");
   });
 
   it("[5] duplicate commit records are rejected by the replay gate", () => {

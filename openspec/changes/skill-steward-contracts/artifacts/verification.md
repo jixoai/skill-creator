@@ -1,6 +1,6 @@
 # skill-steward-contracts verification
 
-记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `315f27e（R9 整改）→ R10 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
+记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `140628e（R10 整改）→ R11 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
 
 ## 责任矩阵
 
@@ -109,6 +109,17 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - P1-4 journal 读取 authority：`readJournal` 改 O_NOFOLLOW fd + fstat regular + fd 读 + 读后 leaf inode 复验——预置 symlink journal（外部可控 JSONL）作为事实源被拒。
   - Deferred（诚实声明）：调用前（capture 之前）的同路径目录换体无法用操作内身份检测——换体目录占据的是 Manager-owned lexical 路径，字节仍落 Manager 路径空间；跨操作持久 inode 锚（store 目录 boot-time 绑定）归 2.3e recovery gate。R9 P2 的 manifest strict Zod schema 仍未做（手工 parser 的 ref/seq/from/hash 绑定仍在）。
   - 门禁（R10 整改后）：contracts 42/42、runtime 60/60（新增 forged-count 负例）、probes 12/12（新增 ×6：journal 父 symlink/backup 父 symlink/manifest hardlink/journal 读 symlink/restore symlink root/目录身份换体）、全量 422/422（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R10（4.0/10，不通过，报告 /tmp/stage1-contracts-review-round10.md；独立 worktree 140628e）→ R11 整改（R9 P1-2/P1-5/P1-7 关闭，本轮关闭全部七个 P1）：
+  - P1-1 写前身份复验：writeFileExclusiveVerified 在 `handle.writeFile` 之前 `verifyDirIdentity(root)`（同路径目录换体在 payload 落盘前拦截）；writeBackupWithManifest 在 manifest open 前复验 backup root 身份（跨写事务持有）。
+  - P1-2 目标删除前内容校验 + 隔离改名：journal 新增 create-target `revision` 与 resource `sha256`（apply 时落盘字节事实）；回滚删除前 walk 目录——文件集合必须精确等于 journal 事实树（SKILL.md + 资源路径）且逐文件 sha256 一致（外部编辑/新增/缺失 → recovery-required，目录保全）；删除 = 整目录隔离改名进 Manager 墓碑 + inode 证明 + 目录 fsync（不再存在递归 rm 外部树窗口；EXDEV fail-closed）。
+  - P1-3 toggle 后置条件 + 前态恢复：`toggleWithPostcondition` 只接受预期终态（disabled/enabled），skipped 按捕获前态处理，conflict/failed 立即 typed 失败；journal disable/enable 的 wasDisabled/wasEnabled 升级为必填；undo 只恢复捕获前态（apply 前 disabled 的技能回滚为 no-op）；no-op disable 的 prepareRollback 直接返回「无事可回滚」，不派生会改坏原状态的 reverse enable。
+  - P1-4 journal 读取目录 authority：readJournal 先 `assertCanonicalDirectory(dirname)` + 读后父目录身份复验（parent symlink 下的外部 JSONL 不再是事实源）。
+  - P1-5 原语自守 containment：read/write/restore/unlink 四原语入口 `assertPathInside(root, candidate)`（遗漏前置断言的未来调用方不再变成外部读写/删除入口）。
+  - P1-6 隔离 fsync 不再吞：quarantine 目录 fsync 失败直接 UNAVAILABLE（未持久化 rename 不得推进 journal/commit）。
+  - P1-7 resource 语义绑定：journal resource 行新增必填 `sha256`；终态闸 + 回滚删除共用该事实（与 proposal 双射 + manifest 双射叠加）。
+  - 模块：`dir-identity.ts` 拆出 canonical/身份原语（journal-schema 与 fs-authority 共用，破循环依赖）。
+  - 门禁（R11 整改后）：contracts 42/42、runtime 62/62（新增 no-op disable 回滚 + 外部编辑阻断删除负例）、probes 14/14（新增 journal 父目录读取 symlink + 原语越 root ×4）、全量 426/426（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R11 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R10 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R9 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R8 复审进行中（复核者在主工作树留下 5 个对抗性探针，已全部回归化并整改）：

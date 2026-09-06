@@ -19,6 +19,7 @@
  * 妥协声明：mutation 权威原语（fd 锚定读/写/删、备份 manifest）物理拆分在
  *   fs-authority.ts；journal 事实形状与严格读取拆分在 journal-schema.ts。
  */
+import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
@@ -51,6 +52,8 @@ import {
   restoreResourceBytesStrict,
   sha256Hex,
   unlinkFileVerified,
+  syncDir,
+  verifyDirIdentity,
   writeBackupWithManifest,
   writeFileExclusiveVerified,
 } from "./fs-authority.js";
@@ -121,9 +124,19 @@ export async function applyProposalTransaction(
 
   /** 补偿：逆序回滚已完成步骤；外部漂移 → recovery-required。 */
   const compensate = async (failure: string): Promise<ApplyOutcome> => {
+    const targetTrees = buildTargetTrees(journal);
     for (const entry of [...journal].reverse()) {
       try {
-        await undoStep(entry, { proposal, snapshot, deps, root, mutations, movedRestore });
+        await undoStep(entry, {
+          proposal,
+          snapshot,
+          deps,
+          root,
+          mutations,
+          movedRestore,
+          targetTrees,
+          backupJournalPath: deps.journalPath,
+        });
       } catch (error) {
         return {
           status: "recovery-required",
@@ -199,7 +212,7 @@ export async function applyProposalTransaction(
             wasDisabled: info.disabled,
             revision: info.revision,
           });
-          await deps.skills.toggle(snapshot.target, [selection.skillId], "disable");
+          await toggleWithPostcondition(deps, snapshot.target, selection.skillId, "disable");
           mutations.push({
             skillId: selection.skillId,
             relPath: "SKILL.md",
@@ -228,7 +241,7 @@ export async function applyProposalTransaction(
             wasEnabled: !info.disabled,
             revision: info.revision,
           });
-          await deps.skills.toggle(snapshot.target, [selection.skillId], "enable");
+          await toggleWithPostcondition(deps, snapshot.target, selection.skillId, "enable");
           mutations.push({
             skillId: selection.skillId,
             relPath: "SKILL.md",
@@ -273,11 +286,8 @@ export async function applyProposalTransaction(
         });
 
         // ---- 创建目标（direct-child，安全名由契约保证）。 ----
+        const createdRevisions = new Map<string, string>();
         for (const target of targets) {
-          await recordStep("create-target", {
-            kind: "content",
-            directoryName: target.directoryName,
-          });
           const created = await deps.creator.save({
             mode: "create",
             workspaceId: snapshot.target.workspaceId,
@@ -285,6 +295,13 @@ export async function applyProposalTransaction(
             directoryName: target.directoryName,
             frontmatter: target.frontmatter,
             body: target.body,
+          });
+          // Codex R10 P1-2：创建后事实（SKILL.md revision）入 journal——回滚删除前校验。
+          createdRevisions.set(target.directoryName, created.document.revision);
+          await recordStep("create-target", {
+            kind: "content",
+            directoryName: target.directoryName,
+            revision: created.document.revision,
           });
           mutations.push({
             relPath: `${target.directoryName}/SKILL.md`,
@@ -380,11 +397,18 @@ export async function applyProposalTransaction(
                 bytes: sourceBytes,
               });
             }
+            // Codex R10 P1-2/P1-7：落盘字节 sha256（reference 为引用行内容）始终入
+            // journal——终态闸与回滚删除前校验共用同一事实。
+            const writtenBytes =
+              mapping.strategy === "reference"
+                ? Buffer.from(`reference: ../../${fromRel}\n`, "utf8")
+                : sourceBytes;
             await recordStep("resource", {
               kind: "resource",
               strategy: mapping.strategy,
               from: fromRel,
               to: label,
+              sha256: sha256Hex(writtenBytes),
               ...(backupRef === undefined ? {} : { backupRef, sourceSha256: liveHash }),
             });
             await fs.mkdir(path.dirname(to), { recursive: true });
@@ -421,11 +445,14 @@ export async function applyProposalTransaction(
 
         // ---- 校验后禁用源技能（源目录保留）。 ----
         for (const source of sources) {
+          // Codex R10 P1-3：禁用前捕获当前启停态（journal 前态 = undo 恢复目标）。
+          const info = await deps.skills.info(snapshot.target, source.skillId);
           await recordStep("disable", {
             kind: "enablement",
             skillId: source.skillId,
+            wasDisabled: info.disabled,
           });
-          await deps.skills.toggle(snapshot.target, [source.skillId], "disable");
+          await toggleWithPostcondition(deps, snapshot.target, source.skillId, "disable");
           mutations.push({
             skillId: source.skillId,
             relPath: "SKILL.md",
@@ -461,6 +488,39 @@ export async function applyProposalTransaction(
     const writer = journalWriter as import("node:fs/promises").FileHandle | null;
     await writer?.close().catch(() => undefined);
   }
+}
+
+/** ToggleSummary 的最小形状（skill-service 返回值）。 */
+interface ToggleSummaryLike {
+  results: ReadonlyArray<{ skillId: string; status: string; error?: string }>;
+}
+
+/**
+ * Codex R10 P1-3：toggle 结果是强制 postcondition——只有预期终态算成功；
+ * skipped（已在目标态）由调用方按捕获前态处理；conflict/failed 立即抛错
+ * （compensation/recovery），绝不投影为 applied。
+ */
+async function toggleWithPostcondition(
+  deps: ApplyTransactionDeps,
+  target: SkillStewardContextSnapshot["target"],
+  skillId: string,
+  mode: "enable" | "disable",
+): Promise<"toggled" | "skipped"> {
+  const summary = (await deps.skills.toggle(target, [skillId as never], mode)) as ToggleSummaryLike;
+  const result = summary.results.find((item) => item.skillId === skillId);
+  if (!result) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `toggle ${mode} returned no result for ${skillId}; recovery required`,
+    );
+  }
+  if (result.status === "skipped") return "skipped";
+  // Provider 的终态是过去式（disabled/enabled）。
+  if (result.status === (mode === "disable" ? "disabled" : "enabled")) return "toggled";
+  throw new DomainError(
+    result.status === "conflict" ? "CONFLICT" : "UNAVAILABLE",
+    `toggle ${mode} for ${skillId} ended as ${result.status}${result.error ? `: ${result.error}` : ""}`,
+  );
 }
 
 /** 判定路径存在（async；precheck 专用）。 */
@@ -522,8 +582,9 @@ export async function undoJournalSteps(
   // 第三道：journal ↔ 备份 manifest 双射（部分/重编号 journal 暴露）。
   const manifest = await readBackupManifest(context.backupJournalPath ?? context.deps.journalPath);
   assertJournalManifestBijection(checked, manifest);
+  const targetTrees = buildTargetTrees(checked);
   for (const entry of [...checked].reverse()) {
-    await undoStep(entry, context);
+    await undoStep(entry, { ...context, targetTrees });
   }
 }
 
@@ -546,11 +607,47 @@ function createdDirectoriesOf(proposal: SkillProposal): Set<string> {
   return new Set();
 }
 
-/** 删除本 proposal 创建的目标目录：绑定 + containment + canonical 一致 + 删后校验。 */
+/** 本 proposal 创建目标的 apply 后事实树（回滚删除前逐项校验，Codex R10 P1-2）。 */
+interface TargetTree {
+  /** SKILL.md 的 revision（sha256:…）。 */
+  skillRevision: string;
+  /** 资源文件相对路径 → 落盘字节 sha256。 */
+  files: Map<string, string>;
+}
+
+/** 从 journal 步骤构建每个 create-target 目录的期望内容树。 */
+function buildTargetTrees(entries: readonly JournalEntry[]): Map<string, TargetTree> {
+  const trees = new Map<string, TargetTree>();
+  for (const entry of entries) {
+    if (entry.step === "create-target") {
+      trees.set(entry.detail.directoryName, {
+        skillRevision: entry.detail.revision,
+        files: new Map(),
+      });
+    } else if (entry.step === "resource") {
+      const directoryName = entry.detail.to.split("/")[0]!;
+      const tree = trees.get(directoryName);
+      const rel = entry.detail.to.split("/").slice(1).join("/");
+      if (tree && rel) tree.files.set(rel, entry.detail.sha256);
+    }
+  }
+  return trees;
+}
+
+/**
+ * Codex R10 P1-2：删除本 proposal 创建的目标目录。
+ *   [1] 绑定（proposal 创建集合）+ containment + canonical/realpath 一致；
+ *   [2] 内容校验：实际文件集合必须精确等于 journal 事实树（SKILL.md + 资源路径），
+ *       且每个文件 sha256 与 apply 时记录一致——任何新增/缺失/外部编辑 → recovery；
+ *   [3] 删除 = 隔离改名（整目录 rename 进 Manager backup root 墓碑 + inode 证明 +
+ *       目录 fsync）——不存在递归 rm 外部树窗口，EXDEV fail-closed。
+ */
 async function removeCreatedDirectory(
   dir: string,
   root: string,
   directoryName: string,
+  tree: TargetTree | undefined,
+  quarantineJournalPath: string,
 ): Promise<void> {
   await assertRealRoot(root);
   assertPathInside(root, dir);
@@ -574,7 +671,48 @@ async function removeCreatedDirectory(
       `Created target escaped the root (symlink race): ${directoryName}`,
     );
   }
-  await fs.rm(dir, { recursive: true, force: true });
+  if (tree !== undefined) {
+    // 内容校验：文件集合 + 逐文件 sha256。
+    const actual = await walkFiles(dir, "");
+    const expected = new Map<string, string>([["SKILL.md", tree.skillRevision], ...tree.files]);
+    if (actual.size !== expected.size || [...expected.keys()].some((f) => !actual.has(f))) {
+      const extra = [...actual.keys()].filter((f) => !expected.has(f));
+      throw new Error(
+        `Created target content drifted (files mismatch; extra: ${extra.join(",") || "none"}); recovery required: ${directoryName}`,
+      );
+    }
+    for (const [file, expectedSha] of expected) {
+      const content = await fs.readFile(path.join(dir, file));
+      const actualSha = sha256Hex(content);
+      const wanted = expectedSha.startsWith("sha256:")
+        ? expectedSha.slice("sha256:".length)
+        : expectedSha;
+      if (actualSha !== wanted) {
+        throw new Error(
+          `Created target file ${file} drifted from the apply-time hash; recovery required: ${directoryName}`,
+        );
+      }
+    }
+  }
+  // 隔离改名（与源删除同一 authority）。
+  const identity = { dev: stat.dev, ino: stat.ino };
+  const quarantineRoot = await prepareBackupRoot(quarantineJournalPath);
+  const quarantineIdentity = await assertCanonicalDirectory(quarantineRoot);
+  const tombstone = path.join(
+    quarantineRoot,
+    `removed-dir-${randomBytes(8).toString("hex")}-${path.basename(dir)}`,
+  );
+  try {
+    await fs.rename(dir, tombstone);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EXDEV") {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `cross-volume target cannot be quarantined in the manager store; recovery required: ${directoryName}`,
+      );
+    }
+    throw error;
+  }
   const stillExists = await fs.lstat(dir).then(
     () => true,
     () => false,
@@ -582,13 +720,47 @@ async function removeCreatedDirectory(
   if (stillExists) {
     throw new DomainError(
       "UNAVAILABLE",
-      `Created target survived removal (path race); recovery required: ${directoryName}`,
+      `Created target survived quarantine rename (path race); recovery required: ${directoryName}`,
     );
   }
+  const tomb = await fs.lstat(tombstone).catch(() => null);
+  if (
+    tomb === null ||
+    !tomb.isDirectory() ||
+    tomb.dev !== identity.dev ||
+    tomb.ino !== identity.ino
+  ) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `Created target race: quarantined directory does not match the captured identity; recovery required: ${directoryName}`,
+    );
+  }
+  await syncDir(quarantineRoot);
+  await verifyDirIdentity(quarantineRoot, quarantineIdentity);
+}
+
+/** 递归收集目录内全部 regular 文件的相对路径（子目录名保留）。 */
+async function walkFiles(dir: string, prefix: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      for (const [f] of await walkFiles(path.join(dir, entry.name), rel)) files.set(f, "");
+    } else if (entry.isFile()) {
+      files.set(rel, "");
+    } else {
+      throw new Error(`Created target contains a non-regular entry: ${rel}`);
+    }
+  }
+  return files;
 }
 
 /** 撤销一步（逆序补偿）；外部漂移抛错 → recovery-required。 */
-async function undoStep(entry: JournalEntry, context: UndoContext): Promise<void> {
+async function undoStep(
+  entry: JournalEntry,
+  context: UndoContext & { targetTrees: Map<string, TargetTree> },
+): Promise<void> {
   const { deps, snapshot, root } = context;
   const created = createdDirectoriesOf(context.proposal);
   const affected = affectedSkillIdsOf(context.proposal);
@@ -628,7 +800,10 @@ async function undoStep(entry: JournalEntry, context: UndoContext): Promise<void
           `Journal disable mutation references skill outside the proposal's affected set: ${entry.detail.skillId}`,
         );
       }
-      await deps.skills.toggle(snapshot.target, [entry.detail.skillId], "enable");
+      // Codex R10 P1-3：undo 只恢复捕获前态——apply 前已 disabled 的技能是 no-op，
+      // 不得把原状态改回 enabled。
+      if (entry.detail.wasDisabled) return;
+      await toggleWithPostcondition(deps, snapshot.target, entry.detail.skillId, "enable");
       return;
     }
     case "enable": {
@@ -638,7 +813,9 @@ async function undoStep(entry: JournalEntry, context: UndoContext): Promise<void
           `Journal enable mutation references skill outside the proposal's affected set: ${entry.detail.skillId}`,
         );
       }
-      await deps.skills.toggle(snapshot.target, [entry.detail.skillId], "disable");
+      // Codex R10 P1-3：同上——恢复捕获前态，不盲目反向。
+      if (entry.detail.wasEnabled) return;
+      await toggleWithPostcondition(deps, snapshot.target, entry.detail.skillId, "disable");
       return;
     }
     case "create-target": {
@@ -651,7 +828,13 @@ async function undoStep(entry: JournalEntry, context: UndoContext): Promise<void
           `Journal create-target references a directory this proposal never created: ${directoryName}`,
         );
       }
-      await removeCreatedDirectory(path.join(root, directoryName), root, directoryName);
+      await removeCreatedDirectory(
+        path.join(root, directoryName),
+        root,
+        directoryName,
+        context.targetTrees.get(directoryName),
+        context.backupJournalPath ?? context.deps.journalPath,
+      );
       return;
     }
     case "resource": {
@@ -714,7 +897,13 @@ async function undoStep(entry: JournalEntry, context: UndoContext): Promise<void
           `Journal resource target escapes the proposal-created directories: ${to}`,
         );
       }
-      await removeCreatedDirectory(path.join(root, directoryName), root, directoryName);
+      await removeCreatedDirectory(
+        path.join(root, directoryName),
+        root,
+        directoryName,
+        context.targetTrees.get(directoryName),
+        context.backupJournalPath ?? context.deps.journalPath,
+      );
       return;
     }
   }
