@@ -74,7 +74,10 @@ const api: ManagerIslandApi = {
     }, 50);
   },
   unmount(el) {
-    if (!mountedRoot || el !== mountedHost) return;
+    // 匹配 mount 时的目标，或包含它的容器（插件传 host/panel 均可）。
+    if (!mountedRoot || (el !== mountedHost && !(el instanceof Node && el.contains(mountedHost)))) {
+      return;
+    }
     const root = mountedRoot;
     mountedRoot = null;
     mountedHost = null;

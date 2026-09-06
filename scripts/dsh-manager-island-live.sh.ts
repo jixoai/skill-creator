@@ -24,13 +24,13 @@ fs.writeFileSync(path.join(root, "dsh-manager-island.url"), "", "utf8");
 const { bootOfficialWebProfile } = await import("../src/daemon/steward/dsh-official-profile.ts");
 const { createDaemonDomain } = await import("../src/daemon/domain.js");
 const { WebServer } = await import("../src/daemon/web-server.js");
-const { deterministicSkillsCliProbe } = await import("../test/helpers/deterministic-probe.js");
 const { ProviderIdSchema } = await import("../src/shared/contracts/workspaces.js");
 const { setHomeOverride } = await import("../src/shared/paths.js");
 const { randomBytes } = await import("node:crypto");
 
 setHomeOverride(process.env.SKILL_CREATOR_HOME!);
-const domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+// 3.1b 验收要求真实文件系统证据：不注入 deterministic probe（真实 skills 探测）。
+const domain = createDaemonDomain();
 
 // island 资产目录：构建产物存在则直接服务；否则报错退出（不接受假 island）。
 const webuiDir = path.join(root, "webui", "build-island");

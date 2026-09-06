@@ -67,7 +67,7 @@ window.__ModuleLoader__.load({
     // ---- Manager island 宿主（3.1a）----
 
     var ISLAND_ASSET_PATH = "/manager/dsh-island.js";
-    var islandState = { open: false, scriptLoading: null, hostEl: null, api: null };
+    var islandState = { open: false, scriptLoading: null, hostEl: null, panelEl: null, api: null };
 
     function loadIslandApi() {
       if (islandState.api) return Promise.resolve(islandState.api);
@@ -102,12 +102,15 @@ window.__ModuleLoader__.load({
       if (!islandState.open) return;
       islandState.open = false;
       try {
-        if (islandState.api && islandState.hostEl) islandState.api.unmount(islandState.hostEl);
+        // unmount 匹配 mount 时的 panel 元素（entry 侧同规则），Svelte root 与
+        // Manager 连接随生命周期释放；失败不阻断 host 移除。
+        if (islandState.api && islandState.panelEl) islandState.api.unmount(islandState.panelEl);
       } finally {
         if (islandState.hostEl && islandState.hostEl.parentNode) {
           islandState.hostEl.parentNode.removeChild(islandState.hostEl);
         }
         islandState.hostEl = null;
+        islandState.panelEl = null;
       }
     }
 
@@ -132,6 +135,7 @@ window.__ModuleLoader__.load({
           });
           document.body.appendChild(host);
           islandState.hostEl = host;
+          islandState.panelEl = panel;
           api.mount(panel);
         })
         .catch(function (error) {
