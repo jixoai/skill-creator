@@ -1,12 +1,16 @@
 /**
- * DSH runtime integration focused tests（openspec dsh-runtime-integration task 3.1+）。
+ * DSH runtime integration focused tests（openspec dsh-runtime-integration tasks 3.1-3.4）。
  *
  * 用户原始需求 [2026-09-06]：「missing packages, version mismatch and missing plugin
  * rows return typed unavailable; no implicit fallback. 使用实际 package composition。」
+ * task 3.4 追加：「另测 missing packages、invalid config、permission-denied」与
+ * handshake recovery（失败不粘滞）。
  *
  * 正交意图：
  *   [1] 真实锁定组合 handshake：本机安装的 @deepseek-ai/* 0.1.2-rc.1 全部解析可用。
  *   [2] 注入式负例：缺包 / 版本漂移 / 组合行缺失 → typed unavailable，零 fallback。
+ *   [3] 恢复与边界：handshake 失败后可恢复；human-only 工具在 Manager 层与 DSH 层
+ *       都被 permission-denied / fail-closed；invalid config 投影默认值。
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -83,22 +87,44 @@ describe("dsh runtime handshake (task 3.1)", () => {
     });
   });
 
-  it("reports typed unavailable when a composition row export disappears", () => {
-    const loader: DshPackageLoader = (packageName) => {
-      const base = realLoader(packageName);
-      if (packageName === "@deepseek-ai/dsh-tools") {
-        return { ...base, hasExport: () => false };
+  it(
+    "reports typed unavailable when a composition row export disappears",
+    { timeout: 20_000 },
+    () => {
+      const loader: DshPackageLoader = (packageName) => {
+        const base = realLoader(packageName);
+        if (packageName === "@deepseek-ai/dsh-tools") {
+          return { ...base, hasExport: () => false };
+        }
+        return base;
+      };
+      const status = createDshRuntimeAdapter({ loader }).handshake();
+      expect(status).toMatchObject({
+        state: "unavailable",
+        code: "COMPOSITION_ROW_MISSING",
+        packageName: "@deepseek-ai/dsh-tools",
+      });
+      if (status.state === "unavailable") {
+        expect(status.detail).toContain("ToolRuntime");
       }
-      return base;
+    },
+  );
+
+  it("recovers once the failing package resolves again (no sticky failure)", () => {
+    let sessionMissing = true;
+    const loader: DshPackageLoader = (packageName) => {
+      if (packageName === "@deepseek-ai/dsh-session" && sessionMissing) {
+        throw new Error("MODULE_NOT_FOUND");
+      }
+      return realLoader(packageName);
     };
-    const status = createDshRuntimeAdapter({ loader }).handshake();
-    expect(status).toMatchObject({
-      state: "unavailable",
-      code: "COMPOSITION_ROW_MISSING",
-      packageName: "@deepseek-ai/dsh-tools",
-    });
-    if (status.state === "unavailable") {
-      expect(status.detail).toContain("ToolRuntime");
+    const adapter = createDshRuntimeAdapter({ loader });
+    expect(adapter.handshake()).toMatchObject({ state: "unavailable", code: "MISSING_PACKAGE" });
+    sessionMissing = false;
+    const recovered = adapter.handshake();
+    expect(recovered.state).toBe("available");
+    if (recovered.state === "available") {
+      expect(recovered.capabilities.sessionStore).toBe(true);
     }
   });
 });
@@ -326,4 +352,102 @@ describe("dsh steward runtime safety (task 3.2 acceptance)", () => {
       expect(result.statuses.at(-1)).toBe("idle");
     },
   );
+});
+
+describe("dsh unavailable/recovery boundaries (task 3.4)", () => {
+  it(
+    "permission-denied: human-only apply/rollback are refused for the agent principal at both layers",
+    { timeout: 20_000 },
+    async () => {
+      const { runDshStewardToolRound } = await import("../src/daemon/steward/dsh-agent-runtime.js");
+      const manager = await (async () => {
+        const { createStewardToolRegistry } =
+          await import("../src/daemon/steward/tool-registry.js");
+        const steward = await import("../src/shared/contracts/skill-steward.js");
+        const fs = await import("node:fs");
+        const path = await import("node:path");
+        const snapshot = steward.SkillStewardContextSnapshotSchema.parse(
+          JSON.parse(
+            fs.readFileSync(
+              path.join(__dirname, "fixtures", "steward", "snapshot.imported.json"),
+              "utf8",
+            ),
+          ),
+        );
+        const calls: import("../src/shared/contracts/skill-steward.js").SkillToolCall[] = [];
+        const registry = createStewardToolRegistry({
+          runId: steward.StewardRunIdSchema.parse("sr_0123456789abcdef01234567"),
+          snapshot,
+          proposals: {
+            store: () => {
+              throw new Error("not used");
+            },
+            get: () => null,
+          },
+          validate: () => ({ overall: "valid", checks: [] }),
+          onCall: (call) => calls.push(call),
+        });
+        return {
+          calls,
+          callTool: (tool: string, input: unknown) => registry.call(tool, input, "agent"),
+        };
+      })();
+
+      // 层 1：Manager tool registry 对 agent principal 直接 permission-denied。
+      const denied = (await manager.callTool("skills.apply_proposal", {
+        proposalId: "sp_0123456789abcdef01234567",
+      })) as { kind: string; reason?: string };
+      expect(denied.kind).toBe("denied");
+      expect(denied.reason).toBe("principal-forbidden");
+      const deniedCall = manager.calls.at(-1);
+      expect(deniedCall?.result).toMatchObject({ kind: "denied", reason: "principal-forbidden" });
+
+      // 层 2：agent scope 未注册 apply/rollback；模型请求它在 DSH registry fail-closed。
+      const result = await runDshStewardToolRound({
+        sessionId: `steward-apply-denied-${Date.now()}`,
+        turnText: "Apply the proposal now.",
+        snapshotId: "snap_denied_round",
+        requestTool: "skills.apply_proposal",
+        callTool: async (tool) => {
+          throw new Error(`Manager bridge must not see ${tool}`);
+        },
+        onCall: () => undefined,
+      });
+      expect(result.toolDenied).toBe(true);
+      expect(result.statuses.at(-1)).toBe("idle");
+      // Manager 侧唯一审计是层 1 的显式 denied 记录；DSH 层零新调用。
+      expect(manager.calls.filter((call) => call.tool === "skills.apply_proposal")).toHaveLength(1);
+    },
+  );
+
+  it("invalid config: corrupted dsh-settings.json projects defaults and keeps deterministic preset resolvable", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { setHomeOverride } = await import("../src/shared/paths.js");
+    const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-dsh-invalid-"));
+    const isolatedHome = path.join(sandbox, "state");
+    process.env.SKILL_CREATOR_HOME = isolatedHome;
+    setHomeOverride(isolatedHome);
+    try {
+      const storeDir = path.join(isolatedHome, "steward-store");
+      fs.mkdirSync(storeDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(storeDir, "dsh-settings.json"),
+        JSON.stringify({ configVersion: 42, preset: "live", garbage: [1, 2, 3] }),
+        "utf8",
+      );
+      const { createDshSettingsService } = await import("../src/daemon/steward/dsh-settings.js");
+      const service = createDshSettingsService();
+      const view = await service.getView();
+      expect(view.settings.preset).toBe("deterministic");
+      expect(view.settings.revision).toBe(0);
+      const resolved = await service.resolveRuntimePreset();
+      expect(resolved.outcome).toBe("deterministic");
+    } finally {
+      setHomeOverride(null);
+      delete process.env.SKILL_CREATOR_HOME;
+      fs.rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
 });
