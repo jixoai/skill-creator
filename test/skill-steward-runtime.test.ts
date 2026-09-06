@@ -2343,7 +2343,7 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
         ],
         replayContext(ctx),
       ),
-    ).rejects.toThrow(/never created/i);
+    ).rejects.toThrow(/never created|manifest/i);
     expect(fs.existsSync(path.join(ctx.directory, "skills", "merge-left"))).toBe(true);
   });
 
@@ -2372,7 +2372,7 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     fs.rmSync(manifestPath);
     await expect(
       undoJournalSteps(await readJournal(ctx.journalPath), replayContext(ctx)),
-    ).rejects.toThrow(/no entry/i);
+    ).rejects.toThrow(/no entry|manifest/i);
 
     // manifest 坏行 → 拒绝。
     fs.writeFileSync(manifestPath, `${originalManifest}{oops\n`, "utf8");

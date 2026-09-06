@@ -39,6 +39,7 @@ import {
   type JournalEntry,
 } from "./journal-schema.js";
 import {
+  assertJournalManifestBijection,
   assertNoSymlinkAncestors,
   findBackupEntry,
   prepareBackupRoot,
@@ -91,7 +92,16 @@ export async function applyProposalTransaction(
   ): Promise<void> => {
     if (journalWriter === null) {
       await fs.mkdir(path.dirname(deps.journalPath), { recursive: true });
-      journalWriter = await fs.open(deps.journalPath, "a", 0o600);
+      // Codex R8 独立探针整改：journal leaf 用 O_NOFOLLOW 追加——预置 symlink
+      // 直连外部文件时 open 失败（ELOOP），记账字节不越界落地。
+      journalWriter = await fs.open(
+        deps.journalPath,
+        fs.constants.O_WRONLY |
+          fs.constants.O_APPEND |
+          fs.constants.O_CREAT |
+          (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW!,
+        0o600,
+      );
     }
     seq += 1;
     const entry = { seq, step, detail } as JournalEntry;
@@ -473,15 +483,19 @@ export interface UndoContext {
  * 逆序撤销一组 journal 步骤（补偿与 rollback 共用）；失败抛错由调用方定级。
  * Codex R7 P1-3/P1-4：入口先经闭合 union 复验——篡改/未知 step/穿越路径在进入
  * 任何文件系统操作之前即被 typed 拒绝（磁盘读出的条目已校验，这里覆盖直调方）。
+ * Codex R8 独立探针整改：回放前校验 journal ↔ 备份 manifest 双射——删除 resource
+ * 行后整体重编号的部分 journal 在此暴露（manifest 是写入时持久化的独立事实）。
  */
 export async function undoJournalSteps(
   entries: JournalEntry[],
   context: UndoContext,
 ): Promise<void> {
-  for (const entry of [...entries].reverse()) {
-    const checked = JournalEntrySchema.safeParse(entry);
-    if (!checked.success) {
-      const reason = checked.error.issues
+  // 第一道：闭合 union 复验全部条目（未知 step/穿越路径/伪造字段先于任何 IO 拒绝）。
+  const checked: JournalEntry[] = [];
+  for (const entry of entries) {
+    const parsed = JournalEntrySchema.safeParse(entry);
+    if (!parsed.success) {
+      const reason = parsed.error.issues
         .slice(0, 3)
         .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
         .join("; ");
@@ -490,7 +504,13 @@ export async function undoJournalSteps(
         `journal step failed closed validation (no replay; recovery required): ${reason}`,
       );
     }
-    await undoStep(checked.data, context);
+    checked.push(parsed.data);
+  }
+  // 第二道：journal ↔ 备份 manifest 双射（部分/重编号 journal 暴露）。
+  const manifest = await readBackupManifest(context.backupJournalPath ?? context.deps.journalPath);
+  assertJournalManifestBijection(checked, manifest);
+  for (const entry of [...checked].reverse()) {
+    await undoStep(entry, context);
   }
 }
 

@@ -23,13 +23,28 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { DomainError } from "../domain-error.js";
-import { BackupRefSchema } from "./journal-schema.js";
+import { BackupRefSchema, type JournalEntry } from "./journal-schema.js";
 
 const O_NOFOLLOW = (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
 const IS_LINUX = process.platform === "linux";
 
 export function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * Codex R8 独立探针整改：root 自身必须是真实目录（末级组件不得是 symlink）。
+ * realpath 会把 symlink root 解析到外部，使「lexical === canonical」恒真——调用方
+ * 传入被换体的 root 时所有下游防线失效；在读/写/删入口统一拒绝。
+ */
+async function assertRealRoot(root: string): Promise<void> {
+  const stat = await fs.lstat(root).catch(() => null);
+  if (stat === null || !stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `manager root is not a real directory (symlinked or missing): ${root}`,
+    );
+  }
 }
 
 /**
@@ -106,6 +121,7 @@ export async function readResourceBytesStrict(
   expectedByteSize: number,
   label: string,
 ): Promise<Buffer> {
+  await assertRealRoot(root);
   const realRoot = await fs.realpath(root);
   const lexicalPosition = path.join(realRoot, path.relative(root, from));
   const realFrom = await realpathOrNotFound(from, label);
@@ -175,6 +191,7 @@ export async function writeFileExclusiveVerified(
   bytes: Buffer,
   label: string,
 ): Promise<void> {
+  await assertRealRoot(root);
   const realRoot = await fs.realpath(root);
   const lexicalPosition = path.join(realRoot, path.relative(root, to));
   await assertNoSymlinkAncestors(to, root);
@@ -301,6 +318,7 @@ async function openVerifiedParentFd(
  *       任一不成立（检查后换体删错外部文件等）→ UNAVAILABLE recovery-required。
  */
 export async function unlinkFileVerified(leaf: string, root: string, label: string): Promise<void> {
+  await assertRealRoot(root);
   await assertNoSymlinkAncestors(leaf, root);
   const identity = await captureLeafIdentity(leaf, label);
   if (identity.nlink !== 1) {
@@ -404,7 +422,13 @@ export async function writeBackupWithManifest(options: {
   const root = await prepareBackupRoot(options.journalPath);
   await writeFileExclusiveVerified(path.join(root, parsedRef), root, bytes, `backup:${parsedRef}`);
   await syncDir(root);
-  const manifestHandle = await fs.open(path.join(root, "manifest.jsonl"), "a", 0o600);
+  // Codex R8 独立探针整改：manifest leaf 用 O_NOFOLLOW 追加——预置 symlink 直连
+  // 外部文件时 open 失败（ELOOP），manager 字节不越界落地。
+  const manifestHandle = await fs.open(
+    path.join(root, "manifest.jsonl"),
+    fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | O_NOFOLLOW,
+    0o600,
+  );
   try {
     const line = `${JSON.stringify({
       ref: parsedRef,
@@ -504,4 +528,47 @@ export function findBackupEntry(
     );
   }
   return entry;
+}
+
+/**
+ * Codex R8 独立探针整改：journal ↔ manifest 双射校验。
+ * seq 连续性挡不住「删除 resource 行后整体重编号」的部分 journal——move 备份的
+ * manifest（ref/seq/from）是 Manager 在写入时持久化的独立事实，回放前要求：
+ * 每条 manifest 记录恰好对应一条 journal move 步骤（ref+seq+from 全等），反之亦然。
+ * 任何一侧缺失、多余或重复 = journal 被篡改/截断 → typed 拒绝（recovery-required）。
+ */
+export function assertJournalManifestBijection(
+  entries: JournalEntry[],
+  manifest: BackupManifestEntry[],
+): void {
+  const moveSteps = entries.filter(
+    (entry): entry is JournalEntry & { step: "resource" } =>
+      entry.step === "resource" && entry.detail.strategy === "move",
+  );
+  const bySeq = new Map(manifest.map((entry) => [entry.seq, entry]));
+  if (bySeq.size !== manifest.length) {
+    throw new Error("backup manifest contains duplicate seq records; recovery required");
+  }
+  const seenRefs = new Set<string>();
+  for (const step of moveSteps) {
+    const bound = bySeq.get(step.seq);
+    if (
+      bound === undefined ||
+      bound.ref !== step.detail.backupRef ||
+      bound.from !== step.detail.from
+    ) {
+      throw new Error(
+        `journal move step ${step.seq} has no exact manifest record; recovery required`,
+      );
+    }
+    if (seenRefs.has(bound.ref)) {
+      throw new Error(`journal references backup ref twice: ${bound.ref}; recovery required`);
+    }
+    seenRefs.add(bound.ref);
+  }
+  if (seenRefs.size !== manifest.length) {
+    throw new Error(
+      `journal has ${seenRefs.size} move steps but manifest records ${manifest.length} backups (renumbered or deleted journal lines); recovery required`,
+    );
+  }
 }

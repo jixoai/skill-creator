@@ -91,7 +91,10 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - 测试（R8 负例 ×8）：readJournal 对缺失/不可读/坏行/未知 step/删行（seq 断裂）全部 typed 拒绝；move 行缺 sourceSha256 解析层拒绝；剥离 commit 行 → applyRollback recovery-required（非假 rolled-back）；commit 行绑定他人 proposalId → recovery-required；`from` 穿越/`directoryName` 穿越/合法名但非本 proposal 创建 → 回放拒绝且根外 sentinel 文件完好；备份字节篡改（同长度）/manifest 缺失/坏行/重复 → 回放拒绝且源不被伪造恢复；hardlink 源 → nlink 策略拒绝 + compensated（源与外部 link 完好、目标零残留）；journal 0600 + 终态 commit 行落盘断言。
   - 已知残余（诚实声明）：macOS 无 fd 相对删除/创建，竞态残余为「外部最多出现一个 0 字节占位文件（写入前锚定即止损）」或「误删外部文件后立即以 nlink 证明转为 typed recovery-required（事实入 journal/审计）」；平台级原子化需 unlinkat/openat，Node 不暴露。Linux 已由 /proc/self/fd 锚定达成。journal 文件的 append fd 逐行 fsync 后仍无跨文件崩溃顺序证明（backup→journal 的持久顺序由先 backup 后 journal 的写入顺序 + 各自 fsync 保证）。
   - 门禁（R8 整改后）：contracts 42/42、runtime 55/55、全量见下轮记录、typecheck 0、webui check 0/0、openspec 9/9、全树 `vp fmt --check` 绿。
-- R8 复审已随本整改提交（结论待出；复核回调为后台 codex-callback.sh 模式）。
+- R8 复审进行中（复核者在主工作树留下 5 个对抗性探针，已全部回归化并整改）：
+  - 探针整改补充提交：manifest leaf / journal leaf 追加改 O_NOFOLLOW（预置 symlink → ELOOP 失败，外部零字节落地）；`assertRealRoot`（root 末级组件 symlink 拒绝——realpath 恒等攻击面）；`assertCommittedJournal` 要求恰好一条 commit 终态行且为末行；新增 `assertJournalManifestBijection`（journal move 步骤 ↔ manifest 记录 ref+seq+from 双射——删除 resource 行后整体重编号的部分 journal 在回放前暴露），入口 `undoJournalSteps` 先 union 复验再双射校验。
+  - 探针回归化：`test/r8-independent-probes.test.ts` 6 tests（manifest symlink 拒绝且外部文件原样 / symlink root 拒绝 / journal leaf symlink typed 终态零外部字节 / 重编号 journal 双射与 proposal 绑定拒绝 / manifest 多余备份双射拒绝 / 重复 commit 记录拒绝）。
+  - 门禁：contracts 42/42、runtime 55/55、probes 6/6、全量 411/411（52 files）、typecheck 0、dsh-official-profile 单独复跑通过（全量下一次超时为负载抖动）。
 
 ## Deferred（owner 与完成边界）
 

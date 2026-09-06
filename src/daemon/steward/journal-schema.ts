@@ -181,17 +181,20 @@ export async function readJournal(journalPath: string): Promise<JournalEntry[]> 
 
 /**
  * 回放闸：journal 必须以本 proposal 的 commit 终态行收尾。崩溃/截断/被删行的
- * journal 一律不得回放——没有完整事实就没有 rolled-back（Codex R7 P1-3）。
+ * journal 一律不得回放——没有完整 journal 就没有 rolled-back（Codex R7 P1-3）。
+ * Codex R8 独立探针整改：commit 行必须恰好一条且为末行——重复 commit 记录
+ * （伪造终态）与中途插入的 commit 一律拒绝。
  */
 export function assertCommittedJournal(
   entries: JournalEntry[],
   expected: { proposalId: string },
 ): void {
+  const commits = entries.filter((entry) => entry.step === "commit");
   const last = entries.at(-1);
-  if (!last || last.step !== "commit") {
+  if (commits.length !== 1 || !last || last.step !== "commit") {
     throw new DomainError(
       "INVALID_OPERATION",
-      `Journal has no terminal commit record (crashed, truncated, or never applied); recovery required (expected proposal ${expected.proposalId}).`,
+      `Journal must end with exactly one terminal commit record (found ${commits.length}, last step ${last?.step ?? "none"}); recovery required (expected proposal ${expected.proposalId}).`,
     );
   }
   if (last.detail.proposalId !== expected.proposalId) {
