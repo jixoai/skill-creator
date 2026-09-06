@@ -1,6 +1,6 @@
 # skill-steward-contracts verification
 
-记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `90895f7（R7 整改）→ R8 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
+记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `ac686f7（R8 整改）→ R9 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
 
 ## 责任矩阵
 
@@ -91,6 +91,18 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - 测试（R8 负例 ×8）：readJournal 对缺失/不可读/坏行/未知 step/删行（seq 断裂）全部 typed 拒绝；move 行缺 sourceSha256 解析层拒绝；剥离 commit 行 → applyRollback recovery-required（非假 rolled-back）；commit 行绑定他人 proposalId → recovery-required；`from` 穿越/`directoryName` 穿越/合法名但非本 proposal 创建 → 回放拒绝且根外 sentinel 文件完好；备份字节篡改（同长度）/manifest 缺失/坏行/重复 → 回放拒绝且源不被伪造恢复；hardlink 源 → nlink 策略拒绝 + compensated（源与外部 link 完好、目标零残留）；journal 0600 + 终态 commit 行落盘断言。
   - 已知残余（诚实声明）：macOS 无 fd 相对删除/创建，竞态残余为「外部最多出现一个 0 字节占位文件（写入前锚定即止损）」或「误删外部文件后立即以 nlink 证明转为 typed recovery-required（事实入 journal/审计）」；平台级原子化需 unlinkat/openat，Node 不暴露。Linux 已由 /proc/self/fd 锚定达成。journal 文件的 append fd 逐行 fsync 后仍无跨文件崩溃顺序证明（backup→journal 的持久顺序由先 backup 后 journal 的写入顺序 + 各自 fsync 保证）。
   - 门禁（R8 整改后）：contracts 42/42、runtime 55/55、全量见下轮记录、typecheck 0、webui check 0/0、openspec 9/9、全树 `vp fmt --check` 绿。
+- R8（3.0/10，不通过，报告 /tmp/stage1-contracts-review-round8.md；独立 worktree ac686f7）→ R9 整改：
+  - 判定：R8 在 ac686f7 复审，其 P1-1/P1-2/P1-4 的主体（journal/manifest leaf O_NOFOLLOW、双 commit 拒绝、manifest 双射）已由 432445f 预先关闭但未计入本轮评审；R9 在其之上继续关闭剩余缺口。
+  - P1-1 journal 独占创建：journal writer 改 `O_CREAT|O_EXCL|O_NOFOLLOW`——崩溃残留/重复 apply/预置 symlink 一律 EEXIST/ELOOP fail-closed（恢复闸门拥有残留文件唯一处置权；负例：复用 journal 路径 → 非 applied 且残留字节原样单行）。
+  - P1-2 manifest 读写 authority：写入端 post-open fstat 强制 regular file；读取端改 O_NOFOLLOW fd + fstat regular + fd 读（symlink/非常规 leaf 即便同根也拒绝）。
+  - P1-3 root canonical：`assertRealRoot` 升级——lstat 真实目录且 `realpath(root) === root`（唯一豁免 darwin /var ↔ /private/var 系统 alias）；写/读/删/restore/目录删除入口全量接入（负例：回放 root 为 symlink → 拒绝且外部 sentinel 目录完好，递归删除从未执行）。
+  - P1-4 终态计数闸：`assertCommittedJournal` 要求 commit 的 mutationCount === 磁盘 mutation 步骤数（edit/disable/enable/create-target/resource）——删除任一 mutation 行后整体重编号（seq 仍连续、manifest 无关）在终态即被拒。
+  - P1-5 replay 身份绑定：undoStep 的 edit/disable/enable 步骤要求 skillId ∈ `affectedSkillIdsOfPatch(proposal.patch)`（回放数据不能启停 proposal 未触碰的技能；负例：disable 行换成同 snapshot 的非 proposal 技能 → affected set 拒绝）。
+  - P1-6 删除改隔离改名（全平台统一）：`unlinkFileVerified` 不再 `fs.rm`——nlink===1 + fd 身份捕获后，rename 到 Manager backup root 内不可预测名 `removed-<rand>-<name>`；源从原路径消失即达成 move 语义。竞态残余的最坏结果从「外部字节被删除」变为「外部文件被移入 Manager 隔离区（字节保全、可审计、可人工恢复）」；跨卷 EXDEV fail-closed recovery；post 证明 = 原路径 ENOENT + 墓碑 inode === 捕获身份 + fd nlink===1（负例：成功 move 后墓碑唯一且字节等于源、manifest 记账不受墓碑影响）。
+  - P1-7 restore 现存 leaf：O_NOFOLLOW fd 打开 + fstat 身份匹配 + fd 读取 + 读后 inode 复验（lstat→readFile 换体窗口关闭）。
+  - Deferred（诚实声明）：per-line hash-chain/operationId 头（R8 P1-4 建议的更强形态）归 2.3e recovery gate 的 journal 头部改造；当前完整性由闭合 union + seq 连续 + mutationCount 终态闸 + manifest 双射 + affected-set 绑定组合承担。macOS 隔离改名的 rename 本身仍按路径执行——残余窗口内外部文件被移入（而非删除于）隔离区并立即转 recovery-required。
+  - 门禁（R9 整改后）：contracts 42/42、runtime 59/59（新增 R9 负例 ×4）、probes 6/6、全量 415/415（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R9 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R8 复审进行中（复核者在主工作树留下 5 个对抗性探针，已全部回归化并整改）：
   - 探针整改补充提交：manifest leaf / journal leaf 追加改 O_NOFOLLOW（预置 symlink → ELOOP 失败，外部零字节落地）；`assertRealRoot`（root 末级组件 symlink 拒绝——realpath 恒等攻击面）；`assertCommittedJournal` 要求恰好一条 commit 终态行且为末行；新增 `assertJournalManifestBijection`（journal move 步骤 ↔ manifest 记录 ref+seq+from 双射——删除 resource 行后整体重编号的部分 journal 在回放前暴露），入口 `undoJournalSteps` 先 union 复验再双射校验。
   - 探针回归化：`test/r8-independent-probes.test.ts` 6 tests（manifest symlink 拒绝且外部文件原样 / symlink root 拒绝 / journal leaf symlink typed 终态零外部字节 / 重编号 journal 双射与 proposal 绑定拒绝 / manifest 多余备份双射拒绝 / 重复 commit 记录拒绝）。

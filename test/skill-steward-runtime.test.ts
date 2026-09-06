@@ -2422,4 +2422,126 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     const mode = fs.statSync(ctx.journalPath).mode & 0o777;
     expect(mode).toBe(0o600);
   });
+
+  it("R9 P1-1: a reused journal path (crash residue) fails closed, never appends", async () => {
+    const { snapshot, proposal } = await seedMergePair();
+    const journalPath = path.join(sandbox, "journal", "reuse.jsonl");
+    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+    fs.writeFileSync(
+      journalPath,
+      '{"seq":1,"step":"disable","detail":{"kind":"enablement","skillId":"sk_deadbeefdeadbeefdeadbeef"}}\n',
+      "utf8",
+    );
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).not.toBe("applied");
+    // 原残留文件字节原样（独占创建失败，不追加）。
+    const residue = fs.readFileSync(journalPath, "utf8");
+    expect(residue).toContain("sk_deadbeefdeadbeefdeadbeef");
+    expect(residue.split("\n").filter(Boolean)).toHaveLength(1);
+  });
+
+  it("R9 P1-6: a moved source leaves a manager-owned tombstone (quarantine rename, not delete)", async () => {
+    const ctx = await applyMove("quarantine");
+    const backupDir = `${ctx.journalPath}.backups`;
+    const tombstones = fs.readdirSync(backupDir).filter((name) => name.startsWith("removed-"));
+    expect(tombstones.length).toBe(1);
+    expect(fs.readFileSync(path.join(backupDir, tombstones[0]!), "utf8")).toBe("right-origin\n");
+    // 源路径消失（move 语义达成），manifest 记账不受墓碑影响。
+    const sourceFile = path.join(ctx.directory, "skills", "merge-right", "shared", "notes.md");
+    expect(fs.existsSync(sourceFile)).toBe(false);
+    expect(fs.existsSync(path.join(backupDir, "manifest.jsonl"))).toBe(true);
+  });
+
+  it("R9 P1-3: a symlinked rollback root is rejected before any recursive removal", async () => {
+    const { directory, snapshot, proposal } = await seedMergePair();
+    const journalPath = path.join(sandbox, "journal", "rollroot.jsonl");
+    const { applyProposalTransaction, undoJournalSteps, readJournal } =
+      await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).toBe("applied");
+    // 把回放 root 换成指向外部目录的 symlink：合法的 proposal-created 目录名落在外部。
+    const outside = path.join(sandbox, "outside-roll");
+    fs.mkdirSync(path.join(outside, "merged-skill"), { recursive: true });
+    fs.writeFileSync(path.join(outside, "merged-skill", "sentinel.txt"), "keep\n", "utf8");
+    const rootLink = path.join(sandbox, "root-link");
+    fs.symlinkSync(outside, rootLink);
+    await expect(
+      undoJournalSteps(await readJournal(journalPath), {
+        proposal,
+        snapshot,
+        deps: {
+          workspaces: domain.workspaces,
+          skills: domain.skills,
+          creator: domain.creator,
+          store: createStewardAuditStore(),
+          journalPath,
+        },
+        root: rootLink,
+        mutations: [],
+      }),
+    ).rejects.toThrow(/not a real directory|not canonical/i);
+    // 外部 sentinel 完好（递归删除从未执行）。
+    expect(fs.readFileSync(path.join(outside, "merged-skill", "sentinel.txt"), "utf8")).toBe(
+      "keep\n",
+    );
+    void directory;
+  });
+
+  it("R9 P1-5: a disable mutation for a snapshot skill outside the proposal is rejected at replay", async () => {
+    const { directory, snapshot, sourceB, proposal } = await seedMergePair();
+    const journalPath = path.join(sandbox, "journal", "affected.jsonl");
+    const { applyProposalTransaction, readJournal, undoJournalSteps } =
+      await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).toBe("applied");
+    // 篡改 journal：把 disable 行的 skillId 换成同 snapshot 内、但 proposal 未触碰的技能
+    //（fixture 快照内必然存在 merge-left/merge-right；取 proposal sources 之外者）。
+    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    const proposalSkillIds = new Set(proposal.skillIds);
+    const outsider = snapshot.skills.find((skill) => !proposalSkillIds.has(skill.skillId));
+    if (outsider) {
+      const tampered = lines.map((line) => {
+        const entry = JSON.parse(line) as { step?: string; detail?: { skillId?: string } };
+        if (entry.step === "disable" && entry.detail?.skillId) {
+          entry.detail.skillId = outsider.skillId;
+        }
+        return JSON.stringify(entry);
+      });
+      fs.writeFileSync(journalPath, `${tampered.join("\n")}\n`, "utf8");
+      await expect(
+        undoJournalSteps(await readJournal(journalPath), {
+          proposal,
+          snapshot,
+          deps: {
+            workspaces: domain.workspaces,
+            skills: domain.skills,
+            creator: domain.creator,
+            store: createStewardAuditStore(),
+            journalPath,
+          },
+          root: path.join(directory, "skills"),
+          mutations: [],
+        }),
+      ).rejects.toThrow(/affected set/i);
+    }
+  });
 });

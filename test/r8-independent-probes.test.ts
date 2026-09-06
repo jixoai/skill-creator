@@ -162,11 +162,13 @@ describe("Codex R8 independent probes (regression-ized)", () => {
     );
     const parsed = await readJournal(journalPath);
     expect(parsed).toHaveLength(4);
-    expect(() =>
-      assertCommittedJournal(parsed, { proposalId: "spp_0123456789abcdef" }),
-    ).not.toThrow();
+    // R9 整改：commit 的 mutationCount(3) 与磁盘 mutation 步骤数(2) 失配——删除
+    // resource 行后重编号（seq 仍连续）在终态闸即被拒绝。
+    expect(() => assertCommittedJournal(parsed, { proposalId: "spp_0123456789abcdef" })).toThrow(
+      /mutationCount .* does not match/i,
+    );
 
-    // 该 journal 自相矛盾（disable proposal 从未创建 merged-skill）——回放必须拒绝。
+    // 双保险：即便计数被一并伪造成匹配，proposal 目标绑定仍拒绝该 journal。
     const checked = entries.map((entry) => JSON.parse(JSON.stringify(entry)) as JournalEntry);
     await expect(
       undoJournalSteps(checked, {
@@ -182,7 +184,7 @@ describe("Codex R8 independent probes (regression-ized)", () => {
         root: path.dirname(journalPath),
         mutations: [],
       }),
-    ).rejects.toThrow(/never created|manifest/i);
+    ).rejects.toThrow(/never created|manifest|mutationCount|affected set/i);
   });
 
   it("[4b] a manifest recording a backup the journal no longer references is rejected (bijection)", async () => {

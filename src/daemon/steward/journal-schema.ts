@@ -203,4 +203,20 @@ export function assertCommittedJournal(
       `Journal commit record belongs to proposal ${last.detail.proposalId}, expected ${expected.proposalId}; recovery required.`,
     );
   }
+  // Codex R8 P1-4：commit 的 mutationCount 必须等于 journal 中的 mutation 步骤数——
+  // 删除任一 mutation 行后重编号（seq 仍连续）会让计数失配，终态闸拒绝假 rolled-back。
+  const mutationSteps = entries.filter(
+    (entry) =>
+      entry.step === "edit" ||
+      entry.step === "disable" ||
+      entry.step === "enable" ||
+      entry.step === "create-target" ||
+      entry.step === "resource",
+  ).length;
+  if (last.detail.mutationCount !== mutationSteps) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Journal commit mutationCount ${last.detail.mutationCount} does not match the ${mutationSteps} mutation steps on disk (deleted or forged lines); recovery required.`,
+    );
+  }
 }

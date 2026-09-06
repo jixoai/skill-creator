@@ -21,10 +21,11 @@
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type {
-  SkillProposal,
-  SkillStewardContextSnapshot,
-  StewardMutationRecord,
+import {
+  affectedSkillIdsOfPatch,
+  type SkillProposal,
+  type SkillStewardContextSnapshot,
+  type StewardMutationRecord,
 } from "../../shared/contracts/skill-steward.js";
 import type { CreatorService } from "../creator-service.js";
 import type { SkillService } from "../skill-service.js";
@@ -41,6 +42,7 @@ import {
 import {
   assertJournalManifestBijection,
   assertNoSymlinkAncestors,
+  assertRealRoot,
   findBackupEntry,
   prepareBackupRoot,
   readBackupManifest,
@@ -92,13 +94,14 @@ export async function applyProposalTransaction(
   ): Promise<void> => {
     if (journalWriter === null) {
       await fs.mkdir(path.dirname(deps.journalPath), { recursive: true });
-      // Codex R8 独立探针整改：journal leaf 用 O_NOFOLLOW 追加——预置 symlink
-      // 直连外部文件时 open 失败（ELOOP），记账字节不越界落地。
+      // Codex R8 P1-1：journal 只允许独占创建——已有文件（崩溃残留 / 重复 apply）
+      // 与预置 symlink（EEXIST/ELOOP）一律 fail-closed：新事务新文件，追加语义
+      // 不存在，恢复闸门（2.3e）拥有残留文件的唯一处置权。
       journalWriter = await fs.open(
         deps.journalPath,
         fs.constants.O_WRONLY |
-          fs.constants.O_APPEND |
           fs.constants.O_CREAT |
+          fs.constants.O_EXCL |
           (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW!,
         0o600,
       );
@@ -400,7 +403,7 @@ export async function applyProposalTransaction(
                 movedRestore.set(seq, { from, bytes: sourceBytes });
                 // Codex R7 P1-1：身份绑定删除（nlink 独占 + fd inode 绑定 +
                 // Linux fd 锚定 unlink / macOS 复验；删除后 nlink===0 证明）。
-                await unlinkFileVerified(from, root, fromRel);
+                await unlinkFileVerified(from, root, fromRel, deps.journalPath);
               }
             }
             mutations.push({
@@ -514,6 +517,14 @@ export async function undoJournalSteps(
   }
 }
 
+/**
+ * Codex R8 P1-5：proposal 影响的技能身份集合——journal 的 edit/disable/enable
+ * mutation 只允许落在这个集合内（回放数据不能启停 proposal 未触碰的技能）。
+ */
+function affectedSkillIdsOf(proposal: SkillProposal): Set<string> {
+  return new Set(affectedSkillIdsOfPatch(proposal.patch));
+}
+
 /** 本 proposal 显式创建的目标目录（undo 删除只能落在这个集合内，Codex R7 P1-4）。 */
 function createdDirectoriesOf(proposal: SkillProposal): Set<string> {
   if (proposal.patch.kind === "split") {
@@ -531,6 +542,7 @@ async function removeCreatedDirectory(
   root: string,
   directoryName: string,
 ): Promise<void> {
+  await assertRealRoot(root);
   assertPathInside(root, dir);
   let stat: import("node:fs").Stats;
   try {
@@ -569,12 +581,19 @@ async function removeCreatedDirectory(
 async function undoStep(entry: JournalEntry, context: UndoContext): Promise<void> {
   const { deps, snapshot, root } = context;
   const created = createdDirectoriesOf(context.proposal);
+  const affected = affectedSkillIdsOf(context.proposal);
   switch (entry.step) {
     case "commit":
     case "precheck":
       return; // 终态行/纯校验步骤无需撤销。
     case "edit": {
       const skillId = entry.detail.skillId;
+      if (!affected.has(skillId)) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `Journal edit mutation references skill outside the proposal's affected set: ${skillId}`,
+        );
+      }
       // 恢复原字节：从快照取原文，以「当前」revision 为期望写回。
       // 若当前内容已不是我们写入后的状态（外部编辑），save 会拒绝 → recovery-required。
       const snapshotEntry = snapshot.skills.find((skill) => skill.skillId === skillId);
@@ -593,10 +612,22 @@ async function undoStep(entry: JournalEntry, context: UndoContext): Promise<void
       return;
     }
     case "disable": {
+      if (!affected.has(entry.detail.skillId)) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `Journal disable mutation references skill outside the proposal's affected set: ${entry.detail.skillId}`,
+        );
+      }
       await deps.skills.toggle(snapshot.target, [entry.detail.skillId], "enable");
       return;
     }
     case "enable": {
+      if (!affected.has(entry.detail.skillId)) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `Journal enable mutation references skill outside the proposal's affected set: ${entry.detail.skillId}`,
+        );
+      }
       await deps.skills.toggle(snapshot.target, [entry.detail.skillId], "disable");
       return;
     }

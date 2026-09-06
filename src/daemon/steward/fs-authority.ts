@@ -19,30 +19,40 @@
  *   「复验父链 → unlink → inode/存在性证明」——竞态残余最多误删外部文件并立即转为
  *   typed recovery-required（事实进 journal/审计），绝不谎称成功。
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { DomainError } from "../domain-error.js";
 import { BackupRefSchema, type JournalEntry } from "./journal-schema.js";
 
 const O_NOFOLLOW = (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
-const IS_LINUX = process.platform === "linux";
 
 export function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
 /**
- * Codex R8 独立探针整改：root 自身必须是真实目录（末级组件不得是 symlink）。
- * realpath 会把 symlink root 解析到外部，使「lexical === canonical」恒真——调用方
- * 传入被换体的 root 时所有下游防线失效；在读/写/删入口统一拒绝。
+ * Codex R8 P1-3 整改：root 必须是 Manager 持有的 canonical 目录。
+ * 要求：lstat 为真实目录（非 symlink），且 realpath(root) 与 root 全等——任何一级
+ * 被换成 symlink 都会破坏全等（symlink root 的 canonical 目标不再是调用方声称的
+ * root，全部下游防线随之失效）。唯一豁免：darwin 的 /var ↔ /private/var 前缀
+ * （系统级 alias，mkdtemp 沙箱天然携带；非攻击面）。
  */
-async function assertRealRoot(root: string): Promise<void> {
+export async function assertRealRoot(root: string): Promise<void> {
   const stat = await fs.lstat(root).catch(() => null);
   if (stat === null || !stat.isDirectory() || stat.isSymbolicLink()) {
     throw new DomainError(
       "INVALID_OPERATION",
       `manager root is not a real directory (symlinked or missing): ${root}`,
+    );
+  }
+  const real = await fs.realpath(root);
+  const darwinAlias =
+    process.platform === "darwin" && root.startsWith("/var/") ? `/private${root}` : null;
+  if (real !== root && real !== darwinAlias) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `manager root is not canonical (realpath ${real} differs from the given root): ${root}`,
     );
   }
 }
@@ -266,12 +276,32 @@ export async function restoreResourceBytesStrict(
     stat = null;
   }
   if (stat !== null) {
-    // Codex R6 P1-2：现存 leaf 必须是 regular file——symlink（即便字节相同）
-    // 不是恢复成功，是外部可控制的路径身份。
+    // Codex R6 P1-2 / R8 P1-7：现存 leaf 必须是 regular file，且读取走 O_NOFOLLOW
+    // fd——lstat 与按路径 readFile 之间的换体窗口关闭（symlink 即便字节相同也不算
+    // 恢复成功）；读后复验 inode 未漂移。
     if (!stat.isFile()) {
       throw new Error(`move restore target exists but is not a regular file: ${label}`);
     }
-    const current = await fs.readFile(to);
+    const handle = await fs.open(to, fs.constants.O_RDONLY | O_NOFOLLOW).catch(() => null);
+    if (handle === null) {
+      throw new Error(`move restore target cannot be opened without following symlinks: ${label}`);
+    }
+    let current: Buffer;
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) {
+        throw new Error(
+          `move restore target identity drifted between validation and open: ${label}`,
+        );
+      }
+      current = await handle.readFile();
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+    const after = await fs.lstat(to);
+    if (after.dev !== stat.dev || after.ino !== stat.ino) {
+      throw new Error(`move restore target identity drifted after read: ${label}`);
+    }
     if (!current.equals(bytes)) {
       throw new Error(`move restore target exists with different bytes (external drift): ${label}`);
     }
@@ -280,44 +310,22 @@ export async function restoreResourceBytesStrict(
   await writeFileExclusiveVerified(to, root, bytes, label);
 }
 
-/** Linux：从 root 起逐级 O_DIRECTORY|O_NOFOLLOW 锚定打开目录链，返回末级父目录句柄。 */
-async function openVerifiedParentFd(
+/**
+ * Codex R7 P1-1 / R8 P1-6：身份绑定的隔离改名删除（全平台统一）。
+ *   [1] nlink 必须为 1（独占 inode 策略，hardlink 源拒绝）；
+ *   [2] O_NOFOLLOW fd 打开 leaf，fstat 命中捕获身份（fd ↔ inode 绑定）；
+ *   [3] rename 到 Manager 隔离区（backup root 内不可预测名）：源从原路径消失即达成
+ *       move 语义；竞态残余的最坏结果是「外部文件被移入隔离区（字节保全、可审计、
+ *       可人工恢复）」，绝不是外部字节被删除；跨卷 rename（EXDEV）fail-closed；
+ *   [4] rename 后证明：原路径 ENOENT + 隔离 inode === 捕获身份 + fd nlink===1——
+ *       移动的就是已验证 inode；任何漂移 → UNAVAILABLE/recovery-required。
+ */
+export async function unlinkFileVerified(
   leaf: string,
   root: string,
-): Promise<import("node:fs/promises").FileHandle> {
-  const rel = path.relative(root, path.dirname(leaf));
-  let current = await fs.open(
-    await fs.realpath(root),
-    fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | O_NOFOLLOW,
-  );
-  try {
-    if (rel !== "") {
-      for (const segment of rel.split(path.sep)) {
-        const next = await fs.open(
-          `/proc/self/fd/${current.fd}/${segment}`,
-          fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | O_NOFOLLOW,
-        );
-        await current.close().catch(() => undefined);
-        current = next;
-      }
-    }
-    return current;
-  } catch (error) {
-    await current.close().catch(() => undefined);
-    throw error;
-  }
-}
-
-/**
- * Codex R7 P1-1：身份绑定删除。
- *   [1] nlink 必须为 1——与外部共享 inode 的源（hardlink）无法证明独占，直接拒绝；
- *   [2] O_NOFOLLOW 打开 leaf fd，fstat 必须命中捕获身份（fd ↔ inode 绑定）；
- *   [3] Linux：已验证父目录 fd 锚定 unlink（/proc/self/fd 等价 unlinkat）；
- *       macOS：复验父链后 unlink（平台无 fd 相对删除）；
- *   [4] 删除后：路径 ENOENT 且 fstat(fd).nlink===0——证明删掉的就是已验证 inode；
- *       任一不成立（检查后换体删错外部文件等）→ UNAVAILABLE recovery-required。
- */
-export async function unlinkFileVerified(leaf: string, root: string, label: string): Promise<void> {
+  label: string,
+  quarantineJournalPath: string,
+): Promise<void> {
   await assertRealRoot(root);
   await assertNoSymlinkAncestors(leaf, root);
   const identity = await captureLeafIdentity(leaf, label);
@@ -336,20 +344,24 @@ export async function unlinkFileVerified(leaf: string, root: string, label: stri
     if (stat.dev !== identity.dev || stat.ino !== identity.ino) {
       throw new DomainError(
         "UNAVAILABLE",
-        `Resource source identity changed before delete (path race); recovery required: ${label}`,
+        `Resource source identity changed before quarantine (path race); recovery required: ${label}`,
       );
     }
-    if (IS_LINUX) {
-      const parent = await openVerifiedParentFd(leaf, root);
-      try {
-        await fs.unlink(`/proc/self/fd/${parent.fd}/${path.basename(leaf)}`);
-      } finally {
-        await parent.close().catch(() => undefined);
+    const quarantineRoot = await prepareBackupRoot(quarantineJournalPath);
+    const tombstone = path.join(
+      quarantineRoot,
+      `removed-${randomBytes(8).toString("hex")}-${path.basename(leaf)}`,
+    );
+    try {
+      await fs.rename(leaf, tombstone);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EXDEV") {
+        throw new DomainError(
+          "UNAVAILABLE",
+          `cross-volume move source cannot be quarantined in the manager store; recovery required: ${label}`,
+        );
       }
-    } else {
-      // macOS：立即复验父链后按路径 unlink；证明交由 [4] 的 inode 事实。
-      await assertNoSymlinkAncestors(leaf, root);
-      await fs.rm(leaf, { force: true });
+      throw error;
     }
     const stillExists = await fs.lstat(leaf).then(
       () => true,
@@ -358,16 +370,24 @@ export async function unlinkFileVerified(leaf: string, root: string, label: stri
     if (stillExists) {
       throw new DomainError(
         "UNAVAILABLE",
-        `Resource source path survived delete (path race); recovery required: ${label}`,
+        `Resource source path survived quarantine rename (path race); recovery required: ${label}`,
+      );
+    }
+    const tomb = await fs.lstat(tombstone).catch(() => null);
+    if (tomb === null || !tomb.isFile() || tomb.dev !== identity.dev || tomb.ino !== identity.ino) {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Resource source race: quarantined inode does not match the captured identity (moved bytes preserved at ${tombstone} for manual recovery); recovery required: ${label}`,
       );
     }
     const after = await handle.stat();
-    if (after.nlink !== 0) {
+    if (after.nlink !== 1) {
       throw new DomainError(
         "UNAVAILABLE",
-        `Resource source deletion removed a different inode (path race; captured dev=${identity.dev} ino=${identity.ino} still linked); recovery required: ${label}`,
+        `Resource source nlink drifted during quarantine (${after.nlink}); recovery required: ${label}`,
       );
     }
+    await syncDir(quarantineRoot).catch(() => undefined);
   } finally {
     await handle.close().catch(() => undefined);
   }
@@ -429,6 +449,12 @@ export async function writeBackupWithManifest(options: {
     fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | O_NOFOLLOW,
     0o600,
   );
+  // Codex R8 P1-2：打开后立即确认 leaf 是 regular file（预置 FIFO/socket 等
+  // 非常规 leaf 一律拒绝，append 字节只落 Manager-owned regular 文件）。
+  if (!(await manifestHandle.stat()).isFile()) {
+    await manifestHandle.close().catch(() => undefined);
+    throw new Error(`backup manifest is not a regular file: ${path.join(root, "manifest.jsonl")}`);
+  }
   try {
     const line = `${JSON.stringify({
       ref: parsedRef,
@@ -451,14 +477,25 @@ export async function writeBackupWithManifest(options: {
  */
 export async function readBackupManifest(journalPath: string): Promise<BackupManifestEntry[]> {
   const root = await prepareBackupRoot(journalPath);
+  const manifestPath = path.join(root, "manifest.jsonl");
   let raw: string;
   try {
-    raw = await fs.readFile(path.join(root, "manifest.jsonl"), "utf8");
+    // Codex R8 P1-2：读取同样走 O_NOFOLLOW fd——symlink leaf（即便指向同根文件）
+    // 不是 Manager 持有的事实文件；非常规 leaf 直接拒绝。
+    const handle = await fs.open(manifestPath, fs.constants.O_RDONLY | O_NOFOLLOW);
+    try {
+      if (!(await handle.stat()).isFile()) {
+        throw new Error(`backup manifest is not a regular file: ${manifestPath}`);
+      }
+      raw = await handle.readFile("utf8");
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw new Error(
-      `backup manifest unreadable: ${path.join(root, "manifest.jsonl")} (${error instanceof Error ? error.message : String(error)})`,
-    );
+    throw error instanceof Error
+      ? error
+      : new Error(`backup manifest unreadable: ${manifestPath} (${String(error)})`);
   }
   const entries: BackupManifestEntry[] = [];
   const seenRefs = new Set<string>();
