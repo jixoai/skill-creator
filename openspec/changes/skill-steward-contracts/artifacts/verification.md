@@ -53,7 +53,16 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - P2-4 per-tool typing / P2-5 grant/audit/journal 形状 → 维持原 Deferred owner（见下节）。
   - 两个 disable fixture 自带的 patch 外观察（R3 探针起点）已重排为精确集合。
   - 门禁（整改后）：contracts 38/38、runtime 36/36、全量 371/371（47 files）、typecheck 0、webui check 0/0、目标文件 fmt 绿、`git diff --check` 干净、openspec 9/9。
-- R4 复审已随 1.4.0 整改提交（结论待出）。
+- R4（6.0/10，不通过，报告 /tmp/stage1-contracts-review-round4.md；独立 worktree c9b4ce1）：
+  - P1-1 父目录 symlink 换体 → 修复：apply 源读取改为「canonical realpath 必须落在 canonical root 同一相对位置（任一 symlink 祖先即拒绝）+ O_NOFOLLOW 描述符打开 + fstat regular/byteSize + 从 fd 读字节」，目标侧 mkdir 后同样校验父链无 symlink（1.5.0）。
+  - P1-2 targetPath 可覆盖主文档 SKILL.md → 修复：target schema 拒绝 basename 大小写不敏感等于 skill.md 的映射；apply 防御同规则断然失败（负例：parse 与手工构造直达 apply 双覆盖）。
+  - P1-3 edit 伪造 frontmatter 身份 → 修复：bind 层新增 EDIT_IDENTITY_MISMATCH（edit.frontmatter.name 必须等于快照条目 directoryName）；apply edit 分支保留同规则防御（负例：bind typed 失败 + 合法 edit 通过）。
+  - P2-1 快照身份唯一性 → 修复：snapshot superRefine 要求 directoryName（大小写归一）、name、manifest (skillId, relPath) 唯一（三个负例）。
+  - P2-2 大小写文件系统判重 → 修复：契约与 apply 的 duplicate targetPath 检测均按 lowercase 归一（负例：仅大小写不同的两条映射 parse 拒绝；apply 防御负例进 P2-3 compensation 测试）。
+  - P2-3 move 假实现 → 修复：move 为真实移动语义（写目标 + journal 记账 + 删除源），compensation 以捕获字节还原源（负例：冲突 move 轮 compensated 后源字节零丢失、目标零残留）。
+  - P2-4 verification 过期 → 本文件即整改（边界更新为 1.5.0；全量门禁见下）。
+  - 门禁（R4 整改后）：contracts 42/42、runtime 40/40、全量 387/387（50 files）、typecheck 0、webui check 0/0、目标文件 fmt 绿、`git diff --check` 干净、openspec 9/9。全树 `vp fmt --check` 仍有 6 个并行文件失败（3 个 archive/demo、contracts demo html、runtime fixture-transcript.json、本 verification.md）——属跨 change 工作树卫生，不作为本 change 门禁事实。
+- R5 复审已随 1.5.0 整改提交（结论待出；复核回调改为后台 codex-callback.sh 模式）。
 
 ## Deferred（owner 与完成边界）
 

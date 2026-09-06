@@ -674,3 +674,76 @@ describe("codex round-3 review probes (contract 1.4.0)", () => {
     }
   });
 });
+
+describe("codex round-4 review probes (contract 1.5.0)", () => {
+  it("P1-2: resource mapping onto SKILL.md fails at parse time (case-insensitive)", () => {
+    const raw = loadFixture<unknown>("proposal-merge.valid.json") as SkillProposal;
+    for (const targetPath of ["SKILL.md", "skill.md", "nested/Skill.MD"]) {
+      const edited = structuredClone(raw);
+      edited.patch.target.resources = [
+        {
+          sourceSkillId: edited.patch.sources[0]!.skillId,
+          sourcePath: "assets/web.env",
+          targetPath,
+          strategy: "copy",
+        },
+      ];
+      expect(SkillProposalSchema.safeParse(edited).success, targetPath).toBe(false);
+    }
+  });
+
+  it("P1-3: edit forging frontmatter.name fails at bind with EDIT_IDENTITY_MISMATCH", () => {
+    const raw = loadFixture<unknown>("proposal-edit.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    const target = importedSnapshot.skills.find(
+      (skill) => skill.skillId === edited.patch.edits[0]!.skillId,
+    );
+    edited.patch.edits[0]!.frontmatter = {
+      ...edited.patch.edits[0]!.frontmatter,
+      name: "different-skill",
+    };
+    const parsed = SkillProposalSchema.safeParse(edited);
+    expect(parsed.success).toBe(true); // parse 不看快照；身份在 bind 层闭合。
+    const bound = bindProposalToSnapshot(parsed.data as SkillProposal, importedSnapshot);
+    expect(bound).toMatchObject({ ok: false, failure: { code: "EDIT_IDENTITY_MISMATCH" } });
+    // 合法 edit（name 与目录一致）仍可通过。
+    const legal = structuredClone(raw);
+    legal.patch.edits[0]!.frontmatter = {
+      ...legal.patch.edits[0]!.frontmatter,
+      name: target!.directoryName,
+    };
+    expect(bindProposalToSnapshot(SkillProposalSchema.parse(legal), importedSnapshot)).toEqual({
+      ok: true,
+    });
+  });
+
+  it("P2-1: snapshot rejects duplicate directoryName / name / manifest key", () => {
+    const base = structuredClone(importedSnapshot);
+    const dupDir = structuredClone(base);
+    dupDir.skills[1]!.directoryName = dupDir.skills[0]!.directoryName;
+    expect(SkillStewardContextSnapshotSchema.safeParse(dupDir).success).toBe(false);
+
+    const dupName = structuredClone(base);
+    dupName.skills[1]!.name = dupName.skills[0]!.name;
+    expect(SkillStewardContextSnapshotSchema.safeParse(dupName).success).toBe(false);
+
+    const dupManifest = structuredClone(base);
+    if (dupManifest.resources.length >= 1) {
+      dupManifest.resources.push(structuredClone(dupManifest.resources[0]!));
+      expect(SkillStewardContextSnapshotSchema.safeParse(dupManifest).success).toBe(false);
+    }
+  });
+
+  it("P2-2: case-insensitive duplicate targetPath fails at parse time", () => {
+    const raw = loadFixture<unknown>("proposal-split.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    const first = edited.patch.targets[0]!.resources[0]!;
+    edited.patch.targets[0]!.resources.push({
+      sourceSkillId: first.sourceSkillId,
+      sourcePath: "assets/api.env",
+      targetPath: first.targetPath.toUpperCase(),
+      strategy: "copy",
+    });
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+  });
+});

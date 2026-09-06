@@ -1369,7 +1369,202 @@ describe("apply-side resource defenses (Codex R3 P1-2/P2-2)", () => {
     await service.approve(proposalId, "human-ui");
     const { outcome } = await service.apply(proposalId, "human-ui");
     expect(outcome.status).toBe("compensated");
-    expect(outcome.failure).toContain("not a regular file");
+    // Codex R4 P1-1：symlink 换体现在在 realpath 祖先链检查即被拒绝（早于 fd 读取）。
+    expect(outcome.failure).toContain("symlink ancestor");
     expect(fs.existsSync(path.join(sandbox, "ws", "skills", "merged-skill"))).toBe(false);
+  });
+});
+
+describe("apply-side R4 defenses (Codex R4 P1-1/P1-2/P2-3)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = ProviderIdSchema.parse("openclaw");
+  const capabilities = {
+    backendId: "fixture",
+    version: "fixture-1",
+    streamingEvents: true,
+    cancellation: true,
+    permissionRequests: true,
+    executionRoot: "isolated" as const,
+  };
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-apply-r4-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function seedTwoSources() {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    for (const name of ["merge-left", "merge-right"]) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId,
+        directoryName: name,
+        frontmatter: { name, description: `${name} skill.` },
+        body: `# ${name}\n`,
+      });
+      fs.mkdirSync(path.join(directory, "skills", name, "shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(directory, "skills", name, "shared", "notes.md"),
+        name === "merge-left" ? "left-origin\n" : "right-origin\n",
+        "utf8",
+      );
+    }
+    const target = { workspaceId: workspace.id, providerId };
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const sourceA = snapshot.skills.find((skill) => skill.directoryName === "merge-left")!;
+    const sourceB = snapshot.skills.find((skill) => skill.directoryName === "merge-right")!;
+    return { directory, snapshot, sourceA, sourceB };
+  }
+
+  function approval() {
+    return createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+    });
+  }
+
+  function mergeProposal(
+    snapshot: SkillStewardContextSnapshot,
+    sourceB: SkillStewardContextSnapshot["skills"][number],
+    targetPath: string,
+    strategy: "copy" | "move" = "copy",
+  ): SkillProposal {
+    return {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "merge",
+      patch: {
+        kind: "merge",
+        snapshotId: snapshot.id,
+        sources: snapshot.skills
+          .filter((skill) => skill.directoryName.startsWith("merge-"))
+          .map((skill) => ({ skillId: skill.skillId, expectedRevision: skill.revision })),
+        target: {
+          directoryName: "merged-skill",
+          frontmatter: { name: "merged-skill", description: "Merged." },
+          body: "# merged-skill\n",
+          resources: [
+            {
+              sourceSkillId: sourceB.skillId,
+              sourcePath: "shared/notes.md",
+              targetPath,
+              strategy,
+            },
+          ],
+        },
+      },
+      rationale: "r4 probe",
+      findingIds: [],
+      evidence: [{ skillId: sourceB.skillId, snippet: "probe" }],
+      skillIds: snapshot.skills
+        .filter((skill) => skill.directoryName.startsWith("merge-"))
+        .map((skill) => skill.skillId),
+      observedRevisions: snapshot.skills
+        .filter((skill) => skill.directoryName.startsWith("merge-"))
+        .map((skill) => ({ skillId: skill.skillId, revision: skill.revision })),
+    };
+  }
+
+  it("P1-1: a symlinked parent directory with a regular file inside fails closed", async () => {
+    const { directory, snapshot, sourceB } = await seedTwoSources();
+    // 父目录换体：merge-right/shared → 指向 sandbox 外部目录；外部 notes.md 字节一致。
+    const outsideDir = path.join(sandbox, "outside");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, "notes.md"), "right-origin\n", "utf8");
+    const sharedDir = path.join(directory, "skills", "merge-right", "shared");
+    fs.rmSync(sharedDir, { recursive: true, force: true });
+    fs.symlinkSync(outsideDir, sharedDir);
+
+    const service = approval();
+    const proposalId = service.submit(
+      mergeProposal(snapshot, sourceB, "shared/notes.md"),
+      snapshot,
+    );
+    await service.approve(proposalId, "human-ui");
+    const { outcome } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("compensated");
+    expect(outcome.failure).toContain("symlink ancestor");
+    expect(fs.existsSync(path.join(directory, "skills", "merged-skill"))).toBe(false);
+  });
+
+  it("P1-2: a hand-built mapping onto SKILL.md is rejected at the apply defense", async () => {
+    const { snapshot, sourceB } = await seedTwoSources();
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    const proposal = mergeProposal(snapshot, sourceB, "SKILL.md");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath: path.join(sandbox, "journal", "skillmd.jsonl"),
+    });
+    expect(outcome.status).toBe("compensated");
+    expect(outcome.failure).toContain("must not target the skill document");
+  });
+
+  it("P2-3: move really moves the source file and compensation restores it", async () => {
+    const { directory, snapshot, sourceB } = await seedTwoSources();
+    const service = approval();
+    const proposalId = service.submit(
+      mergeProposal(snapshot, sourceB, "shared/moved.md", "move"),
+      snapshot,
+    );
+    await service.approve(proposalId, "human-ui");
+    const { outcome } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    const sourceFile = path.join(directory, "skills", "merge-right", "shared", "notes.md");
+    const targetFile = path.join(directory, "skills", "merged-skill", "shared", "moved.md");
+    // 真移动：源文件不存在，目标持有字节。
+    expect(fs.existsSync(sourceFile)).toBe(false);
+    expect(fs.readFileSync(targetFile, "utf8")).toBe("right-origin\n");
+  });
+
+  it("P2-3 compensation: a failed move round restores the source bytes (zero loss)", async () => {
+    const { directory, snapshot, sourceA, sourceB } = await seedTwoSources();
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    // 手工构造值：两条 move 映射，第二条 targetPath 与第一条冲突（绕过 schema 的
+    // 大小写归一判重也覆盖 apply 防御）→ 第二条失败 → compensation 必须还原第一条
+    // 已移动的源字节。
+    const proposal = mergeProposal(snapshot, sourceB, "shared/moved.md", "move");
+    proposal.patch.target.resources.push({
+      sourceSkillId: sourceA.skillId,
+      sourcePath: "shared/notes.md",
+      targetPath: "SHARED/moved.md",
+      strategy: "move",
+    });
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath: path.join(sandbox, "journal", "move.jsonl"),
+    });
+    expect(outcome.status).toBe("compensated");
+    expect(outcome.failure).toContain("Duplicate resource targetPath");
+    // 源还原：两个源技能的 notes.md 都回到原位；目标目录零残留。
+    expect(
+      fs.readFileSync(path.join(directory, "skills", "merge-right", "shared", "notes.md"), "utf8"),
+    ).toBe("right-origin\n");
+    expect(fs.existsSync(path.join(directory, "skills", "merged-skill"))).toBe(false);
   });
 });

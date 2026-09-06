@@ -30,6 +30,11 @@ import { WorkspaceProviderTargetSchema } from "./workspaces.js";
 
 /**
  * 本模块契约版本；Agent 输出必须携带同一版本才可解析。
+ * 1.5.0（Codex R4 复核整改）：资源映射拒绝 targetPath 指向主文档 SKILL.md
+ * （控制面/资源面冲突；大小写不敏感，含大小写文件系统归一的重复 targetPath 检测）
+ * （P1-2/P2-2）；edit 的 frontmatter.name 必须等于快照条目 directoryName——bind 层
+ * 新增 EDIT_IDENTITY_MISMATCH（P1-3）；快照 directoryName/name 与 manifest
+ * (skillId, relPath) 唯一（P2-1）。
  * 1.4.0（Codex R3 复核整改）：proposal.observedRevisions 与 proposal.skillIds
  * 精确相等（P1-1，额外观察身份在解析层拒绝）；split/merge 目标资源映射拒绝
  * 重复 targetPath（P1-2，杜绝 apply 顺序性静默覆盖）；finding.evidence.skillId
@@ -49,7 +54,7 @@ import { WorkspaceProviderTargetSchema } from "./workspaces.js";
  * audit 禁 agent principal；资源映射绑定 sourceSkillId；新增 bindTaskToSnapshot。
  * 1.1.0：patch union 增加 enable（rollback-of-disable 的逆操作语义）。
  */
-export const SKILL_STEWARD_CONTRACT_VERSION = "1.4.0" as const;
+export const SKILL_STEWARD_CONTRACT_VERSION = "1.5.0" as const;
 /** 契约版本字符串约束（稳定语义化字符串）。 */
 export const ContractVersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/);
 /** 契约版本。 */
@@ -227,6 +232,40 @@ export const SkillStewardContextSnapshotSchema = z
     capabilities: AgentRuntimeCapabilitiesSchema,
   })
   .superRefine((snapshot, ctx) => {
+    // Codex R4 P2-1：快照是持久化/transport 边界，bind/apply 依赖 directoryName 与
+    // manifest 查找——目录名、frontmatter name 与 (skillId, relPath) manifest key
+    // 必须唯一，否则源目录/manifest 选择存在歧义。
+    const directoryNames = new Set<string>();
+    const frontmatterNames = new Set<string>();
+    for (const skill of snapshot.skills) {
+      const dirKey = skill.directoryName.toLowerCase();
+      if (directoryNames.has(dirKey)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Snapshot skills contain duplicate directoryName: ${skill.directoryName}.`,
+        });
+      }
+      directoryNames.add(dirKey);
+      const nameKey = skill.name.toLowerCase();
+      if (frontmatterNames.has(nameKey)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Snapshot skills contain duplicate frontmatter name: ${skill.name}.`,
+        });
+      }
+      frontmatterNames.add(nameKey);
+    }
+    const manifestKeys = new Set<string>();
+    for (const resource of snapshot.resources) {
+      const key = `${resource.skillId}\u0000${resource.relPath}`;
+      if (manifestKeys.has(key)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Snapshot resource manifest contains duplicate (skillId, relPath): ${resource.skillId} ${resource.relPath}.`,
+        });
+      }
+      manifestKeys.add(key);
+    }
     // Codex P1-4：预算按「计算出的 UTF-8 字节」强制，byteSize 必须与内容一致。
     let total = 0;
     for (const skill of snapshot.skills) {
@@ -518,12 +557,28 @@ export const StewardPatchTargetDocumentSchema = z
     }
     // Codex R3 P1-2：同一目标内重复 targetPath 会让真实 apply 以后写静默覆盖先写，
     // 属于 mutation 语义未定义；契约层直接拒绝（overwrite 若成为产品策略必须显式建模）。
-    const targetPaths = new Set(target.resources.map((mapping) => mapping.targetPath));
+    // Codex R4 P2-2：大小写不敏感文件系统（macOS/Windows）上不同大小写是同一物理
+    // 文件——按小写归一比较。
+    const targetPaths = new Set(
+      target.resources.map((mapping) => mapping.targetPath.toLowerCase()),
+    );
     if (targetPaths.size !== target.resources.length) {
       ctx.addIssue({
         code: "custom",
         message: "Target resource mappings contain duplicate targetPath.",
       });
+    }
+    // Codex R4 P1-2：资源映射是资源面；主文档 SKILL.md 由 create-target 步骤拥有。
+    // 资源写入 SKILL.md 会静默丢弃声明的 frontmatter/body（控制面文件被资源面覆盖）。
+    for (const mapping of target.resources) {
+      const segments = mapping.targetPath.split("/");
+      const basename = segments[segments.length - 1] ?? "";
+      if (basename.toLowerCase() === "skill.md") {
+        ctx.addIssue({
+          code: "custom",
+          message: `Resource targetPath must not target the skill document (SKILL.md): ${mapping.targetPath}`,
+        });
+      }
     }
   });
 /** patch 目标文档。 */
@@ -940,6 +995,8 @@ export type ProposalBindFailure =
   | { code: "STALE_REVISION"; message: string }
   | { code: "UNSUPPORTED_WRITE_SCOPE"; message: string }
   | { code: "CONTRACT_VERSION"; message: string }
+  /** Codex R4 P1-3：edit 的 frontmatter.name 与快照条目 directoryName 不一致（身份伪造）。 */
+  | { code: "EDIT_IDENTITY_MISMATCH"; message: string }
   /** Codex R2 P2-2：split/merge 新目标撞上快照现有目录（absent precondition 的确定性层）。 */
   | { code: "TARGET_COLLISION"; message: string }
   /** Codex R2 P1-2：映射源技能不在快照，或 sourcePath 不在该源的快照资源 manifest 内。 */
@@ -1044,6 +1101,23 @@ function bindProposalCore(
           message: `Skill ${skillId} expected ${revision} but snapshot holds ${entry.revision}.`,
         },
       };
+    }
+  }
+  // Codex R4 P1-3：edit 只能改文档内容，不能伪造身份——frontmatter.name 必须与
+  // 快照条目的物理 directoryName 一致（split/merge 目标的同名规则已由 target schema
+  // 覆盖；edit 的既有目标在这里闭合）。
+  if (proposal.patch.kind === "edit") {
+    for (const edit of proposal.patch.edits) {
+      const entry = byId.get(edit.skillId);
+      if (entry && edit.frontmatter.name !== entry.directoryName) {
+        return {
+          ok: false,
+          failure: {
+            code: "EDIT_IDENTITY_MISMATCH",
+            message: `Edit for ${edit.skillId} must keep frontmatter.name "${entry.directoryName}" (got "${edit.frontmatter.name}").`,
+          },
+        };
+      }
     }
   }
   // Codex R2 P2-1：证据身份必须属于快照（proposal 层已限制在 skillIds 内）。

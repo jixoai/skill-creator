@@ -61,6 +61,8 @@ export async function applyProposalTransaction(
   const journal: JournalEntry[] = [];
   const mutations: StewardMutationRecord[] = [];
   let seq = 0;
+  /** Codex R4 P2-3：move 步骤的源字节还原表（compensation 恢复源目录用）。 */
+  const movedRestore = new Map<number, { from: string; bytes: Buffer }>();
   const recordStep = async (step: string, detail: Record<string, unknown>): Promise<void> => {
     seq += 1;
     journal.push({ seq, step, detail });
@@ -74,7 +76,7 @@ export async function applyProposalTransaction(
   const compensate = async (failure: string): Promise<ApplyOutcome> => {
     for (const entry of [...journal].reverse()) {
       try {
-        await undoStep(entry, { proposal, snapshot, deps, root, mutations });
+        await undoStep(entry, { proposal, snapshot, deps, root, mutations, movedRestore });
       } catch (error) {
         return {
           status: "recovery-required",
@@ -93,6 +95,14 @@ export async function applyProposalTransaction(
           const entry = snapshot.skills.find((skill) => skill.skillId === edit.skillId);
           if (!entry)
             throw new DomainError("NOT_FOUND", `Skill missing from snapshot: ${edit.skillId}`);
+          // Codex R4 P1-3（apply 防御）：edit 不允许改写身份——frontmatter.name 必须
+          // 与快照条目物理目录一致（bind 层主校验；此处拦截手工构造值）。
+          if (edit.frontmatter.name !== entry.directoryName) {
+            throw new DomainError(
+              "INVALID_OPERATION",
+              `Edit for ${edit.skillId} must keep frontmatter.name "${entry.directoryName}" (got "${edit.frontmatter.name}").`,
+            );
+          }
           const info = await deps.skills.info(snapshot.target, edit.skillId);
           if (info.revision !== edit.expectedRevision) {
             throw new DomainError(
@@ -256,7 +266,16 @@ export async function applyProposalTransaction(
             assertPathInside(root, from);
             assertPathInside(root, to);
             assertPathInside(path.join(root, target.directoryName), to);
-            const seenKey = `${target.directoryName}/${mapping.targetPath}`;
+            // Codex R4 P1-2（apply 防御）：主文档由 create-target 步骤拥有，资源面
+            // 不得写 SKILL.md（契约层已拒绝；手工构造值在此断然失败）。
+            if (path.basename(to).toLowerCase() === "skill.md") {
+              throw new DomainError(
+                "INVALID_OPERATION",
+                `Resource targetPath must not target the skill document: ${target.directoryName}/${mapping.targetPath}`,
+              );
+            }
+            // Codex R4 P2-2（apply 防御）：大小写文件系统归一后判重。
+            const seenKey = `${target.directoryName}/${mapping.targetPath}`.toLowerCase();
             if (seenTargetPaths.has(seenKey)) {
               throw new DomainError(
                 "INVALID_OPERATION",
@@ -275,36 +294,21 @@ export async function applyProposalTransaction(
                 `Resource ${mapping.sourcePath} of skill ${mapping.sourceSkillId} is not in the snapshot manifest.`,
               );
             }
-            // Codex R3 P2-2：源必须是普通文件（拒绝 symlink 换体读取 Provider 外内容），
-            // 且 manifest 的 kind/byteSize 与活体一致；任何漂移都按类型化失败处理。
-            const sourceStat = await fs.lstat(from);
-            if (!sourceStat.isFile()) {
-              throw new DomainError(
-                "INVALID_OPERATION",
-                `Resource source is not a regular file: ${mappingSource.directoryName}/${mapping.sourcePath}`,
-              );
-            }
             if (manifestEntry.kind !== "file") {
               throw new DomainError(
                 "INVALID_OPERATION",
                 `Resource ${mapping.sourcePath} of skill ${mapping.sourceSkillId} is not a file-kind manifest entry.`,
               );
             }
-            if (sourceStat.size !== manifestEntry.byteSize) {
-              throw new DomainError(
-                "CONFLICT",
-                `Resource ${mapping.sourcePath} live size ${sourceStat.size} differs from the snapshot manifest byteSize ${manifestEntry.byteSize}.`,
-              );
-            }
-            let sourceBytes: Buffer;
-            try {
-              sourceBytes = await fs.readFile(from);
-            } catch {
-              throw new DomainError(
-                "NOT_FOUND",
-                `Resource source missing on disk: ${mappingSource.directoryName}/${mapping.sourcePath}`,
-              );
-            }
+            // Codex R4 P1-1：整条路径（含每一级父目录）不得含 symlink——canonical
+            // realpath 必须落在 canonical root 下的同一相对位置；末端用
+            // O_NOFOLLOW 描述符读（lstat→readFile 的 TOCTOU 缺口关闭）。
+            const sourceBytes = await readResourceBytesStrict(
+              from,
+              root,
+              manifestEntry.byteSize,
+              `${mappingSource.directoryName}/${mapping.sourcePath}`,
+            );
             const liveHash = createHash("sha256").update(sourceBytes).digest("hex");
             if (liveHash !== manifestEntry.hash) {
               throw new DomainError(
@@ -319,12 +323,20 @@ export async function applyProposalTransaction(
               to: `${target.directoryName}/${mapping.targetPath}`,
             });
             await fs.mkdir(path.dirname(to), { recursive: true });
+            // Codex R4 P1-1（目标侧）：mkdir 后校验目标父链无 symlink 换体。
+            await assertNoSymlinkAncestors(to, root);
             if (mapping.strategy === "reference") {
               await fs.writeFile(
                 to,
                 `reference: ../../${mappingSource.directoryName}/${mapping.sourcePath}\n`,
                 "utf8",
               );
+            } else if (mapping.strategy === "move") {
+              // Codex R4 P2-3：move 是真实移动语义——先写目标（journal 记账），
+              // 成功后删除源；compensation 用捕获的字节还原源目录。
+              await fs.writeFile(to, sourceBytes);
+              movedRestore.set(seq, { from, bytes: sourceBytes });
+              await fs.rm(from, { force: true });
             } else {
               await fs.writeFile(to, sourceBytes);
             }
@@ -437,6 +449,8 @@ async function undoStep(
     deps: ApplyTransactionDeps;
     root: string;
     mutations: StewardMutationRecord[];
+    /** Codex R4 P2-3：move 步骤的源字节还原表（可选：undoJournalSteps 复放路径无）。 */
+    movedRestore?: Map<number, { from: string; bytes: Buffer }>;
   },
 ): Promise<void> {
   const { deps, snapshot, root } = context;
@@ -472,9 +486,20 @@ async function undoStep(
       await deps.skills.toggle(snapshot.target, [skillId as never], "disable");
       return;
     }
-    case "create-target":
-    case "resource": {
+    case "create-target": {
       // 删除已创建的目标目录（整个 direct-child）。
+      const directoryName = entry.detail.directoryName as string | undefined;
+      if (!directoryName) return;
+      await fs.rm(path.join(root, directoryName), { recursive: true, force: true });
+      return;
+    }
+    case "resource": {
+      // Codex R4 P2-3：move 步骤先还原源字节（目标目录由 create-target 撤销删除）。
+      const moved = context.movedRestore?.get(entry.seq);
+      if (moved) {
+        await fs.mkdir(path.dirname(moved.from), { recursive: true });
+        await fs.writeFile(moved.from, moved.bytes);
+      }
       const directoryName =
         (entry.detail.directoryName as string | undefined) ??
         (entry.detail.to as string | undefined)?.split("/")[0];
@@ -487,8 +512,85 @@ async function undoStep(
   }
 }
 
-/** 快照原文 → creator save 需要的 frontmatter（name/description 必填）+ body。 */
-function parseFrontmatter(content: string): {
+/**
+ * Codex R4 P1-1：资源源的严格读取。三重防线：
+ *   [1] canonical realpath 必须落在 canonical root 下的同一相对位置（任何一级父目录
+ *       是 symlink 都会使二者不等 → 拒绝）；
+ *   [2] 以 O_NOFOLLOW 打开描述符并 fstat 校验 regular file + byteSize（关闭
+ *       lstat→readFile 的 TOCTOU 缺口；末端 symlink 在 open 即失败）；
+ *   [3] 从描述符读取字节（不回退按路径 read）。
+ */
+async function readResourceBytesStrict(
+  from: string,
+  root: string,
+  expectedByteSize: number,
+  label: string,
+): Promise<Buffer> {
+  const realRoot = await fs.realpath(root);
+  let realFrom: string;
+  try {
+    realFrom = await fs.realpath(from);
+  } catch {
+    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
+  }
+  const lexicalPosition = path.join(realRoot, path.relative(root, from));
+  if (realFrom !== lexicalPosition) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Resource source path contains a symlink ancestor (escapes the provider root): ${label}`,
+    );
+  }
+  let handle: import("node:fs/promises").FileHandle;
+  try {
+    handle = await fs.open(
+      from,
+      fs.constants.O_RDONLY | (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW!,
+    );
+  } catch {
+    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new DomainError("INVALID_OPERATION", `Resource source is not a regular file: ${label}`);
+    }
+    if (stat.size !== expectedByteSize) {
+      throw new DomainError(
+        "CONFLICT",
+        `Resource ${label} live size ${stat.size} differs from the snapshot manifest byteSize ${expectedByteSize}.`,
+      );
+    }
+    const bytes = await handle.readFile();
+    return bytes;
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+/**
+ * Codex R4 P1-1（目标侧）：mkdir 之后、写入之前，校验目标路径的每一级父目录
+ * 都不是 symlink（canonical 位置必须与 lexical 位置一致）。
+ */
+async function assertNoSymlinkAncestors(to: string, root: string): Promise<void> {
+  const realRoot = await fs.realpath(root);
+  let realTo: string;
+  try {
+    realTo = await fs.realpath(to);
+  } catch {
+    return; // 目标尚不存在（首次写入）；父链由 realpath 成功本身证明无断裂。
+  }
+  const lexicalPosition = path.join(realRoot, path.relative(root, to));
+  if (realTo !== lexicalPosition) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Resource target path contains a symlink ancestor: ${path.relative(root, to)}`,
+    );
+  }
+}
+
+/** 快照原文 → creator save 需要的 frontmatter（name/description 必填）+ body。 */ function parseFrontmatter(
+  content: string,
+): {
   data: { name: string; description: string } & Record<string, unknown>;
   body: string;
 } {
