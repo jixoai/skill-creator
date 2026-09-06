@@ -87,6 +87,7 @@
     "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1",
     "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
     "@deepseek-ai/dsh-web-frontend": "0.1.2-rc.1",
+    "@skill-creator/dsh-client": "workspace:*",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.1",

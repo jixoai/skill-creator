@@ -194,6 +194,9 @@ importers:
       '@deepseek-ai/dsh-web-frontend':
         specifier: 0.1.2-rc.1
         version: 0.1.2-rc.1
+      '@skill-creator/dsh-client':
+        specifier: workspace:*
+        version: link:packages/skill-creator-dsh-client
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -215,6 +218,8 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.11(@types/node@24.13.3)(@vitest/browser-preview@4.1.10)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
+
+  packages/skill-creator-dsh-client: {}
 
   webui:
     dependencies:

@@ -69,7 +69,7 @@ describe("minimal dsh web host (task 1.1)", () => {
       ]) {
         expect(host.record.activationOrder).toContain(row);
       }
-      expect(host.record.entries).toHaveLength(5);
+      expect(host.record.entries).toHaveLength(6);
       // 带 process token 的认证 URL（浏览器首次握手用）。
       expect(host.record.authenticatedUrl).toMatch(/127\.0\.0\.1:\d+/);
       expect(host.record.authenticatedUrl).not.toStrictEqual(

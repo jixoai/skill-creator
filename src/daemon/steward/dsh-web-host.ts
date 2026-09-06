@@ -24,7 +24,7 @@ import { createRequire } from "node:module";
 const nodeRequire = createRequire(import.meta.url);
 const nodePath = nodeRequire("node:path") as typeof import("node:path");
 
-/** 最小 rows 的模块名（全部来自锁定安装面；官方 patch 的子集）。 */
+/** 最小 rows 的模块名（官方 patch 子集 + Skill Creator Manager client plugin，task 1.2）。 */
 const MINIMAL_ROWS = [
   { name: "@deepseek-ai/dsh-host-webserver", config: { host: "127.0.0.1", port: 0 } },
   // dsh-credentials 是抽象 seam；官方组合用 file-backed local provider 满足
@@ -36,6 +36,9 @@ const MINIMAL_ROWS = [
     name: "@deepseek-ai/dsh-web-app",
     config: { openBrowser: false, printUrl: false, surfaceContext: false },
   },
+  // Manager client plugin（task 1.2）：node half 空 apply；browser half 是唯一
+  // Manager RPC owner。activation 失败会让本次 boot reject（无假成功）。
+  { name: "@skill-creator/dsh-client", config: {} },
 ] as const;
 
 /** boot 记录（smoke 证据与测试断言的事实面）。 */
