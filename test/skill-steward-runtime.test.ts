@@ -34,6 +34,7 @@ import {
   loadContextSnapshot,
 } from "../src/daemon/steward/context-snapshot.js";
 import { createStewardAuditStore } from "../src/daemon/steward/audit-store.js";
+import { createStewardApprovalService } from "../src/daemon/steward/approval-service.js";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import { setHomeOverride } from "../src/shared/paths.js";
@@ -458,3 +459,398 @@ describe("context snapshot builder (task 2.3a)", () => {
 
 /** grant fixture 的本地 parse 通道。 */
 const StewardApprovalGrantSchemaTest = StewardApprovalGrantSchema;
+
+describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = ProviderIdSchema.parse("openclaw");
+  const capabilities = {
+    backendId: "fixture",
+    version: "fixture-1",
+    streamingEvents: true,
+    cancellation: true,
+    permissionRequests: true,
+    executionRoot: "isolated" as const,
+  };
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-txn-test-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function seed(
+    skills: string[],
+  ): Promise<{ target: WorkspaceTarget; snapshot: SkillStewardContextSnapshot }> {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    for (const name of skills) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId,
+        directoryName: name,
+        frontmatter: { name, description: `${name} skill.` },
+        body: `# ${name}\n\nBody of ${name}.\n`,
+      });
+    }
+    const target = { workspaceId: workspace.id, providerId };
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    return { target, snapshot };
+  }
+
+  function approval() {
+    return createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+    });
+  }
+
+  function disableProposal(snapshot: SkillStewardContextSnapshot, skillId: string): SkillProposal {
+    const skill = snapshot.skills.find((entry) => entry.skillId === skillId)!;
+    return {
+      contractVersion: "1.1.0",
+      action: "disable",
+      patch: {
+        kind: "disable",
+        snapshotId: snapshot.id,
+        selections: [{ skillId, expectedRevision: skill.revision }],
+        reason: "test disable",
+      },
+      rationale: "test",
+      findingIds: [],
+      evidence: [{ skillId, snippet: "trigger overlap" }],
+      skillIds: [skillId],
+      observedRevisions: [{ skillId, revision: skill.revision }],
+    };
+  }
+
+  function editProposal(
+    snapshot: SkillStewardContextSnapshot,
+    skillId: string,
+    description: string,
+  ): SkillProposal {
+    const skill = snapshot.skills.find((entry) => entry.skillId === skillId)!;
+    return {
+      contractVersion: "1.1.0",
+      action: "edit",
+      patch: {
+        kind: "edit",
+        snapshotId: snapshot.id,
+        edits: [
+          {
+            skillId,
+            expectedRevision: skill.revision,
+            frontmatter: { name: skill.name, description },
+            body: `# ${skill.directoryName}\n\nEdited body.\n`,
+          },
+        ],
+      },
+      rationale: "test edit",
+      findingIds: [],
+      evidence: [{ skillId, snippet: "vague description" }],
+      skillIds: [skillId],
+      observedRevisions: [{ skillId, revision: skill.revision }],
+    };
+  }
+
+  it("denies apply without a human grant even after validation passes", async () => {
+    const { snapshot } = await seed(["lonely-skill"]);
+    const service = approval();
+    const proposalId = service.submit(
+      disableProposal(snapshot, snapshot.skills[0]!.skillId),
+      snapshot,
+    );
+    const validation = await service.validate(proposalId);
+    expect(validation.overall).toBe("valid");
+    await expect(service.apply(proposalId, "human-ui")).rejects.toThrow(
+      /No unconsumed human grant/,
+    );
+    // Provider 未变：SKILL.md 仍在（未禁用）。
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "lonely-skill", "SKILL.md"))).toBe(
+      true,
+    );
+  });
+
+  it("applies after human approval, and a replayed apply is rejected", async () => {
+    const { snapshot } = await seed(["lonely-skill"]);
+    const service = approval();
+    const proposalId = service.submit(
+      disableProposal(snapshot, snapshot.skills[0]!.skillId),
+      snapshot,
+    );
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    expect(audit.status).toBe("applied");
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "lonely-skill", ".SKILL.md"))).toBe(
+      true,
+    );
+    // 重放：grant 已消费。
+    await expect(service.apply(proposalId, "human-ui")).rejects.toThrow(
+      /No unconsumed human grant/,
+    );
+  });
+
+  it("rolls back disable via a reverse enable proposal that itself needs approval", async () => {
+    const { snapshot } = await seed(["lonely-skill"]);
+    const service = approval();
+    const proposalId = service.submit(
+      disableProposal(snapshot, snapshot.skills[0]!.skillId),
+      snapshot,
+    );
+    await service.approve(proposalId, "human-ui");
+    const { audit } = await service.apply(proposalId, "human-ui");
+    expect(audit.status).toBe("applied");
+
+    const reverse = await service.prepareRollback(audit.id, "human-ui");
+    expect(reverse.note).toContain("separate human approval");
+    // 反向 proposal 未经批准不能 apply。
+    await expect(service.apply(reverse.reverseProposalId, "human-ui")).rejects.toThrow(/grant/);
+    await service.approve(reverse.reverseProposalId, "human-ui");
+    const rollback = await service.apply(reverse.reverseProposalId, "human-ui");
+    expect(rollback.outcome.status).toBe("applied");
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "lonely-skill", "SKILL.md"))).toBe(
+      true,
+    );
+  });
+
+  it("restores original bytes when an edit is rolled back", async () => {
+    const { snapshot } = await seed(["doc-skill"]);
+    const skillId = snapshot.skills[0]!.skillId;
+    const original = snapshot.skills[0]!.content;
+    const service = approval();
+    const proposalId = service.submit(
+      editProposal(snapshot, skillId, "Edited description."),
+      snapshot,
+    );
+    await service.approve(proposalId, "human-ui");
+    const { audit } = await service.apply(proposalId, "human-ui");
+    expect(audit.status).toBe("applied");
+    const afterBytes = fs.readFileSync(
+      path.join(sandbox, "ws", "skills", "doc-skill", "SKILL.md"),
+      "utf8",
+    );
+    expect(afterBytes).not.toBe(original);
+
+    const reverse = await service.prepareRollback(audit.id, "human-ui");
+    await service.approve(reverse.reverseProposalId, "human-ui");
+    await service.apply(reverse.reverseProposalId, "human-ui");
+    const restored = fs.readFileSync(
+      path.join(sandbox, "ws", "skills", "doc-skill", "SKILL.md"),
+      "utf8",
+    );
+    expect(restored).toBe(original);
+  });
+
+  it("compensates fully when a later step fails, leaving the provider unchanged", async () => {
+    const { snapshot } = await seed(["first-skill", "second-skill"]);
+    const service = approval();
+    const first = snapshot.skills.find((skill) => skill.directoryName === "first-skill")!;
+    const second = snapshot.skills.find((skill) => skill.directoryName === "second-skill")!;
+    // 双 edit proposal；在 approve 后、apply 前外部修改第二个技能 → 第二步 stale → 补偿第一步。
+    const proposal: SkillProposal = {
+      contractVersion: "1.1.0",
+      action: "edit",
+      patch: {
+        kind: "edit",
+        snapshotId: snapshot.id,
+        edits: [
+          {
+            skillId: first.skillId,
+            expectedRevision: first.revision,
+            frontmatter: { name: "first-skill", description: "Edited first." },
+            body: "# first-skill\n\nEdited.\n",
+          },
+          {
+            skillId: second.skillId,
+            expectedRevision: second.revision,
+            frontmatter: { name: "second-skill", description: "Edited second." },
+            body: "# second-skill\n\nEdited.\n",
+          },
+        ],
+      },
+      rationale: "two edits",
+      findingIds: [],
+      evidence: [{ skillId: first.skillId, snippet: "x" }],
+      skillIds: [first.skillId, second.skillId],
+      observedRevisions: [
+        { skillId: first.skillId, revision: first.revision },
+        { skillId: second.skillId, revision: second.revision },
+      ],
+    };
+    const proposalId = service.submit(proposal, snapshot);
+    // validate 此时仍 valid（活体还没改）；approve 之后注入外部修改。
+    // 为让 validate 通过后仍可制造漂移：直接 approve（validate 在 approve 内运行，先改会挡 approve）。
+    // 顺序：approve → 外部改 second → apply（第二步 CONFLICT stale → 补偿第一步）。
+    await service.approve(proposalId, "human-ui");
+    fs.writeFileSync(
+      path.join(sandbox, "ws", "skills", "second-skill", "SKILL.md"),
+      "---\nname: second-skill\ndescription: externally edited\n---\n# second-skill\n",
+      "utf8",
+    );
+    const { outcome } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("compensated");
+    // 第一步已被补偿：first-skill 字节恢复原样。
+    const restoredFirst = fs.readFileSync(
+      path.join(sandbox, "ws", "skills", "first-skill", "SKILL.md"),
+      "utf8",
+    );
+    expect(restoredFirst).toBe(first.content);
+  });
+
+  it("applies split with resource mapping and restores the full tree on rollback", async () => {
+    const { snapshot } = await seed(["fat-skill"]);
+    const source = snapshot.skills[0]!;
+    // 资源文件：手动放置（seed 只写 SKILL.md）。
+    fs.mkdirSync(path.join(sandbox, "ws", "skills", "fat-skill", "scripts"), { recursive: true });
+    fs.writeFileSync(
+      path.join(sandbox, "ws", "skills", "fat-skill", "scripts", "run.sh"),
+      "echo fat\n",
+      "utf8",
+    );
+    const service = approval();
+    const proposal: SkillProposal = {
+      contractVersion: "1.1.0",
+      action: "split",
+      patch: {
+        kind: "split",
+        snapshotId: snapshot.id,
+        source: { skillId: source.skillId, expectedRevision: source.revision },
+        targets: [
+          {
+            directoryName: "fat-skill-plan",
+            frontmatter: { name: "fat-skill-plan", description: "Plan half." },
+            body: "# fat-skill-plan\n\nPlan.\n",
+            resources: [],
+          },
+          {
+            directoryName: "fat-skill-exec",
+            frontmatter: { name: "fat-skill-exec", description: "Exec half." },
+            body: "# fat-skill-exec\n\nExec.\n",
+            resources: [
+              { sourcePath: "scripts/run.sh", targetPath: "scripts/run.sh", strategy: "copy" },
+            ],
+          },
+        ],
+      },
+      rationale: "split planning from execution",
+      findingIds: [],
+      evidence: [{ skillId: source.skillId, snippet: "mixed concerns" }],
+      skillIds: [source.skillId],
+      observedRevisions: [{ skillId: source.skillId, revision: source.revision }],
+    };
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    // 目标树 + 资源复制 + 源禁用（目录保留）。
+    expect(
+      fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill-exec", "scripts", "run.sh")),
+    ).toBe(true);
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill", ".SKILL.md"))).toBe(true);
+
+    // rollback：journal replay 恢复完整树和启停。
+    const prepared = service.prepareRollback(audit.id, "human-ui");
+    const rollback = await service.applyRollback(audit.id, "human-ui");
+    expect(rollback.audit.status).toBe("rolled-back");
+    void prepared;
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill-exec"))).toBe(false);
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill-plan"))).toBe(false);
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill", "SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill", ".SKILL.md"))).toBe(false);
+  });
+
+  it("rejects conflicting split targets with zero writes", async () => {
+    const { snapshot } = await seed(["fat-skill"]);
+    const source = snapshot.skills[0]!;
+    fs.mkdirSync(path.join(sandbox, "ws", "skills", "fat-skill-plan"), { recursive: true });
+    const service = approval();
+    const proposal: SkillProposal = {
+      contractVersion: "1.1.0",
+      action: "split",
+      patch: {
+        kind: "split",
+        snapshotId: snapshot.id,
+        source: { skillId: source.skillId, expectedRevision: source.revision },
+        targets: [
+          {
+            directoryName: "fat-skill-plan",
+            frontmatter: { name: "fat-skill-plan", description: "Plan." },
+            body: "# plan\n",
+            resources: [],
+          },
+          {
+            directoryName: "fat-skill-exec",
+            frontmatter: { name: "fat-skill-exec", description: "Exec." },
+            body: "# exec\n",
+            resources: [],
+          },
+        ],
+      },
+      rationale: "conflicting split",
+      findingIds: [],
+      evidence: [{ skillId: source.skillId, snippet: "x" }],
+      skillIds: [source.skillId],
+      observedRevisions: [{ skillId: source.skillId, revision: source.revision }],
+    };
+    const proposalId = service.submit(proposal, snapshot);
+    // validate 阶段就发现目标冲突；approve 被拒。
+    const validation = await service.validate(proposalId);
+    expect(validation.overall).toBe("invalid");
+    await expect(service.approve(proposalId, "human-ui")).rejects.toThrow(/invalid/);
+    // 零写入：exec 目标不存在、源未禁用。
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill-exec"))).toBe(false);
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill", "SKILL.md"))).toBe(true);
+  });
+
+  it("legacy direct approve cannot mutate steward proposals", async () => {
+    const { snapshot } = await seed(["lonely-skill"]);
+    const service = approval();
+    const proposalId = service.submit(
+      disableProposal(snapshot, snapshot.skills[0]!.skillId),
+      snapshot,
+    );
+    // 旧 skillIntelligence.approve 对 Steward proposal id 只会 NOT_FOUND，零 mutation。
+    await expect(
+      domain.skillIntelligence.approve({ proposalId: proposalId as never }),
+    ).rejects.toThrow(/not found/i);
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "lonely-skill", "SKILL.md"))).toBe(
+      true,
+    );
+  });
+
+  it("restart invalidates unconsumed grants so apply is denied", async () => {
+    const { snapshot } = await seed(["lonely-skill"]);
+    const service = approval();
+    const proposalId = service.submit(
+      disableProposal(snapshot, snapshot.skills[0]!.skillId),
+      snapshot,
+    );
+    await service.approve(proposalId, "human-ui");
+    // 重启语义：未消费 grant 全部失效（approve 后 consumedAt 仍为 null → 1 个）。
+    expect(service.invalidateUnconsumedGrants()).toBe(1);
+    await expect(service.apply(proposalId, "human-ui")).rejects.toThrow(
+      /No unconsumed human grant/,
+    );
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "lonely-skill", "SKILL.md"))).toBe(
+      true,
+    );
+  });
+});

@@ -93,5 +93,6 @@ export function assembleStewardSystemPrompt(): string {
     "  disabled after validation.",
     "- The proposal action must equal the patch kind, and skillIds must match exactly the",
     "  identities the patch affects.",
+    "- enable patches are Manager-derived rollback inverses; you never propose them.",
   ].join("\n");
 }

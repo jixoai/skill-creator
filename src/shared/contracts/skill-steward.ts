@@ -28,8 +28,12 @@ import { FindingIdSchema, SeveritySchema } from "./skill-intelligence.js";
 import { SkillIdSchema, type SkillId } from "./skills.js";
 import { WorkspaceProviderTargetSchema } from "./workspaces.js";
 
-/** 本模块契约版本；Agent 输出必须携带同一版本才可解析。 */
-export const SKILL_STEWARD_CONTRACT_VERSION = "1.0.0" as const;
+/**
+ * 本模块契约版本；Agent 输出必须携带同一版本才可解析。
+ * 1.1.0：patch union 增加 enable（rollback-of-disable 的逆操作语义；
+ * task 2.3b 实现期发现的契约缺口，按破坏性更新法则直接演进）。
+ */
+export const SKILL_STEWARD_CONTRACT_VERSION = "1.1.0" as const;
 /** 契约版本字符串约束（稳定语义化字符串）。 */
 export const ContractVersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/);
 /** 契约版本。 */
@@ -427,8 +431,8 @@ export const StewardPatchTargetDocumentSchema = z.object({
 /** patch 目标文档。 */
 export type StewardPatchTargetDocument = z.infer<typeof StewardPatchTargetDocumentSchema>;
 
-/** patch 类别（闭合 union；与 proposal.action 必须一致）。 */
-export const StewardPatchKindSchema = z.enum(["edit", "disable", "split", "merge"]);
+/** patch 类别（闭合 union；与 proposal.action 必须一致）。enable 仅用于 Manager 派生的回滚反向方案。 */
+export const StewardPatchKindSchema = z.enum(["edit", "disable", "enable", "split", "merge"]);
 /** patch 类别。 */
 export type StewardPatchKind = z.infer<typeof StewardPatchKindSchema>;
 
@@ -465,6 +469,14 @@ export const DisableSkillPatchSchema = z.object({
   reason: z.string().min(1).max(2000),
 });
 
+/** enable：恢复启停（Manager 派生的 rollback 反向操作；Agent 不主动建议启用）。 */
+export const EnableSkillPatchSchema = z.object({
+  kind: z.literal("enable"),
+  snapshotId: StewardSnapshotIdSchema,
+  selections: z.array(PatchSkillRefSchema).min(1).max(SNAPSHOT_MAX_SKILLS),
+  reason: z.string().min(1).max(2000),
+});
+
 /** split：一个源拆为 >=2 个不存在的新目标；源保留目录、校验后禁用。 */
 export const SplitSkillPatchSchema = z
   .object({
@@ -488,10 +500,11 @@ export const MergeSkillPatchSchema = z.object({
   target: StewardPatchTargetDocumentSchema,
 });
 
-/** 四类 patch 的闭合 union；未知 action 在解析层被拒绝。 */
+/** patch 的闭合 union（edit/disable/enable/split/merge）；未知 action 在解析层被拒绝。 */
 export const SkillPatchSchema = z.discriminatedUnion("kind", [
   EditSkillPatchSchema,
   DisableSkillPatchSchema,
+  EnableSkillPatchSchema,
   SplitSkillPatchSchema,
   MergeSkillPatchSchema,
 ]);
@@ -557,6 +570,8 @@ export function affectedSkillIdsOfPatch(patch: SkillPatch): SkillId[] {
     case "edit":
       return patch.edits.map((edit) => edit.skillId);
     case "disable":
+      return patch.selections.map((selection) => selection.skillId);
+    case "enable":
       return patch.selections.map((selection) => selection.skillId);
     case "split":
       return [patch.source.skillId];
@@ -727,12 +742,16 @@ export function bindProposalToSnapshot(
       },
     };
   }
-  if (snapshot.scopeKind === "global" && proposal.patch.kind !== "disable") {
+  if (
+    snapshot.scopeKind === "global" &&
+    proposal.patch.kind !== "disable" &&
+    proposal.patch.kind !== "enable"
+  ) {
     return {
       ok: false,
       failure: {
         code: "UNSUPPORTED_WRITE_SCOPE",
-        message: `Global workspace supports analysis and approved disable only; ${proposal.patch.kind} is rejected.`,
+        message: `Global workspace supports analysis and approved disable/enable only; ${proposal.patch.kind} is rejected.`,
       },
     };
   }
@@ -773,6 +792,7 @@ export function expectedRevisionsOfPatch(patch: SkillPatch): Map<SkillId, string
       for (const edit of patch.edits) put(edit.skillId, edit.expectedRevision);
       break;
     case "disable":
+    case "enable":
       for (const selection of patch.selections) put(selection.skillId, selection.expectedRevision);
       break;
     case "split":
