@@ -1,0 +1,268 @@
+<!doctype html>
+<!-- 仅用于展示 Skill Steward 的产品布局；不连接 DSH、RPC 或文件系统，不能作为生产实现证据。 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Skill Steward Reference</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f4f7f7;
+        color: #1d2730;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        min-height: 100vh;
+      }
+      aside {
+        padding: 22px 15px;
+        border-right: 1px solid #d8dfe2;
+        background: #fbfcfc;
+      }
+      main {
+        padding: 28px clamp(18px, 4vw, 48px);
+      }
+      nav button {
+        display: block;
+        width: 100%;
+        padding: 10px;
+        text-align: left;
+        border: 0;
+        background: transparent;
+        border-radius: 6px;
+        margin: 3px 0;
+      }
+      nav .active {
+        background: #e9e1ef;
+        color: #704480;
+        font-weight: 700;
+      }
+      .top,
+      .bar,
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+      .eyebrow,
+      .muted {
+        color: #6b7780;
+        font-size: 12px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-top: 16px;
+      }
+      .panel {
+        background: #fff;
+        border: 1px solid #d8dfe2;
+        border-radius: 8px;
+      }
+      .panel-head {
+        padding: 14px 16px;
+        border-bottom: 1px solid #e8edef;
+      }
+      .panel-body {
+        padding: 16px;
+      }
+      .card {
+        padding: 12px;
+        border: 1px solid #d8dfe2;
+        border-radius: 6px;
+        margin-bottom: 9px;
+      }
+      .selected {
+        border-color: #7b4c8f;
+        box-shadow: 0 0 0 2px #f0e7f4;
+      }
+      .tag {
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: #eee7f1;
+        color: #704480;
+        font-size: 11px;
+      }
+      .event {
+        display: grid;
+        grid-template-columns: 80px 1fr;
+        gap: 10px;
+        padding: 9px 0;
+        border-bottom: 1px solid #edf0f1;
+      }
+      .event:last-child {
+        border: 0;
+      }
+      .event strong {
+        font-size: 12px;
+      }
+      .event code {
+        color: #59676e;
+        font-size: 11px;
+      }
+      .diff {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .diff pre {
+        margin: 0;
+        background: #172126;
+        color: #dce9e8;
+        border-radius: 5px;
+        padding: 10px;
+        overflow: auto;
+        font-size: 12px;
+      }
+      .notice {
+        margin-top: 12px;
+        padding: 10px 12px;
+        background: #f0e7f4;
+        border-left: 3px solid #7b4c8f;
+        color: #5b3d68;
+      }
+      button {
+        padding: 8px 11px;
+        border-radius: 6px;
+        border: 1px solid #d8dfe2;
+        background: #fff;
+      }
+      button.primary {
+        color: #fff;
+        background: #7b4c8f;
+        border-color: #7b4c8f;
+      }
+      @media (max-width: 850px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+        aside {
+          border-right: 0;
+          border-bottom: 1px solid #d8dfe2;
+          padding: 13px 15px;
+        }
+        nav {
+          display: flex;
+          overflow: auto;
+        }
+        nav button {
+          width: auto;
+          white-space: nowrap;
+        }
+        .top {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .grid,
+        .diff {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside>
+        <h2>Skill Creator</h2>
+        <p class="muted">Skill Steward</p>
+        <nav>
+          <button>Workspaces</button><button>Creator</button><button>Repository</button
+          ><button class="active">Steward</button>
+        </nav>
+      </aside>
+      <main>
+        <div class="top">
+          <div>
+            <div class="eyebrow">Workspace / team · Provider / codex</div>
+            <h1>Skill Steward</h1>
+            <p class="muted">A manager-controlled agent for better skills.</p>
+          </div>
+          <div><button>Agent settings</button> <button class="primary">Start task</button></div>
+        </div>
+        <div class="bar" style="margin-top: 18px">
+          <div class="tag">Optimize selected skills · DSH</div>
+          <span class="muted">Snapshot 8bd7c2a · prompt v3</span>
+        </div>
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Agent run</h2>
+              <span class="tag">streaming</span>
+            </div>
+            <div class="panel-body">
+              <div class="event">
+                <strong>09:14:02</strong>
+                <div>
+                  <b>Snapshot created</b>
+                  <div class="muted">3 skills · 3 revisions fixed</div>
+                </div>
+              </div>
+              <div class="event">
+                <strong>09:14:08</strong>
+                <div>
+                  <b>skills.relations</b>
+                  <div class="muted">Found 1 overlap and 1 stale reference</div>
+                </div>
+              </div>
+              <div class="event">
+                <strong>09:14:15</strong>
+                <div>
+                  <b>skills.propose</b>
+                  <div class="muted">Draft patch stored outside Provider</div>
+                </div>
+              </div>
+              <div class="event">
+                <strong>now</strong>
+                <div>
+                  <b>Waiting for approval</b>
+                  <div class="muted">Manager owns the next action</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Proposal</h2>
+              <span class="tag">needs approval</span>
+            </div>
+            <div class="panel-body">
+              <div class="card selected">
+                <b>Narrow release-check trigger</b>
+                <p class="muted">Evidence: trigger overlap 0.78 · revision 8bd7c2a</p>
+              </div>
+              <div class="diff">
+                <pre>
+- approve production deploy
+ provide evidence for human approval</pre
+                >
+                <pre>
++ expectedRevision: 8bd7c2a
+ validation: pending</pre
+                >
+              </div>
+              <div class="notice">
+                No Provider file has changed. Validate, then approve once to apply.
+              </div>
+              <div style="margin-top: 12px">
+                <button>Reject</button> <button class="primary">Validate proposal</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

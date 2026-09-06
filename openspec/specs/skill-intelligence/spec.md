@@ -1,6 +1,7 @@
 # skill-intelligence Specification
 
 ## Purpose
+
 Read-only skill analysis with revision-locked proposal review.
 
 ## Requirements

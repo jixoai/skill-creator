@@ -1,6 +1,7 @@
 # manager-core Specification
 
 ## Purpose
+
 Consolidate the Skill Creator Manager as the single authority over skills, workspaces, revisions, and enablement.
 
 ## Requirements

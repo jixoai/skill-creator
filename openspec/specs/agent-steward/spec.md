@@ -1,6 +1,7 @@
 # agent-steward Specification
 
 ## Purpose
+
 Agent steward runs orchestrated by the Manager with auditable lifecycles and explicit approval gates.
 
 ## Requirements
@@ -13,7 +14,6 @@ The system MUST record selected skills, observed revisions, findings, proposals,
 
 - **WHEN** an Agent proposes and the user applies an optimization
 - **THEN** the daemon can show which revisions were analyzed, which patch was applied and which validation passed
-
 
 ### Requirement: Agent steward operates through Manager
 

@@ -60,7 +60,7 @@ Code + Evidence
 ## 2. 产品真相
 
 ```text
-Skill Creator（ChromeTabs 式 Shell：webui/src/lib/shell + apps 三 App）
+Skill Creator（当前代码：ChromeTabs Shell，三个 App；DSH composition 尚未实现）
 |
 |-- /workspaces -------------- Workspaces App
 |   |-- home tab ------------- Workspace 索引 / import-remove recovery
@@ -68,13 +68,13 @@ Skill Creator（ChromeTabs 式 Shell：webui/src/lib/shell + apps 三 App）
 |       `-- ~/ 或 ws_* ------- Global/Imported Workspace roots
 |
 |-- /creator ----------------- Creator App：在 Imported Workspace.Provider
-|                              创建/编辑技能 + change log + ACP agent 会话
+|                              创建/编辑技能 + change log + 旧 ACP panel
 |
 `-- /repository -------------- Repository App：固定 Git commit 后预览/安装
                                + curated/user sources Discover feed
 ```
 
-一级导航是 Workspaces、Creator、Repository 三个 App；URL 由 shell 内 route registry（`defineApp`/`defineActivity`/`defineRoute`）解析，SvelteKit 侧只有一个 catch-all route 承载。新增产品面必须以 App manifest 注册，不得复活 SvelteKit 多路由页。
+当前一级导航是 Workspaces、Creator、Repository；旧 Steward 是 Workspaces 下的 activity。URL 由 shell route registry 解析，SvelteKit 仅 catch-all 承载。旧实现不满足本轮技能管家目标。批准的目标是复用 DSH Web client plugins 与现有 Manager views，合为一个产品 Shell；任务归属以 GOAL.md 的五阶段顺序和 active changes 为准，不提前把目标写成实现事实。
 
 ```text
 Workspace                  = skills 作用域第一层
@@ -86,7 +86,9 @@ Creator            = create + revision-checked edit/delete + change log
 Repository         = clone + pin commit + scan + preview + install
 Source             = Discover feed 的 curated 或 user Git 源（sources.json）
 Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply）
-ACP Bridge         = agent 子进程 stdio↔WS 帧桥 + daemon 代执行的 fs 安全门
+Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
+Agent Runtime      = 目标为官方 DSH Agent/session/tools/prompt composition；fixture 仅测试，Codex 后端暂不纳入交付
+ACP Bridge         = 当前仍暴露旧入口；规划移除其产品职责，不能作为本轮完成证据
 ```
 
 核心约束：
@@ -102,6 +104,8 @@ ACP Bridge         = agent 子进程 stdio↔WS 帧桥 + daemon 代执行的 fs 
 9. light 资产同时声明 `default/light`，dark 资产声明 `dark`。Core 只管理目录和当前变体；本项目暂不增加主题 IPC，WebView 不拥有 App identity 切换权。
 
 ## 3. 系统拓扑
+
+DSH integration fact (2026-09-06): official `deepseek-ai/deepseek-harness` commit `d347e703908d0406b7a7ef80e3a0e594d86b2215` (v0.1.3-alpha.1, MIT) exposes composable `agent`, `agent-loop`, `session`, `tools`, `system-prompt`, `agent-presets`, `approval`, `sandbox`, API gateway and client module seams. The local `/Users/kzf/Dev/GitHub/dsh` checkout is only `dsh-herdr`; it is not evidence of the official Agent harness. Use `docs/research/2026-09-06-dsh-integration.md` and the active staged changes as the integration boundary; do not treat DSH stores or profiles as Manager truth.
 
 ```text
                          process boundary

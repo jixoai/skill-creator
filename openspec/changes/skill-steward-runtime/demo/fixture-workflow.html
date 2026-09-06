@@ -1,0 +1,34 @@
+<!doctype html><meta charset="utf-8" /><title>Skill Steward runtime reference</title>
+<style>
+  body {
+    font: 14px system-ui;
+    margin: 32px;
+    max-width: 900px;
+  }
+  section {
+    border: 1px solid #ddd;
+    padding: 16px;
+    margin: 12px 0;
+  }
+  code {
+    background: #f4f4f4;
+    padding: 2px 4px;
+  }
+</style>
+<h1>Skill Steward workflow reference</h1>
+<section>
+  <b>Scope</b>
+  <p>Workspace / Provider / selected skills</p>
+  <b>Task</b>
+  <p><button>Check</button> <button>Optimize</button> <button>Organize</button></p>
+</section>
+<section>
+  <b>Run timeline</b>
+  <ol>
+    <li>Snapshot pinned: <code>sha256:...</code></li>
+    <li>Finding with evidence</li>
+    <li>Proposal diff (approval required)</li>
+    <li>Validation passed</li>
+    <li><button>Approve exact patch</button> <button>Reject</button></li>
+  </ol>
+</section>

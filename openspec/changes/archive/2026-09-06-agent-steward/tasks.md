@@ -1,5 +1,7 @@
 # Tasks: agent-steward
 
+> 2026-09-06 复核补记：下文保留原提交验收记录；本轮复跑 251/253，traversal/text-output 两项超时，当前不能以历史 253/253 声明作为 release gate。用户已澄清 DSH 是 Agent 开发基础，原 ACP 任务方向不再满足目标。详见 docs/reviews/2026-09-06-zcode-agent-steward-review.md 和 GOAL.md；本归档不代表新目标已交付。
+
 依赖：`skill-intelligence` 已通过验收。一次只实现一个 backend，完成后再开始另一个。
 
 - [x] 1.1 新建 `src/shared/contracts/agent-steward.ts`，定义 StewardRun、Recommendation、PermissionDecision、RunEvent、terminal status。

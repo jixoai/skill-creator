@@ -1,6 +1,7 @@
 # manager-workbench Specification
 
 ## Purpose
+
 Provide the Workspace, Creator, and Repository workbench surfaces on top of the Manager core.
 
 ## Requirements
