@@ -67,3 +67,9 @@
 - 存储隔离教训（重要，已修复）：dsh storage 单元经 `resolveDshHome()`（env DSH_HOME ?? ~/.dsh）定位 storages，不看 boot 的 home 参数；`bootOfficialWebProfile` 现在在 boot 前固定 `process.env.DSH_HOME = home`、dispose 恢复（含删除原值）。修复前 binder 测试曾把两条临时 workspace 记录写进用户真实 `~/.dsh/storages/workspace.json`——已按 entry 精确清除（仅两条 /var/folders 测试路径），用户原有 4 条 workspace 记录未动，留 `.bak-zcode-pollution` 备份核对。
 - 测试 `test/dsh-session-binder.test.ts` 3/3：typed HOST_UNAVAILABLE；真实官方组合内 openBoundSession（workspace.json sessionIds 收录 + store 事件语法断言）+ completeBoundSession 终态；pipeline 注入后 startRun 结果与 runs.jsonl 均携带 dshSessionId 且 DSH 侧呈现终态叙述。`test/dsh-official-profile.test.ts` 3/3 复跑通过（env 隔离无回归）。
 - 门禁（step 3 边界）：全量 374/374（48 files）；typecheck 0；目标文件 fmt 绿；git diff --check 干净。
+
+## 2.1 实测注记（step 2 补充：断线/重启恢复）
+
+- 宿主进程整体死亡：浏览器层 ERR_CONNECTION_REFUSED + 重新加载入口（dsh-web-2.1-disconnected.png）；进程内 WS 断连横幅属官方 client-connection 自带行为（复用，不改写）。
+- 宿主重启（dispose → 同一固定 home 重启，端口/token 轮换）：workspace 与既有 session 列表完整恢复（「hello, this is a skill-creator · 12分钟」仍在侧边栏；dsh-web-2.1-restarted.png / -restarted-session-detail.png）——session persistence + workspace storage 的重启可验证状态成立；干净 home 的 dispose→二次 boot ready 已由 official-profile 测试与 smoke 脚本覆盖。
+- 2.1 勾选状态（诚实边界）：settings/model/preset/permission 选择面、session list/detail、transcript、类型化 MISSING_CREDENTIAL、断线/重启恢复均已有真实证据；「tool 事件进 transcript」与「运行中取消控件」按任务归属由 2.2 的 Manager tools 逐 call 关联（确定性、无需 LLM 凭据）与后续 Agent 运行面交付——2.1 checkbox 暂不勾，待 2.2 落地后合并浏览器验收再勾。
