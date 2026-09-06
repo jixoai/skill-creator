@@ -38,6 +38,15 @@ if (!fs.existsSync(src)) {
 
 fs.rmSync(dest, { recursive: true, force: true });
 copyDir(src, dest);
+// Manager island（dsh-webui-composition 3.1a）：DSH 页面经同源 /manager/* 服务。
+const islandSrc = path.join(root, "webui", "build-island");
+if (fs.existsSync(islandSrc)) {
+  for (const fileName of fs.readdirSync(islandSrc)) {
+    if (fileName.endsWith(".js") || fileName.endsWith(".css")) {
+      fs.copyFileSync(path.join(islandSrc, fileName), path.join(dest, fileName));
+    }
+  }
+}
 fs.mkdirSync(nativeAppIconDest, { recursive: true });
 for (const fileName of nativeAppIconFiles) {
   const source = path.join(nativeAppIconSource, fileName);

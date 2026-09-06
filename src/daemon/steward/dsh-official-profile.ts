@@ -41,7 +41,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 /**
  * user patch 层：非交互宿主只覆盖 web-runtime 的非 flag 语义（不打印 URL、不注册
  * web-surface 上下文）。webserver 配置走真实 webStartup 服务（见 prepare 的
- * cmdlineArgs 注入），不在这里伪造。
+ * cmdlineArgs 注入），不在这里伪造。skill-creator-manager 行把 Manager client
+ * plugin（task 3.1a：sidebar footer island 入口）加入官方组合。
  */
 const OFFICIAL_PROFILE_USER_PATCH = `# skill-creator 非交互宿主覆盖（server 值走真实 webStartup flags）
 - id: web-runtime
@@ -86,10 +87,42 @@ export async function bootOfficialWebProfile(
   // 把本安装（repo node_modules）的依赖闭包镜像到 $DSH_HOME/profiles/node_modules，
   // 使 profile rows 的裸包名经 Node parent-walk 可解析。
   await healProfilesModuleFallback({ installAnchor, profile, home: options.home });
+  // Manager client plugin 行（task 3.1a）：plugin 是 root devDependency（workspace
+  // 链接，发布包不携带），heal 的闭包遍历只走 dependencies/peerDependencies——
+  // 在此确定性地把它链接进 profile node_modules（dev 组合事实；发布形态由
+  // stage 资产化，属发布决策）。
+  {
+    const pluginSource = path.join(repoRoot, "node_modules", "@skill-creator", "dsh-client");
+    const pluginLink = path.join(
+      options.home,
+      "profiles",
+      "node_modules",
+      "@skill-creator",
+      "dsh-client",
+    );
+    if (fs.existsSync(pluginSource)) {
+      fs.mkdirSync(path.dirname(pluginLink), { recursive: true });
+      const target = fs.realpathSync(pluginSource);
+      if (fs.existsSync(pluginLink)) {
+        const current = fs.realpathSync(pluginLink);
+        if (current !== target) {
+          fs.rmSync(pluginLink, { recursive: true, force: true });
+          fs.symlinkSync(target, pluginLink, "dir");
+        }
+      } else {
+        fs.symlinkSync(target, pluginLink, "dir");
+      }
+    }
+  }
 
-  // base config：空 entry list——base/web 两个 bundle patch 的 insert 会组出全部 rows。
+  // base config：Manager client plugin 行（task 3.1a）——bundle patch 的 insert 会
+  // 把官方 rows 组进来；user patch 层只能做 config 覆盖，新 entry 必须落在 entry list。
   const configPath = path.join(profileDir, "cordis.yml");
-  fs.writeFileSync(configPath, "[]\n", "utf8");
+  fs.writeFileSync(
+    configPath,
+    "- id: skill-creator-manager\n  name: '@skill-creator/dsh-client'\n",
+    "utf8",
+  );
 
   const patches = [...profile.layers.flatMap((layer) => layer.patches), ...profile.patches];
   // launcher seam：等价 dsh-cmdline 的 provideCmdline——在 tree mount 前提供

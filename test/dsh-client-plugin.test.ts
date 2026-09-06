@@ -63,9 +63,19 @@ function materializeClientPlugin(): {
   new Function("window", source)(window);
   expect(loaded.length).toBe(1);
   const registration = loaded[0]!;
-  const exports = registration.factory(() => {
-    throw new Error("minimal plugin must not require other modules");
-  }) as Record<string, unknown>;
+  const require = (name: string): unknown => {
+    if (name === "react") {
+      return {
+        createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({
+          type,
+          props,
+          children,
+        }),
+      };
+    }
+    throw new Error(`unexpected require: ${name}`);
+  };
+  const exports = registration.factory(require) as Record<string, unknown>;
   return { registeredId: registration.id, exports };
 }
 
@@ -156,4 +166,62 @@ describe("manager dsh client plugin protocol (task 1.2)", () => {
       (ctx as unknown as { dispose?: () => void }).dispose?.();
     },
   );
+});
+
+describe("manager island contribution (task 3.1a)", () => {
+  it("declares slots inject and registers a sidebar.footer.action view", () => {
+    const { exports } = materializeClientPlugin();
+    expect(exports["inject"]).toEqual(["slots"]);
+    const apply = exports["apply"] as (ctx: unknown) => { (): void } | { (): void };
+    expect(typeof apply).toBe("function");
+
+    const registrations: Array<{ name: string; id?: string; locale?: string }> = [];
+    const disposers: Array<() => void> = [];
+    const ctx = {
+      effect: (fn: () => () => void) => {
+        disposers.push(fn());
+        return () => disposers.forEach((dispose) => dispose());
+      },
+      slots: {
+        inject: (slotName: string, register: () => unknown) => {
+          expect(slotName).toBe("sidebar.footer.action");
+          return register();
+        },
+        register: (options: { name: string; id?: string; locale?: string }, view: unknown) => {
+          registrations.push(options);
+          expect(typeof view).toBe("function");
+          return () => undefined;
+        },
+      },
+    };
+    apply(ctx);
+    expect(registrations).toHaveLength(1);
+    expect(registrations[0]).toMatchObject({
+      name: "sidebar.footer.action",
+      id: "skill-creator-manager",
+      locale: "common",
+    });
+    // 贡献声明带 inject 面（视图 props 提供器），与官方 footer 贡献同形。
+    expect(typeof (registrations[0] as { inject?: unknown }).inject).toBe("function");
+    // 卸载（DSH lifecycle）：disposer 链可执行（关闭 island + 注销贡献）。
+    disposers.forEach((dispose) => dispose());
+  });
+
+  it("keeps the island lifecycle inside the plugin instance (no duplicate mounts)", () => {
+    const { exports } = materializeClientPlugin();
+    const internal = (
+      exports as unknown as {
+        __internal: {
+          islandState: { open: boolean; scriptLoading: unknown; hostEl: unknown };
+          openIsland: () => void;
+          closeIsland: () => void;
+        };
+      }
+    ).__internal;
+    expect(internal.islandState.open).toBe(false);
+    expect(internal.islandState.hostEl).toBe(null);
+    // 关闭幂等：未打开时 close 不抛错。
+    internal.closeIsland();
+    expect(internal.islandState.open).toBe(false);
+  });
 });

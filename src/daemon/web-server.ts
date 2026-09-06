@@ -256,7 +256,21 @@ export class WebServer {
       response.end("dsh host unmounted");
       return;
     }
+    // 同源组合（Transport Gate）：浏览器以 daemon origin 发请求，DSH host 的
+    // Origin/Host CSRF 校验以它自己的 origin 为准。代理在 daemon 边界把 origin 系
+    // 头改写为 DSH host origin——两套鉴权仍各自执行（浏览器侧 token/cookie 由
+    // 各自 surface 签发，代理不吞凭据）。
+    const dshOrigin = `http://${mount.host}:${mount.port}`;
     const headers = { ...request.headers, host: `${mount.host}:${mount.port}` };
+    if (typeof headers.origin === "string") headers.origin = dshOrigin;
+    if (typeof headers.referer === "string") {
+      try {
+        headers.referer =
+          new URL(headers.referer).pathname === "/" ? `${dshOrigin}/` : headers.referer;
+      } catch {
+        delete headers.referer;
+      }
+    }
     const proxy = http.request(
       { host: mount.host, port: mount.port, method: request.method, path: request.url, headers },
       (upstream) => {
