@@ -4,11 +4,11 @@
 
 ## 已完成任务
 
-| Task                               | 提交                        | 证据                                                                                                                                                                                                           |
-| ---------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 3.1 handshake                      | db13aa8 + 52ef2b1           | @deepseek-ai/* 八包精确锁定 0.1.2-rc.1；handshake 逐包校验版本+组合行导出；注入负例 MISSING_PACKAGE/VERSION_MISMATCH/COMPOSITION_ROW_MISSING；旧 dsh-acp 移除                                                  |
-| 3.2 agent/session/stream/tool 适配 | 79b304f + bf5425b + 5701718 |
-| 3.3 settings/credentials/session streams | 32992cb | 真实 cordis 六服务组合；deterministic LLM transport；agent scope 五域工具（output schema+render，全部回 Manager registry）；版本化 prompt section；tool round/replay/cancel/fail-closed/run record（10 tests） |
+| Task                                     | 提交                        | 证据                                                                                                                                                                                                           |
+| ---------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.1 handshake                            | db13aa8 + 52ef2b1           | @deepseek-ai/* 八包精确锁定 0.1.2-rc.1；handshake 逐包校验版本+组合行导出；注入负例 MISSING_PACKAGE/VERSION_MISMATCH/COMPOSITION_ROW_MISSING；旧 dsh-acp 移除                                                  |
+| 3.2 agent/session/stream/tool 适配       | 79b304f + bf5425b + 5701718 |
+| 3.3 settings/credentials/session streams | 32992cb                     | 真实 cordis 六服务组合；deterministic LLM transport；agent scope 五域工具（output schema+render，全部回 Manager registry）；版本化 prompt section；tool round/replay/cancel/fail-closed/run record（10 tests） |
 
 ## 实测发现（与 tasks 文件列表的偏差）
 
