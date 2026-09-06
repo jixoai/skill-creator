@@ -62,7 +62,14 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - P2-3 move 假实现 → 修复：move 为真实移动语义（写目标 + journal 记账 + 删除源），compensation 以捕获字节还原源（负例：冲突 move 轮 compensated 后源字节零丢失、目标零残留）。
   - P2-4 verification 过期 → 本文件即整改（边界更新为 1.5.0；全量门禁见下）。
   - 门禁（R4 整改后）：contracts 42/42、runtime 40/40、全量 387/387（50 files）、typecheck 0、webui check 0/0、目标文件 fmt 绿、`git diff --check` 干净、openspec 9/9。全树 `vp fmt --check` 仍有 6 个并行文件失败（3 个 archive/demo、contracts demo html、runtime fixture-transcript.json、本 verification.md）——属跨 change 工作树卫生，不作为本 change 门禁事实。
-- R5 复审已随 1.5.0 整改提交（结论待出；复核回调改为后台 codex-callback.sh 模式）。
+- R5（5.5/10，不通过，报告 /tmp/stage1-contracts-review-round5.md；独立 worktree 12d5d74）：
+  - 判定：R4 的 P1-2/P1-3/P2-1/P2-2 经独立探针关闭；P1-1 未闭合（realpath 检查与字符串 IO 拼接，TOCTOU 探针可 applied）；P2-3 升级为 P1（move rollback 无持久备份，审计 rolled-back 但源字节丢失）。
+  - P1-1 修复：源读取改为「canonical 一致 → lstat 捕获 {dev,ino} → O_NOFOLLOW fd 打开且 fstat 身份必须一致 → 从 fd 读 → 读后 canonical/inode 复核」（Node 无 openat 的平台等价 no-symlink traversal，身份链消除双重取值窗口）；目标写入 exclusive fd（O_CREAT|O_EXCL，symlink leaf 失败）+ 写后 canonical/inode 复核，检测到逃逸时清零外部文件并终态 recovery-required（绝不谎称干净补偿）；恢复侧（compensation/rollback 的源还原）同样走 canonical 校验 + exclusive 写；move 删除源前再次校验父链。
+  - P1-2 修复：move 源字节先落 Manager-owned 持久备份（journal 旁 .backups/，write-ahead 记账携带 backupPath+sha256），同进程补偿、applyRollback 与重启 replay 共用；备份缺失/sha 漂移 → 抛错（recovery-required），不伪造已回滚。
+  - 测试（R5 负例）：apply→prepareRollback→applyRollback 源字节恢复；undoJournalSteps 重启等价 replay 从持久备份恢复（断言 .backups/ 落盘 1 份）；12 轮并发换体 chaos——成功轮字节必为真实源、外部文件内容永不变化（swapper 在 realStore/outside 双 symlink 间高频切换，×3 稳定）。
+  - P2-4 修复：本文件边界与门禁事实同步（1.5.0；全量 390/390）。
+  - 门禁（R5 整改后）：contracts 42/42、runtime 43/43、全量 390/390（50 files，两次串行全绿）、typecheck 0、webui check 0/0、openspec 9/9。
+- R6 复审已随本整改提交（结论待出；复核回调为后台 codex-callback.sh 模式）。
 
 ## Deferred（owner 与完成边界）
 

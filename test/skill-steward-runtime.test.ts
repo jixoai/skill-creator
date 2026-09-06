@@ -1568,3 +1568,231 @@ describe("apply-side R4 defenses (Codex R4 P1-1/P1-2/P2-3)", () => {
     expect(fs.existsSync(path.join(directory, "skills", "merged-skill"))).toBe(false);
   });
 });
+
+describe("move durability and path races (Codex R5 P1-1/P1-2)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = ProviderIdSchema.parse("openclaw");
+  const capabilities = {
+    backendId: "fixture",
+    version: "fixture-1",
+    streamingEvents: true,
+    cancellation: true,
+    permissionRequests: true,
+    executionRoot: "isolated" as const,
+  };
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-r5-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function seedMergePair() {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    for (const name of ["merge-left", "merge-right"]) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId,
+        directoryName: name,
+        frontmatter: { name, description: `${name} skill.` },
+        body: `# ${name}\n`,
+      });
+      fs.mkdirSync(path.join(directory, "skills", name, "shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(directory, "skills", name, "shared", "notes.md"),
+        name === "merge-left" ? "left-origin\n" : "right-origin\n",
+        "utf8",
+      );
+    }
+    const target = { workspaceId: workspace.id, providerId };
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const sourceB = snapshot.skills.find((skill) => skill.directoryName === "merge-right")!;
+    return { directory, snapshot, sourceB };
+  }
+
+  function mergeMoveProposal(
+    snapshot: SkillStewardContextSnapshot,
+    sourceB: SkillStewardContextSnapshot["skills"][number],
+  ): SkillProposal {
+    const sources = snapshot.skills.filter((skill) => skill.directoryName.startsWith("merge-"));
+    return {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "merge",
+      patch: {
+        kind: "merge",
+        snapshotId: snapshot.id,
+        sources: sources.map((skill) => ({
+          skillId: skill.skillId,
+          expectedRevision: skill.revision,
+        })),
+        target: {
+          directoryName: "merged-skill",
+          frontmatter: { name: "merged-skill", description: "Merged." },
+          body: "# merged-skill\n",
+          resources: [
+            {
+              sourceSkillId: sourceB.skillId,
+              sourcePath: "shared/notes.md",
+              targetPath: "shared/moved.md",
+              strategy: "move",
+            },
+          ],
+        },
+      },
+      rationale: "r5 durability probe",
+      findingIds: [],
+      evidence: [{ skillId: sourceB.skillId, snippet: "probe" }],
+      skillIds: sources.map((skill) => skill.skillId),
+      observedRevisions: sources.map((skill) => ({
+        skillId: skill.skillId,
+        revision: skill.revision,
+      })),
+    };
+  }
+
+  it("P1-2: apply -> prepareRollback -> applyRollback restores the moved source bytes", async () => {
+    const { directory, snapshot, sourceB } = await seedMergePair();
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(mergeMoveProposal(snapshot, sourceB), snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    const sourceFile = path.join(directory, "skills", "merge-right", "shared", "notes.md");
+    expect(fs.existsSync(sourceFile)).toBe(false);
+
+    const rollback = await service.prepareRollback(audit.id, "human-ui");
+    expect(rollback.note).toContain("Rollback grant minted");
+    const rolled = await service.applyRollback(audit.id, "human-ui");
+    expect(rolled.audit.status).toBe("rolled-back");
+    // 持久备份路径：源字节恢复（applyRollback 走 readJournal/undoJournalSteps，
+    // 无进程内 movedRestore）。
+    expect(fs.readFileSync(sourceFile, "utf8")).toBe("right-origin\n");
+    expect(fs.existsSync(path.join(directory, "skills", "merged-skill"))).toBe(false);
+  });
+
+  it("P1-2: undoJournalSteps (restart-equivalent replay) restores the source from the persistent backup", async () => {
+    const { directory, snapshot, sourceB } = await seedMergePair();
+    const journalPath = path.join(sandbox, "journal", "restart.jsonl");
+    const { applyProposalTransaction, readJournal, undoJournalSteps } =
+      await import("../src/daemon/steward/apply-transaction.js");
+    const proposal = mergeMoveProposal(snapshot, sourceB);
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).toBe("applied");
+    const sourceFile = path.join(directory, "skills", "merge-right", "shared", "notes.md");
+    expect(fs.existsSync(sourceFile)).toBe(false);
+    // 备份落盘（journal 旁 .backups/）。
+    const backupDir = `${journalPath}.backups`;
+    expect(fs.readdirSync(backupDir).length).toBe(1);
+
+    // 重启等价：全新 context（无内存表）回放 journal 撤销。
+    const entries = await readJournal(journalPath);
+    await undoJournalSteps(entries, {
+      proposal,
+      snapshot,
+      deps: {
+        workspaces: domain.workspaces,
+        skills: domain.skills,
+        creator: domain.creator,
+        store: createStewardAuditStore(),
+        journalPath,
+      },
+      root: path.join(directory, "skills"),
+      mutations: [],
+    });
+    expect(fs.readFileSync(sourceFile, "utf8")).toBe("right-origin\n");
+    expect(fs.existsSync(path.join(directory, "skills", "merged-skill"))).toBe(false);
+  });
+
+  it("P1-1: concurrent parent-dir swapping never reads outside bytes undetected (chaos loop)", async () => {
+    const { directory, snapshot, sourceB } = await seedMergePair();
+    const sharedDir = path.join(directory, "skills", "merge-right", "shared");
+    // 真实内容迁往独立 store；shared 变成挂载点，攻击者在两个 symlink 目标间高频
+    // 切换（换体源 = outside，真实源 = realStore）。攻击者绝不写穿 shared 路径。
+    const realStore = path.join(sandbox, "realstore");
+    fs.mkdirSync(realStore, { recursive: true });
+    fs.renameSync(sharedDir, realStore);
+    fs.symlinkSync(realStore, sharedDir);
+    const outsideDir = path.join(sandbox, "outside");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, "notes.md"), "left-origin\n", "utf8");
+
+    let swapping = true;
+    const swapper = (async () => {
+      let flip = false;
+      while (swapping) {
+        try {
+          fs.rmSync(sharedDir, { force: true });
+          fs.symlinkSync(flip ? outsideDir : realStore, sharedDir);
+          flip = !flip;
+        } catch {
+          /* 竞态窗口内的任何一步失败都重试 */
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    })();
+
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    let applied = 0;
+    let rejected = 0;
+    try {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        // 每轮重建干净目标（applied 后 merged-skill 已存在会 CONFLICT，重建快照场景）。
+        fs.rmSync(path.join(directory, "skills", "merged-skill"), { recursive: true, force: true });
+        const proposal = mergeMoveProposal(snapshot, sourceB);
+        const outcome = await applyProposalTransaction(proposal, snapshot, {
+          workspaces: domain.workspaces,
+          skills: domain.skills,
+          creator: domain.creator,
+          store: createStewardAuditStore(),
+          journalPath: path.join(sandbox, "journal", `chaos-${attempt}.jsonl`),
+        });
+        if (outcome.status === "applied") {
+          applied += 1;
+          const moved = path.join(directory, "skills", "merged-skill", "shared", "moved.md");
+          // 成功轮的内容必须来自真实源（right-origin），绝不能是外部字节。
+          if (fs.existsSync(moved)) {
+            expect(fs.readFileSync(moved, "utf8")).toBe("right-origin\n");
+          }
+        } else {
+          rejected += 1;
+        }
+      }
+    } finally {
+      swapping = false;
+      await swapper;
+    }
+    // 不变量：要么干净成功（字节正确），要么类型化失败；外部文件内容永不变化。
+    expect(applied + rejected).toBe(12);
+    expect(fs.readFileSync(path.join(outsideDir, "notes.md"), "utf8")).toBe("left-origin\n");
+  });
+});
