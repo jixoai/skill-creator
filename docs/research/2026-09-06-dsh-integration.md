@@ -104,3 +104,50 @@ DSH 应作为运行时基础设施；Workspace、Provider、Skill、revision、p
 ## 结论与限制
 
 DSH 官方源码足以作为 Skill Creator 的 Agent runtime foundation：它提供 scoped setup、typed tools、prompt assembly、model/profile registry、durable sessions、stream events、approval 和 sandbox。它没有替 Skill Creator 定义技能领域的 snapshot、冲突分析、patch、拆分/合并或 Manager-owned apply；这些必须在本项目实现。官方包仍是 alpha，版本和内部 Web 组件 API 可能变化，生产接入必须锁定 commit/版本并保留 fixture adapter 与完整回归证据。
+
+## DSH Web composition 事实表（dsh-webui-composition task 0.1，2026-09-06 npm 实测）
+
+来源：`npm view <pkg> versions/peerDependencies/dependencies`、临时目录 `pnpm add -E` clean install
+（浏览器面 `/tmp/dsh-web-facts-*`、服务端 host `/tmp/dsh-webapp-facts-*`）、安装产物
+`lib/index.js`/`lib/client.js`/`package.json` 逐文件阅读。锁定原则：全部候选包取与 runtime
+五包同代的 `0.1.2-rc.1`。
+
+### 包事实
+
+| package                                                          | 锁定版本   | peer graph（声明）                                                                                           | entry / 加载结果                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@deepseek-ai/dsh-client-web`                                    | 0.1.2-rc.1 | 仅 `cordis ^4.0.2`（不完整）                                                                                 | `lib/index.js` 导出 `AppWebEntry`；**React 浏览器构建**：import `boot-page.module.css`、`react`、`react-dom`、`react/jsx-runtime`、`cordis-plugin-loader`、`dsh-client-store`、`dsh-client-ui-primitives`、`dsh-client-ui-slots`。Node 原生 ESM 加载失败（`ERR_UNKNOWN_FILE_EXTENSION ".css"`）——只能在 bundler（Vite css 处理）或浏览器宿主内加载。这是预期形态，不是缺陷。 |
+| `@deepseek-ai/dsh-client-connection`                             | 0.1.2-rc.1 | `cordis ^4.0.2`                                                                                              | `./client` 子入口是浏览器模块；deps：zod、dsh-credentials、schemastery（服务端 bundle 内提供）                                                                                                                                                                                                                                                                               |
+| `@deepseek-ai/dsh-client-ui-session`                             | 0.1.2-rc.1 | `cordis ^4.0.2`                                                                                              | `./client` = `window.__ModuleLoader__.load({ id, factory: (require) => … })` 工厂模块——客户端插件只能在 DSH web shell 的模块加载器内执行，factory 内 require `dsh-client-store`、`dsh-client-ui-slots`、`react`                                                                                                                                                              |
+| `@deepseek-ai/dsh-client-ui-chat`                                | 0.1.2-rc.1 | `cordis ^4.0.2`                                                                                              | 同上形态；deps schemastery                                                                                                                                                                                                                                                                                                                                                   |
+| `@deepseek-ai/dsh-client-store` / `-ui-primitives` / `-ui-slots` | 0.1.2-rc.1 | —                                                                                                            | client-web/ui-session 的隐藏依赖（未被声明为 peer），必须显式锁定安装                                                                                                                                                                                                                                                                                                        |
+| `@deepseek-ai/cordis-plugin-loader`                              | 1.0.3      | —                                                                                                            | client-web 隐藏 peer；也是 dsh-web-app 的 peer                                                                                                                                                                                                                                                                                                                               |
+| `@deepseek-ai/dsh-web-app`                                       | 0.1.2-rc.1 | `cordis ^4.0.2`、`cordis-plugin-loader ^1.0.3`、`dsh-shell-env ^0.1.2-rc.1`、`dsh-system-prompt ^0.1.2-rc.1` | 服务端 web host 启动器：CLI（deps commander/open）+ 72 直接依赖（client-ui-* 全家桶）；exports 含 `./startup`（启动 seam）与 `./cordis.patch.yml`（Cordis profile patch——客户端 plugin 的 manifest 通道）。clean install 180 个 .pnpm 条目全解析                                                                                                                             |
+| `@deepseek-ai/dsh-user-approval`                                 | 0.1.2-rc.1 | dsh-agent/brand/llm/scope/session/system-prompt/invariants + cordis                                          | 服务端 approval 服务（runtime 面，非浏览器）                                                                                                                                                                                                                                                                                                                                 |
+
+### 隐藏 peer（peerDependencies 未声明但构建实际 import）
+
+`dsh-client-web`：`react`、`react-dom`、`@deepseek-ai/cordis-plugin-loader`、
+`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`、
+`@deepseek-ai/dsh-client-ui-slots`。实测 react@19 系可用；缺任一项 → 浏览器端
+module-not-found。仓内安装面把后四者并入 `DSH_WEB_LOCKED_PACKAGES`，react 系记录在
+`DSH_WEB_HIDDEN_PEER_PACKAGES`，缺失时投影 typed unavailable（MISSING_PEER）。
+
+### clean install 记录
+
+- 浏览器面（client-web/connection/ui-session/ui-chat + client-store/ui-primitives/ui-slots
+  - cordis-plugin-loader + cordis@4.0.2 + react@19）：pnpm 解析成功；`/client` 子入口均为
+    `window.__ModuleLoader__` 工厂模块（Node 下执行会在 `window` 处 ReferenceError——证明
+    它们只能进 DSH web shell）。
+- 服务端（dsh-web-app@0.1.2-rc.1）：72 直接依赖、180 .pnpm 条目全部解析；无版本冲突。
+
+### 架构结论（后续任务的边界）
+
+1. DSH web shell 是 **React** 应用；Skill Creator 的 Svelte 组件不能直接进它的 slots，
+   只能按 3.1a 的 host/island 方式挂载，或产出同形态 `window.__ModuleLoader__.load` 的
+   client 插件（1.2）。
+2. `dsh-web-app` 是官方 host 启动器（含 CLI 全家桶）；本仓 1.1 优先复用其 `./startup`
+   与 boot manifest，而不是把 72 个依赖全部引入 daemon——daemon 只需提供 loopback RPC
+   与静态宿主页。
+3. 任何缺包/版本漂移/隐藏 peer 缺失都走 `DshWebRuntimeStatusSchema` 的 typed
+   unavailable + recoveryCommand，不猜测、不静默降级。

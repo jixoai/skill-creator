@@ -5,3 +5,6 @@ allowBuilds:
   esbuild: true
   sharp: true
   "@tailwindcss/oxide": true
+  # koffi 来自 dsh-web-app 全家桶的 dsh-host-directory-picker-native（FFI）；
+  # 本仓只用 dsh-web-app 的 ./startup 与 cordis.patch.yml 作 host 参考，不用原生目录选择器。
+  koffi: false

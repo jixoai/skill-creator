@@ -90,6 +90,86 @@ export type DshRuntimeStatus = z.infer<typeof DshRuntimeStatusSchema>;
 
 /*
  * ---------------------------------------------------------------------------
+ * DSH Web composition 锁定（dsh-webui-composition task 0.1）
+ * 事实源：npm registry 实测（2026-09-06，见 docs/research/2026-09-06-dsh-integration.md
+ * 「DSH Web composition 事实表」节）。全部候选包在 0.1.2-rc.1 与 runtime 五包同代发布。
+ * ---------------------------------------------------------------------------
+ */
+
+/**
+ * Web composition 锁定包。分两个安装面：
+ * - browser face（webui 构建期消费，Vite bundler 解析，daemon 永不 import）；
+ * - server host（dsh-web-app：官方 web profile 启动器，`./startup` + `./cordis.patch.yml`）。
+ */
+export const DSH_WEB_LOCKED_PACKAGES = {
+  // ---- browser face（React 构建；client.js 是 window.__ModuleLoader__ 工厂模块） ----
+  "@deepseek-ai/dsh-client-web": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-client-connection": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-client-ui-session": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-client-ui-chat": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-client-store": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-client-ui-slots": "0.1.2-rc.1",
+  "@deepseek-ai/cordis-plugin-loader": "1.0.3",
+  // ---- server host ----
+  "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
+} as const;
+/** Web 锁定包名集合。 */
+export type DshWebLockedPackageName = keyof typeof DSH_WEB_LOCKED_PACKAGES;
+
+/**
+ * dsh-client-web 的 peerDependencies 只声明 cordis，但浏览器构建实际 import 的
+ * 隐藏 peer（实测 lib/index.js import 表：react 系 + cordis-plugin-loader +
+ * client-store/ui-primitives/ui-slots——后三者已并入锁定表）。安装面缺 react 系 →
+ * 浏览器 module-not-found，由 typed unavailable 表达，不得静默降级。
+ */
+export const DSH_WEB_HIDDEN_PEER_PACKAGES = {
+  react: "19",
+  "react-dom": "19",
+} as const;
+/** 隐藏 peer 名集合。 */
+export type DshWebHiddenPeerName = keyof typeof DSH_WEB_HIDDEN_PEER_PACKAGES;
+
+/** Web composition 失败原因（闭合集合；MISSING_PEER 特指隐藏 peer 未安装）。 */
+export const DshWebUnavailableCodeSchema = z.enum([
+  "MISSING_PACKAGE",
+  "VERSION_MISMATCH",
+  "COMPOSITION_ROW_MISSING",
+  "MISSING_PEER",
+]);
+/** Web composition 失败原因码。 */
+export type DshWebUnavailableCode = z.infer<typeof DshWebUnavailableCodeSchema>;
+
+/** Web composition 可用性投影（typed unavailable；无隐式 fallback）。 */
+export const DshWebRuntimeStatusSchema = z.discriminatedUnion("state", [
+  z.object({
+    state: z.literal("available"),
+    /** 浏览器面 entry：dsh-client-web 根导出的 AppWebEntry（React 构建，仅浏览器/bundler 可加载）。 */
+    browserEntry: z.literal("AppWebEntry"),
+    /** 服务端 host 启动 seam：dsh-web-app 的 `./startup` export。 */
+    serverStartup: z.literal("@deepseek-ai/dsh-web-app/startup"),
+    packages: z.array(
+      z.object({
+        packageName: z.string().min(1),
+        lockedVersion: z.string().min(1),
+        resolvedVersion: z.string().min(1),
+      }),
+    ),
+  }),
+  z.object({
+    state: z.literal("unavailable"),
+    code: DshWebUnavailableCodeSchema,
+    packageName: z.string().min(1),
+    detail: z.string().min(1),
+    /** 面向操作者的恢复命令（typed unavailable 必须带恢复路径）。 */
+    recoveryCommand: z.string().min(1),
+  }),
+]);
+/** Web composition 状态。 */
+export type DshWebRuntimeStatus = z.infer<typeof DshWebRuntimeStatusSchema>;
+
+/*
+ * ---------------------------------------------------------------------------
  * Steward DSH settings / credentials / session streams（task 3.3）
  * 研究事实源：docs/research/2026-09-06-dsh-integration.md「模型、profile 与流式事件」
  * 「Approval、permission 与 sandbox」「Session 与 persistence」三节。
