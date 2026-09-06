@@ -49,11 +49,12 @@ import {
 } from "./apply-transaction.js";
 import { buildContextSnapshot, stewardStoreDir } from "./context-snapshot.js";
 
-/** 内部 proposal 存档（提交时即绑定快照）。 */
+/** 内部 proposal 存档（提交时即绑定快照与 run）。 */
 interface ProposalEntry {
   proposalId: StewardProposalId;
   proposal: SkillProposal;
   snapshot: SkillStewardContextSnapshot;
+  runId: import("../../shared/contracts/skill-steward.js").StewardRunId2;
 }
 
 /** 审批服务依赖。 */
@@ -83,6 +84,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
   function submit(
     proposal: SkillProposal,
     snapshot: SkillStewardContextSnapshot,
+    runId: import("../../shared/contracts/skill-steward.js").StewardRunId2,
   ): StewardProposalId {
     const bound = bindProposalToSnapshot(proposal, snapshot);
     if (!bound.ok) {
@@ -92,7 +94,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       );
     }
     const proposalId = StewardProposalIdSchema.parse(`spp_${randomBytes(8).toString("hex")}`);
-    proposals.set(proposalId, { proposalId, proposal, snapshot });
+    proposals.set(proposalId, { proposalId, proposal, snapshot, runId });
     return proposalId;
   }
 
@@ -189,6 +191,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       id: StewardGrantIdSchema.parse(`grant_${randomBytes(8).toString("hex")}`),
       proposalId,
       snapshotId: entry.snapshot.id,
+      runId: entry.runId,
       fingerprint: fingerprintOf(entry.proposal),
       principal,
       issuedAt: new Date().toISOString(),
@@ -249,7 +252,8 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       });
       const audit: StewardAuditRecord = {
         id: StewardAuditIdSchema.parse(`aud_${randomBytes(8).toString("hex")}`),
-        runId: { sr: entry.snapshot.id } as unknown as StewardAuditRecord["runId"],
+        runId: entry.runId,
+        snapshotId: entry.snapshot.id,
         proposalId,
         action: entry.proposal.patch.kind,
         principal,
@@ -306,6 +310,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
         proposalId: reverseProposalId,
         proposal: reverse,
         snapshot: entry.snapshot,
+        runId: entry.runId,
       });
       return {
         reverseProposalId,
@@ -355,6 +360,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
         proposalId: reverseProposalId,
         proposal: reverse,
         snapshot: freshSnapshot,
+        runId: entry.runId,
       });
       return {
         reverseProposalId,
@@ -368,6 +374,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       id: StewardGrantIdSchema.parse(`grant_${randomBytes(8).toString("hex")}`),
       proposalId: audit.proposalId,
       snapshotId: entry.snapshot.id,
+      runId: entry.runId,
       fingerprint: fingerprintOf(entry.proposal),
       principal,
       issuedAt: new Date().toISOString(),
@@ -428,6 +435,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       const recovery: StewardAuditRecord = {
         id: StewardAuditIdSchema.parse(`aud_${randomBytes(8).toString("hex")}`),
         runId: audit.runId,
+        snapshotId: audit.snapshotId,
         proposalId: audit.proposalId,
         action: audit.action,
         principal,

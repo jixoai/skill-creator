@@ -79,7 +79,7 @@ export function createSkillStewardPipelineService(deps: {
     const proposals: SkillStewardRunResult["proposals"] = [];
     const sink = {
       store(proposal: SkillProposal): StewardProposalId {
-        const proposalId = approval.submit(proposal, snapshot);
+        const proposalId = approval.submit(proposal, snapshot, runId);
         proposals.push({ proposalId, action: proposal.action });
         return proposalId;
       },

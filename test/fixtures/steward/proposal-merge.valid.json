@@ -1,5 +1,5 @@
 {
-  "contractVersion": "1.1.0",
+  "contractVersion": "1.2.0",
   "action": "merge",
   "patch": {
     "kind": "merge",
@@ -25,12 +25,14 @@
         {
           "sourcePath": "scripts/deploy-web.sh",
           "targetPath": "scripts/deploy-web.sh",
-          "strategy": "copy"
+          "strategy": "copy",
+          "sourceSkillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2"
         },
         {
           "sourcePath": "assets/api.env",
           "targetPath": "assets/api.env",
-          "strategy": "copy"
+          "strategy": "copy",
+          "sourceSkillId": "sk_b1b2c3d4e5f6a7b8c9d0e1f2"
         }
       ]
     }

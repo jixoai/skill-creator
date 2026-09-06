@@ -431,6 +431,7 @@ describe("context snapshot builder (task 2.3a)", () => {
       id: "grant_0123456789abcdef",
       proposalId: "spp_0123456789abcdef",
       snapshotId: "snap_0123456789abcdef",
+      runId: "sr_0123456789abcdef01234567",
       fingerprint: `sha256:${"a".repeat(64)}`,
       principal: "human-ui",
       issuedAt: "2026-09-06T00:00:00.000Z",
@@ -527,7 +528,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
   function disableProposal(snapshot: SkillStewardContextSnapshot, skillId: string): SkillProposal {
     const skill = snapshot.skills.find((entry) => entry.skillId === skillId)!;
     return {
-      contractVersion: "1.1.0",
+      contractVersion: "1.2.0",
       action: "disable",
       patch: {
         kind: "disable",
@@ -550,7 +551,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
   ): SkillProposal {
     const skill = snapshot.skills.find((entry) => entry.skillId === skillId)!;
     return {
-      contractVersion: "1.1.0",
+      contractVersion: "1.2.0",
       action: "edit",
       patch: {
         kind: "edit",
@@ -668,7 +669,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     const second = snapshot.skills.find((skill) => skill.directoryName === "second-skill")!;
     // 双 edit proposal；在 approve 后、apply 前外部修改第二个技能 → 第二步 stale → 补偿第一步。
     const proposal: SkillProposal = {
-      contractVersion: "1.1.0",
+      contractVersion: "1.2.0",
       action: "edit",
       patch: {
         kind: "edit",
@@ -729,7 +730,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     );
     const service = approval();
     const proposal: SkillProposal = {
-      contractVersion: "1.1.0",
+      contractVersion: "1.2.0",
       action: "split",
       patch: {
         kind: "split",
@@ -785,7 +786,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     fs.mkdirSync(path.join(sandbox, "ws", "skills", "fat-skill-plan"), { recursive: true });
     const service = approval();
     const proposal: SkillProposal = {
-      contractVersion: "1.1.0",
+      contractVersion: "1.2.0",
       action: "split",
       patch: {
         kind: "split",
@@ -829,7 +830,11 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     const proposalId = service.submit(editProposal(snapshot, skillId, "Journaled edit."), snapshot);
     await service.approve(proposalId, "human-ui");
     // 让 journal 持久化失败：把 journal 路径占位成普通文件（mkdir 必败）。
-    fs.writeFileSync(path.join(sandbox, "home", "steward-store", "journal"), "not a directory", "utf8");
+    fs.writeFileSync(
+      path.join(sandbox, "home", "steward-store", "journal"),
+      "not a directory",
+      "utf8",
+    );
     const { outcome } = await service.apply(proposalId, "human-ui");
     expect(["compensated", "recovery-required"]).toContain(outcome.status);
     // 零写入：原字节未变。

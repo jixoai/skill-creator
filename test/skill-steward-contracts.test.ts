@@ -22,6 +22,7 @@ import {
   SkillToolCallSchema,
   StewardTaskIdSchema,
   bindProposalToSnapshot,
+  bindTaskToSnapshot,
   type SkillProposal,
   type SkillStewardContextSnapshot,
 } from "../src/shared/contracts/skill-steward.js";
@@ -155,11 +156,96 @@ describe("scope and identity binding", () => {
   it("rejects stale revisions with a typed failure", () => {
     const raw = loadFixture<unknown>("proposal-edit.valid.json") as SkillProposal;
     const edited = structuredClone(raw);
+    // schema 层要求 observed == expected（Codex P1-2）：一致篡改两处，让 bind 层对快照判 stale。
     edited.patch.edits[0]!.expectedRevision = `sha256:${"9".repeat(64)}`;
+    edited.observedRevisions[0]!.revision = `sha256:${"9".repeat(64)}`;
     const parsed = SkillProposalSchema.parse(edited);
     const bound = bindProposalToSnapshot(parsed, importedSnapshot);
     expect(bound.ok).toBe(false);
     if (!bound.ok) expect(bound.failure.code).toBe("STALE_REVISION");
+  });
+
+  it("Codex P1-2: rejects observed revisions disagreeing with patch expectations at parse time", () => {
+    const raw = loadFixture<unknown>("proposal-edit.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    edited.observedRevisions[0]!.revision = `sha256:${"9".repeat(64)}`;
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+  });
+
+  it("Codex P1-1: rejects nested traversal, backslash, and Windows roots in mapping paths", () => {
+    for (const badPath of [
+      "assets/../../outside.env",
+      "foo/../bar",
+      "..\\outside.env",
+      "C:\\outside.env",
+      "\\\\srv\\share\\f",
+    ]) {
+      const raw = loadFixture<unknown>("proposal-merge.valid.json") as SkillProposal;
+      const edited = structuredClone(raw);
+      edited.patch.target.resources[0]!.targetPath = badPath;
+      const result = SkillProposalSchema.safeParse(edited);
+      expect(result.success, badPath).toBe(false);
+    }
+  });
+
+  it("Codex P1-3: rejects duplicate identities in patch arrays", () => {
+    const raw = loadFixture<unknown>("proposal-merge.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    const first = edited.patch.sources[0]!;
+    edited.patch.sources[1] = { ...first };
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+
+    const rawDisable = loadFixture<unknown>("proposal-disable.valid.json") as SkillProposal;
+    const dupDisable = structuredClone(rawDisable);
+    dupDisable.patch.selections.push({ ...dupDisable.patch.selections[0]! });
+    expect(SkillProposalSchema.safeParse(dupDisable).success).toBe(false);
+  });
+
+  it("Codex P1-4: rejects forged byteSize and computed budget overruns", () => {
+    const forged = structuredClone(importedSnapshotRaw) as {
+      skills: Array<Record<string, unknown>>;
+    };
+    forged.skills[0] = { ...forged.skills[0]!, byteSize: 0 };
+    expect(SkillStewardContextSnapshotSchema.safeParse(forged).success).toBe(false);
+
+    const emoji = structuredClone(importedSnapshotRaw) as {
+      skills: Array<Record<string, unknown>>;
+    };
+    emoji.skills[0] = { ...emoji.skills[0]!, content: "😀".repeat(70000), byteSize: 280000 };
+    expect(SkillStewardContextSnapshotSchema.safeParse(emoji).success).toBe(false);
+  });
+
+  it("Codex P2-1: rejects targets whose frontmatter name differs from directoryName", () => {
+    const raw = loadFixture<unknown>("proposal-split.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    edited.patch.targets[0]!.frontmatter = {
+      ...edited.patch.targets[0]!.frontmatter,
+      name: "different-name",
+    };
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+  });
+
+  it("Codex P2-2: rejects scopeKind forged against a global workspace id", () => {
+    const forged = structuredClone(globalSnapshotRaw) as Record<string, unknown>;
+    forged.scopeKind = "imported";
+    expect(SkillStewardContextSnapshotSchema.safeParse(forged).success).toBe(false);
+  });
+
+  it("Codex P2-3: bindTaskToSnapshot rejects outsider skills and accepts members", () => {
+    const task = {
+      id: "task_0123456789abcdef",
+      kind: "check",
+      snapshotId: importedSnapshot.id,
+      skillIds: ["sk_ffffffffffffffffffffffff"],
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      createdAt: "2026-09-06T00:00:00.000Z",
+    };
+    const insider = { ...task, skillIds: importedSnapshot.skills.map((skill) => skill.skillId) };
+    expect(bindTaskToSnapshot(insider, importedSnapshot).ok).toBe(true);
+    const bound = bindTaskToSnapshot(task, importedSnapshot);
+    expect(bound.ok).toBe(false);
+    if (!bound.ok) expect(bound.failure.code).toBe("UNKNOWN_SKILL");
   });
 
   it("rejects skills outside the snapshot", () => {

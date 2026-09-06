@@ -30,10 +30,14 @@ import { WorkspaceProviderTargetSchema } from "./workspaces.js";
 
 /**
  * 本模块契约版本；Agent 输出必须携带同一版本才可解析。
- * 1.1.0：patch union 增加 enable（rollback-of-disable 的逆操作语义；
- * task 2.3b 实现期发现的契约缺口，按破坏性更新法则直接演进）。
+ * 1.2.0（Codex 复核 P1/P2 整改）：共享安全相对路径校验（拒绝嵌套穿越/反斜杠/
+ * 盘符/UNC）；observedRevisions 与 patch 期望 revision 一一且相等；身份唯一性；
+ * byteSize 与内容 UTF-8 字节一致且预算按计算值强制；目标 frontmatter.name 与
+ * directoryName 一致；scopeKind 与 workspaceId 交叉校验；grant 增加 runId；
+ * audit 禁 agent principal；资源映射绑定 sourceSkillId；新增 bindTaskToSnapshot。
+ * 1.1.0：patch union 增加 enable（rollback-of-disable 的逆操作语义）。
  */
-export const SKILL_STEWARD_CONTRACT_VERSION = "1.1.0" as const;
+export const SKILL_STEWARD_CONTRACT_VERSION = "1.2.0" as const;
 /** 契约版本字符串约束（稳定语义化字符串）。 */
 export const ContractVersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/);
 /** 契约版本。 */
@@ -135,7 +139,27 @@ export type AgentRuntimeCapabilities = z.infer<typeof AgentRuntimeCapabilitiesSc
 // [1] 不可变上下文快照
 // ---------------------------------------------------------------------------
 
+/**
+ * 共享安全相对路径校验（Codex P1-1）：逐段拒绝 `.`/`..`、反斜杠、NUL、
+ * POSIX 根、盘符根与 UNC 形态；只允许多段普通名称。
+ */
+export function isSafeRelativePath(value: string): boolean {
+  if (value.length === 0 || value.length > 500) return false;
+  if (value.includes("\\") || value.includes("\0")) return false;
+  if (/^[a-zA-Z]:/.test(value)) return false; // Windows 盘符
+  if (value.startsWith("//")) return false; // UNC
+  const segments = value.split("/");
+  return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
+/** 技能目录内相对路径（资源映射/审计/证据共用同一安全校验）。 */
+const RelPathSchema = z.string().refine(isSafeRelativePath, {
+  message: "Relative path inside the skill directory (segment-safe, no traversal/backslash/roots).",
+});
+
 /** 快照预算：技能数、单技能内容与总内容上限（超出即拒绝，不静默截断）。 */
+const utf8ByteLength = (content: string): number => new TextEncoder().encode(content).length;
+
 export const SNAPSHOT_MAX_SKILLS = 100;
 export const SNAPSHOT_MAX_CONTENT_BYTES_PER_SKILL = 256 * 1024;
 export const SNAPSHOT_MAX_TOTAL_CONTENT_BYTES = 2 * 1024 * 1024;
@@ -193,7 +217,24 @@ export const SkillStewardContextSnapshotSchema = z
     capabilities: AgentRuntimeCapabilitiesSchema,
   })
   .superRefine((snapshot, ctx) => {
-    const total = snapshot.skills.reduce((sum, skill) => sum + skill.byteSize, 0);
+    // Codex P1-4：预算按「计算出的 UTF-8 字节」强制，byteSize 必须与内容一致。
+    let total = 0;
+    for (const skill of snapshot.skills) {
+      const actual = utf8ByteLength(skill.content);
+      if (actual !== skill.byteSize) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Skill ${skill.directoryName} byteSize ${skill.byteSize} != computed ${actual}.`,
+        });
+      }
+      if (actual > SNAPSHOT_MAX_CONTENT_BYTES_PER_SKILL) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Skill ${skill.directoryName} exceeds the per-skill byte budget (${actual}).`,
+        });
+      }
+      total += actual;
+    }
     if (total > SNAPSHOT_MAX_TOTAL_CONTENT_BYTES) {
       ctx.addIssue({
         code: "custom",
@@ -203,6 +244,14 @@ export const SkillStewardContextSnapshotSchema = z
     const ids = new Set(snapshot.skills.map((skill) => skill.skillId));
     if (ids.size !== snapshot.skills.length) {
       ctx.addIssue({ code: "custom", message: "Snapshot contains duplicate skill ids." });
+    }
+    // Codex P2-2：scopeKind 与 workspaceId 交叉绑定，杜绝伪造 imported 绕过 Global 写限制。
+    const isGlobal = snapshot.target.workspaceId === "~";
+    if (isGlobal !== (snapshot.scopeKind === "global")) {
+      ctx.addIssue({
+        code: "custom",
+        message: "scopeKind must match the workspace identity (global iff workspaceId is '~').",
+      });
     }
     for (const resource of snapshot.resources) {
       if (!ids.has(resource.skillId)) {
@@ -344,10 +393,7 @@ export type SkillToolCall = z.infer<typeof SkillToolCallSchema>;
 export const StewardEvidenceSchema = z
   .object({
     skillId: SkillIdSchema,
-    path: z
-      .string()
-      .regex(/^(?!\/)(?!\.\.(\/|$))[^\0]+$/)
-      .optional(),
+    path: RelPathSchema.optional(),
     lineStart: z.number().int().positive().optional(),
     lineEnd: z.number().int().positive().optional(),
     snippet: z.string().max(2000).optional(),
@@ -411,16 +457,10 @@ export const StewardFindingSchema = z
 /** 结构化 finding。 */
 export type StewardFinding = z.infer<typeof StewardFindingSchema>;
 
-/** 技能目录内相对路径（资源映射/审计使用；拒绝穿越与绝对路径）。 */
-const RelPathSchema = z
-  .string()
-  .regex(
-    /^(?!\/)(?!\.\.(\/|$))([^\0]+)$/,
-    "Relative path inside the skill directory (no traversal, no absolute path).",
-  );
-
 /** split/merge 的显式资源映射：copy / move / reference。 */
 export const StewardResourceMappingSchema = z.object({
+  /** Codex P2-5：资源来源绑定到具体源技能身份（merge 多源时消除同名歧义）。 */
+  sourceSkillId: SkillIdSchema,
   sourcePath: RelPathSchema,
   targetPath: RelPathSchema,
   strategy: z.enum(["copy", "move", "reference"]),
@@ -428,13 +468,25 @@ export const StewardResourceMappingSchema = z.object({
 /** 资源映射。 */
 export type StewardResourceMapping = z.infer<typeof StewardResourceMappingSchema>;
 
-/** split/merge 新目标的完整文档（安全目录名 + frontmatter + body + 显式资源映射）。 */
-export const StewardPatchTargetDocumentSchema = z.object({
-  directoryName: SkillDirectoryNameSchema,
-  frontmatter: SkillFrontmatterSchema,
-  body: z.string().max(SNAPSHOT_MAX_CONTENT_BYTES_PER_SKILL),
-  resources: z.array(StewardResourceMappingSchema).max(200).default([]),
-});
+/**
+ * split/merge 新目标的完整文档（安全目录名 + frontmatter + body + 显式资源映射）。
+ * Codex P2-1：物理目录名必须与文档身份一致（frontmatter.name === directoryName）。
+ */
+export const StewardPatchTargetDocumentSchema = z
+  .object({
+    directoryName: SkillDirectoryNameSchema,
+    frontmatter: SkillFrontmatterSchema,
+    body: z.string().max(SNAPSHOT_MAX_CONTENT_BYTES_PER_SKILL),
+    resources: z.array(StewardResourceMappingSchema).max(200).default([]),
+  })
+  .superRefine((target, ctx) => {
+    if (target.frontmatter.name !== target.directoryName) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Target frontmatter name "${target.frontmatter.name}" must equal directoryName "${target.directoryName}".`,
+      });
+    }
+  });
 /** patch 目标文档。 */
 export type StewardPatchTargetDocument = z.infer<typeof StewardPatchTargetDocumentSchema>;
 
@@ -452,37 +504,61 @@ export const PatchSkillRefSchema = z.object({
 export type PatchSkillRef = z.infer<typeof PatchSkillRefSchema>;
 
 /** edit：逐技能整文档替换（保留未知合法 frontmatter 由 apply 层执行）。 */
-export const EditSkillPatchSchema = z.object({
-  kind: z.literal("edit"),
-  snapshotId: StewardSnapshotIdSchema,
-  edits: z
-    .array(
-      z.object({
-        skillId: SkillIdSchema,
-        expectedRevision: ContentRevisionSchema,
-        frontmatter: SkillFrontmatterSchema,
-        body: z.string().max(SNAPSHOT_MAX_CONTENT_BYTES_PER_SKILL),
-      }),
-    )
-    .min(1)
-    .max(SNAPSHOT_MAX_SKILLS),
-});
+export const EditSkillPatchSchema = z
+  .object({
+    kind: z.literal("edit"),
+    snapshotId: StewardSnapshotIdSchema,
+    edits: z
+      .array(
+        z.object({
+          skillId: SkillIdSchema,
+          expectedRevision: ContentRevisionSchema,
+          frontmatter: SkillFrontmatterSchema,
+          body: z.string().max(SNAPSHOT_MAX_CONTENT_BYTES_PER_SKILL),
+        }),
+      )
+      .min(1)
+      .max(SNAPSHOT_MAX_SKILLS),
+  })
+  .superRefine((patch, ctx) => {
+    if (new Set(patch.edits.map((edit) => edit.skillId)).size !== patch.edits.length) {
+      ctx.addIssue({ code: "custom", message: "Edit patch contains duplicate skill ids." });
+    }
+  });
 
 /** disable：仅启停语义（apply 走 Provider 真实启停机制，不是 UI flag）。 */
-export const DisableSkillPatchSchema = z.object({
-  kind: z.literal("disable"),
-  snapshotId: StewardSnapshotIdSchema,
-  selections: z.array(PatchSkillRefSchema).min(1).max(SNAPSHOT_MAX_SKILLS),
-  reason: z.string().min(1).max(2000),
-});
+export const DisableSkillPatchSchema = z
+  .object({
+    kind: z.literal("disable"),
+    snapshotId: StewardSnapshotIdSchema,
+    selections: z.array(PatchSkillRefSchema).min(1).max(SNAPSHOT_MAX_SKILLS),
+    reason: z.string().min(1).max(2000),
+  })
+  .superRefine((patch, ctx) => {
+    if (
+      new Set(patch.selections.map((selection) => selection.skillId)).size !==
+      patch.selections.length
+    ) {
+      ctx.addIssue({ code: "custom", message: "Disable patch contains duplicate skill ids." });
+    }
+  });
 
 /** enable：恢复启停（Manager 派生的 rollback 反向操作；Agent 不主动建议启用）。 */
-export const EnableSkillPatchSchema = z.object({
-  kind: z.literal("enable"),
-  snapshotId: StewardSnapshotIdSchema,
-  selections: z.array(PatchSkillRefSchema).min(1).max(SNAPSHOT_MAX_SKILLS),
-  reason: z.string().min(1).max(2000),
-});
+export const EnableSkillPatchSchema = z
+  .object({
+    kind: z.literal("enable"),
+    snapshotId: StewardSnapshotIdSchema,
+    selections: z.array(PatchSkillRefSchema).min(1).max(SNAPSHOT_MAX_SKILLS),
+    reason: z.string().min(1).max(2000),
+  })
+  .superRefine((patch, ctx) => {
+    if (
+      new Set(patch.selections.map((selection) => selection.skillId)).size !==
+      patch.selections.length
+    ) {
+      ctx.addIssue({ code: "custom", message: "Enable patch contains duplicate skill ids." });
+    }
+  });
 
 /** split：一个源拆为 >=2 个不存在的新目标；源保留目录、校验后禁用。 */
 export const SplitSkillPatchSchema = z
@@ -500,12 +576,18 @@ export const SplitSkillPatchSchema = z
   });
 
 /** merge：>=2 个源合并为一个新目标；源保留目录、验证后全部禁用。 */
-export const MergeSkillPatchSchema = z.object({
-  kind: z.literal("merge"),
-  snapshotId: StewardSnapshotIdSchema,
-  sources: z.array(PatchSkillRefSchema).min(2).max(SNAPSHOT_MAX_SKILLS),
-  target: StewardPatchTargetDocumentSchema,
-});
+export const MergeSkillPatchSchema = z
+  .object({
+    kind: z.literal("merge"),
+    snapshotId: StewardSnapshotIdSchema,
+    sources: z.array(PatchSkillRefSchema).min(2).max(SNAPSHOT_MAX_SKILLS),
+    target: StewardPatchTargetDocumentSchema,
+  })
+  .superRefine((patch, ctx) => {
+    if (new Set(patch.sources.map((source) => source.skillId)).size !== patch.sources.length) {
+      ctx.addIssue({ code: "custom", message: "Merge patch contains duplicate source skill ids." });
+    }
+  });
 
 /** patch 的闭合 union（edit/disable/enable/split/merge）；未知 action 在解析层被拒绝。 */
 export const SkillPatchSchema = z.discriminatedUnion("kind", [
@@ -558,12 +640,34 @@ export const SkillProposalSchema = z
         });
       }
     }
-    const covered = new Set(proposal.observedRevisions.map((observed) => observed.skillId));
+    const observedMap = new Map(
+      proposal.observedRevisions.map((observed) => [observed.skillId, observed.revision]),
+    );
+    // Codex P1-2：观察集合与受影响身份一一对应。
+    if (observedMap.size !== proposal.observedRevisions.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Proposal observedRevisions contain duplicate skill ids.",
+      });
+    }
     for (const skillId of proposal.skillIds) {
-      if (!covered.has(skillId)) {
+      if (!observedMap.has(skillId)) {
         ctx.addIssue({
           code: "custom",
           message: `Proposal references skill ${skillId} without an observed revision.`,
+        });
+      }
+    }
+    if (new Set(proposal.skillIds).size !== proposal.skillIds.length) {
+      ctx.addIssue({ code: "custom", message: "Proposal skillIds contain duplicates." });
+    }
+    // Codex P1-2：每个观察 revision 必须等于 patch 的 expectedRevision。
+    for (const [skillId, revision] of expectedRevisionsOfPatch(proposal.patch)) {
+      const observed = observedMap.get(skillId);
+      if (observed !== undefined && observed !== revision) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Observed revision for ${skillId} (${observed}) differs from the patch expectation (${revision}).`,
         });
       }
     }
@@ -668,6 +772,8 @@ export const StewardApprovalGrantSchema = z.object({
   id: StewardGrantIdSchema,
   proposalId: StewardProposalIdSchema,
   snapshotId: StewardSnapshotIdSchema,
+  /** Codex P2-5：grant 绑定 run（重启/取消语义以此失效）。 */
+  runId: StewardRunIdSchema,
   /** 规范化 patch 的 sha256 fingerprint；apply 时必须再次匹配。 */
   fingerprint: ContentRevisionSchema,
   /** 只能是已鉴权人类 UI（或 Manager 恢复代码的显式 principal）。 */
@@ -698,8 +804,10 @@ export const StewardAuditRecordSchema = z.object({
   id: StewardAuditIdSchema,
   runId: StewardRunIdSchema,
   proposalId: StewardProposalIdSchema,
+  snapshotId: StewardSnapshotIdSchema,
   action: StewardPatchKindSchema,
-  principal: SkillToolPrincipalSchema,
+  /** Codex P2-5：审计只记录人类/恢复主体；agent 永不出现在 mutation 审计。 */
+  principal: z.enum(["human-ui", "manager-recovery"]),
   appliedAt: z.string().datetime(),
   status: z.enum(["applied", "rolled-back", "recovery-required"]),
   mutations: z.array(StewardMutationRecordSchema).min(1).max(500),
@@ -710,8 +818,42 @@ export const StewardAuditRecordSchema = z.object({
 export type StewardAuditRecord = z.infer<typeof StewardAuditRecordSchema>;
 
 // ---------------------------------------------------------------------------
-// bind 层：proposal ↔ snapshot 的确定性校验（纯函数）
+// bind 层：task/proposal ↔ snapshot 的确定性校验（纯函数）
 // ---------------------------------------------------------------------------
+
+/** task bind 失败（闭合原因）。 */
+export type TaskBindFailure =
+  | { code: "SNAPSHOT_MISMATCH"; message: string }
+  | { code: "UNKNOWN_SKILL"; message: string };
+
+/**
+ * 把任务绑定到快照（Codex P2-3）：skillIds 必须全部属于快照；
+ * runtime 接收任务前必须通过本检查。
+ */
+export function bindTaskToSnapshot(
+  task: SkillStewardTask,
+  snapshot: SkillStewardContextSnapshot,
+): { ok: true } | { ok: false; failure: TaskBindFailure } {
+  if (task.snapshotId !== snapshot.id) {
+    return {
+      ok: false,
+      failure: { code: "SNAPSHOT_MISMATCH", message: "Task references a different snapshot." },
+    };
+  }
+  const ids = new Set(snapshot.skills.map((skill) => skill.skillId));
+  for (const skillId of task.skillIds) {
+    if (!ids.has(skillId)) {
+      return {
+        ok: false,
+        failure: {
+          code: "UNKNOWN_SKILL",
+          message: `Skill ${skillId} is not part of the snapshot.`,
+        },
+      };
+    }
+  }
+  return { ok: true };
+}
 
 /** bind 失败的类型化结果（闭合原因；不产生任何 mutation）。 */
 export type ProposalBindFailure =
