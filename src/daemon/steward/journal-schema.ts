@@ -14,7 +14,11 @@
  */
 import { promises as fs } from "node:fs";
 import { z } from "zod";
-import { ContentRevisionSchema, RelPathSchema } from "../../shared/contracts/skill-steward.js";
+import {
+  ContentRevisionSchema,
+  RelPathSchema,
+  type SkillProposal,
+} from "../../shared/contracts/skill-steward.js";
 import { SkillIdSchema } from "../../shared/contracts/skills.js";
 import { SkillDirectoryNameSchema } from "../../shared/contracts/creator.js";
 import { DomainError } from "../domain-error.js";
@@ -128,10 +132,30 @@ export type JournalEntry = z.infer<typeof JournalEntrySchema>;
  * 只有完整、连续、可解析的 journal 才允许进入回放（部分回放 = 假 rolled-back）。
  */
 export async function readJournal(journalPath: string): Promise<JournalEntry[]> {
+  // Codex R9 P1-4：事实源 leaf 读取走 O_NOFOLLOW fd——预置 symlink journal（指向
+  // 外部可控 JSONL）在 open 即 ELOOP 拒绝；fd 打开后校验 regular file 并从 fd 读取。
   let raw: string;
+  let leafIdentity: { dev: number; ino: number };
   try {
-    raw = await fs.readFile(journalPath, "utf8");
+    const handle = await fs.open(
+      journalPath,
+      fs.constants.O_RDONLY | (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW!,
+    );
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) {
+        throw new DomainError(
+          "UNAVAILABLE",
+          `Journal file is not a regular file; recovery required: ${journalPath}`,
+        );
+      }
+      leafIdentity = { dev: stat.dev, ino: stat.ino };
+      raw = await handle.readFile("utf8");
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
   } catch (error) {
+    if (error instanceof DomainError) throw error;
     const code = (error as NodeJS.ErrnoException).code ?? "unknown";
     if (code === "ENOENT") {
       throw new DomainError("NOT_FOUND", `Journal file not found: ${journalPath}`);
@@ -139,6 +163,18 @@ export async function readJournal(journalPath: string): Promise<JournalEntry[]> 
     throw new DomainError(
       "UNAVAILABLE",
       `Journal file unreadable (${code}); recovery required: ${journalPath}`,
+    );
+  }
+  const after = await fs.lstat(journalPath).catch(() => null);
+  if (
+    after === null ||
+    !after.isFile() ||
+    after.dev !== leafIdentity.dev ||
+    after.ino !== leafIdentity.ino
+  ) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `Journal leaf identity drifted after read; recovery required: ${journalPath}`,
     );
   }
   const entries: JournalEntry[] = [];
@@ -180,14 +216,52 @@ export async function readJournal(journalPath: string): Promise<JournalEntry[]> 
 }
 
 /**
+ * Codex R9 P1-3：从 proposal（rollback 时经 grant fingerprint 校验的独立不可变事实）
+ * 展开期望的 journal mutation 步骤集合——journal 内部自报的 mutationCount 不是
+ * 完整性证明；删行后同步伪造计数会被「与 proposal 双射」拒绝。
+ */
+export function expectedJournalStepsOf(proposal: SkillProposal): {
+  kinds: Map<string, number>;
+  directoryNames: Set<string>;
+  skillIds: Set<string>;
+} {
+  const kinds = new Map<string, number>();
+  const directoryNames = new Set<string>();
+  const skillIds = new Set<string>();
+  const bump = (kind: string, n = 1) => kinds.set(kind, (kinds.get(kind) ?? 0) + n);
+  const patch = proposal.patch;
+  if (patch.kind === "edit") {
+    bump("edit", patch.edits.length);
+    for (const edit of patch.edits) skillIds.add(edit.skillId);
+  } else if (patch.kind === "disable" || patch.kind === "enable") {
+    bump(patch.kind, patch.selections.length);
+    for (const selection of patch.selections) skillIds.add(selection.skillId);
+  } else {
+    bump("precheck");
+    const targets = patch.kind === "split" ? patch.targets : [patch.target];
+    bump("create-target", targets.length);
+    for (const target of targets) {
+      directoryNames.add(target.directoryName);
+      bump("resource", target.resources.length);
+    }
+    const sources = patch.kind === "split" ? [patch.source] : patch.sources;
+    bump("disable", sources.length);
+    for (const source of sources) skillIds.add(source.skillId);
+  }
+  return { kinds, directoryNames, skillIds };
+}
+
+/**
  * 回放闸：journal 必须以本 proposal 的 commit 终态行收尾。崩溃/截断/被删行的
  * journal 一律不得回放——没有完整 journal 就没有 rolled-back（Codex R7 P1-3）。
  * Codex R8 独立探针整改：commit 行必须恰好一条且为末行——重复 commit 记录
  * （伪造终态）与中途插入的 commit 一律拒绝。
+ * Codex R9 P1-3：commit 携带 proposal；mutation 步骤集合必须与 proposal 展开的
+ * 期望集合双射（kind 计数 + create-target 目录名 + mutation skillIds）。
  */
 export function assertCommittedJournal(
   entries: JournalEntry[],
-  expected: { proposalId: string },
+  expected: { proposalId: string; proposal: SkillProposal },
 ): void {
   const commits = entries.filter((entry) => entry.step === "commit");
   const last = entries.at(-1);
@@ -217,6 +291,55 @@ export function assertCommittedJournal(
     throw new DomainError(
       "INVALID_OPERATION",
       `Journal commit mutationCount ${last.detail.mutationCount} does not match the ${mutationSteps} mutation steps on disk (deleted or forged lines); recovery required.`,
+    );
+  }
+  // Codex R9 P1-3：与 proposal 展开的期望步骤双射——journal 是自报事实，proposal
+  // 才是独立不可变锚（grant fingerprint 在 rollback 前已复核）。
+  const expectedSteps = expectedJournalStepsOf(expected.proposal);
+  const observedKinds = new Map<string, number>();
+  const observedDirs = new Set<string>();
+  const observedSkillIds = new Set<string>();
+  for (const entry of entries) {
+    if (entry.step === "commit" || entry.step === "precheck") {
+      if (entry.step === "precheck") {
+        observedKinds.set("precheck", (observedKinds.get("precheck") ?? 0) + 1);
+      }
+      continue;
+    }
+    observedKinds.set(entry.step, (observedKinds.get(entry.step) ?? 0) + 1);
+    if (entry.step === "create-target") observedDirs.add(entry.detail.directoryName);
+    if (entry.step === "edit" || entry.step === "disable" || entry.step === "enable") {
+      observedSkillIds.add(entry.detail.skillId);
+    }
+  }
+  const kindsMatch =
+    observedKinds.size === expectedSteps.kinds.size &&
+    [...expectedSteps.kinds.entries()].every(
+      ([kind, count]) => observedKinds.get(kind) === count,
+    ) &&
+    [...observedKinds.entries()].every(([kind, count]) => expectedSteps.kinds.get(kind) === count);
+  if (!kindsMatch) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Journal step kinds do not match the proposal expansion (expected ${JSON.stringify([...expectedSteps.kinds])}, observed ${JSON.stringify([...observedKinds])}); deleted, forged, or substituted lines; recovery required.`,
+    );
+  }
+  const dirMismatch =
+    observedDirs.size !== expectedSteps.directoryNames.size ||
+    [...expectedSteps.directoryNames].some((name) => !observedDirs.has(name));
+  if (dirMismatch) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Journal create-target directories do not match the proposal targets; recovery required.`,
+    );
+  }
+  const skillMismatch =
+    observedSkillIds.size !== expectedSteps.skillIds.size ||
+    [...expectedSteps.skillIds].some((id) => !observedSkillIds.has(id));
+  if (skillMismatch) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Journal mutation skillIds do not match the proposal affected set; recovery required.`,
     );
   }
 }

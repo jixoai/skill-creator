@@ -2343,7 +2343,7 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
         ],
         replayContext(ctx),
       ),
-    ).rejects.toThrow(/never created|manifest/i);
+    ).rejects.toThrow(/never created|manifest|commit record|terminal commit/i);
     expect(fs.existsSync(path.join(ctx.directory, "skills", "merge-left"))).toBe(true);
   });
 
@@ -2498,6 +2498,54 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
       "keep\n",
     );
     void directory;
+  });
+
+  it("R10 P1-3: a forged mutationCount with renumbered lines still fails the rollback gate", async () => {
+    const { snapshot, proposal } = await seedMergePair();
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    await service.prepareRollback(audit.id, "human-ui");
+    const journalPath = path.join(
+      sandbox,
+      "home",
+      "steward-store",
+      "journal",
+      `${proposalId}.jsonl`,
+    );
+    // 删除全部 disable 行、重编号、同步伪造 commit 计数——proposal 双射必须拒绝。
+    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    const kept = lines
+      .filter((line) => JSON.parse(line).step !== "disable")
+      .map((line, index) => {
+        const entry = JSON.parse(line) as { seq: number; step: string };
+        entry.seq = index + 1;
+        if (entry.step === "commit") {
+          // 伪造：计数改为剩余 mutation 数（precheck 后 create-target+resource）
+        }
+        return JSON.stringify(entry);
+      })
+      .map((line) => {
+        const entry = JSON.parse(line) as {
+          step: string;
+          detail: { mutationCount?: number };
+        };
+        if (entry.step === "commit" && entry.detail.mutationCount !== undefined) {
+          entry.detail.mutationCount = 2; // precheck 之外的 create-target(1)+resource(1)
+        }
+        return JSON.stringify(entry);
+      });
+    fs.writeFileSync(journalPath, `${kept.join("\n")}\n`, "utf8");
+    const rolled = await service.applyRollback(audit.id, "human-ui");
+    expect(rolled.audit.status).toBe("recovery-required");
   });
 
   it("R9 P1-5: a disable mutation for a snapshot skill outside the proposal is rejected at replay", async () => {

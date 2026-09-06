@@ -184,7 +184,9 @@ describe("Codex R8 independent probes (regression-ized)", () => {
         root: path.dirname(journalPath),
         mutations: [],
       }),
-    ).rejects.toThrow(/never created|manifest|mutationCount|affected set/i);
+    ).rejects.toThrow(
+      /never created|manifest|mutationCount|affected set|commit record|terminal commit/i,
+    );
   });
 
   it("[4b] a manifest recording a backup the journal no longer references is rejected (bijection)", async () => {
@@ -227,7 +229,128 @@ describe("Codex R8 independent probes (regression-ized)", () => {
         root: path.dirname(journalPath),
         mutations: [],
       }),
-    ).rejects.toThrow(/manifest|move step/i);
+    ).rejects.toThrow(/manifest|move step|commit record|terminal commit/i);
+  });
+
+  it("[R9-1] a symlinked journal parent directory fails closed; no bytes reach outside", async () => {
+    const root = tmp();
+    const outside = path.join(root, "outside");
+    fsSync.mkdirSync(outside, { recursive: true });
+    const journalLink = path.join(root, "journal-link");
+    fsSync.symlinkSync(outside, journalLink);
+    const snapshot = fixtureSnapshot();
+    const proposal = fixtureDisableProposal();
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: { resolveWritable: () => ({ directory: root }) } as never,
+      skills: {
+        info: async (_t: unknown, skillId: string) => ({
+          skillId,
+          revision: snapshot.skills.find((s) => s.skillId === skillId)!.revision,
+          disabled: false,
+        }),
+        toggle: async () => ({ results: [] }),
+      } as never,
+      creator: {} as never,
+      store: {} as never,
+      journalPath: path.join(journalLink, "op.jsonl"),
+    });
+    expect(outcome.status).not.toBe("applied");
+    expect(fsSync.readdirSync(outside).length).toBe(0);
+  });
+
+  it("[R9-2] a symlinked backup parent directory is rejected before creating any backup", async () => {
+    const root = tmp();
+    const outside = path.join(root, "outside");
+    fsSync.mkdirSync(outside, { recursive: true });
+    const journalLink = path.join(root, "journal-link");
+    fsSync.symlinkSync(outside, journalLink);
+    await expect(
+      writeBackupWithManifest({
+        journalPath: path.join(journalLink, "op.jsonl"),
+        ref: "1-aaaaaaaaaaaa.bin",
+        seq: 1,
+        from: "source/notes.md",
+        bytes: Buffer.from("manager-secret\n", "utf8"),
+      }),
+    ).rejects.toThrow();
+    expect(fsSync.readdirSync(outside).length).toBe(0);
+  });
+
+  it("[R9-3] a hardlinked manifest leaf is refused; external inode receives no bytes", async () => {
+    const root = tmp();
+    const journalPath = path.join(root, "journal", "op.jsonl");
+    fsSync.mkdirSync(path.dirname(journalPath), { recursive: true });
+    const { prepareBackupRoot } = await import("../src/daemon/steward/fs-authority.js");
+    const backupRoot = await prepareBackupRoot(journalPath);
+    const outsideManifest = path.join(root, "outside-manifest.jsonl");
+    fsSync.writeFileSync(outsideManifest, "EXTERNAL\n", "utf8");
+    fsSync.linkSync(outsideManifest, path.join(backupRoot, "manifest.jsonl"));
+    await expect(
+      writeBackupWithManifest({
+        journalPath,
+        ref: "1-aaaaaaaaaaaa.bin",
+        seq: 1,
+        from: "source/notes.md",
+        bytes: Buffer.from("manager-secret\n", "utf8"),
+      }),
+    ).rejects.toThrow(/hardlink/i);
+    expect(fsSync.readFileSync(outsideManifest, "utf8")).toBe("EXTERNAL\n");
+  });
+
+  it("[R9-4] a symlinked journal leaf is rejected as a truth source on read", async () => {
+    const root = tmp();
+    const outside = path.join(root, "outside-journal.jsonl");
+    fsSync.writeFileSync(
+      outside,
+      JSON.stringify({
+        seq: 1,
+        step: "commit",
+        detail: {
+          kind: "commit",
+          proposalId: "spp_0123456789abcdef",
+          status: "applied",
+          mutationCount: 0,
+        },
+      }) + "\n",
+      "utf8",
+    );
+    const journalPath = path.join(root, "op.jsonl");
+    fsSync.symlinkSync(outside, journalPath);
+    const { readJournal } = await import("../src/daemon/steward/journal-schema.js");
+    await expect(readJournal(journalPath)).rejects.toThrow(/unreadable|ELOOP|regular file/i);
+  });
+
+  it("[R9-5] a symlinked restore root is rejected before reading any existing leaf", async () => {
+    const root = tmp();
+    const outside = path.join(root, "outside");
+    fsSync.mkdirSync(outside, { recursive: true });
+    fsSync.writeFileSync(path.join(outside, "x.txt"), "same-bytes\n", "utf8");
+    const rootLink = path.join(root, "provider");
+    fsSync.symlinkSync(outside, rootLink);
+    const { restoreResourceBytesStrict } = await import("../src/daemon/steward/fs-authority.js");
+    await expect(
+      restoreResourceBytesStrict(
+        path.join(rootLink, "x.txt"),
+        rootLink,
+        Buffer.from("same-bytes\n", "utf8"),
+        "restore-root-probe",
+      ),
+    ).rejects.toThrow(/not a real directory|not canonical/i);
+  });
+
+  it("[R9-6] directory identity drift (same lexical path, replacement dir) is detected", async () => {
+    const root = tmp();
+    const dirA = path.join(root, "managed");
+    const dirB = path.join(root, "replacement");
+    fsSync.mkdirSync(dirA, { recursive: true });
+    fsSync.mkdirSync(dirB, { recursive: true });
+    const { assertRealRoot, verifyDirIdentity } =
+      await import("../src/daemon/steward/fs-authority.js");
+    const identity = await assertRealRoot(dirA);
+    // 同 lexical 路径换体：原目录移走、外部真实目录顶替。
+    fsSync.renameSync(dirA, path.join(root, "moved-away"));
+    fsSync.renameSync(dirB, dirA);
+    await expect(verifyDirIdentity(dirA, identity)).rejects.toThrow(/identity drifted/i);
   });
 
   it("[5] duplicate commit records are rejected by the replay gate", () => {

@@ -1,6 +1,6 @@
 # skill-steward-contracts verification
 
-记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `ac686f7（R8 整改）→ R9 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
+记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `315f27e（R9 整改）→ R10 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
 
 ## 责任矩阵
 
@@ -102,6 +102,14 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - P1-7 restore 现存 leaf：O_NOFOLLOW fd 打开 + fstat 身份匹配 + fd 读取 + 读后 inode 复验（lstat→readFile 换体窗口关闭）。
   - Deferred（诚实声明）：per-line hash-chain/operationId 头（R8 P1-4 建议的更强形态）归 2.3e recovery gate 的 journal 头部改造；当前完整性由闭合 union + seq 连续 + mutationCount 终态闸 + manifest 双射 + affected-set 绑定组合承担。macOS 隔离改名的 rename 本身仍按路径执行——残余窗口内外部文件被移入（而非删除于）隔离区并立即转 recovery-required。
   - 门禁（R9 整改后）：contracts 42/42、runtime 59/59（新增 R9 负例 ×4）、probes 6/6、全量 415/415（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R9（4.5/10，不通过，报告 /tmp/stage1-contracts-review-round9.md；独立 worktree 315f27e）→ R10 整改（P1-5 判定关闭、P1-6 大体关闭，本轮关闭四个剩余 P1）：
+  - P1-1 parent/root inode authority：`assertRealRoot` 返回 `{dev,ino}` 身份，`verifyDirIdentity` 在每次 leaf IO 前后复验（write/read/unlink/restore/backup 全链）——同 lexical 路径目录换体在操作内检出；journal 目录与 backup 父目录创建/使用前经 `assertCanonicalDirectory`（预置 symlink 父目录在写任何字节前拒绝）；manifest 打开后 `nlink===1` 独占 inode 门（hardlink 到外部文件的 manifest 打开即拒），写后复验 nlink（中途被 link 出去同样拒绝）。
+  - P1-2 restore root 漏接：`restoreResourceBytesStrict` 首行 `assertRealRoot`（symlink root 下现存 leaf 读取防线不再建立在不可信 root 上）+ 读后身份复验。
+  - P1-3 终态闸与 proposal 双射：`expectedJournalStepsOf(proposal)` 从 patch 展开 {kind 计数, create-target 目录名集, mutation skillIds 集}；`assertCommittedJournal` 要求磁盘 journal 与之精确双射——删行后同步伪造 mutationCount（R9 探针 5 形态）被独立锚（proposal，rollback 前 grant fingerprint 已复核）拒绝；`undoJournalSteps` 直调同样过终态闸。负例：真实 disable apply → 删 disable 行 + 重编号 + 伪造计数 → applyRollback recovery-required。
+  - P1-4 journal 读取 authority：`readJournal` 改 O_NOFOLLOW fd + fstat regular + fd 读 + 读后 leaf inode 复验——预置 symlink journal（外部可控 JSONL）作为事实源被拒。
+  - Deferred（诚实声明）：调用前（capture 之前）的同路径目录换体无法用操作内身份检测——换体目录占据的是 Manager-owned lexical 路径，字节仍落 Manager 路径空间；跨操作持久 inode 锚（store 目录 boot-time 绑定）归 2.3e recovery gate。R9 P2 的 manifest strict Zod schema 仍未做（手工 parser 的 ref/seq/from/hash 绑定仍在）。
+  - 门禁（R10 整改后）：contracts 42/42、runtime 60/60（新增 forged-count 负例）、probes 12/12（新增 ×6：journal 父 symlink/backup 父 symlink/manifest hardlink/journal 读 symlink/restore symlink root/目录身份换体）、全量 422/422（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R10 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R9 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R8 复审进行中（复核者在主工作树留下 5 个对抗性探针，已全部回归化并整改）：
   - 探针整改补充提交：manifest leaf / journal leaf 追加改 O_NOFOLLOW（预置 symlink → ELOOP 失败，外部零字节落地）；`assertRealRoot`（root 末级组件 symlink 拒绝——realpath 恒等攻击面）；`assertCommittedJournal` 要求恰好一条 commit 终态行且为末行；新增 `assertJournalManifestBijection`（journal move 步骤 ↔ manifest 记录 ref+seq+from 双射——删除 resource 行后整体重编号的部分 journal 在回放前暴露），入口 `undoJournalSteps` 先 union 复验再双射校验。

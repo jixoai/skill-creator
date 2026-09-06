@@ -38,7 +38,7 @@ export function sha256Hex(bytes: Buffer): string {
  * root，全部下游防线随之失效）。唯一豁免：darwin 的 /var ↔ /private/var 前缀
  * （系统级 alias，mkdtemp 沙箱天然携带；非攻击面）。
  */
-export async function assertRealRoot(root: string): Promise<void> {
+export async function assertRealRoot(root: string): Promise<DirIdentity> {
   const stat = await fs.lstat(root).catch(() => null);
   if (stat === null || !stat.isDirectory() || stat.isSymbolicLink()) {
     throw new DomainError(
@@ -55,6 +55,38 @@ export async function assertRealRoot(root: string): Promise<void> {
       `manager root is not canonical (realpath ${real} differs from the given root): ${root}`,
     );
   }
+  return { dev: stat.dev, ino: stat.ino };
+}
+
+/** 目录身份（dev/ino 绑定，检测同 lexical 路径的目录换体）。 */
+export interface DirIdentity {
+  dev: number;
+  ino: number;
+}
+
+/** 复验目录身份：同 lexical 路径上的任何换体（rename 顶替）都会使 inode 失配。 */
+export async function verifyDirIdentity(dir: string, identity: DirIdentity): Promise<void> {
+  const stat = await fs.lstat(dir).catch(() => null);
+  if (
+    stat === null ||
+    !stat.isDirectory() ||
+    stat.dev !== identity.dev ||
+    stat.ino !== identity.ino
+  ) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `manager directory identity drifted (path race or replacement); recovery required: ${dir}`,
+    );
+  }
+}
+
+/**
+ * Codex R9 P1-1 整改：Manager 事实目录（journal 目录 / backup 父目录）同样要求
+ * canonical——lstat 真实目录且 realpath 与自身全等（darwin /var 豁免同前）。
+ * 预置 symlink 父目录（journal-link -> outside）在此拒绝。
+ */
+export async function assertCanonicalDirectory(dir: string): Promise<DirIdentity> {
+  return assertRealRoot(dir);
 }
 
 /**
@@ -131,7 +163,7 @@ export async function readResourceBytesStrict(
   expectedByteSize: number,
   label: string,
 ): Promise<Buffer> {
-  await assertRealRoot(root);
+  const rootIdentity = await assertRealRoot(root);
   const realRoot = await fs.realpath(root);
   const lexicalPosition = path.join(realRoot, path.relative(root, from));
   const realFrom = await realpathOrNotFound(from, label);
@@ -177,6 +209,7 @@ export async function readResourceBytesStrict(
       `Resource source path raced after read (canonical position moved): ${label}`,
     );
   }
+  await verifyDirIdentity(root, rootIdentity);
   return bytes;
 }
 
@@ -201,7 +234,7 @@ export async function writeFileExclusiveVerified(
   bytes: Buffer,
   label: string,
 ): Promise<void> {
-  await assertRealRoot(root);
+  const rootIdentity = await assertRealRoot(root);
   const realRoot = await fs.realpath(root);
   const lexicalPosition = path.join(realRoot, path.relative(root, to));
   await assertNoSymlinkAncestors(to, root);
@@ -255,6 +288,7 @@ export async function writeFileExclusiveVerified(
       `Resource target identity changed after write (path race); recovery required: ${label}`,
     );
   }
+  await verifyDirIdentity(root, rootIdentity);
 }
 
 /**
@@ -268,6 +302,9 @@ export async function restoreResourceBytesStrict(
   bytes: Buffer,
   label: string,
 ): Promise<void> {
+  // Codex R9 P1-2：restore 全入口 root canonical 校验（symlink root 下「现存 leaf
+  // 读取」防线全部建立在不可信 root 上）。
+  const rootIdentity = await assertRealRoot(root);
   await assertNoSymlinkAncestors(to, root);
   let stat: import("node:fs").Stats | null = null;
   try {
@@ -305,9 +342,11 @@ export async function restoreResourceBytesStrict(
     if (!current.equals(bytes)) {
       throw new Error(`move restore target exists with different bytes (external drift): ${label}`);
     }
+    await verifyDirIdentity(root, rootIdentity);
     return;
   }
   await writeFileExclusiveVerified(to, root, bytes, label);
+  await verifyDirIdentity(root, rootIdentity);
 }
 
 /**
@@ -348,6 +387,7 @@ export async function unlinkFileVerified(
       );
     }
     const quarantineRoot = await prepareBackupRoot(quarantineJournalPath);
+    const quarantineIdentity = await assertCanonicalDirectory(quarantineRoot);
     const tombstone = path.join(
       quarantineRoot,
       `removed-${randomBytes(8).toString("hex")}-${path.basename(leaf)}`,
@@ -388,6 +428,7 @@ export async function unlinkFileVerified(
       );
     }
     await syncDir(quarantineRoot).catch(() => undefined);
+    await verifyDirIdentity(quarantineRoot, quarantineIdentity);
   } finally {
     await handle.close().catch(() => undefined);
   }
@@ -412,17 +453,18 @@ export interface BackupManifestEntry {
  */
 export async function prepareBackupRoot(journalPath: string): Promise<string> {
   const backupDir = `${journalPath}.backups`;
-  const canonicalParent = await fs.realpath(path.dirname(journalPath));
-  await fs.mkdir(backupDir, { recursive: true }).catch(() => undefined);
-  const realBackup = await fs.realpath(backupDir);
-  const lexicalBackup = path.join(canonicalParent, path.basename(backupDir));
-  if (realBackup !== lexicalBackup) {
+  // Codex R9 P1-1：父目录（journal 所在目录）必须先通过 canonical 校验——预置
+  // symlink 父目录（journal-link -> outside）在创建任何字节之前拒绝。
+  await assertCanonicalDirectory(path.dirname(journalPath));
+  await fs.mkdir(backupDir, 0o700).catch(() => undefined);
+  const identity = await assertCanonicalDirectory(backupDir).catch(() => null);
+  if (identity === null) {
     throw new DomainError(
       "UNAVAILABLE",
-      `move backup root escaped its manager-owned location (path race); recovery required: ${backupDir}`,
+      `move backup root is not a canonical manager directory; recovery required: ${backupDir}`,
     );
   }
-  return realBackup;
+  return backupDir;
 }
 
 /**
@@ -440,8 +482,10 @@ export async function writeBackupWithManifest(options: {
   const { ref, seq, from, bytes } = options;
   const parsedRef = BackupRefSchema.parse(ref);
   const root = await prepareBackupRoot(options.journalPath);
+  const rootIdentity = await assertCanonicalDirectory(root);
   await writeFileExclusiveVerified(path.join(root, parsedRef), root, bytes, `backup:${parsedRef}`);
   await syncDir(root);
+  await verifyDirIdentity(root, rootIdentity);
   // Codex R8 独立探针整改：manifest leaf 用 O_NOFOLLOW 追加——预置 symlink 直连
   // 外部文件时 open 失败（ELOOP），manager 字节不越界落地。
   const manifestHandle = await fs.open(
@@ -451,9 +495,18 @@ export async function writeBackupWithManifest(options: {
   );
   // Codex R8 P1-2：打开后立即确认 leaf 是 regular file（预置 FIFO/socket 等
   // 非常规 leaf 一律拒绝，append 字节只落 Manager-owned regular 文件）。
-  if (!(await manifestHandle.stat()).isFile()) {
+  const manifestStat = await manifestHandle.stat();
+  if (!manifestStat.isFile()) {
     await manifestHandle.close().catch(() => undefined);
     throw new Error(`backup manifest is not a regular file: ${path.join(root, "manifest.jsonl")}`);
+  }
+  // Codex R9 P1-1：manifest 首次创建语义 + 独占 inode——hardlink 到外部文件的
+  // manifest（nlink > 1）在打开即拒绝，追加字节不可能落进外部 inode。
+  if (manifestStat.nlink !== 1) {
+    await manifestHandle.close().catch(() => undefined);
+    throw new Error(
+      `backup manifest is hardlinked (nlink=${manifestStat.nlink}); manager refuses to append: ${path.join(root, "manifest.jsonl")}`,
+    );
   }
   try {
     const line = `${JSON.stringify({
@@ -465,10 +518,17 @@ export async function writeBackupWithManifest(options: {
     })}\n`;
     await manifestHandle.write(line, null, "utf8");
     await manifestHandle.sync();
+    // 写后复验：期间被 hardlink 出去（nlink 增长）同样拒绝。
+    if ((await manifestHandle.stat()).nlink !== 1) {
+      throw new Error(
+        `backup manifest gained a hardlink during append; recovery required: ${path.join(root, "manifest.jsonl")}`,
+      );
+    }
   } finally {
     await manifestHandle.close().catch(() => undefined);
   }
   await syncDir(root);
+  await verifyDirIdentity(root, rootIdentity);
 }
 
 /**

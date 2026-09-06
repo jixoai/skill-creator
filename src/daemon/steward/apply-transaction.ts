@@ -40,6 +40,7 @@ import {
   type JournalEntry,
 } from "./journal-schema.js";
 import {
+  assertCanonicalDirectory,
   assertJournalManifestBijection,
   assertNoSymlinkAncestors,
   assertRealRoot,
@@ -94,6 +95,9 @@ export async function applyProposalTransaction(
   ): Promise<void> => {
     if (journalWriter === null) {
       await fs.mkdir(path.dirname(deps.journalPath), { recursive: true });
+      // Codex R9 P1-1：journal 所在目录必须 canonical（预置 symlink 父目录拒绝）
+      // ——独占创建只封 leaf，父目录换体仍可把事实字节写到外部。
+      await assertCanonicalDirectory(path.dirname(deps.journalPath));
       // Codex R8 P1-1：journal 只允许独占创建——已有文件（崩溃残留 / 重复 apply）
       // 与预置 symlink（EEXIST/ELOOP）一律 fail-closed：新事务新文件，追加语义
       // 不存在，恢复闸门（2.3e）拥有残留文件的唯一处置权。
@@ -509,7 +513,13 @@ export async function undoJournalSteps(
     }
     checked.push(parsed.data);
   }
-  // 第二道：journal ↔ 备份 manifest 双射（部分/重编号 journal 暴露）。
+  // 第二道：终态闸（含 proposal 双射）——直调方与 applyRollback 同一标准，无 commit
+  // 或与 proposal 展开不符的 journal 一律不得回放（Codex R9 P1-3）。
+  assertCommittedJournal(checked, {
+    proposalId: path.basename(context.backupJournalPath ?? context.deps.journalPath, ".jsonl"),
+    proposal: context.proposal,
+  });
+  // 第三道：journal ↔ 备份 manifest 双射（部分/重编号 journal 暴露）。
   const manifest = await readBackupManifest(context.backupJournalPath ?? context.deps.journalPath);
   assertJournalManifestBijection(checked, manifest);
   for (const entry of [...checked].reverse()) {
