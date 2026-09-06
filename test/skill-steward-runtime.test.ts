@@ -822,6 +822,24 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     expect(fs.existsSync(path.join(sandbox, "ws", "skills", "fat-skill", "SKILL.md"))).toBe(true);
   });
 
+  it("fails closed with zero writes when the journal cannot be persisted", async () => {
+    const { snapshot } = await seed(["journaled-skill"]);
+    const skillId = snapshot.skills[0]!.skillId;
+    const service = approval();
+    const proposalId = service.submit(editProposal(snapshot, skillId, "Journaled edit."), snapshot);
+    await service.approve(proposalId, "human-ui");
+    // 让 journal 持久化失败：把 journal 路径占位成普通文件（mkdir 必败）。
+    fs.writeFileSync(path.join(sandbox, "home", "steward-store", "journal"), "not a directory", "utf8");
+    const { outcome } = await service.apply(proposalId, "human-ui");
+    expect(["compensated", "recovery-required"]).toContain(outcome.status);
+    // 零写入：原字节未变。
+    const bytes = fs.readFileSync(
+      path.join(sandbox, "ws", "skills", "journaled-skill", "SKILL.md"),
+      "utf8",
+    );
+    expect(bytes).toBe(snapshot.skills[0]!.content);
+  });
+
   it("legacy direct approve cannot mutate steward proposals", async () => {
     const { snapshot } = await seed(["lonely-skill"]);
     const service = approval();
