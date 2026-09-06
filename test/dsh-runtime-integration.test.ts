@@ -102,3 +102,69 @@ describe("dsh runtime handshake (task 3.1)", () => {
     }
   });
 });
+
+describe("dsh composition boot (task 3.2 step 1)", () => {
+  it("boots the real cordis composition with all steward-required services", async () => {
+    const { Context } = await import("@deepseek-ai/cordis");
+    const { SessionProjectionRegistry } = await import("@deepseek-ai/dsh-session-projection");
+    const { SessionStore } = await import("@deepseek-ai/dsh-session");
+    const { LlmRuntime } = await import("@deepseek-ai/dsh-llm");
+    const { SystemPrompt } = await import("@deepseek-ai/dsh-system-prompt");
+    const { ToolRuntime } = await import("@deepseek-ai/dsh-tools");
+    const { AgentRegistry } = await import("@deepseek-ai/dsh-agent");
+    const { AgentLoop } = await import("@deepseek-ai/dsh-agent-loop");
+    const ctx = new Context();
+    for (const service of [
+      SessionProjectionRegistry,
+      SessionStore,
+      LlmRuntime,
+      SystemPrompt,
+      ToolRuntime,
+      AgentRegistry,
+    ]) {
+      ctx.plugin(service);
+    }
+    ctx.plugin(AgentLoop, {});
+    // cordis 以 fiber 调度 init；短settling 等待服务就绪。
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(typeof ctx.tools).toBe("object");
+    expect(typeof ctx.tools.register).toBe("function");
+    expect(typeof ctx.tools.restrict).toBe("function");
+    expect(typeof ctx.agents).toBe("object");
+    expect(typeof ctx.llm).toBe("object");
+    expect(typeof ctx.systemPrompt).toBe("object");
+    expect(typeof ctx.sessions).toBe("object");
+    expect(typeof ctx.sessionProjections).toBe("object");
+  });
+
+  it("enforces typed tool output schemas at registration (fail-closed)", async () => {
+    const { Context } = await import("@deepseek-ai/cordis");
+    const { SessionProjectionRegistry } = await import("@deepseek-ai/dsh-session-projection");
+    const { SessionStore } = await import("@deepseek-ai/dsh-session");
+    const { LlmRuntime } = await import("@deepseek-ai/dsh-llm");
+    const { SystemPrompt } = await import("@deepseek-ai/dsh-system-prompt");
+    const { ToolRuntime } = await import("@deepseek-ai/dsh-tools");
+    const { AgentRegistry } = await import("@deepseek-ai/dsh-agent");
+    const ctx = new Context();
+    for (const service of [
+      SessionProjectionRegistry,
+      SessionStore,
+      LlmRuntime,
+      SystemPrompt,
+      ToolRuntime,
+      AgentRegistry,
+    ]) {
+      ctx.plugin(service);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // 无 output 声明的工具必须被拒绝（typed tool contract，实测发现）。
+    expect(() =>
+      ctx.tools.register({
+        name: "skills.list_context",
+        description: "must fail without output schema",
+        input: { type: "object", properties: {} },
+        execute: async () => ({ ok: true }),
+      }),
+    ).toThrow(/output/);
+  });
+});
