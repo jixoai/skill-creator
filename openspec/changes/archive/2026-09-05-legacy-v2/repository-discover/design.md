@@ -76,9 +76,7 @@ export interface CuratedSourceEntry {
   description: string; // 一句话卡片描述
   homepage?: string; // 可选的项目主页链接
 }
-export const CURATED_SOURCES: readonly CuratedSourceEntry[] = [
-  /* ... */
-];
+export const CURATED_SOURCES: readonly CuratedSourceEntry[] = [/* ... */];
 ```
 
 - 内置条目随发布版本固化，不持久化（改目录即换版本，破坏性更新策略一致）。

@@ -20,7 +20,7 @@
 ## 1.1 实测注记
 
 - 最小组合的服务闭合链（实测）：host-webserver（提供 webServer）→ credentials-local（提供具体 ctx.credentials；dsh-credentials 只是抽象 seam，装它会 `credentials.modifyRecord is not a function`）→ client-connection（webServer+credentials → 提供 connection + /api fence + token/cookie 会话）→ client-modules（扫 loader entries；Loader 必须带 baseUrl，否则 entry 无 resolution base URL）→ web-app（webServer → 自挂官方 dist + authenticatedUrl）。
-- token 握手实测形状：`/?token=<launch-token>` → 303 + `Set-Cookie: dsh-auth-…` + `Location: /`；带 cookie GET / → 200，index 从 679B 膨胀到 ~3KB（**DSH_BOOT** boot graph 注入）。
+- token 握手实测形状：`/?token=<launch-token>` → 303 + `Set-Cookie: dsh-auth-…` + `Location: /`；带 cookie GET / → 200，index 从 679B 膨胀到 ~3KB（`__DSH_BOOT__` boot graph 注入）。
 - cordis Context 无进程退出钩子：独立 smoke 进程在成功路径显式 process.exit（keep-alive 句柄）。
 - daemon 侧挂载（/dsh 反代、remote namespace 桥）按任务归属归 3.1a；1.1 交付可复用 boot 模块 + smoke 证据，不做未验证的 daemon wiring。
 
@@ -85,7 +85,7 @@
 
 ## 3.1a 实测注记（Manager host/island 挂载同一 DSH host——进行中）
 
-- step1 已提交：`WebServer.mountDsh` 同源挂载（Manager 保留 /ws/rpc、/ws/acp/*、/api/health、/manager/* 资产前缀；DSH 官方 route 经 HTTP/升级双代理；DSH 未挂载时 SPA 静态回退=恢复入口；代理在 daemon 边界改写 origin/referer 为 DSH host origin——两套鉴权仍各自执行）。测试 `test/dsh-manager-mount.test.ts`：路由分区、token 握手过代理（303+cookie+__DSH_BOOT__）、/manager/* 静态可达、卸载恢复。
+- step1 已提交：`WebServer.mountDsh` 同源挂载（Manager 保留 `/ws/rpc`、`/ws/acp/*`、`/api/health`、`/manager/*` 资产前缀；DSH 官方 route 经 HTTP/升级双代理；DSH 未挂载时 SPA 静态回退=恢复入口；代理在 daemon 边界改写 origin/referer 为 DSH host origin——两套鉴权仍各自执行）。测试 `test/dsh-manager-mount.test.ts`：路由分区、token 握手过代理（303+cookie+`__DSH_BOOT__`）、`/manager/*` 静态可达、卸载恢复。
 - step2/3 实现完成（浏览器已验证数据面）：`@skill-creator/dsh-client` browser half 向官方 `sidebar.footer.action`（root-scope list slot）贡献 Manager 入口（apply/inject 协议测试 2/2）；点击动态加载 `/manager/dsh-island.js`（新 `webui/vite.island.config.ts` 单文件 IIFE + scoped CSS 稳定资产名）挂载 Svelte island——`webui/src/lib/dsh-island/`：IslandRoot/IslandShell（AppShell 同源逻辑，location 为 island 进程内状态）、island-nav（注入 NavControllerAdapter，无宿主 URL 副作用）、$app/navigation + $app/state shims；entry mount 等 Manager 连接 connected 后再挂载（WorkspacesHome 首载不重试）。plugin 工厂在 combo 加载时捕获 `#token=`（DSH shell 会清理地址栏）。
 - 浏览器证据（`scripts/dsh-manager-island-live.sh.ts`，daemon WebServer + 官方 DSH host + 双 token 入口 `?token=<dsh>#token=<manager>`）：DSH 页面 footer 出现 Manager 入口；island 挂载后渲染**原有 WorkspacesHome 真实数据**（Global Workspace 543 skills/75 agent locations）并可导航进 **原有 ProviderView**（Amp provider：列表+markdown 正文+Insights/Steward/Updates tabs，island 导航 adapter 生效）；同源 /ws/rpc 从页面探测 WS_OPEN_OK（dsh-web-3.1a-island-mounted.png / -provider-view-island.png）。
 - 已知问题（3.1a 未完项）：DSH live-sync 通道经朴素 node 代理周期性断流重连（所有 HTTP 单发请求 200、SSE /plugins/events 可流式；连接层内部 sync 断流触发官方重连 UI）——session 列表/transcript 同屏被此阻塞（session/transcript 本身在 2.1/2.2 直连 host 已验证）。owner：本任务收尾（代理流兼容性）。

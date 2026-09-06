@@ -72,13 +72,8 @@
               "edges": [
                 {
                   "kind": "overlap",
-                  "skillIds": [
-                    "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
-                    "sk_b1b2c3d4e5f6a7b8c9d0e1f2"
-                  ],
-                  "findingIds": [
-                    "fn_139b2514139b2514"
-                  ]
+                  "skillIds": ["sk_a1b2c3d4e5f6a7b8c9d0e1f2", "sk_b1b2c3d4e5f6a7b8c9d0e1f2"],
+                  "findingIds": ["fn_139b2514139b2514"]
                 }
               ],
               "findings": [
@@ -87,10 +82,7 @@
                   "kind": "duplicate-trigger",
                   "severity": "warning",
                   "message": "Enabled skills share trigger tokens: Bash, Read.",
-                  "skillIds": [
-                    "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
-                    "sk_b1b2c3d4e5f6a7b8c9d0e1f2"
-                  ],
+                  "skillIds": ["sk_a1b2c3d4e5f6a7b8c9d0e1f2", "sk_b1b2c3d4e5f6a7b8c9d0e1f2"],
                   "observedRevisions": {
                     "sk_a1b2c3d4e5f6a7b8c9d0e1f2": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
                     "sk_b1b2c3d4e5f6a7b8c9d0e1f2": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
@@ -127,10 +119,7 @@
               "severity": "warning",
               "category": "duplicate-trigger",
               "message": "Enabled skills share trigger tokens: Bash, Read.",
-              "skillIds": [
-                "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
-                "sk_b1b2c3d4e5f6a7b8c9d0e1f2"
-              ],
+              "skillIds": ["sk_a1b2c3d4e5f6a7b8c9d0e1f2", "sk_b1b2c3d4e5f6a7b8c9d0e1f2"],
               "observedRevisions": [
                 {
                   "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
@@ -255,9 +244,7 @@
                   "snippet": "---\nname: deploy-web\ndescription: Deploy the web app.\nallowe"
                 }
               ],
-              "skillIds": [
-                "sk_a1b2c3d4e5f6a7b8c9d0e1f2"
-              ],
+              "skillIds": ["sk_a1b2c3d4e5f6a7b8c9d0e1f2"],
               "observedRevisions": [
                 {
                   "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
@@ -349,9 +336,7 @@
                   "snippet": "---\nname: deploy-web\ndescription: Deploy the web app.\nallowe"
                 }
               ],
-              "skillIds": [
-                "sk_a1b2c3d4e5f6a7b8c9d0e1f2"
-              ],
+              "skillIds": ["sk_a1b2c3d4e5f6a7b8c9d0e1f2"],
               "observedRevisions": [
                 {
                   "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
@@ -525,9 +510,7 @@
                   "snippet": "---\nname: deploy-web\ndescription: Deploy the web app.\nallowe"
                 }
               ],
-              "skillIds": [
-                "sk_a1b2c3d4e5f6a7b8c9d0e1f2"
-              ],
+              "skillIds": ["sk_a1b2c3d4e5f6a7b8c9d0e1f2"],
               "observedRevisions": [
                 {
                   "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
@@ -588,8 +571,5 @@
       "droppedLateResponses": 0
     }
   },
-  "determinismVerified": [
-    "valid-check",
-    "late-event"
-  ]
+  "determinismVerified": ["valid-check", "late-event"]
 }
