@@ -16,6 +16,7 @@ import path from "node:path";
 import { ORPCError, createRouterClient } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain } from "../src/daemon/domain.js";
+import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
 import { CURATED_SOURCES } from "../src/shared/curated-sources.js";
 import { setHomeOverride } from "../src/shared/paths.js";
@@ -48,7 +49,7 @@ function createClient() {
         startedAt: 0,
         tray: "headless",
       }),
-      domain: createDaemonDomain(),
+      domain: createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() }),
     }),
   );
 }

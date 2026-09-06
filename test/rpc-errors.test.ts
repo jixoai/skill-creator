@@ -16,6 +16,7 @@ import path from "node:path";
 import { ORPCError, createActionableClient, createRouterClient } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
+import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import { DomainError } from "../src/daemon/domain-error.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
@@ -40,7 +41,11 @@ afterEach(() => {
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
-function createClient(domain: DaemonDomain = createDaemonDomain()) {
+function createClient(
+  domain: DaemonDomain = createDaemonDomain(undefined, {
+    skillsCliProbe: deterministicSkillsCliProbe(),
+  }),
+) {
   return createRouterClient(
     createRpcRouter({
       status: () => ({
@@ -109,7 +114,9 @@ describe("RPC domain-error boundary", () => {
     const workspaces = createWorkspaceRegistry({
       countSkills: () => Promise.reject(new Error("count adapter failed")),
     });
-    const client = createClient(createDaemonDomain(workspaces));
+    const client = createClient(
+      createDaemonDomain(workspaces, { skillsCliProbe: deterministicSkillsCliProbe() }),
+    );
 
     try {
       await client.workspace.list({});

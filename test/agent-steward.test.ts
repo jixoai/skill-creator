@@ -18,6 +18,7 @@ import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
+import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import { DomainError } from "../src/daemon/domain-error.js";
 import { createCodexAppServerAdapter } from "../src/daemon/steward/codex-adapter.js";
 import { createDshHarnessAdapter } from "../src/daemon/steward/dsh-adapter.js";
@@ -37,7 +38,10 @@ let domain: DaemonDomain;
 const providerId = ProviderIdSchema.parse("openclaw");
 
 function buildDomain(adapters: HarnessAdapter[]): DaemonDomain {
-  return createDaemonDomain(undefined, { stewardAdapters: adapters });
+  return createDaemonDomain(undefined, {
+    stewardAdapters: adapters,
+    skillsCliProbe: deterministicSkillsCliProbe(),
+  });
 }
 
 beforeEach(() => {

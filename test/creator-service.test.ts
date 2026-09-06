@@ -17,6 +17,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCreatorService } from "../src/daemon/creator-service.js";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
+import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import type { SkillService } from "../src/daemon/skill-service.js";
 import { SkillIdSchema, type SkillMetadata } from "../src/shared/contracts/skills.js";
 import {
@@ -36,7 +37,7 @@ beforeEach(() => {
   const isolatedHome = path.join(sandbox, "state");
   process.env.SKILL_CREATOR_HOME = isolatedHome;
   setHomeOverride(isolatedHome);
-  domain = createDaemonDomain();
+  domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
 });
 
 afterEach(async () => {

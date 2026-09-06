@@ -18,6 +18,7 @@ import { createCreatorService, type CreatorService } from "./creator-service.js"
 import { createRepositoryService, type RepositoryService } from "./repository-service.js";
 import { createSourceRegistry, type SourceRegistry } from "./source-registry.js";
 import { createSkillsCliProbe, type SkillsCliProbe } from "./skills-cli-probe.js";
+
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
 import {
   createSkillIntelligenceService,
@@ -66,9 +67,13 @@ export interface DaemonDomain {
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
 export function createDaemonDomain(
   workspaces: WorkspaceRegistry = createWorkspaceRegistry(),
-  options: { stewardAdapters?: HarnessAdapter[] } = {},
+  options: {
+    stewardAdapters?: HarnessAdapter[];
+    /** 测试注入确定性探测：避免真实 `npx skills list` 子进程把用例时序绑到网络与负载。 */
+    skillsCliProbe?: SkillsCliProbe;
+  } = {},
 ): DaemonDomain {
-  const skillsCliProbe = createSkillsCliProbe();
+  const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();
   const skills = createSkillService(workspaces, { skillsCliProbe });
   const repository = createRepositoryService(workspaces, skills);
   const creator = createCreatorService(workspaces, skills);
