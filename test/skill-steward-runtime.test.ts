@@ -9,12 +9,14 @@
  *   [2] 快照作用域：inspect/propose 只接受快照成员；proposal bind 拒绝 stale/unknown。
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AGENT_ALLOWED_TOOLS,
   SkillProposalSchema,
   SkillStewardContextSnapshotSchema,
+  StewardApprovalGrantSchema,
   StewardProposalIdSchema,
   StewardRunIdSchema,
   type SkillProposal,
@@ -27,6 +29,20 @@ import {
   type StewardProposalSink,
 } from "../src/daemon/steward/tool-registry.js";
 import { runFixtureStewardScenario } from "../src/daemon/steward/runtime.js";
+import {
+  buildContextSnapshot,
+  loadContextSnapshot,
+} from "../src/daemon/steward/context-snapshot.js";
+import { createStewardAuditStore } from "../src/daemon/steward/audit-store.js";
+import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
+import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
+import { setHomeOverride } from "../src/shared/paths.js";
+import {
+  ProviderIdSchema,
+  type WorkspaceProviderTarget,
+} from "../src/shared/contracts/workspaces.js";
+
+type WorkspaceTarget = WorkspaceProviderTarget;
 
 const fixtureDir = path.join(__dirname, "fixtures", "steward");
 
@@ -291,3 +307,154 @@ function proposalResponsePatch(
   if (!response || response.kind !== "proposal") return undefined;
   return response.proposal.patch as { kind: string };
 }
+
+describe("context snapshot builder (task 2.3a)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = "openclaw";
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-snapshot-test-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function seedWorkspace(skills: Array<[string, string]>): Promise<WorkspaceTarget> {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    for (const [name, description] of skills) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId: ProviderIdSchema.parse(providerId),
+        directoryName: name,
+        frontmatter: { name, description },
+        body: `# ${name}\n\nUses \`scripts/${name}.sh\`.\n`,
+      });
+    }
+    return { workspaceId: workspace.id, providerId: ProviderIdSchema.parse(providerId) };
+  }
+
+  it("captures a single-read snapshot: provider edits afterwards do not change run content", async () => {
+    const target = await seedWorkspace([["alpha-skill", "Alpha skill."]]);
+    const capabilities = {
+      backendId: "fixture",
+      version: "fixture-1",
+      streamingEvents: true,
+      cancellation: true,
+      permissionRequests: true,
+      executionRoot: "isolated" as const,
+    };
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    expect(snapshot.skills).toHaveLength(1);
+    const before = snapshot.skills[0]!.revision;
+
+    // 修改 Provider：快照内容不变（不可变快照）。
+    const skillDirectory = path.join(sandbox, "ws", "skills", "alpha-skill");
+    fs.writeFileSync(
+      path.join(skillDirectory, "SKILL.md"),
+      "---\nname: alpha-skill\ndescription: changed\n---\n# changed\n",
+      "utf8",
+    );
+
+    const persisted = await loadContextSnapshot(snapshot.id);
+    expect(persisted?.skills[0]?.revision).toBe(before);
+    expect(persisted?.skills[0]?.content).toContain("Alpha");
+  });
+
+  it("rejects oversize content with a typed budget failure", async () => {
+    const target = await seedWorkspace([["big-skill", "Big skill."]]);
+    const skillDirectory = path.join(sandbox, "ws", "skills", "big-skill");
+    const big = `---\nname: big-skill\ndescription: Big.\n---\n# big\n\n${"x".repeat(256 * 1024)}\n`;
+    fs.writeFileSync(path.join(skillDirectory, "SKILL.md"), big, "utf8");
+    await expect(
+      buildContextSnapshot(domain.skills, {
+        target,
+        promptVersion: "1.0.0",
+        toolVersion: "1.0.0",
+        capabilities: {
+          backendId: "fixture",
+          version: "fixture-1",
+          streamingEvents: true,
+          cancellation: true,
+          permissionRequests: true,
+          executionRoot: "isolated",
+        },
+      }),
+    ).rejects.toThrow(/256 KiB/);
+  });
+
+  it("manifests skill resources with hashes and survives restart reads", async () => {
+    const target = await seedWorkspace([["res-skill", "Resource skill."]]);
+    const skillDirectory = path.join(sandbox, "ws", "skills", "res-skill");
+    fs.mkdirSync(path.join(skillDirectory, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(skillDirectory, "scripts", "run.sh"), "echo ok\n", "utf8");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities: {
+        backendId: "fixture",
+        version: "fixture-1",
+        streamingEvents: true,
+        cancellation: true,
+        permissionRequests: true,
+        executionRoot: "isolated",
+      },
+    });
+    expect(snapshot.resources.some((resource) => resource.relPath === "scripts/run.sh")).toBe(true);
+    // 重启读取：新 store 实例（同 home）能读回快照。
+    const again = await loadContextSnapshot(snapshot.id);
+    expect(again?.id).toBe(snapshot.id);
+  });
+
+  it("audit store round-trips runs, audits, and grants across restart", async () => {
+    const store = createStewardAuditStore();
+    const grant = StewardApprovalGrantSchemaTest.parse({
+      id: "grant_0123456789abcdef",
+      proposalId: "spp_0123456789abcdef",
+      snapshotId: "snap_0123456789abcdef",
+      fingerprint: `sha256:${"a".repeat(64)}`,
+      principal: "human-ui",
+      issuedAt: "2026-09-06T00:00:00.000Z",
+      consumedAt: null,
+      inputRevisions: [
+        { skillId: "sk_a1b2c3d4e5f6a7b8c9d0e1f2", revision: `sha256:${"1".repeat(64)}` },
+      ],
+      absentPreconditions: [],
+    });
+    await store.appendRun({
+      runId: "sr_0123456789abcdef01234567",
+      snapshotId: "snap_0123456789abcdef",
+      terminal: "completed",
+      endedAt: "2026-09-06T00:00:01.000Z",
+    });
+    await store.appendGrant(grant);
+
+    // 「重启」：新实例读取同一持久目录。
+    const reopened = createStewardAuditStore();
+    const runs = await reopened.listRuns();
+    const grants = await reopened.listGrants();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.terminal).toBe("completed");
+    expect(grants).toHaveLength(1);
+    expect(grants[0]!.consumedAt).toBeNull();
+  });
+});
+
+/** grant fixture 的本地 parse 通道。 */
+const StewardApprovalGrantSchemaTest = StewardApprovalGrantSchema;
