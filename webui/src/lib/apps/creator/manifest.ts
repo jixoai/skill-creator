@@ -24,7 +24,7 @@ export const creatorApp = defineApp({
         component: () => import("./CreatorHome.svelte"),
       }),
     }),
-    // 实例 tab：编辑或新建技能（左右分栏 ACP 对话 + 子视图）
+    // 实例 tab：编辑或新建技能（单列子视图区；Agent 会话由 DSH host 承载，3.2）
     defineActivity({
       pattern: "/creator",
       root: defineRoute({

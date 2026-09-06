@@ -46,10 +46,11 @@
   - Ownership: 本阶段只实现挂载、路由、store bridge 与原有操作可达性；专属 workflow 控件和全部 action/recovery 用户流程由下一阶段 `steward-product-workflow` 唯一实现，不重复构建。
   - Evidence: IslandRoot 匹配面从单一 Workspaces App 扩到三 App（manifest activities 复用 SPA 同源路由树，零 manifest 改动）；`creator-editor.svelte.ts` 新增跨卸载草稿缓存（route identity 键 + 快照隔离）与身份级 hydration 标记——同一身份只自动 hydrate 一次（子视图往返/断线重连/island 重开不重置 baseline，显式 Reload/Retry 走 reset；delete 清缓存）。浏览器验收（`scripts/dsh-manager-island-live.sh.ts` 真实 skills 探测）：island 内 Creator 编辑器可达（CreatorHome → New skill，ws_bcafc73bcbac89a26a92417e / aider-desk）；dirty draft（dir/name/desc/body 四字段）经 island 关闭→重开→重导航完整恢复；Create 保存真实落盘 `ws/.aider-desk/skills/final-save-probe/SKILL.md`（frontmatter+body）。Repository Discover 可达，扫描 Anthropic 官方源（pinned commit `41bbe19d1a1a`、20 skills、真实网络 clone），勾选 academy-guide + 目标 island-ws/AiderDesk → Install → `ws/.aider-desk/skills/academy-guide/SKILL.md` 落盘（截图 dsh-web-3.1c-*.png）；Creator/Repository 视图 1100px/680px 均 scrollWidth=clientWidth 无横向溢出；0 JS 错误。单测 `webui/src/lib/__tests__/creator-draft-cache.test.ts` 3/3（键语义/快照隔离/hydration 标记）。工具限制声明：bb-browser 合成 input 事件不触发 Svelte bind，表单输入用 `execCommand('insertText')` 真实编辑管线完成（dsh-web-3.1c-creator-saved.png 可见表单值）。
 
-- [ ] 3.2 删除双入口和旧 ACP 产品叙事。
+- [x] 3.2 删除双入口和旧 ACP 产品叙事。
   - Files: `webui/src/routes/`, `webui/src/lib/components/creator/acp-panel.svelte`, `README.md`, `src/shared/rpc-contract.ts`。
   - Steps: 移除生产导航中的 generic ACP session；把残留 adapter 标为内部 legacy 或删除；README 只描述 DSH host + Skill Creator Manager。
   - Acceptance: `rg` 不再显示 ACP 是 Steward/Creator 产品入口；应用启动只有一个 DSH-hosted Agent surface。
+  - Evidence: 删除 `acp-panel.svelte`（唯一产品消费者 CreatorWorkspace 改单列编辑器：去 ACP 分栏/窄屏 chat toggle/拖拽分隔条，Test 子视图文案改为 DSH-hosted agent session）；`rpc-contract.ts` 的 `acp` namespace 标注 internal legacy（daemon 诊断/测试面保留，不追加能力）；README（/creator 行、模块树、RPC 表）与 AGENTS.md 产品真相（旧 ACP panel 移除、ACP Bridge=internal legacy）同步。`rg -i acp webui/src` 仅余移除决策注释；README 无产品 ACP 叙事。daemon 默认入口切换到 DSH host（SPA 仅恢复夹具）按 change 内部分工归 4.1 release evidence 收尾。门禁：typecheck 0、webui check 0/0、全量 411/411（52 files）、fmt 全树绿、openspec 9/9。
 
 - [ ] 4.1 完成浏览器、daemon、filesystem 和 release evidence。
   - Files: `scripts/dsh-web-smoke.sh.ts`, `docs/release/dsh-web-composition.md`, `docs/reviews/`。

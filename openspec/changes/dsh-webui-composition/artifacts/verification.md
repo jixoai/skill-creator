@@ -115,3 +115,10 @@
   - 溢出：Creator 编辑器与 Repository scan 视图在 1100px/680px 面板宽均 scrollWidth===clientWidth（截图 dsh-web-3.1c-creator-1100px.png / dsh-web-3.1c-repository-installed.png 等）。
 - 单测：`pnpm exec vitest run webui/src/lib/__tests__/creator-draft-cache.test.ts` 3/3（身份键语义、快照双向隔离、hydration 标记 reset）。
 - 工具限制（诚实声明）：bb-browser 合成 `input` 事件不触发 island 包内 Svelte bind（palette bits-ui 过滤例外）；表单输入改经 `document.execCommand('insertText')` 真实编辑管线完成，点击均走真实 DOM handler。revision conflict / session expiry / recovery 状态语义未在 island 内逐项重演——由 store 层代次门与 creator save CONFLICT 既有测试持有（本轮未改其逻辑，只加了缓存层）。
+
+## 3.2 实测注记（移除 generic ACP 产品入口）
+
+- `webui/src/lib/components/creator/acp-panel.svelte` 删除；CreatorWorkspace 单列化（分栏/拖拽/chat-toggle 移除），Test 子视图文案指向 DSH-hosted agent session。
+- `rpc-contract.ts` acp namespace 标注 internal legacy（不追加能力；daemon 诊断/测试保留）；README 与 AGENTS.md 产品真相同步（ACP Bridge = internal legacy，Agent 会话由 DSH host 唯一承载）。
+- 验收：`rg -i acp webui/src` 仅余移除决策注释；README/产品面零 ACP 叙事。daemon 默认入口切 DSH host 归 4.1。
+- 门禁：typecheck 0、webui check 0/0、全量 411/411、fmt 绿、openspec 9/9。

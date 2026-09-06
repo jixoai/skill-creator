@@ -282,6 +282,11 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
         .output(z.object({ frames: z.array(DshSessionStreamFrameSchema) })),
     },
   },
+  /**
+   * Internal legacy ACP bridge（dsh-webui-composition 3.2）：generic ACP session 已从
+   * 产品入口移除——Agent 会话由 DSH host 唯一承载。此 namespace 仅供 daemon 内部
+   * 诊断/测试使用，不再是 Steward/Creator 的产品入口，不向前追加能力。
+   */
   acp: {
     /** List ACP-capable agents installed on this machine (daemon-lifetime cached). */
     agents: {

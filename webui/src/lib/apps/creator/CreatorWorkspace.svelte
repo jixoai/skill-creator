@@ -1,17 +1,16 @@
 <!--
-  用户原始需求 [2026-07-27]：「Creator 编辑 tab 左右分栏，左侧 ACP 对话，右侧子视图」。
+  用户原始需求 [2026-07-27]：「Creator 编辑 tab 左右分栏，左侧 ACP 对话，右侧子视图」
+  → [2026-09-07]（openspec dsh-webui-composition 3.2）：移除 generic ACP 对话面板，
+  Agent 会话由 DSH host 唯一承载；Creator 回归单列编辑器。
   正交意图：
-  1. 左右分栏布局（左 40% ACP 对话 / 右 60% 子视图），可拖拽分隔条。
-  2. 窄屏堆叠 + 顶部 toggle（对话/子视图）。
-  3. 子视图通过 sub-view-tabs 组件切换，激活子视图编码到 URL search param。
-  4. 通过 Svelte context 下发共享编辑草稿（File 写入 / Preview / Log / Validate 读取）。
-  视图状态：分栏比例 → 组件局部 $state（瞬时 UI）；子视图 → URL；草稿 → 共享 creator-editor context（$state），
+  1. 单列编辑器布局（子视图区占满），子视图通过 sub-view-tabs 切换，激活子视图编码到 URL search param。
+  2. 通过 Svelte context 下发共享编辑草稿（File 写入 / Preview / Log / Validate 读取）。
+  视图状态：子视图 → URL；草稿 → 共享 creator-editor context（$state），
   同一身份的草稿在卸载时快照进模块级缓存（island 关闭→重开 / 与官方 session 往返不丢 dirty draft）。
 -->
 <script lang="ts">
   import { useParams, useSearch } from "$lib/shell";
   import SubViewTabs from "$lib/components/creator/sub-view-tabs.svelte";
-  import AcpPanel from "$lib/components/creator/acp-panel.svelte";
   import FileBrowser from "$lib/components/creator/file-browser.svelte";
   import ChangeLog from "$lib/components/creator/change-log.svelte";
   import PreviewView from "$lib/components/creator/preview.svelte";
@@ -48,13 +47,6 @@
   const getSearch = useSearch<{ subview?: string; template?: string }>();
   const search = $derived(getSearch?.() ?? {});
   const subview = $derived(search.subview ?? "file");
-
-  // 分栏比例（组件局部 $state，瞬时 UI）。
-  let splitRatio = $state(0.4);
-  let dragging = $state(false);
-
-  // 窄屏 toggle（对话/子视图）。
-  let narrowPanel = $state<"chat" | "view">("chat");
 
   // 由 URL params 派生的 Workspace Provider 目标。
   const target = $derived.by<WorkspaceProviderTarget | null>(() => {
@@ -120,24 +112,6 @@
       }
     };
   });
-
-  function startDrag(e: MouseEvent): void {
-    e.preventDefault();
-    dragging = true;
-    const container = (e.currentTarget as HTMLElement).parentElement!;
-    const onMove = (ev: MouseEvent): void => {
-      if (!dragging) return;
-      const rect = container.getBoundingClientRect();
-      splitRatio = Math.max(0.2, Math.min(0.7, (ev.clientX - rect.left) / rect.width));
-    };
-    const onUp = (): void => {
-      dragging = false;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }
 </script>
 
 <div class="flex h-full flex-col overflow-hidden">
@@ -149,51 +123,15 @@
     <span class="text-xs text-muted-foreground">{wsId} / {providerId}</span>
   </header>
 
-  <!-- 窄屏 toggle（≤1024px） -->
-  <div class="flex shrink-0 border-b border-border lg:hidden">
-    <button
-      class="flex-1 py-2 text-xs font-medium {narrowPanel === 'chat'
-        ? 'bg-muted text-foreground'
-        : 'text-muted-foreground'}"
-      onclick={() => (narrowPanel = "chat")}
-    >
-      AI Chat
-    </button>
-    <button
-      class="flex-1 py-2 text-xs font-medium {narrowPanel === 'view'
-        ? 'bg-muted text-foreground'
-        : 'text-muted-foreground'}"
-      onclick={() => (narrowPanel = "view")}
-    >
-      Views
-    </button>
-  </div>
-
-  <!-- 主体：桌面左右分栏 / 窄屏单面板 -->
-  <div class="flex min-h-0 flex-1">
-    <!-- 左侧：ACP 对话面板（桌面 40%） -->
-    <div class="hidden flex-col border-r border-border lg:flex" style="width: {splitRatio * 100}%">
-      {#if target}
-        <AcpPanel {target} />
-      {:else}
-        <div
-          class="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground"
-        >
-          Invalid workspace target.
-        </div>
-      {/if}
-    </div>
-
-    <!-- 拖拽分隔条（桌面） -->
-    <button
-      type="button"
-      class="hidden w-1 shrink-0 cursor-col-resize border-0 bg-border p-0 transition-colors hover:bg-primary/30 lg:block"
-      aria-label="Resize panels"
-      onmousedown={startDrag}
-    ></button>
-
-    <!-- 右侧：子视图区（桌面 60%） -->
-    <div class="flex min-w-0 flex-1 flex-col" class:hidden={narrowPanel === "chat"}>
+  <!-- 主体：单列子视图区（3.2：generic ACP 对话面板移除，Agent 会话归 DSH host） -->
+  <div class="flex min-h-0 flex-1 flex-col">
+    {#if !target}
+      <div
+        class="flex flex-1 items-center justify-center p-4 text-center text-xs text-muted-foreground"
+      >
+        Invalid workspace target.
+      </div>
+    {:else}
       <SubViewTabs />
 
       <div class="min-h-0 flex-1 overflow-hidden">
@@ -211,7 +149,7 @@
           >
             <div class="space-y-1">
               <p class="font-medium text-foreground">Test run</p>
-              <p>A secondary ACP session to exercise this skill lands here.</p>
+              <p>Exercising this skill inside the DSH-hosted agent session lands here.</p>
               <p class="text-muted-foreground/60">(Not yet implemented.)</p>
             </div>
           </div>
@@ -219,6 +157,6 @@
           <FileBrowser />
         {/if}
       </div>
-    </div>
+    {/if}
   </div>
 </div>

@@ -68,7 +68,8 @@ Skill Creator（当前代码：ChromeTabs Shell，三个 App；DSH composition �
 |       `-- ~/ 或 ws_* ------- Global/Imported Workspace roots
 |
 |-- /creator ----------------- Creator App：在 Imported Workspace.Provider
-|                              创建/编辑技能 + change log + 旧 ACP panel
+|                              创建/编辑技能 + change log（单列编辑器；Agent
+|                              会话由 DSH host 承载，内嵌 ACP 面板已移除）
 |
 `-- /repository -------------- Repository App：固定 Git commit 后预览/安装
                                + curated/user sources Discover feed
@@ -88,7 +89,8 @@ Source             = Discover feed 的 curated 或 user Git 源（sources.json�
 Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply）
 Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
 Agent Runtime      = 目标为官方 DSH Agent/session/tools/prompt composition；fixture 仅测试，Codex 后端暂不纳入交付
-ACP Bridge         = 当前仍暴露旧入口；规划移除其产品职责，不能作为本轮完成证据
+ACP Bridge         = internal legacy：generic ACP session 已从产品入口移除（3.2），
+                      Agent 会话由 DSH host 唯一承载；daemon 内诊断面保留但不扩张
 ```
 
 核心约束：
