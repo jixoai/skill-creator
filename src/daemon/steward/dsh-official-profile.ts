@@ -15,6 +15,13 @@
  *       disable web-startup（它 inject 的 cmdlineArgs 是 dsh CLI 进程专属服务）。
  * 妥协声明：完整 profile 含 agent/llm/session 全家桶（85+ base rows）；本模块只做
  * 宿主启动与探针面，浏览器交互验证与 Manager run↔DSH session 绑定在 2.1 后续步骤。
+ *
+ * preset 行闭包事实（2026-09-06 浏览器验证实测）：官方 agent-presets 的 standard/
+ * minimal 预设行引用 @deepseek-ai/dsh-persona 与 @deepseek-ai/dsh-tool-ask-user，
+ * ptc 额外引用 @deepseek-ai/dsh-agent-tool-presentation；这些包不在 dsh-base 依赖
+ * 闭包内。heal 的 module fallback 只遍历根 manifest 的 dependencies/peerDependencies，
+ * 因此三者必须作为本仓 dependencies 安装（发布包同规则），否则 session/create 以
+ * agent-preset/invalid 拒绝（preset mount 时行无法解析）。
  */
 import fs from "node:fs";
 import path from "node:path";
