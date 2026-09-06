@@ -20,7 +20,10 @@ import {
   SkillStewardContextSnapshotSchema,
   SkillStewardResponseSchema,
   SkillToolCallSchema,
+  StewardFindingSchema,
+  StewardSnapshotIdSchema,
   StewardTaskIdSchema,
+  bindManagerDerivedProposalToSnapshot,
   bindProposalToSnapshot,
   bindTaskToSnapshot,
   type SkillProposal,
@@ -421,7 +424,7 @@ describe("versioned prompts and templates (task 1.4)", () => {
   it("renders deterministic check/optimize/organize turns bound to the snapshot", () => {
     const taskId = StewardTaskIdSchema.parse("task_0123456789abcdef");
     for (const kind of ["check", "optimize", "organize"] as const) {
-      const turn = renderStewardTaskTurn({
+      const rendered = renderStewardTaskTurn({
         task: {
           id: taskId,
           kind,
@@ -433,10 +436,172 @@ describe("versioned prompts and templates (task 1.4)", () => {
         },
         snapshot: importedSnapshot,
       });
+      if (!rendered.ok) throw new Error(`render failed: ${rendered.failure.message}`);
+      const turn = rendered.text;
       expect(turn).toContain(kind);
       expect(turn).toContain(importedSnapshot.id);
       expect(turn).toContain(STEWARD_PROMPT_VERSION);
       expect(turn).toContain("human approves");
     }
+  });
+
+  it("refuses to render a task turn whose identity does not match the snapshot (Codex R2 P2-4)", () => {
+    const taskId = StewardTaskIdSchema.parse("task_0123456789abcdef");
+    const mismatched = renderStewardTaskTurn({
+      task: {
+        id: taskId,
+        kind: "check",
+        snapshotId: StewardSnapshotIdSchema.parse("snap_ffffffffffffffff"),
+        skillIds: importedSnapshot.skills.map((skill) => skill.skillId),
+        promptVersion: STEWARD_PROMPT_VERSION,
+        toolVersion: STEWARD_TOOL_VERSION,
+        createdAt: "2026-09-06T00:00:00.000Z",
+      },
+      snapshot: importedSnapshot,
+    });
+    expect(mismatched).toMatchObject({ ok: false, failure: { code: "SNAPSHOT_MISMATCH" } });
+    const outsider = renderStewardTaskTurn({
+      task: {
+        id: taskId,
+        kind: "check",
+        snapshotId: importedSnapshot.id,
+        skillIds: [SkillIdSchema.parse("sk_ffffffffffffffffffffffff")],
+        promptVersion: STEWARD_PROMPT_VERSION,
+        toolVersion: STEWARD_TOOL_VERSION,
+        createdAt: "2026-09-06T00:00:00.000Z",
+      },
+      snapshot: importedSnapshot,
+    });
+    expect(outsider).toMatchObject({ ok: false, failure: { code: "UNKNOWN_SKILL" } });
+  });
+});
+
+describe("codex round-2 review probes (contract 1.3.0)", () => {
+  it("P1-1: snapshot resource manifest rejects traversal, backslash, drive-letter and UNC relPaths", () => {
+    const base = structuredClone(importedSnapshot);
+    for (const relPath of [
+      "assets/../../outside",
+      "assets\\..\\outside",
+      "C:/x",
+      "//server/share/x",
+    ]) {
+      const snapshot = structuredClone(base);
+      snapshot.resources = [
+        {
+          skillId: snapshot.skills[0]!.skillId,
+          relPath,
+          hash: "a".repeat(64),
+          byteSize: 1,
+          kind: "file",
+        },
+      ];
+      expect(SkillStewardContextSnapshotSchema.safeParse(snapshot).success, relPath).toBe(false);
+    }
+  });
+
+  it("P1-2: split mapping source must be the patch source skill at parse time", () => {
+    const raw = loadFixture<unknown>("proposal-split.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    const first = edited.patch.targets[0]!.resources[0]!;
+    first.sourceSkillId = "sk_b1b2c3d4e5f6a7b8c9d0e1f2";
+    first.sourcePath = "assets/api.env";
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+  });
+
+  it("P1-2: merge mapping source must belong to the patch sources at parse time", () => {
+    const raw = loadFixture<unknown>("proposal-merge.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    edited.patch.target.resources[0]!.sourceSkillId = "sk_c1b2c3d4e5f6a7b8c9d0e1f2";
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+  });
+
+  it("P1-2: bind rejects a mapping whose sourcePath is outside the snapshot manifest", () => {
+    const raw = loadFixture<unknown>("proposal-split.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    edited.patch.targets[0]!.resources[0]!.sourcePath = "references/missing.md";
+    const parsed = SkillProposalSchema.parse(edited);
+    const bound = bindProposalToSnapshot(parsed, importedSnapshot);
+    expect(bound).toMatchObject({ ok: false, failure: { code: "RESOURCE_MAPPING" } });
+  });
+
+  it("P1-3: agent proposals cannot enable on any scope; Manager-derived bind can", () => {
+    const raw = loadFixture<unknown>("proposal-disable.valid.json") as SkillProposal;
+    const enableProposal = () => {
+      const edited = structuredClone(raw);
+      edited.action = "enable";
+      edited.patch = {
+        kind: "enable",
+        snapshotId: edited.patch.snapshotId,
+        selections: edited.patch.selections,
+        reason: "Manager-derived rollback inverse.",
+      };
+      return SkillProposalSchema.parse(edited);
+    };
+    const imported = bindProposalToSnapshot(enableProposal(), importedSnapshot);
+    expect(imported).toMatchObject({ ok: false, failure: { code: "UNSUPPORTED_WRITE_SCOPE" } });
+    const global = bindProposalToSnapshot(enableProposal(), globalSnapshot);
+    expect(global).toMatchObject({ ok: false, failure: { code: "UNSUPPORTED_WRITE_SCOPE" } });
+    // Manager 派生入口允许 enable（Global 的 rollback-of-disable 逆）。
+    expect(bindManagerDerivedProposalToSnapshot(enableProposal(), importedSnapshot)).toEqual({
+      ok: true,
+    });
+    expect(bindManagerDerivedProposalToSnapshot(enableProposal(), globalSnapshot)).toEqual({
+      ok: true,
+    });
+    // Agent 的 Global disable 仍可用。
+    const disable = parseProposal("proposal-disable.valid.json").proposal!;
+    expect(bindProposalToSnapshot(disable, globalSnapshot)).toEqual({ ok: true });
+  });
+
+  it("P2-1: evidence outside the proposal skillIds fails at parse time", () => {
+    const raw = loadFixture<unknown>("proposal-disable.valid.json") as SkillProposal;
+    const edited = structuredClone(raw);
+    edited.evidence[0]!.skillId = "sk_c1b2c3d4e5f6a7b8c9d0e1f2";
+    expect(SkillProposalSchema.safeParse(edited).success).toBe(false);
+  });
+
+  it("P2-1: finding observedRevisions must equal skillIds exactly", () => {
+    const finding = {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      origin: "agent-semantic",
+      severity: "warning",
+      category: "unclear-description",
+      message: "Description does not state the scope.",
+      skillIds: [importedSnapshot.skills[0]!.skillId],
+      observedRevisions: [
+        {
+          skillId: importedSnapshot.skills[0]!.skillId,
+          revision: importedSnapshot.skills[0]!.revision,
+        },
+        {
+          skillId: importedSnapshot.skills[1]!.skillId,
+          revision: importedSnapshot.skills[1]!.revision,
+        },
+      ],
+      evidence: [{ skillId: importedSnapshot.skills[0]!.skillId, snippet: "x" }],
+    };
+    expect(StewardFindingSchema.safeParse(finding).success).toBe(false);
+  });
+
+  it("P2-2: split/merge targets colliding with snapshot directories fail with TARGET_COLLISION", () => {
+    const splitRaw = loadFixture<unknown>("proposal-split.valid.json") as SkillProposal;
+    const splitEdited = structuredClone(splitRaw);
+    splitEdited.patch.targets[0]!.directoryName = "deploy-api";
+    splitEdited.patch.targets[0]!.frontmatter.name = "deploy-api";
+    const splitBound = bindProposalToSnapshot(
+      SkillProposalSchema.parse(splitEdited),
+      importedSnapshot,
+    );
+    expect(splitBound).toMatchObject({ ok: false, failure: { code: "TARGET_COLLISION" } });
+
+    const mergeRaw = loadFixture<unknown>("proposal-merge.valid.json") as SkillProposal;
+    const mergeEdited = structuredClone(mergeRaw);
+    mergeEdited.patch.target.directoryName = "audit-logs";
+    mergeEdited.patch.target.frontmatter.name = "audit-logs";
+    const mergeBound = bindProposalToSnapshot(
+      SkillProposalSchema.parse(mergeEdited),
+      importedSnapshot,
+    );
+    expect(mergeBound).toMatchObject({ ok: false, failure: { code: "TARGET_COLLISION" } });
   });
 });

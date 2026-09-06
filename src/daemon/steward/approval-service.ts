@@ -28,6 +28,7 @@ import {
   type StewardGrantId,
   StewardProposalIdSchema,
   bindProposalToSnapshot,
+  bindManagerDerivedProposalToSnapshot,
   type SkillProposal,
   type SkillStewardContextSnapshot,
   type SkillValidationResult,
@@ -55,6 +56,8 @@ interface ProposalEntry {
   proposal: SkillProposal;
   snapshot: SkillStewardContextSnapshot;
   runId: import("../../shared/contracts/skill-steward.js").StewardRunId2;
+  /** Codex R2 P1-3：仅 Manager prepareRollback 置位；enable 反向只走 manager binder。 */
+  managerDerived?: boolean;
 }
 
 /** 审批服务依赖。 */
@@ -80,13 +83,23 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
   const applying = new Set<StewardProposalId>();
   const rollbackGrants = new Map<string, StewardApprovalGrant>();
 
-  /** runtime 的 propose 工具入口：bind 通过后入档。 */
+  /** runtime 的 propose 工具入口：先 runtime parse（house law），bind 通过后入档。 */
   function submit(
     proposal: SkillProposal,
     snapshot: SkillStewardContextSnapshot,
     runId: import("../../shared/contracts/skill-steward.js").StewardRunId2,
   ): StewardProposalId {
-    const bound = bindProposalToSnapshot(proposal, snapshot);
+    // mutation 边界不吃编译期信任：手写/漂移对象在 safeParse 处类型化失败。
+    const parsed = SkillProposalSchema.safeParse(proposal);
+    if (!parsed.success) {
+      throw new DomainError(
+        "INVALID_OPERATION",
+        `Proposal failed contract parse: ${parsed.error.issues
+          .map((issue) => `${issue.path.map(String).join(".") || "value"}: ${issue.message}`)
+          .join("; ")}`,
+      );
+    }
+    const bound = bindProposalToSnapshot(parsed.data, snapshot);
     if (!bound.ok) {
       throw new DomainError(
         bound.failure.code === "STALE_REVISION" ? "CONFLICT" : "INVALID_OPERATION",
@@ -94,7 +107,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       );
     }
     const proposalId = StewardProposalIdSchema.parse(`spp_${randomBytes(8).toString("hex")}`);
-    proposals.set(proposalId, { proposalId, proposal, snapshot, runId });
+    proposals.set(proposalId, { proposalId, proposal: parsed.data, snapshot, runId });
     return proposalId;
   }
 
@@ -110,7 +123,9 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
   async function validate(proposalId: StewardProposalId): Promise<SkillValidationResult> {
     const entry = requireProposal(proposalId);
     const checks: SkillValidationResult["checks"] = [];
-    const bound = bindProposalToSnapshot(entry.proposal, entry.snapshot);
+    const bound = entry.managerDerived
+      ? bindManagerDerivedProposalToSnapshot(entry.proposal, entry.snapshot)
+      : bindProposalToSnapshot(entry.proposal, entry.snapshot);
     checks.push({
       name: "contract-bind",
       status: bound.ok ? "passed" : "failed",
@@ -303,6 +318,11 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
         reason: `Manager-derived rollback of ${auditId}.`,
       };
       reverse.rationale = `Rollback of audit ${auditId}: restore prior enablement.`;
+      // Codex R2 P1-3：enable 反向只允许 Manager 派生入口；prepare 时 fail-fast 复核。
+      const reverseBound = bindManagerDerivedProposalToSnapshot(reverse, entry.snapshot);
+      if (!reverseBound.ok) {
+        throw new DomainError("INVALID_OPERATION", reverseBound.failure.message);
+      }
       const reverseProposalId = StewardProposalIdSchema.parse(
         `spp_${randomBytes(8).toString("hex")}`,
       );
@@ -311,6 +331,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
         proposal: reverse,
         snapshot: entry.snapshot,
         runId: entry.runId,
+        managerDerived: true,
       });
       return {
         reverseProposalId,

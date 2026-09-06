@@ -1,5 +1,5 @@
 {
-  "contractVersion": "1.2.0",
+  "contractVersion": "1.3.0",
   "action": "merge",
   "patch": {
     "kind": "merge",

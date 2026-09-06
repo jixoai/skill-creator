@@ -30,6 +30,14 @@ import { WorkspaceProviderTargetSchema } from "./workspaces.js";
 
 /**
  * 本模块契约版本；Agent 输出必须携带同一版本才可解析。
+ * 1.3.0（Codex R2 复核整改）：快照资源清单 relPath 复用共享安全路径校验
+ * （P1-1）；资源映射 sourceSkillId 按 patch kind 闭合且 bind 对齐 snapshot
+ * 资源 manifest（P1-2）；enable 收敛为 Manager 派生专用——普通 agent bind 在
+ * 任何 scope 都拒绝 enable，Global 只允许 disable，Manager 走
+ * bindManagerDerivedProposalToSnapshot（P1-3）；evidence.skillId 必须属于
+ * proposal.skillIds 且 bind 时属于 snapshot；finding.observedRevisions 与
+ * skillIds 精确相等；split/merge 新目标不得撞快照现有目录名（bind 的
+ * TARGET_COLLISION；活体 absent 检查仍在 approval 层保留）。
  * 1.2.0（Codex 复核 P1/P2 整改）：共享安全相对路径校验（拒绝嵌套穿越/反斜杠/
  * 盘符/UNC）；observedRevisions 与 patch 期望 revision 一一且相等；身份唯一性；
  * byteSize 与内容 UTF-8 字节一致且预算按计算值强制；目标 frontmatter.name 与
@@ -37,7 +45,7 @@ import { WorkspaceProviderTargetSchema } from "./workspaces.js";
  * audit 禁 agent principal；资源映射绑定 sourceSkillId；新增 bindTaskToSnapshot。
  * 1.1.0：patch union 增加 enable（rollback-of-disable 的逆操作语义）。
  */
-export const SKILL_STEWARD_CONTRACT_VERSION = "1.2.0" as const;
+export const SKILL_STEWARD_CONTRACT_VERSION = "1.3.0" as const;
 /** 契约版本字符串约束（稳定语义化字符串）。 */
 export const ContractVersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/);
 /** 契约版本。 */
@@ -188,10 +196,8 @@ export type StewardSkillSnapshotEntry = z.infer<typeof StewardSkillSnapshotEntry
 /** 技能配套资源清单条目（相对路径 + hash + 类型 + 大小；不跟随目录外 symlink）。 */
 export const StewardResourceEntrySchema = z.object({
   skillId: SkillIdSchema,
-  /** 技能目录内的相对路径（无 .. / 无绝对路径）。 */
-  relPath: z
-    .string()
-    .regex(/^(?!\/)(?!\.\.(\/|$))[^\0]+$/, "Relative path inside the skill directory."),
+  /** 技能目录内的相对路径（Codex R2 P1-1：复用共享 isSafeRelativePath，拒绝嵌套穿越/反斜杠/盘符/UNC）。 */
+  relPath: RelPathSchema,
   hash: z.string().regex(/^[a-f0-9]{64}$/),
   byteSize: z.number().int().nonnegative(),
   kind: z.enum(["file", "other"]),
@@ -453,6 +459,16 @@ export const StewardFindingSchema = z
         });
       }
     }
+    // Codex R2 P2-1：observedRevisions 与 skillIds 精确相等（多余观察/重复观察都是身份漂移）。
+    if (
+      covered.size !== finding.observedRevisions.length ||
+      covered.size !== new Set(finding.skillIds).size
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Finding observedRevisions must equal skillIds exactly.",
+      });
+    }
   });
 /** 结构化 finding。 */
 export type StewardFinding = z.infer<typeof StewardFindingSchema>;
@@ -671,6 +687,35 @@ export const SkillProposalSchema = z
         });
       }
     }
+    // Codex R2 P2-1：证据身份必须落在 proposal 声明的受影响集合内。
+    const declaredScope = new Set(proposal.skillIds);
+    for (const evidence of proposal.evidence) {
+      if (!declaredScope.has(evidence.skillId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Evidence references skill ${evidence.skillId} outside the proposal skillIds scope.`,
+        });
+      }
+    }
+    // Codex R2 P1-2：资源映射的源身份按 patch kind 闭合（snapshot 侧对齐在 bind 层）。
+    if (proposal.patch.kind === "split" || proposal.patch.kind === "merge") {
+      const targets =
+        proposal.patch.kind === "split" ? proposal.patch.targets : [proposal.patch.target];
+      const allowedSources =
+        proposal.patch.kind === "split"
+          ? new Set<SkillId>([proposal.patch.source.skillId])
+          : new Set<SkillId>(proposal.patch.sources.map((source) => source.skillId));
+      for (const target of targets) {
+        for (const mapping of target.resources) {
+          if (!allowedSources.has(mapping.sourceSkillId)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `Resource mapping source ${mapping.sourceSkillId} is not a patch source skill (kind ${proposal.patch.kind}).`,
+            });
+          }
+        }
+      }
+    }
   });
 /** proposal。 */
 export type SkillProposal = z.infer<typeof SkillProposalSchema>;
@@ -861,18 +906,49 @@ export type ProposalBindFailure =
   | { code: "UNKNOWN_SKILL"; message: string }
   | { code: "STALE_REVISION"; message: string }
   | { code: "UNSUPPORTED_WRITE_SCOPE"; message: string }
-  | { code: "CONTRACT_VERSION"; message: string };
+  | { code: "CONTRACT_VERSION"; message: string }
+  /** Codex R2 P2-2：split/merge 新目标撞上快照现有目录（absent precondition 的确定性层）。 */
+  | { code: "TARGET_COLLISION"; message: string }
+  /** Codex R2 P1-2：映射源技能不在快照，或 sourcePath 不在该源的快照资源 manifest 内。 */
+  | { code: "RESOURCE_MAPPING"; message: string };
+
+/** bind 结果。 */
+export type ProposalBindResult = { ok: true } | { ok: false; failure: ProposalBindFailure };
 
 /**
- * 把 proposal 绑定到不可变快照：
+ * 把 proposal 绑定到不可变快照（Agent 面）：
  * - snapshotId 一致；contractVersion 与本模块版本一致；
  * - 全部受影响身份属于快照；expectedRevision 必须等于快照 revision；
- * - Global scope 只允许 disable（edit/split/merge → unsupported-write-scope）。
+ * - evidence 身份属于快照（Codex R2 P2-1）；
+ * - Global scope 只允许 disable（Codex R2 P1-3：enable 收敛为 Manager 派生专用，
+ *   任何 scope 的普通 agent proposal 都不能 enable）；
+ * - split/merge 新目标不得撞快照现有目录名；资源映射源/路径必须在快照 manifest 内
+ *   （Codex R2 P1-2/P2-2；活体 absent/hash 复核仍在 approval/apply 层保留）。
  */
 export function bindProposalToSnapshot(
   proposal: SkillProposal,
   snapshot: SkillStewardContextSnapshot,
-): { ok: true } | { ok: false; failure: ProposalBindFailure } {
+): ProposalBindResult {
+  return bindProposalCore(proposal, snapshot, { managerDerived: false });
+}
+
+/**
+ * Manager 派生反向 proposal 的内部 bind（Codex R2 P1-3）：
+ * 仅由 Manager approval/recovery 代码路径调用（入口不可被 Agent 构造），
+ * 允许 enable（含 Global 的 rollback-of-disable 逆），其余约束与 Agent bind 相同。
+ */
+export function bindManagerDerivedProposalToSnapshot(
+  proposal: SkillProposal,
+  snapshot: SkillStewardContextSnapshot,
+): ProposalBindResult {
+  return bindProposalCore(proposal, snapshot, { managerDerived: true });
+}
+
+function bindProposalCore(
+  proposal: SkillProposal,
+  snapshot: SkillStewardContextSnapshot,
+  options: { managerDerived: boolean },
+): ProposalBindResult {
   if (proposal.contractVersion !== SKILL_STEWARD_CONTRACT_VERSION) {
     return {
       ok: false,
@@ -891,16 +967,26 @@ export function bindProposalToSnapshot(
       },
     };
   }
+  if (proposal.patch.kind === "enable" && !options.managerDerived) {
+    return {
+      ok: false,
+      failure: {
+        code: "UNSUPPORTED_WRITE_SCOPE",
+        message:
+          "enable is a Manager-derived rollback inverse; agent proposals cannot enable skills.",
+      },
+    };
+  }
   if (
     snapshot.scopeKind === "global" &&
     proposal.patch.kind !== "disable" &&
-    proposal.patch.kind !== "enable"
+    !(proposal.patch.kind === "enable" && options.managerDerived)
   ) {
     return {
       ok: false,
       failure: {
         code: "UNSUPPORTED_WRITE_SCOPE",
-        message: `Global workspace supports analysis and approved disable/enable only; ${proposal.patch.kind} is rejected.`,
+        message: `Global workspace supports analysis and approved disable only; ${proposal.patch.kind} is rejected.`,
       },
     };
   }
@@ -925,6 +1011,64 @@ export function bindProposalToSnapshot(
           message: `Skill ${skillId} expected ${revision} but snapshot holds ${entry.revision}.`,
         },
       };
+    }
+  }
+  // Codex R2 P2-1：证据身份必须属于快照（proposal 层已限制在 skillIds 内）。
+  for (const evidence of proposal.evidence) {
+    if (!byId.has(evidence.skillId)) {
+      return {
+        ok: false,
+        failure: {
+          code: "UNKNOWN_SKILL",
+          message: `Evidence references skill ${evidence.skillId} which is not part of the snapshot.`,
+        },
+      };
+    }
+  }
+  if (proposal.patch.kind === "split" || proposal.patch.kind === "merge") {
+    const patch = proposal.patch;
+    const targets = patch.kind === "split" ? patch.targets : [patch.target];
+    // Codex R2 P2-2：新目标撞快照现有目录名 → deterministic absent-precondition 失败。
+    const existingNames = new Map(
+      snapshot.skills.map((skill) => [skill.directoryName, skill.skillId]),
+    );
+    for (const target of targets) {
+      if (existingNames.has(target.directoryName)) {
+        return {
+          ok: false,
+          failure: {
+            code: "TARGET_COLLISION",
+            message: `Target directory "${target.directoryName}" already exists in the snapshot (skill ${existingNames.get(target.directoryName)}).`,
+          },
+        };
+      }
+    }
+    // Codex R2 P1-2：每条映射的源技能必须在快照内，sourcePath 必须在该源的 manifest 中。
+    for (const target of targets) {
+      for (const mapping of target.resources) {
+        if (!byId.has(mapping.sourceSkillId)) {
+          return {
+            ok: false,
+            failure: {
+              code: "RESOURCE_MAPPING",
+              message: `Resource mapping source skill ${mapping.sourceSkillId} is not part of the snapshot.`,
+            },
+          };
+        }
+        const inManifest = snapshot.resources.some(
+          (resource) =>
+            resource.skillId === mapping.sourceSkillId && resource.relPath === mapping.sourcePath,
+        );
+        if (!inManifest) {
+          return {
+            ok: false,
+            failure: {
+              code: "RESOURCE_MAPPING",
+              message: `Resource ${mapping.sourcePath} is not in the snapshot manifest of skill ${mapping.sourceSkillId}.`,
+            },
+          };
+        }
+      }
     }
   }
   return { ok: true };

@@ -14,6 +14,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AGENT_ALLOWED_TOOLS,
+  SKILL_STEWARD_CONTRACT_VERSION,
   SkillProposalSchema,
   SkillStewardContextSnapshotSchema,
   StewardApprovalGrantSchema,
@@ -528,7 +529,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
   function disableProposal(snapshot: SkillStewardContextSnapshot, skillId: string): SkillProposal {
     const skill = snapshot.skills.find((entry) => entry.skillId === skillId)!;
     return {
-      contractVersion: "1.2.0",
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
       action: "disable",
       patch: {
         kind: "disable",
@@ -551,7 +552,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
   ): SkillProposal {
     const skill = snapshot.skills.find((entry) => entry.skillId === skillId)!;
     return {
-      contractVersion: "1.2.0",
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
       action: "edit",
       patch: {
         kind: "edit",
@@ -669,7 +670,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     const second = snapshot.skills.find((skill) => skill.directoryName === "second-skill")!;
     // 双 edit proposal；在 approve 后、apply 前外部修改第二个技能 → 第二步 stale → 补偿第一步。
     const proposal: SkillProposal = {
-      contractVersion: "1.2.0",
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
       action: "edit",
       patch: {
         kind: "edit",
@@ -719,18 +720,26 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
   });
 
   it("applies split with resource mapping and restores the full tree on rollback", async () => {
-    const { snapshot } = await seed(["fat-skill"]);
-    const source = snapshot.skills[0]!;
-    // 资源文件：手动放置（seed 只写 SKILL.md）。
+    const { target, snapshot: stale } = await seed(["fat-skill"]);
+    // 资源文件必须在快照前落盘：bind 只接受快照 manifest 内的映射源（R2 P1-2）。
     fs.mkdirSync(path.join(sandbox, "ws", "skills", "fat-skill", "scripts"), { recursive: true });
     fs.writeFileSync(
       path.join(sandbox, "ws", "skills", "fat-skill", "scripts", "run.sh"),
       "echo fat\n",
       "utf8",
     );
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      skillIds: stale.skills.map((skill) => skill.skillId),
+      promptVersion: stale.promptVersion,
+      toolVersion: stale.toolVersion,
+      capabilities: stale.capabilities,
+    });
+    const source = snapshot.skills[0]!;
     const service = approval();
     const proposal: SkillProposal = {
-      contractVersion: "1.2.0",
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
       action: "split",
       patch: {
         kind: "split",
@@ -748,7 +757,12 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
             frontmatter: { name: "fat-skill-exec", description: "Exec half." },
             body: "# fat-skill-exec\n\nExec.\n",
             resources: [
-              { sourcePath: "scripts/run.sh", targetPath: "scripts/run.sh", strategy: "copy" },
+              {
+                sourceSkillId: source.skillId,
+                sourcePath: "scripts/run.sh",
+                targetPath: "scripts/run.sh",
+                strategy: "copy",
+              },
             ],
           },
         ],
@@ -786,7 +800,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     fs.mkdirSync(path.join(sandbox, "ws", "skills", "fat-skill-plan"), { recursive: true });
     const service = approval();
     const proposal: SkillProposal = {
-      contractVersion: "1.2.0",
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
       action: "split",
       patch: {
         kind: "split",
@@ -1037,5 +1051,169 @@ describe("restart recovery (task 2.3e)", () => {
       await domain.steward.dispose();
       await domain.repository.dispose();
     }
+  });
+});
+
+describe("resource mapping source identity at apply time (Codex R2 P1-2)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = ProviderIdSchema.parse("openclaw");
+  const capabilities = {
+    backendId: "fixture",
+    version: "fixture-1",
+    streamingEvents: true,
+    cancellation: true,
+    permissionRequests: true,
+    executionRoot: "isolated" as const,
+  };
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-apply-test-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function seed(
+    skills: string[],
+  ): Promise<{ target: WorkspaceTarget; snapshot: SkillStewardContextSnapshot }> {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    for (const name of skills) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId,
+        directoryName: name,
+        frontmatter: { name, description: `${name} skill.` },
+        body: `# ${name}\n\nBody of ${name}.\n`,
+      });
+    }
+    const target = { workspaceId: workspace.id, providerId };
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    return { target, snapshot };
+  }
+
+  function approval() {
+    return createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+    });
+  }
+
+  async function seedTwoSourcesWithSameRelPath(): Promise<{
+    snapshot: SkillStewardContextSnapshot;
+    sourceA: SkillStewardContextSnapshot["skills"][number];
+    sourceB: SkillStewardContextSnapshot["skills"][number];
+  }> {
+    const { target, snapshot: stale } = await seed(["merge-left", "merge-right"]);
+    for (const [name, content] of [
+      ["merge-left", "left-origin\n"],
+      ["merge-right", "right-origin\n"],
+    ] as const) {
+      fs.mkdirSync(path.join(sandbox, "ws", "skills", name, "shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(sandbox, "ws", "skills", name, "shared", "notes.md"),
+        content,
+        "utf8",
+      );
+    }
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      skillIds: stale.skills.map((skill) => skill.skillId),
+      promptVersion: stale.promptVersion,
+      toolVersion: stale.toolVersion,
+      capabilities: stale.capabilities,
+    });
+    const sourceA = snapshot.skills.find((skill) => skill.directoryName === "merge-left")!;
+    const sourceB = snapshot.skills.find((skill) => skill.directoryName === "merge-right")!;
+    return { snapshot, sourceA, sourceB };
+  }
+
+  function mergeProposal(
+    snapshot: SkillStewardContextSnapshot,
+    sourceA: SkillStewardContextSnapshot["skills"][number],
+    sourceB: SkillStewardContextSnapshot["skills"][number],
+  ): SkillProposal {
+    return {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "merge",
+      patch: {
+        kind: "merge",
+        snapshotId: snapshot.id,
+        sources: [
+          { skillId: sourceA.skillId, expectedRevision: sourceA.revision },
+          { skillId: sourceB.skillId, expectedRevision: sourceB.revision },
+        ],
+        target: {
+          directoryName: "merged-skill",
+          frontmatter: { name: "merged-skill", description: "Merged." },
+          body: "# merged-skill\n",
+          resources: [
+            {
+              // 显式指认 B 为源：两个源都有 shared/notes.md，apply 必须取 B 的字节。
+              sourceSkillId: sourceB.skillId,
+              sourcePath: "shared/notes.md",
+              targetPath: "shared/notes.md",
+              strategy: "copy",
+            },
+          ],
+        },
+      },
+      rationale: "merge two skills with same-named resources",
+      findingIds: [],
+      evidence: [{ skillId: sourceA.skillId, snippet: "overlap" }],
+      skillIds: [sourceA.skillId, sourceB.skillId],
+      observedRevisions: [
+        { skillId: sourceA.skillId, revision: sourceA.revision },
+        { skillId: sourceB.skillId, revision: sourceB.revision },
+      ],
+    };
+  }
+
+  it("copies from the mapping's explicit source skill, not the first source", async () => {
+    const { snapshot, sourceA, sourceB } = await seedTwoSourcesWithSameRelPath();
+    const service = approval();
+    const proposalId = service.submit(mergeProposal(snapshot, sourceA, sourceB), snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    const copied = fs.readFileSync(
+      path.join(sandbox, "ws", "skills", "merged-skill", "shared", "notes.md"),
+      "utf8",
+    );
+    expect(copied).toBe("right-origin\n");
+  });
+
+  it("fails closed with zero residue when the source resource drifts from the manifest hash", async () => {
+    const { snapshot, sourceA, sourceB } = await seedTwoSourcesWithSameRelPath();
+    const service = approval();
+    const proposalId = service.submit(mergeProposal(snapshot, sourceA, sourceB), snapshot);
+    await service.approve(proposalId, "human-ui");
+    // 批准后外部篡改 B 的资源：apply 必须按快照 manifest hash 拒绝并补偿。
+    fs.writeFileSync(
+      path.join(sandbox, "ws", "skills", "merge-right", "shared", "notes.md"),
+      "tampered\n",
+      "utf8",
+    );
+    const { outcome } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("compensated");
+    expect(fs.existsSync(path.join(sandbox, "ws", "skills", "merged-skill"))).toBe(false);
   });
 });

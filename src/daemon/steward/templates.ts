@@ -14,8 +14,12 @@
 import type {
   SkillStewardContextSnapshot,
   SkillStewardTask,
+  TaskBindFailure,
 } from "../../shared/contracts/skill-steward.js";
-import { SKILL_STEWARD_CONTRACT_VERSION } from "../../shared/contracts/skill-steward.js";
+import {
+  SKILL_STEWARD_CONTRACT_VERSION,
+  bindTaskToSnapshot,
+} from "../../shared/contracts/skill-steward.js";
 import { STEWARD_PROMPT_VERSION, STEWARD_TOOL_VERSION } from "./prompts.js";
 
 /** 模板渲染输入：任务 + 其绑定的不可变快照。 */
@@ -83,8 +87,16 @@ function renderOrganize(input: StewardTaskTemplateInput): string {
   ].join("\n");
 }
 
-/** 组装完整 user turn：版本头 + 快照摘要 + 任务正文 + 输出约束。 */
-export function renderStewardTaskTurn(input: StewardTaskTemplateInput): string {
+/**
+ * 组装完整 user turn：版本头 + 快照摘要 + 任务正文 + 输出约束。
+ * Codex R2 P2-4：渲染入口强制 bindTaskToSnapshot——错配 task 不得渲染成 user turn
+ * （返回类型化失败；调用方把失败投影为 run 失败，而不是吞掉身份漂移）。
+ */
+export function renderStewardTaskTurn(
+  input: StewardTaskTemplateInput,
+): { ok: true; text: string } | { ok: false; failure: TaskBindFailure } {
+  const bound = bindTaskToSnapshot(input.task, input.snapshot);
+  if (!bound.ok) return { ok: false, failure: bound.failure };
   const { task } = input;
   const body =
     task.kind === "check"
@@ -92,7 +104,7 @@ export function renderStewardTaskTurn(input: StewardTaskTemplateInput): string {
       : task.kind === "optimize"
         ? renderOptimize(input)
         : renderOrganize(input);
-  return [
+  const text = [
     `Contract ${SKILL_STEWARD_CONTRACT_VERSION} · prompt ${STEWARD_PROMPT_VERSION} · tools ${STEWARD_TOOL_VERSION}`,
     "",
     snapshotSummary(input.snapshot),
@@ -109,4 +121,5 @@ export function renderStewardTaskTurn(input: StewardTaskTemplateInput): string {
   ]
     .filter((line) => line !== "")
     .join("\n");
+  return { ok: true, text };
 }

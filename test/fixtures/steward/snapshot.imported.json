@@ -49,6 +49,20 @@
       "hash": "bbbbbbbbaaaaaaaaccccccccddddddddbbbbbbbbaaaaaaaaccccccccdddddddd",
       "byteSize": 64,
       "kind": "file"
+    },
+    {
+      "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+      "relPath": "references/checklist.md",
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "byteSize": 96,
+      "kind": "file"
+    },
+    {
+      "skillId": "sk_a1b2c3d4e5f6a7b8c9d0e1f2",
+      "relPath": "assets/web.env",
+      "hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "byteSize": 48,
+      "kind": "file"
     }
   ],
   "promptVersion": "1.0.0",

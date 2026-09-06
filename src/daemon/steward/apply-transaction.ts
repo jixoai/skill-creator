@@ -14,6 +14,7 @@
  *       （保留 journal，封锁 target）。
  *   [4] 审计事实：输出 mutation 列表（前后 revision/启停语义），供 audit-store 持久化。
  */
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
@@ -186,7 +187,6 @@ export async function applyProposalTransaction(
         // ---- 前置校验 + 写前记账：源 revision、目标目录必须不存在。 ----
         const sources =
           proposal.patch.kind === "split" ? [proposal.patch.source] : proposal.patch.sources;
-        const primarySourceId = sources[0]!.skillId;
         for (const source of sources) {
           const entry = snapshot.skills.find((skill) => skill.skillId === source.skillId);
           if (!entry)
@@ -236,30 +236,65 @@ export async function applyProposalTransaction(
             semantic: "content",
           });
           // ---- 资源映射（copy/move/reference），逐条记账。 ----
-          const sourceEntry = snapshot.skills.find((skill) => skill.skillId === primarySourceId);
-          if (!sourceEntry)
-            throw new DomainError("NOT_FOUND", "Split/merge source missing from snapshot.");
+          // Codex R2 P1-2：每条映射按自己的 sourceSkillId 解析源目录（不再吃 primarySourceId），
+          // 复制前对源文件做存在性 + sha256 复核（对齐快照 manifest）。
           for (const mapping of target.resources) {
-            const from = path.join(root, sourceEntry.directoryName, mapping.sourcePath);
+            const mappingSource = snapshot.skills.find(
+              (skill) => skill.skillId === mapping.sourceSkillId,
+            );
+            if (!mappingSource) {
+              throw new DomainError(
+                "NOT_FOUND",
+                `Resource mapping source missing from snapshot: ${mapping.sourceSkillId}`,
+              );
+            }
+            const from = path.join(root, mappingSource.directoryName, mapping.sourcePath);
             const to = path.join(root, target.directoryName, mapping.targetPath);
             assertPathInside(root, from);
             assertPathInside(root, to);
             assertPathInside(path.join(root, target.directoryName), to);
+            const manifestEntry = snapshot.resources.find(
+              (resource) =>
+                resource.skillId === mapping.sourceSkillId &&
+                resource.relPath === mapping.sourcePath,
+            );
+            if (!manifestEntry) {
+              throw new DomainError(
+                "INVALID_OPERATION",
+                `Resource ${mapping.sourcePath} of skill ${mapping.sourceSkillId} is not in the snapshot manifest.`,
+              );
+            }
+            let sourceBytes: Buffer;
+            try {
+              sourceBytes = await fs.readFile(from);
+            } catch {
+              throw new DomainError(
+                "NOT_FOUND",
+                `Resource source missing on disk: ${mappingSource.directoryName}/${mapping.sourcePath}`,
+              );
+            }
+            const liveHash = createHash("sha256").update(sourceBytes).digest("hex");
+            if (liveHash !== manifestEntry.hash) {
+              throw new DomainError(
+                "CONFLICT",
+                `Resource ${mapping.sourcePath} drifted from the snapshot manifest hash.`,
+              );
+            }
             await recordStep("resource", {
               kind: "resource",
               strategy: mapping.strategy,
-              from: mapping.sourcePath,
+              from: `${mappingSource.directoryName}/${mapping.sourcePath}`,
               to: `${target.directoryName}/${mapping.targetPath}`,
             });
             await fs.mkdir(path.dirname(to), { recursive: true });
             if (mapping.strategy === "reference") {
               await fs.writeFile(
                 to,
-                `reference: ../../${sourceEntry.directoryName}/${mapping.sourcePath}\n`,
+                `reference: ../../${mappingSource.directoryName}/${mapping.sourcePath}\n`,
                 "utf8",
               );
             } else {
-              await fs.copyFile(from, to);
+              await fs.writeFile(to, sourceBytes);
             }
             mutations.push({
               relPath: `${target.directoryName}/${mapping.targetPath}`,
