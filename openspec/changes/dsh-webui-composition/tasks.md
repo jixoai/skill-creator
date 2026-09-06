@@ -7,10 +7,9 @@
   - Steps: 逐个读取锁定 commit 中候选 package 的 `package.json`、`exports`、`types`、`peerDependencies`、构建脚本和最小实例测试；核对 `@deepseek-ai/dsh-web-app`、`@deepseek-ai/dsh-client-web`、client modules、ui session/chat/approval 的真实 package name；再用已发布包或可复现 commit tarball/workspace pack 做 clean install，记录 browser entry 与实际可加载的 `AppWebEntry`。
   - Acceptance: 事实表包含 package name、版本/commit、entry、peer graph、安装来源和加载结果；clean install 能解析同一依赖图。任何版本/缺包/exports/peer/build/安装失败都变成 typed unavailable 和恢复命令；不得猜测 `dsh-acp` 或高层嵌入 API。
 
-- [ ] 1.1 建立官方 DSH web host 的最小真实启动。
-  - Files: `dsh-web/` 或 `webui/dsh/`, `src/daemon/web-server.ts`, `scripts/dsh-web-smoke.sh.ts`。
-  - Steps: 使用官方 web profile 的 `AppWebEntry`、Cordis loader、client module graph 和 boot manifest；由当前 daemon 提供 loopback RPC/remote namespace；不使用 iframe 或静态 demo。
-  - Acceptance: 在干净临时 home 启动一次真实 DSH web host，记录 boot graph、plugin activation、session connection 和失败恢复证据。
+- [x] 1.1 建立官方 DSH web host 的最小真实启动。
+  - Files: `dsh-web/` 或 `webui/dsh/`, `src/daemon/web-server.ts`, `scripts/dsh-web-smoke.sh.ts`.
+  - Evidence: 26fadd8 —— `src/daemon/steward/dsh-web-host.ts`：真实 Cordis Loader + 五个官方 rows（host-webserver / credentials-local（具体 provider，满足 client-connection 的 ctx.credentials seam）/ client-connection / client-modules / web-app）；web-app 自行挂载官方 dsh-web-frontend dist（无 iframe、无静态 demo）；loader baseUrl 使 client-modules 把裸包名 entry 解析到 dsh.client manifest 并组装 window.__DSH_BOOT__。`pnpm exec vitest run test/dsh-web-host.test.ts` 4 passed：loopback OS-assigned 端口、无认证 401、?token= 握手 303+Set-Cookie、会话 index 200 且注入 __DSH_BOOT__、/api fence 401、dispose→二次 boot ready。`pnpm exec tsx scripts/dsh-web-smoke.sh.ts` 在干净临时 home（SKILL_CREATOR_HOME+DSH_HOME 隔离）跑 primary+recovery 双启动，证据落 artifacts/dsh-web-smoke.json（boot graph entries/activationOrder、session connection=token→cookie 会话、16 个 client 模块引用、恢复 ready）。daemon HTTP 反代与 remote namespace 桥按任务归属留 3.1a（同一 host 挂 Manager），本任务不提前做半成品 wiring。
 
 - [ ] 1.2 将 Skill Creator Manager 注册为 DSH client plugin。
   - Files: `packages/skill-creator-dsh-client/` 或等价 `webui/dsh-plugin/`, `package.json`, `cordis.patch.yml`/profile manifest。
