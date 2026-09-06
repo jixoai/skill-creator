@@ -1,6 +1,6 @@
 # skill-steward-contracts verification
 
-记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `f2519cc → R6 整改提交`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
+记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `90895f7（R7 整改）→ R8 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
 
 ## 责任矩阵
 
@@ -78,15 +78,28 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - P2-2 修复：verification 顶部边界更新为 1.5.0/当前提交；fmt 失败计数以复核独立运行为准（R6 列 7 个跨 change 文件，本 change 目标文件不在其列）。
   - 测试（R6 负例 ×4）：journal 删除 → applyRollback recovery-required（非假 rolled-back）；journal backupRef 篡改为外部绝对路径 → replay 拒绝且源不被外部字节污染；backup 根预置 symlink → apply fail-closed 且外部目录零写入；源位置预置同字节 symlink → replay 拒绝（not a regular file）且外部文件不被触碰。
   - 门禁（R6 整改后）：contracts 42/42、runtime 47/47、全量 394/394（50 files）、typecheck 0、webui check 0/0、openspec 9/9。
-- R7 复审已随本整改提交（结论待出；复核回调为后台 codex-callback.sh 模式）。
+- R7（3.0/10，不通过，报告 /tmp/stage1-contracts-review-round7.md；独立 worktree 90895f7）→ R8 整改：
+  - 判定：R6 的逃逸不清零、静态 backup root 拒绝、空 journal 拒绝被确认；但独立探针复现 10 项新事实——源删除/目标写/backup 写的检查后换体（外部文件被真实删除/写入字节后才发现）、journal 删行/坏行/未知 step 仍可假 rolled-back、`fromRel`/`directoryName` 穿越 Provider 根（根外建文件、递归删根外目录）、backupRef 缺 hash 时同根任意字节可恢复进 Provider。
+  - P1-1 修复（源删除）：`unlinkFileVerified`——lstat 捕获身份且 **nlink===1 独占 inode 策略**（hardlink 源直接拒绝）→ O_NOFOLLOW fd 打开且 fstat 命中捕获身份 → Linux 走 `/proc/self/fd/<已验证父目录fd>/` 锚定 unlink（unlinkat 等价）；macOS（/dev/fd 不支持子路径）复验父链后 unlink → 删除后 lstat ENOENT **且 fstat(fd).nlink===0**（证明删的是已验证 inode，而非"路径消失"）；任一不成立 → UNAVAILABLE/recovery-required。探针 10 的 hardlink 担忧由 nlink 策略一并关闭（负例测试）。
+  - P1-2 修复（目标/备份/恢复写入）：`writeFileExclusiveVerified`——exclusive fd 打开后、**写任何字节之前**先锚定 realpath 位置 + lstat inode === fd inode（父目录/backup 根在检查与 open 之间换体时，最多在外部残留 0 字节占位，Manager 字节不越界落地）；写入走 fd + `handle.sync()`（**失败即 UNAVAILABLE，不再吞掉**——sync 失败阻断后续源删除）；写后再次复验位置与身份。
+  - P1-3 修复（journal truth）：新 `src/daemon/steward/journal-schema.ts`——journal 行为闭合 Zod discriminated union（step/detail 逐字面量、strictObject 拒未知字段、move 必带 backupRef+sourceSha256、非 move 禁带备份事实）；`readJournal` 严格化（ENOENT→NOT_FOUND；不可读/坏行/未知 step→UNAVAILABLE；**seq 必须 1..N 连续**，删行/重排即拒）；apply 成功后追加 **commit 终态行**（proposalId 绑定）；`applyRollback` 经 `assertCommittedJournal` 回放闸——无 commit 行（崩溃/截断/删行）或 proposalId 不符 → recovery-required，绝不 rolled-back；`undoStep` 的 default 静默返回被闭合 union 消灭。
+  - P1-4 修复（路径穿越）：journal 的 `from`/`to` 复用共享 `RelPathSchema`、`directoryName` 复用 `SkillDirectoryNameSchema`（解析层即死）；`undoJournalSteps` 入口对每条 entry 再过 schema（直调篡改也在文件系统操作前拒绝）；undo 删除目录绑定 **本 proposal 创建的目标集合**（`createdDirectoriesOf`——journal 任意指定目录/穿越递归删除被拒）+ lstat directory + canonical 一致 + 删后 ENOENT。
+  - P1-5 修复（backup 完整性绑定）：`<backupRoot>/manifest.jsonl` Manager 生成并持久化（ref/seq/from/sha256/byteSize），备份写入顺序 = 字节落盘+fsync → 目录 fsync → manifest 行+fsync → journal 记账；回放按 manifest 精确匹配（缺行/坏行/重复 ref/seq-from-sha 不符/字节 hash 不符一律 recovery），journal 缺 sourceSha256 在解析层即拒。
+  - P2-1 修复（持久化栅栏）：journal 从按路径 `appendFile` 改为**常驻 0600 append fd + 逐行 fsync**（打开失败留在 try 内走补偿路径，输出 typed 终态不裸抛）。
+  - P2-2 修复：全树 `vp fmt` 归一（7 个跨 change 文件已格式化并单独提交；dsh-webui verification 中被 formatter 吞掉的 `__DSH_BOOT__`/`/ws/acp/*` 字面量以 code span 修复）；本文件边界更新为本提交。
+  - 模块拆分：mutation 权威原语（fd 锚定读/写/删 + backup manifest）→ 新 `src/daemon/steward/fs-authority.ts`；journal 事实形状与严格读取 → 新 `src/daemon/steward/journal-schema.ts`；`apply-transaction.ts` 回归纯编排（文件意图法）。
+  - 测试（R8 负例 ×8）：readJournal 对缺失/不可读/坏行/未知 step/删行（seq 断裂）全部 typed 拒绝；move 行缺 sourceSha256 解析层拒绝；剥离 commit 行 → applyRollback recovery-required（非假 rolled-back）；commit 行绑定他人 proposalId → recovery-required；`from` 穿越/`directoryName` 穿越/合法名但非本 proposal 创建 → 回放拒绝且根外 sentinel 文件完好；备份字节篡改（同长度）/manifest 缺失/坏行/重复 → 回放拒绝且源不被伪造恢复；hardlink 源 → nlink 策略拒绝 + compensated（源与外部 link 完好、目标零残留）；journal 0600 + 终态 commit 行落盘断言。
+  - 已知残余（诚实声明）：macOS 无 fd 相对删除/创建，竞态残余为「外部最多出现一个 0 字节占位文件（写入前锚定即止损）」或「误删外部文件后立即以 nlink 证明转为 typed recovery-required（事实入 journal/审计）」；平台级原子化需 unlinkat/openat，Node 不暴露。Linux 已由 /proc/self/fd 锚定达成。journal 文件的 append fd 逐行 fsync 后仍无跨文件崩溃顺序证明（backup→journal 的持久顺序由先 backup 后 journal 的写入顺序 + 各自 fsync 保证）。
+  - 门禁（R8 整改后）：contracts 42/42、runtime 55/55、全量见下轮记录、typecheck 0、webui check 0/0、openspec 9/9、全树 `vp fmt --check` 绿。
+- R8 复审已随本整改提交（结论待出；复核回调为后台 codex-callback.sh 模式）。
 
 ## Deferred（owner 与完成边界）
 
 - **per-tool payload typing（R1 P2-4 / R2 P2-3）**：`SkillToolCallSchema.input/result.value` 仍为 `z.unknown()`。Owner：`dsh-runtime-integration`（DSH 侧 defineTool 已按 ParameterSchemaSpec 逐工具声明输入；contract 层 per-tool discriminated input/result schema 必须在 DSH adapter 以「契约层解析」替代「桥接透传」前关闭——即 dsh-webui-composition 之前）。不升级为阶段 1 P1 的理由：有限域工具与 principal 边界已闭合，无 Manager 写入绕过（R2 复核结论一致）。
-- **transaction 形状收紧（R2 P2-5）**：grant inputRevisions exact-set、audit 资源 source/hash/backup 字段、journal entry versioned union + recovery parser schema 化。Owner：`skill-steward-runtime` 剩余任务（2.3e recovery gate / 2.4a）与 `steward-product-workflow`；在 rollback/recovery 面向用户开放前必须关闭。
+- **transaction 形状收紧（R2 P2-5）**：~~journal entry versioned union + recovery parser schema 化~~（R8 已关闭：`journal-schema.ts` 闭合 union + commit 终态行 + manifest 绑定）；剩余 grant inputRevisions exact-set 与 audit 资源 source/hash/backup 字段。Owner：`skill-steward-runtime` 剩余任务（2.3e recovery gate / 2.4a）与 `steward-product-workflow`；在 rollback/recovery 面向用户开放前必须关闭。
 - EOF 空行（R2 P2-6 提及的 audit-store.ts 文件尾）：已随 3.3 重构与 formatter 消除（`git diff --check` 于 df75447 边界干净）。
 
 ## 未验证项（诚实声明）
 
-- 本 change 仅契约层：Agent runtime 接入、WebUI、daemon RPC 暴露属后续阶段（R2 复审时 dsh-runtime-integration 3.1-3.4 已并行推进，但不作为本 change 完成证据）。按 tasks.md Review gate，契约 ready 以复核通过为准（R4 待出）。
+- 本 change 仅契约层：Agent runtime 接入、WebUI、daemon RPC 暴露属后续阶段（R2 复审时 dsh-runtime-integration 3.1-3.4 已并行推进，但不作为本 change 完成证据）。按 tasks.md Review gate，契约 ready 以复核通过为准（R8 待出）。
 - `demo/contracts-reference.html` 未作为任何实现依据（`rg -rn "contracts-reference" src webui/src test` 零引用）。

@@ -1,0 +1,507 @@
+/**
+ * Skill Steward 文件系统 mutation 权威层（Codex R7 P1-1/P1-2/P1-5/P2-1）。
+ *
+ * 用户原始需求 [2026-09-06]（transaction-contract.md）：「普通失败补偿到原状态；补偿
+ * 遇到外部修改或 I/O 错误时进入 recovery-required」。
+ * Codex R7 复核（/tmp/stage1-contracts-review-round7.md）：「源删除和目标/备份写入
+ * 仍有检查后换体窗口」「backupRef 只有名称白名单，没有 operation/source 完整性绑定」
+ * 「journal 仍 appendFile……fd sync 失败被吞」。
+ *
+ * 正交意图：
+ *   [1] fd 身份锚定的 leaf 读/写/删原语：exclusive open 后、写任何字节之前先锚定
+ *       canonical 位置与 inode（换体 → 0 字节即止损）；删除以 fstat.nlink===0 证明
+ *       删掉的是已验证 inode，而不是「路径消失」；fd sync 失败一律 typed 失败。
+ *   [2] Manager-owned move 备份事实：备份根 containment + manifest.jsonl
+ *       （ref/seq/from/sha256/byteSize）与 journal 记账一一绑定；回放缺行、重复、
+ *       hash/来源不符一律拒绝，杜绝「同根任意字节恢复进 Provider」。
+ * 妥协声明：Node 无 unlinkat/openat，无法做平台级原子 leaf unlink。Linux 用
+ *   /proc/self/fd 的已验证父目录锚定 unlink；macOS（/dev/fd 不支持子路径遍历）只能
+ *   「复验父链 → unlink → inode/存在性证明」——竞态残余最多误删外部文件并立即转为
+ *   typed recovery-required（事实进 journal/审计），绝不谎称成功。
+ */
+import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { DomainError } from "../domain-error.js";
+import { BackupRefSchema } from "./journal-schema.js";
+
+const O_NOFOLLOW = (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
+const IS_LINUX = process.platform === "linux";
+
+export function sha256Hex(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * 目录父链无 symlink：canonical realpath 必须与 lexical 位置一致（任一祖先被换成
+ * symlink 都会不等 → 拒绝）。写入/删除前的静态防线。
+ */
+export async function assertNoSymlinkAncestors(to: string, root: string): Promise<void> {
+  const realRoot = await fs.realpath(root);
+  const parent = path.dirname(to);
+  const realParent = await fs.realpath(parent);
+  const lexicalParent = path.join(realRoot, path.relative(root, parent));
+  if (realParent !== lexicalParent) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Resource target path contains a symlink ancestor: ${path.relative(root, to)}`,
+    );
+  }
+}
+
+/** 目录 fsync（崩溃持久化栅栏；失败 = typed UNAVAILABLE，不静默放行）。 */
+export async function syncDir(dir: string): Promise<void> {
+  try {
+    const handle = await fs.open(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  } catch (error) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `durability sync failed for ${dir} (${error instanceof Error ? error.message : String(error)}); recovery required`,
+    );
+  }
+}
+
+interface LeafIdentity {
+  dev: number;
+  ino: number;
+  nlink: number;
+  size: number;
+}
+
+async function captureLeafIdentity(
+  leaf: string,
+  label: string,
+  expectedByteSize?: number,
+): Promise<LeafIdentity> {
+  let stat: import("node:fs").Stats;
+  try {
+    stat = await fs.lstat(leaf);
+  } catch {
+    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
+  }
+  if (!stat.isFile()) {
+    throw new DomainError("INVALID_OPERATION", `Resource source is not a regular file: ${label}`);
+  }
+  if (expectedByteSize !== undefined && stat.size !== expectedByteSize) {
+    throw new DomainError(
+      "CONFLICT",
+      `Resource ${label} live size ${stat.size} differs from the expected byteSize ${expectedByteSize}.`,
+    );
+  }
+  return { dev: stat.dev, ino: stat.ino, nlink: stat.nlink, size: stat.size };
+}
+
+/**
+ * Codex R4/R5 P1-1（读取侧，维持）：canonical 一致 + lstat 身份捕获 + O_NOFOLLOW
+ * fd + fstat 身份一致 + fd 读 + 读后稳定。
+ */
+export async function readResourceBytesStrict(
+  from: string,
+  root: string,
+  expectedByteSize: number,
+  label: string,
+): Promise<Buffer> {
+  const realRoot = await fs.realpath(root);
+  const lexicalPosition = path.join(realRoot, path.relative(root, from));
+  const realFrom = await realpathOrNotFound(from, label);
+  if (realFrom !== lexicalPosition) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Resource source path contains a symlink ancestor (escapes the provider root): ${label}`,
+    );
+  }
+  const identity = await captureLeafIdentity(from, label, expectedByteSize);
+  let handle: import("node:fs/promises").FileHandle;
+  try {
+    handle = await fs.open(from, fs.constants.O_RDONLY | O_NOFOLLOW);
+  } catch {
+    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
+  }
+  let bytes: Buffer;
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new DomainError("INVALID_OPERATION", `Resource source is not a regular file: ${label}`);
+    }
+    if (stat.size !== expectedByteSize) {
+      throw new DomainError(
+        "CONFLICT",
+        `Resource ${label} live size ${stat.size} differs from the snapshot manifest byteSize ${expectedByteSize}.`,
+      );
+    }
+    if (stat.dev !== identity.dev || stat.ino !== identity.ino) {
+      throw new DomainError(
+        "INVALID_OPERATION",
+        `Resource source identity changed between validation and open (path race): ${label}`,
+      );
+    }
+    bytes = await handle.readFile();
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+  const realFromAfter = await realpathOrNotFound(from, label);
+  if (realFromAfter !== realFrom) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Resource source path raced after read (canonical position moved): ${label}`,
+    );
+  }
+  return bytes;
+}
+
+async function realpathOrNotFound(target: string, label: string): Promise<string> {
+  try {
+    return await fs.realpath(target);
+  } catch {
+    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
+  }
+}
+
+/**
+ * Codex R7 P1-2/P2-1：fd 锚定的 exclusive 写。
+ * open("wx") 成功后、写任何字节之前：realpath 必须等于 canonical lexical 位置，且
+ * 该位置 inode === fd inode——父目录/备份根在检查与 open 之间换体时，字节不会
+ * 越界落地（外部最多残留一个 0 字节占位文件，记录路径后交给人工恢复）。
+ * 写入走 fd + fsync（失败 = UNAVAILABLE，绝不吞）；写后再次复验位置与身份。
+ */
+export async function writeFileExclusiveVerified(
+  to: string,
+  root: string,
+  bytes: Buffer,
+  label: string,
+): Promise<void> {
+  const realRoot = await fs.realpath(root);
+  const lexicalPosition = path.join(realRoot, path.relative(root, to));
+  await assertNoSymlinkAncestors(to, root);
+  let handle: import("node:fs/promises").FileHandle;
+  try {
+    handle = await fs.open(to, "wx");
+  } catch (error) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Resource target already exists or cannot be created exclusively: ${label} (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+  let identity: { dev: number; ino: number };
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new DomainError("INVALID_OPERATION", `Resource target is not a regular file: ${label}`);
+    }
+    identity = { dev: stat.dev, ino: stat.ino };
+    // 写前锚定：fd 指向的 inode 必须就是 canonical 位置上的那个（换体即止损）。
+    const realTo = await fs.realpath(to);
+    if (realTo !== lexicalPosition) {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Resource target escaped the root before any bytes were written (path race; at most an empty placeholder remains at ${realTo}); recovery required: ${label}`,
+      );
+    }
+    const atPosition = await fs.lstat(to);
+    if (atPosition.dev !== identity.dev || atPosition.ino !== identity.ino) {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Resource target identity drifted before write (path race); recovery required: ${label}`,
+      );
+    }
+    await handle.writeFile(bytes);
+    await handle.sync();
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+  const realToAfter = await fs.realpath(to);
+  if (realToAfter !== lexicalPosition) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `Resource target escaped the provider root after write (path race); external path untouched, recovery required: ${label}`,
+    );
+  }
+  const after = await fs.lstat(to);
+  if (after.dev !== identity.dev || after.ino !== identity.ino) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `Resource target identity changed after write (path race); recovery required: ${label}`,
+    );
+  }
+}
+
+/**
+ * Codex R5/R6 P1-1（恢复侧写入）：move 补偿/rollback 的源字节还原——父链 canonical
+ * 校验 + exclusive 写（已存在则要求字节一致），杜绝恢复路径经换体 symlink 写到
+ * Provider 外部。
+ */
+export async function restoreResourceBytesStrict(
+  to: string,
+  root: string,
+  bytes: Buffer,
+  label: string,
+): Promise<void> {
+  await assertNoSymlinkAncestors(to, root);
+  let stat: import("node:fs").Stats | null = null;
+  try {
+    stat = await fs.lstat(to);
+  } catch {
+    stat = null;
+  }
+  if (stat !== null) {
+    // Codex R6 P1-2：现存 leaf 必须是 regular file——symlink（即便字节相同）
+    // 不是恢复成功，是外部可控制的路径身份。
+    if (!stat.isFile()) {
+      throw new Error(`move restore target exists but is not a regular file: ${label}`);
+    }
+    const current = await fs.readFile(to);
+    if (!current.equals(bytes)) {
+      throw new Error(`move restore target exists with different bytes (external drift): ${label}`);
+    }
+    return;
+  }
+  await writeFileExclusiveVerified(to, root, bytes, label);
+}
+
+/** Linux：从 root 起逐级 O_DIRECTORY|O_NOFOLLOW 锚定打开目录链，返回末级父目录句柄。 */
+async function openVerifiedParentFd(
+  leaf: string,
+  root: string,
+): Promise<import("node:fs/promises").FileHandle> {
+  const rel = path.relative(root, path.dirname(leaf));
+  let current = await fs.open(
+    await fs.realpath(root),
+    fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | O_NOFOLLOW,
+  );
+  try {
+    if (rel !== "") {
+      for (const segment of rel.split(path.sep)) {
+        const next = await fs.open(
+          `/proc/self/fd/${current.fd}/${segment}`,
+          fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | O_NOFOLLOW,
+        );
+        await current.close().catch(() => undefined);
+        current = next;
+      }
+    }
+    return current;
+  } catch (error) {
+    await current.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Codex R7 P1-1：身份绑定删除。
+ *   [1] nlink 必须为 1——与外部共享 inode 的源（hardlink）无法证明独占，直接拒绝；
+ *   [2] O_NOFOLLOW 打开 leaf fd，fstat 必须命中捕获身份（fd ↔ inode 绑定）；
+ *   [3] Linux：已验证父目录 fd 锚定 unlink（/proc/self/fd 等价 unlinkat）；
+ *       macOS：复验父链后 unlink（平台无 fd 相对删除）；
+ *   [4] 删除后：路径 ENOENT 且 fstat(fd).nlink===0——证明删掉的就是已验证 inode；
+ *       任一不成立（检查后换体删错外部文件等）→ UNAVAILABLE recovery-required。
+ */
+export async function unlinkFileVerified(leaf: string, root: string, label: string): Promise<void> {
+  await assertNoSymlinkAncestors(leaf, root);
+  const identity = await captureLeafIdentity(leaf, label);
+  if (identity.nlink !== 1) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Resource source is hardlinked (nlink=${identity.nlink}); exclusive-inode policy refuses to move it: ${label}`,
+    );
+  }
+  const handle = await fs.open(leaf, fs.constants.O_RDONLY | O_NOFOLLOW).catch(() => null);
+  if (handle === null) {
+    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
+  }
+  try {
+    const stat = await handle.stat();
+    if (stat.dev !== identity.dev || stat.ino !== identity.ino) {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Resource source identity changed before delete (path race); recovery required: ${label}`,
+      );
+    }
+    if (IS_LINUX) {
+      const parent = await openVerifiedParentFd(leaf, root);
+      try {
+        await fs.unlink(`/proc/self/fd/${parent.fd}/${path.basename(leaf)}`);
+      } finally {
+        await parent.close().catch(() => undefined);
+      }
+    } else {
+      // macOS：立即复验父链后按路径 unlink；证明交由 [4] 的 inode 事实。
+      await assertNoSymlinkAncestors(leaf, root);
+      await fs.rm(leaf, { force: true });
+    }
+    const stillExists = await fs.lstat(leaf).then(
+      () => true,
+      () => false,
+    );
+    if (stillExists) {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Resource source path survived delete (path race); recovery required: ${label}`,
+      );
+    }
+    const after = await handle.stat();
+    if (after.nlink !== 0) {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Resource source deletion removed a different inode (path race; captured dev=${identity.dev} ino=${identity.ino} still linked); recovery required: ${label}`,
+      );
+    }
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// [2] Manager-owned move 备份事实（Codex R7 P1-5）
+// ---------------------------------------------------------------------------
+
+/** backup manifest 行：ref 与 seq、来源路径、hash、字节量一一绑定。 */
+export interface BackupManifestEntry {
+  ref: string;
+  seq: number;
+  from: string;
+  sha256: string;
+  byteSize: number;
+}
+
+/**
+ * Codex R6 P1-2：backup 根目录——由 canonical journalPath 派生（`<journal>.backups`），
+ * 每次使用前校验 canonical containment（预置/换体 symlink 直接拒绝）。
+ */
+export async function prepareBackupRoot(journalPath: string): Promise<string> {
+  const backupDir = `${journalPath}.backups`;
+  const canonicalParent = await fs.realpath(path.dirname(journalPath));
+  await fs.mkdir(backupDir, { recursive: true }).catch(() => undefined);
+  const realBackup = await fs.realpath(backupDir);
+  const lexicalBackup = path.join(canonicalParent, path.basename(backupDir));
+  if (realBackup !== lexicalBackup) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `move backup root escaped its manager-owned location (path race); recovery required: ${backupDir}`,
+    );
+  }
+  return realBackup;
+}
+
+/**
+ * 写一份 move 备份并登记 manifest：先备份字节（exclusive fd + fsync）+ 目录 fsync，
+ * 再追加 manifest 行 + fsync。manifest 未落盘的备份不可能被 journal 引用成功——
+ * journal 记账发生在两者之后。
+ */
+export async function writeBackupWithManifest(options: {
+  journalPath: string;
+  ref: string;
+  seq: number;
+  from: string;
+  bytes: Buffer;
+}): Promise<void> {
+  const { ref, seq, from, bytes } = options;
+  const parsedRef = BackupRefSchema.parse(ref);
+  const root = await prepareBackupRoot(options.journalPath);
+  await writeFileExclusiveVerified(path.join(root, parsedRef), root, bytes, `backup:${parsedRef}`);
+  await syncDir(root);
+  const manifestHandle = await fs.open(path.join(root, "manifest.jsonl"), "a", 0o600);
+  try {
+    const line = `${JSON.stringify({
+      ref: parsedRef,
+      seq,
+      from,
+      sha256: sha256Hex(bytes),
+      byteSize: bytes.byteLength,
+    })}\n`;
+    await manifestHandle.write(line, null, "utf8");
+    await manifestHandle.sync();
+  } finally {
+    await manifestHandle.close().catch(() => undefined);
+  }
+  await syncDir(root);
+}
+
+/**
+ * 读取备份 manifest（严格）：坏行/字段不符 → Error（调用方转 recovery-required）；
+ * 重复 ref → Error。备份根换体由 prepareBackupRoot 拒绝。
+ */
+export async function readBackupManifest(journalPath: string): Promise<BackupManifestEntry[]> {
+  const root = await prepareBackupRoot(journalPath);
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(root, "manifest.jsonl"), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error(
+      `backup manifest unreadable: ${path.join(root, "manifest.jsonl")} (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+  const entries: BackupManifestEntry[] = [];
+  const seenRefs = new Set<string>();
+  const lines = raw.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index]!.trim();
+    if (!trimmed) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      throw new Error(`backup manifest line ${index + 1} is corrupt`);
+    }
+    const ref =
+      typeof (parsed as { ref?: unknown }).ref === "string" ? (parsed as { ref: string }).ref : "";
+    const seq = (parsed as { seq?: unknown }).seq;
+    const from = (parsed as { from?: unknown }).from;
+    const sha256 = (parsed as { sha256?: unknown }).sha256;
+    const byteSize = (parsed as { byteSize?: unknown }).byteSize;
+    const refOk = BackupRefSchema.safeParse(ref).success;
+    if (
+      !refOk ||
+      typeof seq !== "number" ||
+      !Number.isInteger(seq) ||
+      seq <= 0 ||
+      typeof from !== "string" ||
+      from.length === 0 ||
+      typeof sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(sha256) ||
+      typeof byteSize !== "number" ||
+      !Number.isInteger(byteSize) ||
+      byteSize < 0
+    ) {
+      throw new Error(`backup manifest line ${index + 1} failed validation`);
+    }
+    if (seenRefs.has(ref)) {
+      throw new Error(`backup manifest contains duplicate ref: ${ref}`);
+    }
+    seenRefs.add(ref);
+    entries.push({ ref, seq, from, sha256, byteSize });
+  }
+  return entries;
+}
+
+/**
+ * 按 journal 事实（ref + seq + from + sha256）精确定位 manifest 条目；缺失、重复、
+ * 归属不符一律 Error——回放数据不能把任意同根字节恢复进 Provider。
+ */
+export function findBackupEntry(
+  manifest: BackupManifestEntry[],
+  expected: { ref: string; seq: number; from: string; sha256: string },
+): BackupManifestEntry {
+  const matches = manifest.filter((entry) => entry.ref === expected.ref);
+  if (matches.length === 0) {
+    throw new Error(
+      `backup manifest has no entry for ref ${expected.ref} (step ${expected.seq}); recovery required`,
+    );
+  }
+  const entry = matches[0]!;
+  if (
+    entry.seq !== expected.seq ||
+    entry.from !== expected.from ||
+    entry.sha256 !== expected.sha256
+  ) {
+    throw new Error(
+      `backup manifest entry ${expected.ref} does not match journal facts (seq/from/sha); recovery required`,
+    );
+  }
+  return entry;
+}

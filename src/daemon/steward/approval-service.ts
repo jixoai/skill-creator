@@ -44,10 +44,10 @@ import { DomainError } from "../domain-error.js";
 import type { StewardAuditStore } from "./audit-store.js";
 import {
   applyProposalTransaction,
-  readJournal,
   undoJournalSteps,
   type ApplyOutcome,
 } from "./apply-transaction.js";
+import { assertCommittedJournal, readJournal } from "./journal-schema.js";
 import { buildContextSnapshot, stewardStoreDir } from "./context-snapshot.js";
 
 /** 内部 proposal 存档（提交时即绑定快照与 run）。 */
@@ -438,15 +438,11 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
     const root = deps.workspaces.resolveWritable(entry.snapshot.target).directory;
     const mutations: StewardMutationRecord[] = [];
     try {
-      // Codex R6 P1-3：journal 缺失/损坏/为空都进 recovery 审计——没有可回放的
-      // 事实就不能宣称 rolled-back（readJournal 抛 typed 错；空 journal 显式拒绝）。
+      // Codex R6 P1-3 / R7 P1-3：journal 缺失/不可读/坏行/seq 断裂由 readJournal 抛
+      // typed 错；空 journal 与无 commit 终态行（崩溃/截断/删除行）由回放闸拒绝——
+      // 没有完整且已提交的事实就不能宣称 rolled-back。
       const entries = await readJournal(journalPath);
-      if (entries.length === 0) {
-        throw new DomainError(
-          "INVALID_OPERATION",
-          `Rollback journal is empty (nothing to replay): ${journalPath}`,
-        );
-      }
+      assertCommittedJournal(entries, { proposalId: audit.proposalId });
       await undoJournalSteps(entries, {
         proposal: entry.proposal,
         snapshot: entry.snapshot,

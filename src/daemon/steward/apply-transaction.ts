@@ -6,15 +6,19 @@
  * 原状态；补偿遇到外部修改或 I/O 错误时进入 recovery-required」。
  *
  * 正交意图：
- *   [1] 写前记账（write-ahead journal）：每个 mutation 前持久化 before/after 事实。
+ *   [1] 写前记账（write-ahead journal）：每个 mutation 前持久化 before/after 事实；
+ *       全部成功后追加 commit 终态行（回放闸，Codex R7 P1-3）。记账走常驻 fd +
+ *       逐行 fsync（Codex R7 P2-1）。
  *   [2] 复用 Manager 服务：edit 走 creator.save（revision 校验 + 原子写 + frontmatter
  *       round-trip）；启停走 skills.toggle（真实 Provider 机制）；split/merge 目标创建
  *       走 creator.save create（direct-child + 安全名）。
  *   [3] 逆序补偿：普通失败恢复原字节/启停/删除已建目标；外部漂移 → recovery-required
- *       （保留 journal，封锁 target）。
+ *       （保留 journal，封锁 target）。回放侧所有路径事实经闭合 union + proposal
+ *       目标绑定二次校验（Codex R7 P1-4）；move 备份经 manifest 一一绑定（P1-5）。
  *   [4] 审计事实：输出 mutation 列表（前后 revision/启停语义），供 audit-store 持久化。
+ * 妥协声明：mutation 权威原语（fd 锚定读/写/删、备份 manifest）物理拆分在
+ *   fs-authority.ts；journal 事实形状与严格读取拆分在 journal-schema.ts。
  */
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
@@ -28,13 +32,27 @@ import type { WorkspaceRegistry } from "../workspace-registry/index.js";
 import { DomainError } from "../domain-error.js";
 import { assertPathInside } from "../path-safety.js";
 import type { StewardAuditStore } from "./audit-store.js";
+import {
+  assertCommittedJournal,
+  JournalEntrySchema,
+  readJournal,
+  type JournalEntry,
+} from "./journal-schema.js";
+import {
+  assertNoSymlinkAncestors,
+  findBackupEntry,
+  prepareBackupRoot,
+  readBackupManifest,
+  readResourceBytesStrict,
+  restoreResourceBytesStrict,
+  sha256Hex,
+  unlinkFileVerified,
+  writeBackupWithManifest,
+  writeFileExclusiveVerified,
+} from "./fs-authority.js";
 
-/** 一步 journal 记账（mutation 前持久化）。 */
-export interface JournalEntry {
-  seq: number;
-  step: string;
-  detail: Record<string, unknown>;
-}
+export type { JournalEntry };
+export { readJournal, assertCommittedJournal };
 
 /** apply 结果终态。 */
 export type ApplyOutcome =
@@ -48,7 +66,7 @@ export interface ApplyTransactionDeps {
   skills: SkillService;
   creator: CreatorService;
   store: StewardAuditStore;
-  /** journal 文件路径（默认 home/steward-store/journal/<operationId>.jsonl）。 */
+  /** journal 文件路径（`<proposalId>.jsonl`；默认 home/steward-store/journal/ 下）。 */
   journalPath: string;
 }
 
@@ -63,11 +81,23 @@ export async function applyProposalTransaction(
   let seq = 0;
   /** Codex R4 P2-3：move 步骤的源字节还原表（compensation 恢复源目录用）。 */
   const movedRestore = new Map<number, { from: string; bytes: Buffer }>();
-  const recordStep = async (step: string, detail: Record<string, unknown>): Promise<void> => {
+  // Codex R7 P2-1：journal 走常驻 append fd，逐行 fsync——不再按路径 appendFile。
+  // 打开失败（目录不可写等）留在 try 内：走补偿路径输出 typed 终态，不裸抛。
+  let journalWriter: import("node:fs/promises").FileHandle | null = null;
+  const operationId = path.basename(deps.journalPath, ".jsonl");
+  const recordStep = async <S extends JournalEntry["step"]>(
+    step: S,
+    detail: Extract<JournalEntry, { step: S }>["detail"],
+  ): Promise<void> => {
+    if (journalWriter === null) {
+      await fs.mkdir(path.dirname(deps.journalPath), { recursive: true });
+      journalWriter = await fs.open(deps.journalPath, "a", 0o600);
+    }
     seq += 1;
-    journal.push({ seq, step, detail });
-    await fs.mkdir(path.dirname(deps.journalPath), { recursive: true });
-    await fs.appendFile(deps.journalPath, `${JSON.stringify({ seq, step, detail })}\n`, "utf8");
+    const entry = { seq, step, detail } as JournalEntry;
+    journal.push(entry);
+    await journalWriter.write(`${JSON.stringify(entry)}\n`, null, "utf8");
+    await journalWriter.sync();
   };
 
   const root = deps.workspaces.resolveWritable(snapshot.target).directory;
@@ -81,7 +111,7 @@ export async function applyProposalTransaction(
         return {
           status: "recovery-required",
           mutations,
-          failure: `compensation failed at step ${entry.step} (${entry.detail.kind ?? ""}): ${error instanceof Error ? error.message : String(error)}; original failure: ${failure}`,
+          failure: `compensation failed at step ${entry.step} (${entry.detail.kind}): ${error instanceof Error ? error.message : String(error)}; original failure: ${failure}`,
         };
       }
     }
@@ -309,81 +339,58 @@ export async function applyProposalTransaction(
               manifestEntry.byteSize,
               `${mappingSource.directoryName}/${mapping.sourcePath}`,
             );
-            const liveHash = createHash("sha256").update(sourceBytes).digest("hex");
+            const liveHash = sha256Hex(sourceBytes);
             if (liveHash !== manifestEntry.hash) {
               throw new DomainError(
                 "CONFLICT",
                 `Resource ${mapping.sourcePath} drifted from the snapshot manifest hash.`,
               );
             }
-            // Codex R5 P1-2：move 的源字节先落 Manager-owned 持久备份（journal 目录
-            // 旁 .backups/），write-ahead 记账携带 backupPath + sha256——同进程补偿、
-            // 正常 rollback 与重启恢复共用同一事实源；无备份不得删除源。
+            // Codex R5 P1-2 / R7 P1-5：move 的源字节先落 Manager-owned 持久备份并登记
+            // manifest（ref/seq/from/sha256/byteSize 一一绑定），write-ahead 记账携带
+            // backupRef + sha256——同进程补偿、正常 rollback 与重启恢复共用同一事实源；
+            // 无备份不得删除源。
             const label = `${target.directoryName}/${mapping.targetPath}`;
+            const fromRel = `${mappingSource.directoryName}/${mapping.sourcePath}`;
             let backupRef: string | undefined;
             if (mapping.strategy === "move") {
-              // Codex R6 P1-2：backup 根由 canonical journalPath 派生且 containment
-              // 校验（拒绝预置 symlink 换体把备份写到外部）；journal 只记 Manager
-              // 生成的相对文件名，replay 拒绝任意路径。
-              const backupDir = await prepareBackupRoot(deps.journalPath);
               backupRef = `${seq + 1}-${liveHash.slice(0, 12)}.bin`;
-              await writeResourceFileStrict(
-                path.join(backupDir, backupRef),
-                backupDir,
-                sourceBytes,
-                `backup:${backupRef}`,
-              );
-              await syncDir(backupDir);
+              await writeBackupWithManifest({
+                journalPath: deps.journalPath,
+                ref: backupRef,
+                seq: seq + 1,
+                from: fromRel,
+                bytes: sourceBytes,
+              });
             }
             await recordStep("resource", {
               kind: "resource",
               strategy: mapping.strategy,
-              from: `${mappingSource.directoryName}/${mapping.sourcePath}`,
+              from: fromRel,
               to: label,
               ...(backupRef === undefined ? {} : { backupRef, sourceSha256: liveHash }),
             });
             await fs.mkdir(path.dirname(to), { recursive: true });
-            // Codex R4/R5 P1-1（目标侧）：mkdir 后校验目标父链无 symlink 换体，
-            // 写入走 exclusive fd + 写后 canonical/inode 复核（逃逸→恢复必需）。
+            // Codex R4/R5/R7 P1-1（目标侧）：mkdir 后校验目标父链无 symlink 换体；
+            // 写入走 exclusive fd，写前/写后都做 canonical+inode 锚定（换体在写字节
+            // 之前即止损；sync 失败 typed 失败）。
             await assertNoSymlinkAncestors(to, root);
             if (mapping.strategy === "reference") {
-              await writeResourceFileStrict(
+              await writeFileExclusiveVerified(
                 to,
                 root,
-                Buffer.from(
-                  `reference: ../../${mappingSource.directoryName}/${mapping.sourcePath}\n`,
-                  "utf8",
-                ),
+                Buffer.from(`reference: ../../${fromRel}\n`, "utf8"),
                 label,
               );
             } else {
-              await writeResourceFileStrict(to, root, sourceBytes, label);
+              await writeFileExclusiveVerified(to, root, sourceBytes, label);
               if (mapping.strategy === "move") {
                 // Codex R4 P2-3 / R5 P1-2：真实移动——目标写入 + 备份落盘 +
                 // journal 记账完成后才删除源；恢复路径优先内存表、回退持久备份。
                 movedRestore.set(seq, { from, bytes: sourceBytes });
-                // Codex R5/R6 P1-1：身份绑定删除——父链校验 + lstat 捕获 {dev,ino}
-                // 后立即 unlink，删除后验证该路径已不存在；任何一步身份漂移或
-                // 删除后仍存在，按恢复必需处理（Node 无 openat/unlinkat 的平台
-                // 等价：宁可 recovery-required，绝不确定地删除外部文件）。
-                await assertNoSymlinkAncestors(from, root);
-                const preDelete = await lstatSource(
-                  from,
-                  `${mappingSource.directoryName}/${mapping.sourcePath}`,
-                  manifestEntry.byteSize,
-                );
-                await fs.rm(from, { force: true });
-                const stillExists = await fs.lstat(from).then(
-                  () => true,
-                  () => false,
-                );
-                if (stillExists) {
-                  throw new DomainError(
-                    "UNAVAILABLE",
-                    `move source path raced during delete (identity changed); recovery required: ${mappingSource.directoryName}/${mapping.sourcePath}`,
-                  );
-                }
-                void preDelete;
+                // Codex R7 P1-1：身份绑定删除（nlink 独占 + fd inode 绑定 +
+                // Linux fd 锚定 unlink / macOS 复验；删除后 nlink===0 证明）。
+                await unlinkFileVerified(from, root, fromRel);
               }
             }
             mutations.push({
@@ -413,6 +420,14 @@ export async function applyProposalTransaction(
         break;
       }
     }
+    // Codex R7 P1-3：全部成功后追加 commit 终态行——回放闸（无 commit 行的 journal
+    // 是崩溃/截断事实，只能 recovery，不得宣称 rolled-back）。
+    await recordStep("commit", {
+      kind: "commit",
+      proposalId: operationId,
+      status: "applied",
+      mutationCount: mutations.length,
+    });
     return { status: "applied", mutations };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -424,40 +439,11 @@ export async function applyProposalTransaction(
       return { ...outcome, status: "recovery-required", failure: message };
     }
     return outcome;
+  } finally {
+    // recordStep 闭包内赋值不参与直线流分析：以断言回到声明类型后关闭。
+    const writer = journalWriter as import("node:fs/promises").FileHandle | null;
+    await writer?.close().catch(() => undefined);
   }
-}
-
-/** 读取 journal 文件为步骤列表（重启恢复/rollback replay 用）。 */
-export async function readJournal(journalPath: string): Promise<JournalEntry[]> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(journalPath, "utf8");
-  } catch {
-    return [];
-  }
-  const entries: JournalEntry[] = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as { seq?: unknown; step?: unknown; detail?: unknown };
-      if (
-        typeof parsed.seq === "number" &&
-        typeof parsed.step === "string" &&
-        typeof parsed.detail === "object" &&
-        parsed.detail !== null
-      ) {
-        entries.push({
-          seq: parsed.seq,
-          step: parsed.step,
-          detail: parsed.detail as Record<string, unknown>,
-        });
-      }
-    } catch {
-      continue;
-    }
-  }
-  return entries;
 }
 
 /** 判定路径存在（async；precheck 专用）。 */
@@ -477,52 +463,109 @@ export interface UndoContext {
   deps: ApplyTransactionDeps;
   root: string;
   mutations: StewardMutationRecord[];
+  /** Codex R4 P2-3：move 步骤的源字节还原表（同进程补偿用；回放路径缺省）。 */
+  movedRestore?: Map<number, { from: string; bytes: Buffer }>;
   /** Codex R6 P1-2：move 备份根的原事务 journal 路径（缺省用 deps.journalPath）。 */
   backupJournalPath?: string;
 }
 
-/** 逆序撤销一组 journal 步骤（补偿与 rollback 共用）；失败抛错由调用方定级。 */
+/**
+ * 逆序撤销一组 journal 步骤（补偿与 rollback 共用）；失败抛错由调用方定级。
+ * Codex R7 P1-3/P1-4：入口先经闭合 union 复验——篡改/未知 step/穿越路径在进入
+ * 任何文件系统操作之前即被 typed 拒绝（磁盘读出的条目已校验，这里覆盖直调方）。
+ */
 export async function undoJournalSteps(
   entries: JournalEntry[],
   context: UndoContext,
 ): Promise<void> {
   for (const entry of [...entries].reverse()) {
-    await undoStep(entry, context);
+    const checked = JournalEntrySchema.safeParse(entry);
+    if (!checked.success) {
+      const reason = checked.error.issues
+        .slice(0, 3)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; ");
+      throw new DomainError(
+        "UNAVAILABLE",
+        `journal step failed closed validation (no replay; recovery required): ${reason}`,
+      );
+    }
+    await undoStep(checked.data, context);
+  }
+}
+
+/** 本 proposal 显式创建的目标目录（undo 删除只能落在这个集合内，Codex R7 P1-4）。 */
+function createdDirectoriesOf(proposal: SkillProposal): Set<string> {
+  if (proposal.patch.kind === "split") {
+    return new Set(proposal.patch.targets.map((target) => target.directoryName));
+  }
+  if (proposal.patch.kind === "merge") {
+    return new Set([proposal.patch.target.directoryName]);
+  }
+  return new Set();
+}
+
+/** 删除本 proposal 创建的目标目录：绑定 + containment + canonical 一致 + 删后校验。 */
+async function removeCreatedDirectory(
+  dir: string,
+  root: string,
+  directoryName: string,
+): Promise<void> {
+  assertPathInside(root, dir);
+  let stat: import("node:fs").Stats;
+  try {
+    stat = await fs.lstat(dir);
+  } catch {
+    return; // 已不存在：幂等完成。
+  }
+  if (!stat.isDirectory()) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Created target is no longer a directory (external drift): ${directoryName}`,
+    );
+  }
+  const realDir = await fs.realpath(dir);
+  const lexicalDir = path.join(await fs.realpath(root), path.relative(root, dir));
+  if (realDir !== lexicalDir) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Created target escaped the root (symlink race): ${directoryName}`,
+    );
+  }
+  await fs.rm(dir, { recursive: true, force: true });
+  const stillExists = await fs.lstat(dir).then(
+    () => true,
+    () => false,
+  );
+  if (stillExists) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `Created target survived removal (path race); recovery required: ${directoryName}`,
+    );
   }
 }
 
 /** 撤销一步（逆序补偿）；外部漂移抛错 → recovery-required。 */
-async function undoStep(
-  entry: JournalEntry,
-  context: {
-    proposal: SkillProposal;
-    snapshot: SkillStewardContextSnapshot;
-    deps: ApplyTransactionDeps;
-    root: string;
-    mutations: StewardMutationRecord[];
-    /** Codex R4 P2-3：move 步骤的源字节还原表（可选：undoJournalSteps 复放路径无）。 */
-    movedRestore?: Map<number, { from: string; bytes: Buffer }>;
-    /** Codex R6 P1-2：move 备份根的原事务 journal 路径。 */
-    backupJournalPath?: string;
-  },
-): Promise<void> {
+async function undoStep(entry: JournalEntry, context: UndoContext): Promise<void> {
   const { deps, snapshot, root } = context;
+  const created = createdDirectoriesOf(context.proposal);
   switch (entry.step) {
+    case "commit":
     case "precheck":
-      return; // 纯校验步骤无需撤销。
+      return; // 终态行/纯校验步骤无需撤销。
     case "edit": {
-      const skillId = entry.detail.skillId as string;
+      const skillId = entry.detail.skillId;
       // 恢复原字节：从快照取原文，以「当前」revision 为期望写回。
       // 若当前内容已不是我们写入后的状态（外部编辑），save 会拒绝 → recovery-required。
       const snapshotEntry = snapshot.skills.find((skill) => skill.skillId === skillId);
       if (!snapshotEntry) throw new Error("snapshot entry lost");
-      const current = await deps.skills.info(snapshot.target, skillId as never);
+      const current = await deps.skills.info(snapshot.target, skillId);
       const frontmatter = parseFrontmatter(snapshotEntry.content);
       await deps.creator.save({
         mode: "update",
         workspaceId: snapshot.target.workspaceId,
         providerId: snapshot.target.providerId,
-        skillId: skillId as never,
+        skillId,
         expectedRevision: current.revision,
         frontmatter: frontmatter.data,
         body: frontmatter.body,
@@ -530,340 +573,94 @@ async function undoStep(
       return;
     }
     case "disable": {
-      const skillId = entry.detail.skillId as string;
-      await deps.skills.toggle(snapshot.target, [skillId as never], "enable");
+      await deps.skills.toggle(snapshot.target, [entry.detail.skillId], "enable");
       return;
     }
     case "enable": {
-      const skillId = entry.detail.skillId as string;
-      await deps.skills.toggle(snapshot.target, [skillId as never], "disable");
+      await deps.skills.toggle(snapshot.target, [entry.detail.skillId], "disable");
       return;
     }
     case "create-target": {
-      // 删除已创建的目标目录（整个 direct-child）。
-      const directoryName = entry.detail.directoryName as string | undefined;
-      if (!directoryName) return;
-      await fs.rm(path.join(root, directoryName), { recursive: true, force: true });
+      // Codex R7 P1-4：删除目录必须绑定本 proposal 创建的目标——journal 任意指定
+      // 目录（含穿越）在此拒绝，绝不递归删除 Provider 根外内容。
+      const { directoryName } = entry.detail;
+      if (!created.has(directoryName)) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `Journal create-target references a directory this proposal never created: ${directoryName}`,
+        );
+      }
+      await removeCreatedDirectory(path.join(root, directoryName), root, directoryName);
       return;
     }
     case "resource": {
-      // Codex R4 P2-3 / R5 P1-2：move 步骤先还原源字节（目标目录由 create-target
-      // 撤销删除）。恢复事实源：同进程内存表 → journal 记账的持久备份；备份缺失
-      // 或 sha 漂移直接抛错（→ recovery-required），绝不伪造已回滚。
-      const fromRel = entry.detail.from as string | undefined;
-      if (entry.detail.strategy === "move" && fromRel) {
+      const { from: fromRel, to, strategy } = entry.detail;
+      // Codex R4 P2-3 / R5 P1-2 / R7 P1-5：move 步骤恢复源字节（目标目录随后删除）。
+      // 恢复事实源：同进程内存表 → journal 记账的持久备份 + manifest 一一绑定；
+      // 备份缺失、hash/归属不符直接抛错（→ recovery-required），绝不伪造已回滚。
+      if (strategy === "move") {
         const from = path.join(root, fromRel);
-        let restored = false;
+        assertPathInside(root, from);
         const moved = context.movedRestore?.get(entry.seq);
         if (moved) {
           await fs.mkdir(path.dirname(moved.from), { recursive: true });
           await restoreResourceBytesStrict(moved.from, root, moved.bytes, fromRel);
-          restored = true;
         } else {
-          // Codex R6 P1-2：journal 只信 Manager 生成的相对 backupRef；绝对路径/
-          // `..`/换体 backup 根一律拒绝（回放数据不可指向任意外部路径）。
-          const backupRef = entry.detail.backupRef as string | undefined;
-          const expectedSha = entry.detail.sourceSha256 as string | undefined;
-          if (!backupRef || !isValidBackupRef(backupRef)) {
-            throw new Error(
-              `move rollback has no valid backupRef for step ${entry.seq} (${fromRel})`,
+          const { backupRef, sourceSha256 } = entry.detail;
+          if (backupRef === undefined || sourceSha256 === undefined) {
+            throw new DomainError(
+              "UNAVAILABLE",
+              `move journal step ${entry.seq} lacks manager backup facts; recovery required`,
             );
           }
-          const backupRoot = await prepareBackupRoot(
-            context.backupJournalPath ?? context.deps.journalPath,
-          );
+          const backupJournalPath = context.backupJournalPath ?? deps.journalPath;
+          const manifest = await readBackupManifest(backupJournalPath);
+          const bound = findBackupEntry(manifest, {
+            ref: backupRef,
+            seq: entry.seq,
+            from: fromRel,
+            sha256: sourceSha256,
+          });
+          const backupRoot = await prepareBackupRoot(backupJournalPath);
           const backupPath = path.join(backupRoot, backupRef);
-          let backup: Buffer | null;
+          let backup: Buffer;
           try {
             backup = await readResourceBytesStrict(
               backupPath,
               backupRoot,
-              (await fs.stat(backupPath)).size,
+              bound.byteSize,
               `backup:${backupRef}`,
             );
-          } catch {
-            backup = null;
-          }
-          if (backup === null) {
+          } catch (error) {
             throw new Error(
-              `move rollback backup missing on disk for step ${entry.seq}: ${backupRef}`,
+              `move rollback backup unreadable for step ${entry.seq}: ${backupRef} (${error instanceof Error ? error.message : String(error)})`,
             );
           }
-          if (expectedSha && createHash("sha256").update(backup).digest("hex") !== expectedSha) {
+          if (sha256Hex(backup) !== sourceSha256) {
             throw new Error(
               `move rollback backup hash mismatch for step ${entry.seq}: ${backupRef}`,
             );
           }
           await fs.mkdir(path.dirname(from), { recursive: true });
           await restoreResourceBytesStrict(from, root, backup, fromRel);
-          restored = true;
         }
-        void restored;
       }
-      const directoryName =
-        (entry.detail.directoryName as string | undefined) ??
-        (entry.detail.to as string | undefined)?.split("/")[0];
-      if (!directoryName) return;
-      await fs.rm(path.join(root, directoryName), { recursive: true, force: true });
+      // 目标目录（本 proposal 创建的 direct-child）删除；`to` 的首段必须命中绑定集合。
+      const directoryName = to.split("/")[0]!;
+      if (!created.has(directoryName)) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `Journal resource target escapes the proposal-created directories: ${to}`,
+        );
+      }
+      await removeCreatedDirectory(path.join(root, directoryName), root, directoryName);
       return;
     }
-    default:
-      return;
   }
 }
 
-/**
- * Codex R4 P1-1：资源源的严格读取。三重防线：
- *   [1] canonical realpath 必须落在 canonical root 下的同一相对位置（任何一级父目录
- *       是 symlink 都会使二者不等 → 拒绝）；
- *   [2] 以 O_NOFOLLOW 打开描述符并 fstat 校验 regular file + byteSize（关闭
- *       lstat→readFile 的 TOCTOU 缺口；末端 symlink 在 open 即失败）；
- *   [3] 从描述符读取字节（不回退按路径 read）。
- */
-async function readResourceBytesStrict(
-  from: string,
-  root: string,
-  expectedByteSize: number,
-  label: string,
-): Promise<Buffer> {
-  // Codex R5 P1-1：Node 无 openat，以「canonical 一致 + inode 身份链 + 读后稳定」
-  // 组合达成等价的 no-symlink traversal：
-  //   (1) realpath 必须落在 canonical root 的同一 lexical 位置（拒绝任一 symlink 祖先）；
-  //   (2) lstat 捕获 {dev, ino, size} 身份；
-  //   (3) O_NOFOLLOW 打开 leaf fd，fstat 身份必须与 (2) 完全一致——(1)(2) 之间被
-  //       换体的竞态在此暴露（外部 inode 的 dev/ino 必不相同）；
-  //   (4) 从 fd 读字节（fd 指向已验证 inode，路径换体不影响读取内容）；
-  //   (5) 读后再次 realpath + lstat 一致——(3) 之后的换体也按可疑状态拒绝。
-  const realRoot = await fs.realpath(root);
-  const lexicalPosition = path.join(realRoot, path.relative(root, from));
-  const realFrom = await realpathOrNotFound(from, label);
-  if (realFrom !== lexicalPosition) {
-    throw new DomainError(
-      "INVALID_OPERATION",
-      `Resource source path contains a symlink ancestor (escapes the provider root): ${label}`,
-    );
-  }
-  const identity = await lstatSource(from, label, expectedByteSize);
-  let handle: import("node:fs/promises").FileHandle;
-  try {
-    handle = await fs.open(
-      from,
-      fs.constants.O_RDONLY | (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW!,
-    );
-  } catch {
-    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
-  }
-  let bytes: Buffer;
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile()) {
-      throw new DomainError("INVALID_OPERATION", `Resource source is not a regular file: ${label}`);
-    }
-    if (stat.size !== expectedByteSize) {
-      throw new DomainError(
-        "CONFLICT",
-        `Resource ${label} live size ${stat.size} differs from the snapshot manifest byteSize ${expectedByteSize}.`,
-      );
-    }
-    if (stat.dev !== identity.dev || stat.ino !== identity.ino) {
-      throw new DomainError(
-        "INVALID_OPERATION",
-        `Resource source identity changed between validation and open (path race): ${label}`,
-      );
-    }
-    bytes = await handle.readFile();
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
-  const realFromAfter = await realpathOrNotFound(from, label);
-  if (realFromAfter !== realFrom) {
-    throw new DomainError(
-      "INVALID_OPERATION",
-      `Resource source path raced after read (canonical position moved): ${label}`,
-    );
-  }
-  return bytes;
-}
-
-async function realpathOrNotFound(target: string, label: string): Promise<string> {
-  try {
-    return await fs.realpath(target);
-  } catch {
-    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
-  }
-}
-
-async function lstatSource(
-  from: string,
-  label: string,
-  expectedByteSize: number,
-): Promise<{ dev: number; ino: number }> {
-  let stat: import("node:fs").Stats;
-  try {
-    stat = await fs.lstat(from);
-  } catch {
-    throw new DomainError("NOT_FOUND", `Resource source missing on disk: ${label}`);
-  }
-  if (!stat.isFile()) {
-    throw new DomainError("INVALID_OPERATION", `Resource source is not a regular file: ${label}`);
-  }
-  if (stat.size !== expectedByteSize) {
-    throw new DomainError(
-      "CONFLICT",
-      `Resource ${label} live size ${stat.size} differs from the snapshot manifest byteSize ${expectedByteSize}.`,
-    );
-  }
-  return { dev: stat.dev, ino: stat.ino };
-}
-
-/**
- * Codex R4 P1-1（目标侧）：mkdir 之后、写入之前，校验目标父目录（已存在的
- * dirname）canonical 位置与 lexical 位置一致（任一 symlink 祖先拒绝）。
- */
-async function assertNoSymlinkAncestors(to: string, root: string): Promise<void> {
-  const realRoot = await fs.realpath(root);
-  const parent = path.dirname(to);
-  const realParent = await fs.realpath(parent);
-  const lexicalParent = path.join(realRoot, path.relative(root, parent));
-  if (realParent !== lexicalParent) {
-    throw new DomainError(
-      "INVALID_OPERATION",
-      `Resource target path contains a symlink ancestor: ${path.relative(root, to)}`,
-    );
-  }
-}
-
-/**
- * Codex R6 P1-2：backup 根目录——由 canonical journalPath 派生（`<journal>.backups`），
- * 每次使用前校验 canonical containment（预置 symlink 换体直接拒绝）。
- */
-async function prepareBackupRoot(journalPath: string): Promise<string> {
-  const backupDir = `${journalPath}.backups`;
-  const canonicalParent = await fs.realpath(path.dirname(journalPath));
-  await fs.mkdir(backupDir, { recursive: true }).catch(() => undefined);
-  const realBackup = await fs.realpath(backupDir);
-  const lexicalBackup = path.join(canonicalParent, path.basename(backupDir));
-  if (realBackup !== lexicalBackup) {
-    throw new DomainError(
-      "UNAVAILABLE",
-      `move backup root escaped its manager-owned location (path race); recovery required: ${backupDir}`,
-    );
-  }
-  return realBackup;
-}
-
-/** Codex R6 P1-2：合法 backupRef 是 Manager 生成的安全相对文件名（无路径分隔/遍历）。 */
-function isValidBackupRef(ref: string): boolean {
-  return /^\d+-[0-9a-f]{12}\.bin$/.test(ref);
-}
-
-/** Codex R6 P2-1：目录 fsync（崩溃持久化栅栏；平台不支持时记录并放行）。 */
-async function syncDir(dir: string): Promise<void> {
-  try {
-    const handle = await fs.open(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close().catch(() => undefined);
-    }
-  } catch (error) {
-    throw new DomainError(
-      "UNAVAILABLE",
-      `durability sync failed for ${dir} (${error instanceof Error ? error.message : String(error)}); recovery required`,
-    );
-  }
-}
-
-/**
- * Codex R5 P1-1（恢复侧写入）：move 补偿/rollback 的源字节还原——父链 canonical
- * 校验 + exclusive 写（已存在则要求字节一致），杜绝恢复路径经换体 symlink 写到
- * Provider 外部。
- */
-async function restoreResourceBytesStrict(
-  to: string,
-  root: string,
-  bytes: Buffer,
-  label: string,
-): Promise<void> {
-  await assertNoSymlinkAncestors(to, root);
-  let stat: import("node:fs").Stats | null = null;
-  try {
-    stat = await fs.lstat(to);
-  } catch {
-    stat = null;
-  }
-  if (stat !== null) {
-    // Codex R6 P1-2：现存 leaf 必须是 regular file——symlink（即便字节相同）
-    // 不是恢复成功，是外部可控制的路径身份。
-    if (!stat.isFile()) {
-      throw new Error(`move restore target exists but is not a regular file: ${label}`);
-    }
-    const current = await fs.readFile(to);
-    if (!current.equals(bytes)) {
-      throw new Error(`move restore target exists with different bytes (external drift): ${label}`);
-    }
-    return;
-  }
-  await writeResourceFileStrict(to, root, bytes, label);
-}
-
-/**
- * Codex R5 P1-1（目标侧写入）：exclusive create（O_CREAT|O_EXCL，symlink leaf 直接
- * 失败）+ fd 写 + 写后 canonical 复核。检测到写逃逸（父目录在窗口内被换体）时，
- * 将逃逸文件清零并抛 UNAVAILABLE——调用方按 recovery-required 处理，绝不谎称
- * 干净补偿。
- */
-async function writeResourceFileStrict(
-  to: string,
-  root: string,
-  bytes: Buffer,
-  label: string,
-): Promise<void> {
-  const realRoot = await fs.realpath(root);
-  const lexicalPosition = path.join(realRoot, path.relative(root, to));
-  let handle: import("node:fs/promises").FileHandle;
-  try {
-    handle = await fs.open(to, "wx");
-  } catch (error) {
-    throw new DomainError(
-      "INVALID_OPERATION",
-      `Resource target already exists or cannot be created exclusively: ${label} (${error instanceof Error ? error.message : String(error)})`,
-    );
-  }
-  let identity: { dev: number; ino: number };
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile()) {
-      throw new DomainError("INVALID_OPERATION", `Resource target is not a regular file: ${label}`);
-    }
-    identity = { dev: stat.dev, ino: stat.ino };
-    await handle.writeFile(bytes);
-    await handle.sync().catch(() => undefined);
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
-  // 写后复核：canonical 位置一致 + 同一 inode（父目录换体会让 realpath 指向外部）。
-  const realTo = await fs.realpath(to);
-  if (realTo !== lexicalPosition) {
-    // Codex R6 P1-1：逃逸只报告，不触碰外部路径——canonical 位置可能指向任何
-    // 无关外部文件，Manager 无权清零/修改它（外部文件保持原状，恢复由人处理）。
-    throw new DomainError(
-      "UNAVAILABLE",
-      `Resource target escaped the provider root (path race); external path untouched, recovery required: ${label}`,
-    );
-  }
-  const after = await fs.lstat(to);
-  if (after.dev !== identity.dev || after.ino !== identity.ino) {
-    throw new DomainError(
-      "UNAVAILABLE",
-      `Resource target identity changed after write (path race); recovery required: ${label}`,
-    );
-  }
-}
-
-/** 快照原文 → creator save 需要的 frontmatter（name/description 必填）+ body。 */ function parseFrontmatter(
-  content: string,
-): {
+/** 快照原文 → creator save 需要的 frontmatter（name/description 必填）+ body。 */
+function parseFrontmatter(content: string): {
   data: { name: string; description: string } & Record<string, unknown>;
   body: string;
 } {
@@ -893,13 +690,16 @@ function coerceYamlScalar(raw: string): unknown {
 
 /**
  * 重启恢复扫描（task 2.3e）：journal 目录中「有记账无终态审计」的 operation
- * 即为崩溃残留；恢复前必须封锁对应 target 的后续写入。
+ * 即为崩溃残留；恢复前必须封锁对应 target 的后续写入。Codex R7 P1-3：读取失败
+ * 的 journal 以 corrupt 上报（恢复闸门必须按 recovery-required 处理，不得跳过）。
  */
 export interface UnfinishedOperation {
   proposalId: string;
   journalPath: string;
   steps: number;
   lastStep: string | null;
+  /** journal 缺失/损坏/seq 断裂（回放不可能成功，只能人工恢复）。 */
+  corrupt: boolean;
 }
 
 /** 扫描未完成 journal（重启第一步；只读，不自动重放写操作）。 */
@@ -915,13 +715,21 @@ export async function scanUnfinishedJournals(storeDir: string): Promise<Unfinish
   for (const file of files) {
     if (!file.endsWith(".jsonl") || file.endsWith("-rollback.jsonl")) continue;
     const journalPath = path.join(journalDir, file);
-    const entries = await readJournal(journalPath);
+    const proposalId = file.replace(/\.jsonl$/, "");
+    let entries: JournalEntry[];
+    try {
+      entries = await readJournal(journalPath);
+    } catch {
+      unfinished.push({ proposalId, journalPath, steps: 0, lastStep: null, corrupt: true });
+      continue;
+    }
     if (entries.length === 0) continue;
     unfinished.push({
-      proposalId: file.replace(/\.jsonl$/, ""),
+      proposalId,
       journalPath,
       steps: entries.length,
       lastStep: entries[entries.length - 1]!.step,
+      corrupt: false,
     });
   }
   return unfinished;

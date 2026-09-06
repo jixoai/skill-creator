@@ -169,8 +169,8 @@ export function isSafeRelativePath(value: string): boolean {
   return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
 }
 
-/** 技能目录内相对路径（资源映射/审计/证据共用同一安全校验）。 */
-const RelPathSchema = z.string().refine(isSafeRelativePath, {
+/** 技能目录内相对路径（资源映射/审计/证据/journal 回放事实共用同一安全校验）。 */
+export const RelPathSchema = z.string().refine(isSafeRelativePath, {
   message: "Relative path inside the skill directory (segment-safe, no traversal/backslash/roots).",
 });
 

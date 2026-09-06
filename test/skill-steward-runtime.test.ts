@@ -1710,9 +1710,10 @@ describe("move durability and path races (Codex R5 P1-1/P1-2)", () => {
     expect(outcome.status).toBe("applied");
     const sourceFile = path.join(directory, "skills", "merge-right", "shared", "notes.md");
     expect(fs.existsSync(sourceFile)).toBe(false);
-    // 备份落盘（journal 旁 .backups/）。
+    // 备份落盘（journal 旁 .backups/：一份 .bin + manifest.jsonl 记账）。
     const backupDir = `${journalPath}.backups`;
-    expect(fs.readdirSync(backupDir).length).toBe(1);
+    expect(fs.readdirSync(backupDir).filter((name) => name.endsWith(".bin")).length).toBe(1);
+    expect(fs.existsSync(path.join(backupDir, "manifest.jsonl"))).toBe(true);
 
     // 重启等价：全新 context（无内存表）回放 journal 撤销。
     const entries = await readJournal(journalPath);
@@ -1941,23 +1942,46 @@ describe("journal and backup authority (Codex R6 P1-2/P1-3)", () => {
     fs.writeFileSync(journalPath, tampered.join("\n") + "\n", "utf8");
 
     const { undoJournalSteps } = await import("../src/daemon/steward/apply-transaction.js");
-    const entries = await readJournal(journalPath);
     const sourceFile = path.join(directory, "skills", "merge-right", "shared", "notes.md");
+    // Codex R8 P1-4：外部 backupRef 在 readJournal 的闭合 union 即被拒绝（更早、更强）。
+    await expect(readJournal(journalPath)).rejects.toThrow(/backupRef/);
+    // 即便绕过读取层直调回放，schema 复验同样拒绝。
     await expect(
-      undoJournalSteps(entries, {
-        proposal,
-        snapshot,
-        deps: {
-          workspaces: domain.workspaces,
-          skills: domain.skills,
-          creator: domain.creator,
-          store: createStewardAuditStore(),
-          journalPath,
+      undoJournalSteps(
+        [
+          {
+            seq: 1,
+            step: "precheck",
+            detail: { kind: "precheck", targets: ["merged-skill"] },
+          },
+          {
+            seq: 2,
+            step: "resource",
+            detail: {
+              kind: "resource",
+              strategy: "move",
+              from: "merge-right/shared/notes.md",
+              to: "merged-skill/shared/moved.md",
+              backupRef: "/tmp/evil-outside.bin",
+              sourceSha256: "a".repeat(64),
+            },
+          },
+        ],
+        {
+          proposal,
+          snapshot,
+          deps: {
+            workspaces: domain.workspaces,
+            skills: domain.skills,
+            creator: domain.creator,
+            store: createStewardAuditStore(),
+            journalPath,
+          },
+          root: path.join(directory, "skills"),
+          mutations: [],
         },
-        root: path.join(directory, "skills"),
-        mutations: [],
-      }),
-    ).rejects.toThrow(/no valid backupRef/);
+      ),
+    ).rejects.toThrow(/validation/);
     // 源未被外部文件内容污染（仍不存在——拒绝恢复而不是写外部字节）。
     expect(fs.existsSync(sourceFile)).toBe(false);
   });
@@ -2023,5 +2047,379 @@ describe("journal and backup authority (Codex R6 P1-2/P1-3)", () => {
     ).rejects.toThrow(/not a regular file/);
     // symlink 仍在（没有被当作已恢复而清除），外部文件未被触碰。
     expect(fs.readFileSync(outsideFile, "utf8")).toBe("right-origin\n");
+  });
+});
+
+describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
+  let sandbox = "";
+  let domain: DaemonDomain;
+  const providerId = ProviderIdSchema.parse("openclaw");
+  const capabilities = {
+    backendId: "fixture",
+    version: "fixture-1",
+    streamingEvents: true,
+    cancellation: true,
+    permissionRequests: true,
+    executionRoot: "isolated" as const,
+  };
+
+  beforeEach(() => {
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "steward-r8-"));
+    process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
+    setHomeOverride(path.join(sandbox, "home"));
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(async () => {
+    await domain.steward.dispose();
+    await domain.repository.dispose();
+    setHomeOverride(null);
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  async function seedMergePair() {
+    const directory = path.join(sandbox, "ws");
+    fs.mkdirSync(directory, { recursive: true });
+    const workspace = domain.workspaces.import(directory, "ws");
+    for (const name of ["merge-left", "merge-right"]) {
+      await domain.creator.save({
+        mode: "create",
+        workspaceId: workspace.id,
+        providerId,
+        directoryName: name,
+        frontmatter: { name, description: `${name} skill.` },
+        body: `# ${name}\n`,
+      });
+      fs.mkdirSync(path.join(directory, "skills", name, "shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(directory, "skills", name, "shared", "notes.md"),
+        name === "merge-left" ? "left-origin\n" : "right-origin\n",
+        "utf8",
+      );
+    }
+    const target = { workspaceId: workspace.id, providerId };
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const sourceB = snapshot.skills.find((skill) => skill.directoryName === "merge-right")!;
+    const sources = snapshot.skills.filter((skill) => skill.directoryName.startsWith("merge-"));
+    const proposal: SkillProposal = {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "merge",
+      patch: {
+        kind: "merge",
+        snapshotId: snapshot.id,
+        sources: sources.map((skill) => ({
+          skillId: skill.skillId,
+          expectedRevision: skill.revision,
+        })),
+        target: {
+          directoryName: "merged-skill",
+          frontmatter: { name: "merged-skill", description: "Merged." },
+          body: "# merged-skill\n",
+          resources: [
+            {
+              sourceSkillId: sourceB.skillId,
+              sourcePath: "shared/notes.md",
+              targetPath: "shared/moved.md",
+              strategy: "move",
+            },
+          ],
+        },
+      },
+      rationale: "r8 authority probe",
+      findingIds: [],
+      evidence: [{ skillId: sourceB.skillId, snippet: "probe" }],
+      skillIds: sources.map((skill) => skill.skillId),
+      observedRevisions: sources.map((skill) => ({
+        skillId: skill.skillId,
+        revision: skill.revision,
+      })),
+    };
+    return { directory, snapshot, sourceB, proposal };
+  }
+
+  /** 一次成功 apply，返回 journal/备份/上下文事实。 */
+  async function applyMove(tag: string) {
+    const { directory, snapshot, sourceB, proposal } = await seedMergePair();
+    const journalPath = path.join(sandbox, "journal", `${tag}.jsonl`);
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).toBe("applied");
+    return { directory, snapshot, sourceB, proposal, journalPath };
+  }
+
+  function replayContext(ctx: Awaited<ReturnType<typeof applyMove>>) {
+    return {
+      proposal: ctx.proposal,
+      snapshot: ctx.snapshot,
+      deps: {
+        workspaces: domain.workspaces,
+        skills: domain.skills,
+        creator: domain.creator,
+        store: createStewardAuditStore(),
+        journalPath: ctx.journalPath,
+      },
+      root: path.join(ctx.directory, "skills"),
+      mutations: [],
+    };
+  }
+
+  it("P1-3: readJournal rejects missing/unreadable/corrupt/unknown/truncated journals typed", async () => {
+    const { readJournal } = await import("../src/daemon/steward/apply-transaction.js");
+    const base = await applyMove("strict-read");
+    const journalDir = path.dirname(base.journalPath);
+
+    // 缺失 → NOT_FOUND。
+    await expect(readJournal(path.join(journalDir, "none.jsonl"))).rejects.toThrow(/not found/i);
+
+    // 不可读 → UNAVAILABLE。
+    const unreadable = path.join(journalDir, "unreadable.jsonl");
+    fs.copyFileSync(base.journalPath, unreadable);
+    fs.chmodSync(unreadable, 0o000);
+    try {
+      await expect(readJournal(unreadable)).rejects.toThrow(/unreadable/i);
+    } finally {
+      fs.chmodSync(unreadable, 0o644);
+    }
+
+    // 坏 JSON 行 → 拒绝（不静默跳过）。
+    const corrupt = path.join(journalDir, "corrupt.jsonl");
+    fs.copyFileSync(base.journalPath, corrupt);
+    fs.appendFileSync(corrupt, "{oops\n", "utf8");
+    await expect(readJournal(corrupt)).rejects.toThrow(/corrupt/i);
+
+    // 未知 step → 闭合 union 拒绝（不再 default 静默成功）。
+    const unknown = path.join(journalDir, "unknown.jsonl");
+    fs.copyFileSync(base.journalPath, unknown);
+    fs.appendFileSync(unknown, `${JSON.stringify({ seq: 99, step: "explode", detail: {} })}\n`);
+    await expect(readJournal(unknown)).rejects.toThrow(/failed closed validation/i);
+
+    // 删除中间行（部分 journal）→ seq 断裂拒绝。
+    const partial = path.join(journalDir, "partial.jsonl");
+    const lines = fs.readFileSync(base.journalPath, "utf8").trim().split("\n");
+    fs.writeFileSync(partial, `${lines.slice(1).join("\n")}\n`, "utf8");
+    await expect(readJournal(partial)).rejects.toThrow(/seq broken/i);
+  });
+
+  it("P1-5/P1-3: a move journal line without sourceSha256 fails the closed union", async () => {
+    const { readJournal } = await import("../src/daemon/steward/apply-transaction.js");
+    const ctx = await applyMove("no-sha");
+    const lines = fs.readFileSync(ctx.journalPath, "utf8").trim().split("\n");
+    const stripped = lines.map((line) => {
+      const entry = JSON.parse(line) as { detail?: { sourceSha256?: string } };
+      if (entry.detail?.sourceSha256) delete entry.detail.sourceSha256;
+      return JSON.stringify(entry);
+    });
+    fs.writeFileSync(ctx.journalPath, `${stripped.join("\n")}\n`, "utf8");
+    await expect(readJournal(ctx.journalPath)).rejects.toThrow(/sourceSha256/i);
+  });
+
+  it("P1-3: an uncommitted journal (no terminal commit line) never rolls back", async () => {
+    const { snapshot, proposal } = await seedMergePair();
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    await service.prepareRollback(audit.id, "human-ui");
+    const journalPath = path.join(
+      sandbox,
+      "home",
+      "steward-store",
+      "journal",
+      `${proposalId}.jsonl`,
+    );
+    // 剥离末尾 commit 行：模拟崩溃/截断的 journal。
+    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    fs.writeFileSync(journalPath, `${lines.slice(0, -1).join("\n")}\n`, "utf8");
+    const rolled = await service.applyRollback(audit.id, "human-ui");
+    expect(rolled.audit.status).toBe("recovery-required");
+  });
+
+  it("P1-3: a commit record bound to another proposal is rejected", async () => {
+    const { snapshot, proposal } = await seedMergePair();
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    await service.prepareRollback(audit.id, "human-ui");
+    const journalPath = path.join(
+      sandbox,
+      "home",
+      "steward-store",
+      "journal",
+      `${proposalId}.jsonl`,
+    );
+    // 篡改 commit 行的 proposal 绑定。
+    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    const last = JSON.parse(lines[lines.length - 1]!) as {
+      detail: { proposalId: string };
+    };
+    last.detail.proposalId = "spp_ffffffffffffffff";
+    lines[lines.length - 1] = JSON.stringify(last);
+    fs.writeFileSync(journalPath, `${lines.join("\n")}\n`, "utf8");
+    const rolled = await service.applyRollback(audit.id, "human-ui");
+    expect(rolled.audit.status).toBe("recovery-required");
+  });
+
+  it("P1-4: traversal rel paths in replay are rejected before touching the filesystem", async () => {
+    const ctx = await applyMove("traversal");
+    const { undoJournalSteps } = await import("../src/daemon/steward/apply-transaction.js");
+    const outsideDir = path.join(sandbox, "outside-r8");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, "escaped.md"), "sentinel\n", "utf8");
+
+    // from 穿越 Provider 根。
+    await expect(
+      undoJournalSteps(
+        [
+          {
+            seq: 1,
+            step: "resource",
+            detail: {
+              kind: "resource",
+              strategy: "move",
+              from: "../../outside-r8/escaped.md",
+              to: "merged-skill/shared/moved.md",
+              backupRef: "1-aaaaaaaaaaaa.bin",
+              sourceSha256: "a".repeat(64),
+            },
+          },
+        ],
+        replayContext(ctx),
+      ),
+    ).rejects.toThrow(/failed closed validation/i);
+    expect(fs.existsSync(path.join(outsideDir, "escaped.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(outsideDir, "escaped.md"), "utf8")).toBe("sentinel\n");
+
+    // create-target 目录名穿越（递归删除根外目录的向量）。
+    await expect(
+      undoJournalSteps(
+        [
+          {
+            seq: 1,
+            step: "create-target",
+            detail: { kind: "content", directoryName: "../outside-r8" },
+          },
+        ],
+        replayContext(ctx),
+      ),
+    ).rejects.toThrow(/failed closed validation/i);
+    expect(fs.existsSync(path.join(outsideDir, "escaped.md"))).toBe(true);
+
+    // 合法目录名但非本 proposal 创建（binding 拒绝，防 journal 任意指定目录）。
+    await expect(
+      undoJournalSteps(
+        [
+          {
+            seq: 1,
+            step: "create-target",
+            detail: { kind: "content", directoryName: "merge-left" },
+          },
+        ],
+        replayContext(ctx),
+      ),
+    ).rejects.toThrow(/never created/i);
+    expect(fs.existsSync(path.join(ctx.directory, "skills", "merge-left"))).toBe(true);
+  });
+
+  it("P1-5: backup replay is bound to the persisted manifest (bytes/ref/seq)", async () => {
+    const ctx = await applyMove("manifest");
+    const { undoJournalSteps, readJournal } =
+      await import("../src/daemon/steward/apply-transaction.js");
+    const backupDir = `${ctx.journalPath}.backups`;
+    const binFiles = fs.readdirSync(backupDir).filter((name) => name.endsWith(".bin"));
+    expect(binFiles.length).toBe(1);
+    const binPath = path.join(backupDir, binFiles[0]!);
+    const manifestPath = path.join(backupDir, "manifest.jsonl");
+    const sourceFile = path.join(ctx.directory, "skills", "merge-right", "shared", "notes.md");
+    const originalBin = fs.readFileSync(binPath);
+    const originalManifest = fs.readFileSync(manifestPath, "utf8");
+
+    // 篡改备份字节（同长度）：hash 绑定拒绝，源不得被错误字节恢复。
+    fs.writeFileSync(binPath, Buffer.from("t".repeat(originalBin.byteLength), "utf8"), "utf8");
+    await expect(
+      undoJournalSteps(await readJournal(ctx.journalPath), replayContext(ctx)),
+    ).rejects.toThrow(/hash mismatch/i);
+    expect(fs.existsSync(sourceFile)).toBe(false);
+    fs.writeFileSync(binPath, originalBin, "utf8");
+
+    // manifest 缺失：无归属事实 → 拒绝。
+    fs.rmSync(manifestPath);
+    await expect(
+      undoJournalSteps(await readJournal(ctx.journalPath), replayContext(ctx)),
+    ).rejects.toThrow(/no entry/i);
+
+    // manifest 坏行 → 拒绝。
+    fs.writeFileSync(manifestPath, `${originalManifest}{oops\n`, "utf8");
+    await expect(
+      undoJournalSteps(await readJournal(ctx.journalPath), replayContext(ctx)),
+    ).rejects.toThrow(/corrupt/i);
+
+    // manifest 重复 ref → 拒绝。
+    fs.writeFileSync(manifestPath, `${originalManifest}${originalManifest}`, "utf8");
+    await expect(
+      undoJournalSteps(await readJournal(ctx.journalPath), replayContext(ctx)),
+    ).rejects.toThrow(/duplicate/i);
+    // 全程源未被伪造恢复。
+    expect(fs.existsSync(sourceFile)).toBe(false);
+  });
+
+  it("P1-1: a hardlinked move source is refused (exclusive-inode policy) and compensated", async () => {
+    const { directory, snapshot, proposal } = await seedMergePair();
+    const sourceFile = path.join(directory, "skills", "merge-right", "shared", "notes.md");
+    const linkPath = path.join(sandbox, "hardlink-notes.md");
+    fs.linkSync(sourceFile, linkPath);
+    const journalPath = path.join(sandbox, "journal", "hardlink.jsonl");
+    const { applyProposalTransaction } = await import("../src/daemon/steward/apply-transaction.js");
+    const outcome = await applyProposalTransaction(proposal, snapshot, {
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store: createStewardAuditStore(),
+      journalPath,
+    });
+    expect(outcome.status).not.toBe("applied");
+    expect(outcome.status === "compensated" || outcome.status === "recovery-required").toBe(true);
+    expect(outcome.failure).toContain("hardlinked");
+    // 源与外部 hardlink 都未被删除；目标目录零残留。
+    expect(fs.readFileSync(sourceFile, "utf8")).toBe("right-origin\n");
+    expect(fs.readFileSync(linkPath, "utf8")).toBe("right-origin\n");
+    expect(fs.existsSync(path.join(directory, "skills", "merged-skill"))).toBe(false);
+  });
+
+  it("P2-1: the journal persists through a dedicated 0600 fd with a terminal commit line", async () => {
+    const ctx = await applyMove("durability");
+    const { readJournal } = await import("../src/daemon/steward/apply-transaction.js");
+    const entries = await readJournal(ctx.journalPath);
+    const last = entries[entries.length - 1]!;
+    expect(last.step).toBe("commit");
+    expect(last.detail.kind).toBe("commit");
+    const mode = fs.statSync(ctx.journalPath).mode & 0o777;
+    expect(mode).toBe(0o600);
   });
 });

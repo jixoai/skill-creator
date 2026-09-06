@@ -1,0 +1,203 @@
+/**
+ * Skill Steward journal 事实层：闭合 Zod union + 严格读取（Codex R7 P1-3/P1-4）。
+ *
+ * 用户原始需求 [2026-09-06]（transaction-contract.md）：「每步记账并持久化，再推进
+ * 下一步」「补偿遇到外部修改或 I/O 错误时进入 recovery-required」。
+ * Codex R7 复核（/tmp/stage1-contracts-review-round7.md）：「journal replay 仍可对
+ * 部分、坏或未知内容假成功」「journal 中的相对路径字段可以穿越 Provider 根」。
+ *
+ * 正交意图：
+ *   [1] journal 行的闭合 discriminated union：step/detail 逐字面量收窄，相对路径与
+ *       目录名复用共享契约 schema（穿越在解析层即死，绝不进入回放）。
+ *   [2] 严格读取：缺失/不可读/坏行/未知 step/seq 断裂一律 typed 错误；终态 commit
+ *       行是回放闸——没有完整 journal 就没有 rolled-back。
+ */
+import { promises as fs } from "node:fs";
+import { z } from "zod";
+import { ContentRevisionSchema, RelPathSchema } from "../../shared/contracts/skill-steward.js";
+import { SkillIdSchema } from "../../shared/contracts/skills.js";
+import { SkillDirectoryNameSchema } from "../../shared/contracts/creator.js";
+import { DomainError } from "../domain-error.js";
+
+/** Manager 生成的 move 备份文件名（`<seq>-<sha12>.bin`；manifest 与 journal 共用）。 */
+export const BackupRefSchema = z.string().regex(/^\d+-[0-9a-f]{12}\.bin$/, {
+  message: "Manager backup reference must match `<seq>-<sha12>.bin`.",
+});
+
+const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
+
+/** move 步骤必须携带 Manager 生成的备份事实；非 move 步骤禁止携带。 */
+const ResourceDetailSchema = z
+  .strictObject({
+    kind: z.literal("resource"),
+    strategy: z.enum(["copy", "move", "reference"]),
+    from: RelPathSchema,
+    to: RelPathSchema,
+    backupRef: BackupRefSchema.optional(),
+    sourceSha256: Sha256HexSchema.optional(),
+  })
+  .superRefine((detail, ctx) => {
+    if (detail.strategy === "move") {
+      if (detail.backupRef === undefined || detail.sourceSha256 === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: "move journal step must carry manager backupRef + sourceSha256.",
+        });
+      }
+      return;
+    }
+    if (detail.backupRef !== undefined || detail.sourceSha256 !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "non-move journal step must not carry backup facts.",
+      });
+    }
+  });
+
+/** journal 行闭合 union：未知 step / 未知字段在 safeParse 即失败。 */
+export const JournalEntrySchema = z.discriminatedUnion("step", [
+  z.strictObject({
+    seq: z.number().int().positive(),
+    step: z.literal("precheck"),
+    detail: z.strictObject({
+      kind: z.literal("precheck"),
+      targets: z.array(SkillDirectoryNameSchema).min(1),
+    }),
+  }),
+  z.strictObject({
+    seq: z.number().int().positive(),
+    step: z.literal("edit"),
+    detail: z.strictObject({
+      kind: z.literal("content"),
+      skillId: SkillIdSchema,
+      beforeRevision: ContentRevisionSchema,
+    }),
+  }),
+  z.strictObject({
+    seq: z.number().int().positive(),
+    step: z.literal("disable"),
+    detail: z.strictObject({
+      kind: z.literal("enablement"),
+      skillId: SkillIdSchema,
+      wasDisabled: z.boolean().optional(),
+      revision: ContentRevisionSchema.optional(),
+    }),
+  }),
+  z.strictObject({
+    seq: z.number().int().positive(),
+    step: z.literal("enable"),
+    detail: z.strictObject({
+      kind: z.literal("enablement"),
+      skillId: SkillIdSchema,
+      wasEnabled: z.boolean().optional(),
+      revision: ContentRevisionSchema.optional(),
+    }),
+  }),
+  z.strictObject({
+    seq: z.number().int().positive(),
+    step: z.literal("create-target"),
+    detail: z.strictObject({
+      kind: z.literal("content"),
+      directoryName: SkillDirectoryNameSchema,
+    }),
+  }),
+  z.strictObject({
+    seq: z.number().int().positive(),
+    step: z.literal("resource"),
+    detail: ResourceDetailSchema,
+  }),
+  z.strictObject({
+    seq: z.number().int().positive(),
+    step: z.literal("commit"),
+    detail: z.strictObject({
+      kind: z.literal("commit"),
+      /** 操作 ID（journal 文件名派生）；回放侧按与期望 operationId 全等比对。 */
+      proposalId: z.string().min(1).max(200),
+      status: z.literal("applied"),
+      mutationCount: z.number().int().nonnegative(),
+    }),
+  }),
+]);
+
+/** journal 行（写入与回放共用同一事实形状）。 */
+export type JournalEntry = z.infer<typeof JournalEntrySchema>;
+
+/**
+ * 读取 journal 文件为严格校验后的步骤列表。
+ * 缺失 → NOT_FOUND；不可读/坏行/未知 step/字段不符/seq 断裂 → UNAVAILABLE；
+ * 只有完整、连续、可解析的 journal 才允许进入回放（部分回放 = 假 rolled-back）。
+ */
+export async function readJournal(journalPath: string): Promise<JournalEntry[]> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(journalPath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "unknown";
+    if (code === "ENOENT") {
+      throw new DomainError("NOT_FOUND", `Journal file not found: ${journalPath}`);
+    }
+    throw new DomainError(
+      "UNAVAILABLE",
+      `Journal file unreadable (${code}); recovery required: ${journalPath}`,
+    );
+  }
+  const entries: JournalEntry[] = [];
+  const lines = raw.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index]!.trim();
+    if (!trimmed) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Journal line ${index + 1} is corrupt (truncated or malformed); recovery required: ${journalPath}`,
+      );
+    }
+    const checked = JournalEntrySchema.safeParse(parsed);
+    if (!checked.success) {
+      const reason = checked.error.issues
+        .slice(0, 3)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; ");
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Journal line ${index + 1} failed closed validation (${reason}); recovery required: ${journalPath}`,
+      );
+    }
+    entries.push(checked.data);
+  }
+  for (let index = 0; index < entries.length; index += 1) {
+    if (entries[index]!.seq !== index + 1) {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Journal seq broken at line ${index + 1} (expected ${index + 1}, got ${entries[index]!.seq}; deleted or reordered lines); recovery required: ${journalPath}`,
+      );
+    }
+  }
+  return entries;
+}
+
+/**
+ * 回放闸：journal 必须以本 proposal 的 commit 终态行收尾。崩溃/截断/被删行的
+ * journal 一律不得回放——没有完整事实就没有 rolled-back（Codex R7 P1-3）。
+ */
+export function assertCommittedJournal(
+  entries: JournalEntry[],
+  expected: { proposalId: string },
+): void {
+  const last = entries.at(-1);
+  if (!last || last.step !== "commit") {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      `Journal has no terminal commit record (crashed, truncated, or never applied); recovery required (expected proposal ${expected.proposalId}).`,
+    );
+  }
+  if (last.detail.proposalId !== expected.proposalId) {
+    throw new DomainError(
+      "CONFLICT",
+      `Journal commit record belongs to proposal ${last.detail.proposalId}, expected ${expected.proposalId}; recovery required.`,
+    );
+  }
+}
