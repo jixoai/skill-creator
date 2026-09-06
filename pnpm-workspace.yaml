@@ -9,3 +9,9 @@ allowBuilds:
   # koffi 来自 dsh-web-app 全家桶的 dsh-host-directory-picker-native（FFI）；
   # 本仓只用 dsh-web-app 的 ./startup 与 cordis.patch.yml 作 host 参考，不用原生目录选择器。
   koffi: false
+  # dsh-base 闭包带入的原生/生成脚本包（pty/proto/子进程桥）。
+  # web host 只消费其 JS 面；如后续 base 层功能需要原生构建，再逐个放开。
+  "@deepseek-ai/dsh-subprocess-local": false
+  "@google/genai": false
+  node-pty: false
+  protobufjs: false
