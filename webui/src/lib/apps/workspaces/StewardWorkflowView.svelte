@@ -1,7 +1,8 @@
 <!--
-  用户原始需求 [2026-09-07]（openspec steward-product-workflow task 4.1）：
-  「只实现 task/target/selected-skills/runtime-config stores 和对应 workflow view；
-  复用阶段 4 已注册的 plugin/root/connection/RPC owner。」
+  用户原始需求 [2026-09-07]（openspec steward-product-workflow tasks 4.1/4.2）：
+  「只实现 task/target/selected-skills/runtime-config stores 和对应 workflow view」
+  +「timeline, tool calls, evidence graph, diff, validation, approval, rollback
+  and recovery states work at 1100px and 680px without overflow」。
   正交意图：
   1. 任务/范围选择：taskKind 分段控制 + 技能多选（来自 skills.list）+ instructions；
      选择按 target 键控存活（island 卸载/重连不重置）。
@@ -9,6 +10,10 @@
      补丁更新（typed rejected 可见）。
   3. run 投影：skillSteward.startRun 终态（terminal/toolCalls/dshSessionId/proposals），
      latest-request-wins，迟到响应不覆盖。
+  4. 提案工作流（4.2）：每提案 validate→approve→apply→rollback 事实链 +
+     mutation diff（Manager 修订级事实）+ recovery/compensated/stale 终态 +
+     append-only timeline + agent stream（脱敏帧，tool-call/tool-result 即
+     tool calls 面与提案的证据链）。
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -16,13 +21,24 @@
   import { loadSkills, skillsState, filteredSkills } from "$lib/stores/skills.svelte";
   import {
     applyStewardRuntimeConfigPatch,
+    applyStewardProposal,
+    applyStewardRollback,
+    approveStewardProposal,
     clampInstructions,
+    framesForCurrentRun,
+    isReverseProposalPlaceholder,
     loadStewardRuntimeConfig,
+    loadStewardStreamFrames,
+    prepareStewardRollback,
+    proposalStates,
     runtimeConfigState,
     selectionFor,
     startStewardWorkflowRun,
+    streamFramesState,
     toggleSelectedSkill,
+    validateStewardProposal,
     workflowRunState,
+    workflowTimeline,
     STEWARD_INSTRUCTIONS_MAX,
     type StewardWorkflowSelection,
   } from "$lib/stores/steward-workflow.svelte";
@@ -31,9 +47,12 @@
   import { Checkbox } from "$lib/components/ui/checkbox";
   import { Textarea } from "$lib/components/ui/textarea";
   import IconCpu from "@lucide/svelte/icons/cpu";
+  import IconGitBranch from "@lucide/svelte/icons/git-branch";
+  import IconHistory from "@lucide/svelte/icons/history";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPlay from "@lucide/svelte/icons/play";
   import IconSettings from "@lucide/svelte/icons/settings";
+  import IconWrench from "@lucide/svelte/icons/wrench";
   import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
   import type { StewardTaskKind } from "$shared/contracts/skill-steward.js";
 
@@ -285,24 +304,355 @@
           {#if run.dshSessionId}
             <Badge variant="outline" class="text-[10px]">dsh {run.dshSessionId}</Badge>
           {/if}
-          {#if run.proposals.length > 0}
-            <Badge variant="secondary" class="text-[10px]">{run.proposals.length} proposals</Badge>
-          {/if}
+          <code class="text-[10px] text-muted-foreground">{run.snapshotId}</code>
         </div>
         <p class="text-xs text-muted-foreground">{run.terminal}</p>
-        {#if run.proposals.length > 0}
-          <ul class="flex flex-col gap-1 text-xs">
-            {#each run.proposals as proposal (proposal.proposalId)}
-              <li class="flex items-center gap-2">
-                <Badge variant="outline" class="text-[10px]">{proposal.action}</Badge>
-                <code class="text-[10px]">{proposal.proposalId}</code>
-              </li>
-            {/each}
-          </ul>
+      </section>
+    {/if}
+
+    <!-- 提案工作流（4.2）：validate → approve → apply → rollback + diff + recovery -->
+    {#if workflowRunState.run?.proposals.length}
+      <section class="flex flex-col gap-2" aria-label="Proposals">
+        <span class="text-xs font-medium text-muted-foreground">
+          Proposals ({workflowRunState.run.proposals.length})
+        </span>
+        {#each workflowRunState.run.proposals as proposal (proposal.proposalId)}
+          {@const state = proposalStates[proposal.proposalId]}
+          <article
+            class="flex flex-col gap-2 rounded-md border p-2"
+            aria-label={`Proposal ${proposal.proposalId}`}
+          >
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <IconWrench class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              <Badge variant="secondary" class="text-[10px]">{proposal.action}</Badge>
+              <code class="text-[10px]">{proposal.proposalId}</code>
+              {#if state?.validation}
+                <Badge
+                  variant="outline"
+                  class="text-[10px] {state.validation.overall === 'valid'
+                    ? 'text-emerald-600'
+                    : state.validation.overall === 'stale'
+                      ? 'text-amber-600'
+                      : 'text-destructive'}"
+                >
+                  {state.validation.overall}
+                </Badge>
+              {/if}
+              {#if state?.grant}
+                <Badge variant="outline" class="text-[10px]">granted</Badge>
+              {/if}
+              {#if state?.apply}
+                <Badge
+                  variant="outline"
+                  class="text-[10px] {state.apply.outcomeStatus === 'applied'
+                    ? 'text-emerald-600'
+                    : 'text-destructive'}"
+                >
+                  {state.apply.outcomeStatus}
+                </Badge>
+              {/if}
+              {#if state?.busy}
+                <IconLoader class="h-3.5 w-3.5 animate-spin" aria-hidden="true"></IconLoader>
+              {/if}
+            </div>
+
+            {#if state?.error}
+              <p class="text-xs text-destructive" role="alert">{state.error}</p>
+            {/if}
+
+            <!-- recovery / compensated 终态横幅：恢复动作=按 checks 修因或重跑 -->
+            {#if state?.apply && state.apply.outcomeStatus !== "applied"}
+              <div
+                class="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs"
+                role="status"
+              >
+                <p class="font-medium">
+                  {state.apply.outcomeStatus === "recovery-required"
+                    ? "Recovery required — the journal stopped before a clean terminal state."
+                    : "Compensated — mutations were rolled back in-transaction."}
+                </p>
+                {#if state.apply.failure}
+                  <p class="text-muted-foreground">{state.apply.failure}</p>
+                {/if}
+                <p class="text-muted-foreground">
+                  audit {state.apply.auditId} ({state.apply.auditStatus}); run a new check after
+                  resolving the cause — stale proposals are rejected at validation.
+                </p>
+              </div>
+            {/if}
+
+            <!-- rollback 终态（recovery-required/compensated 的恢复横幅） -->
+            {#if state?.rollbackResult && state.rollbackResult.outcomeStatus !== "applied"}
+              <div
+                class="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs"
+                role="status"
+              >
+                <p class="font-medium">
+                  Rollback {state.rollbackResult.outcomeStatus} — the reverse transaction did not reach
+                  a clean terminal state.
+                </p>
+                {#if state.rollbackResult.failure}
+                  <p class="text-muted-foreground">{state.rollbackResult.failure}</p>
+                {/if}
+                <p class="text-muted-foreground">
+                  audit {state.rollbackResult.auditId} ({state.rollbackResult.auditStatus}); resolve
+                  the reported cause before retrying — file states are preserved.
+                </p>
+              </div>
+            {/if}
+
+            <!-- validation checks（证据：逐项通过/失败/跳过） -->
+            {#if state?.validation}
+              <ul class="flex flex-col gap-0.5 text-[11px]">
+                {#each state.validation.checks as check (check.name)}
+                  <li class="flex items-start gap-2">
+                    <span
+                      class="mt-0.5 shrink-0 {check.status === 'passed'
+                        ? 'text-emerald-600'
+                        : check.status === 'failed'
+                          ? 'text-destructive'
+                          : 'text-muted-foreground'}"
+                    >
+                      {check.status === "passed" ? "✓" : check.status === "failed" ? "✕" : "–"}
+                    </span>
+                    <span class="min-w-0 break-words">
+                      <span class="font-medium">{check.name}</span>
+                      {#if check.detail}
+                        <span class="text-muted-foreground"> — {check.detail}</span>
+                      {/if}
+                    </span>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+
+            <!-- mutation diff（Manager 修订级事实：relPath + semantic + before→after） -->
+            {#if state?.apply?.mutations.length}
+              <div class="overflow-x-auto">
+                <table
+                  class="w-full min-w-72 border-collapse text-[11px]"
+                  aria-label="Mutation diff"
+                >
+                  <thead>
+                    <tr class="text-left text-muted-foreground">
+                      <th class="py-0.5 pr-2 font-medium">path</th>
+                      <th class="py-0.5 pr-2 font-medium">semantic</th>
+                      <th class="py-0.5 font-medium">revision</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each state.apply.mutations as mutation (mutation.relPath)}
+                      <tr class="border-t">
+                        <td class="max-w-56 truncate py-0.5 pr-2" title={mutation.relPath}>
+                          {mutation.relPath}
+                        </td>
+                        <td class="py-0.5 pr-2 text-muted-foreground">{mutation.semantic}</td>
+                        <td class="py-0.5 font-mono text-[10px]">
+                          {(mutation.beforeRevision ?? "∅").slice(0, 8)} → {(
+                            mutation.afterRevision ?? "∅"
+                          ).slice(0, 8)}
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+              <p class="text-[10px] text-muted-foreground">
+                diff shows Manager mutation facts (revision fingerprints); byte-level content review
+                belongs to the workspace provider view.
+              </p>
+            {/if}
+
+            <!-- 操作链 -->
+            <div class="flex flex-wrap items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-6 px-2 text-[11px]"
+                disabled={state?.busy !== null && state?.busy !== undefined}
+                onclick={() => void validateStewardProposal(proposal.proposalId)}
+              >
+                Validate
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-6 px-2 text-[11px]"
+                disabled={(state?.busy !== null && state?.busy !== undefined) ||
+                  state?.validation?.overall !== "valid"}
+                title={state?.validation?.overall === "stale"
+                  ? "Revision drift — re-run the task to refresh the snapshot"
+                  : "Approve requires a passing validation"}
+                onclick={() => void approveStewardProposal(proposal.proposalId)}
+              >
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                class="h-6 px-2 text-[11px]"
+                disabled={(state?.busy !== null && state?.busy !== undefined) ||
+                  !state?.grant ||
+                  state?.apply !== null}
+                onclick={() => void applyStewardProposal(proposal.proposalId)}
+              >
+                Apply
+              </Button>
+              {#if state?.apply?.outcomeStatus === "applied"}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-6 gap-1 px-2 text-[11px]"
+                  disabled={(state?.busy !== null && state?.busy !== undefined) ||
+                    state.rollbackPrep !== null}
+                  onclick={() =>
+                    void prepareStewardRollback(proposal.proposalId, state!.apply!.auditId)}
+                >
+                  <IconGitBranch class="h-3 w-3" aria-hidden="true" />
+                  Prepare rollback
+                </Button>
+                {#if state?.rollbackPrep}
+                  {#if !isReverseProposalPlaceholder(state.rollbackPrep.reverseProposalId) && state.rollbackPrep.reverseProposalId}
+                    <!-- enablement 逆操作：reverse proposal 需独立审批后按正常 apply 链执行 -->
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-6 px-2 text-[11px]"
+                      disabled={proposalStates[state.rollbackPrep.reverseProposalId]?.grant !==
+                        undefined ||
+                        (proposalStates[state.rollbackPrep.reverseProposalId]?.busy !== null &&
+                          proposalStates[state.rollbackPrep.reverseProposalId]?.busy !== undefined)}
+                      onclick={() =>
+                        void approveStewardProposal(state!.rollbackPrep!.reverseProposalId!)}
+                    >
+                      Approve reverse
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-6 px-2 text-[11px]"
+                      disabled={proposalStates[state.rollbackPrep.reverseProposalId]?.grant ===
+                        undefined}
+                      onclick={() =>
+                        void applyStewardProposal(state!.rollbackPrep!.reverseProposalId!)}
+                    >
+                      Apply reverse
+                    </Button>
+                  {:else}
+                    <!-- split/merge 逆操作：rollback grant 直接消费（journal 反向重放） -->
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-6 px-2 text-[11px]"
+                      disabled={state?.busy !== null && state?.busy !== undefined}
+                      title={state.rollbackPrep.note}
+                      onclick={() =>
+                        void applyStewardRollback(proposal.proposalId, state!.apply!.auditId)}
+                    >
+                      Rollback (replay)
+                    </Button>
+                  {/if}
+                {/if}
+              {/if}
+            </div>
+            {#if state?.rollbackPrep}
+              <p class="text-[11px] text-muted-foreground">{state.rollbackPrep.note}</p>
+            {/if}
+            {#if state?.grant}
+              <p class="text-[10px] text-muted-foreground">
+                grant {state.grant.grantId} · fingerprint {state.grant.fingerprint.slice(0, 16)}… ·
+                issued {state.grant.issuedAt}
+              </p>
+            {/if}
+          </article>
+        {/each}
+      </section>
+    {/if}
+
+    <!-- agent stream（tool calls 证据链；脱敏帧） -->
+    <section class="flex flex-col gap-1.5" aria-label="Agent stream">
+      <div class="flex items-center gap-1.5">
+        <IconHistory class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+        <span class="text-xs font-medium text-muted-foreground">Agent stream</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2 text-[11px]"
+          disabled={streamFramesState.loading}
+          onclick={() => void loadStewardStreamFrames()}
+        >
+          {#if streamFramesState.loading}
+            <IconLoader class="h-3 w-3 animate-spin" aria-hidden="true" />
+          {:else}
+            refresh
+          {/if}
+        </Button>
+        {#if workflowRunState.run?.dshSessionId}
+          <span class="text-[10px] text-muted-foreground">
+            filtered to session {workflowRunState.run.dshSessionId}
+          </span>
         {/if}
-        <p class="text-[10px] text-muted-foreground">
-          approval / apply / rollback arrive with the product workflow UI (task 4.2).
+      </div>
+      {#if streamFramesState.error}
+        <p class="text-xs text-destructive">{streamFramesState.error}</p>
+      {:else if framesForCurrentRun().length === 0}
+        <p class="text-xs text-muted-foreground">
+          {streamFramesState.loading
+            ? "Loading frames…"
+            : "No frames yet — run a task to populate the stream."}
         </p>
+      {:else}
+        <ol class="flex max-h-56 flex-col gap-0.5 overflow-auto text-[11px]">
+          {#each framesForCurrentRun().slice(-30).reverse() as frame (frame.seq)}
+            <li class="flex items-baseline gap-2">
+              <span class="w-8 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+                {frame.seq}
+              </span>
+              <span
+                class="shrink-0 font-mono text-[10px] {frame.kind === 'tool-call' ||
+                frame.kind === 'tool-result'
+                  ? 'text-primary'
+                  : 'text-muted-foreground'}"
+              >
+                {frame.kind}
+              </span>
+              {#if frame.toolName}
+                <code class="shrink-0 text-[10px]">{frame.toolName}</code>
+              {/if}
+              {#if frame.text}
+                <span class="min-w-0 flex-1 truncate" title={frame.text}>{frame.text}</span>
+              {/if}
+            </li>
+          {/each}
+        </ol>
+      {/if}
+    </section>
+
+    <!-- timeline（run + 提案生命周期追加式时间线） -->
+    {#if workflowTimeline.length > 0}
+      <section class="flex flex-col gap-1.5" aria-label="Workflow timeline">
+        <div class="flex items-center gap-1.5">
+          <IconHistory class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <span class="text-xs font-medium text-muted-foreground">Timeline</span>
+        </div>
+        <ol class="flex flex-col gap-0.5 text-[11px]">
+          {#each [...workflowTimeline].reverse() as event, index (workflowTimeline.length - index)}
+            <li class="flex items-baseline gap-2">
+              <span class="w-14 shrink-0 font-mono text-[10px] text-muted-foreground">
+                {new Date(event.at).toLocaleTimeString()}
+              </span>
+              <span
+                class="shrink-0 font-mono text-[10px] {event.kind === 'error'
+                  ? 'text-destructive'
+                  : event.kind === 'applied' || event.kind === 'rolled-back'
+                    ? 'text-emerald-600'
+                    : 'text-muted-foreground'}"
+              >
+                {event.kind}
+              </span>
+              <span class="min-w-0 flex-1 break-words">{event.text}</span>
+            </li>
+          {/each}
+        </ol>
       </section>
     {/if}
   {/if}

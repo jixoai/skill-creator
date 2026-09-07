@@ -14,3 +14,16 @@
   - runtime config：`dsh.settings` 视图（deterministic · steward-deterministic/steward-echo、approval: ask、rev 0）+ approval ask→never 补丁生效；
   - island 关闭（0 残留）→ 重开 → 重导航：选择（1 selected + Organize）与 run 投影完整存活——「survive reconnect」验收点。
 - 门禁：`pnpm test` 454/454（54 files，projects 拆分后 node+webui 双管线）；typecheck 0；webui check 0/0；`pnpm build`；`vp fmt --check` 482 clean；`git diff --check` clean；`openspec validate --all --strict` 9/9。
+
+## 4.2 实测注记（产品级 workflow UI）
+
+- 视图/Store：`StewardWorkflowView` 提案卡片 + timeline + agent stream 三段（同一 island root，零 iframe/零第二 shell）。store 增 `workflowTimeline`（append-only 事件）、`proposalStates`（validation/grant/apply/rollbackResult/rollbackPrep/busy/error 逐提案事实链）、`streamFramesState` + `framesForCurrentRun`（按当前 run 的 dshSessionId 过滤）。全部走既有 `skillSteward.*` / `dsh.sessions.streams` RPC，无契约改动。
+- rollback 双形态（approval-service 实测）：disable/enable 的逆 = 真实 reverse proposal（note 要求 separate human approval → UI 走 Approve reverse + Apply reverse）；split/merge 的逆 = rollback grant（reverseProposalId 是 `spp_`+16 零占位 → UI 直接 Rollback(replay) 消费 grant）。`isReverseProposalPlaceholder` 固化该哨兵语义。
+- 生产 stream 接线：`dsh-session-binder` 增 `createCollector` 钩子（session 开启 → onTurnStart；每投影 tool call → onToolCall；失败只丢帧不影响绑定）；`pipeline-service.setDshSessionBinder` 运行时注入点；`bootDaemon` 在 DSH host 挂载后以 `domain.dshSettings.createStreamCollector` 构造 binder 注入——此前 `dsh.sessions.streams` 在生产无数据源（collector 只有测试/脚本消费），UI 恒空。
+- 轮内三个真实缺陷（全部 4.2 产品化浏览器实测暴露）：
+  1. Svelte 信号丢失：store 的 `$state` Record getter 返回裸对象（`selectionFor`/`proposalStateFor`）——store 函数改裸目标不触发信号（Validate 徽章靠偶发重渲染出现、busy spinner 永久卡死）。修复：统一返回 record 内 proxy。
+  2. journal 双射零计数缺陷：`expectedJournalStepsOf` 对 `bump("resource", 0)` 也入表，observed 只计实际出现的 kind → resource-less split/merge 的 rollback/重放双射必然失配，全部误报 recovery-required（真实磁盘无法恢复）。修复：零计数不入表（skill-steward-runtime +1 回归：expected kinds 恰为 precheck/create-target/disable）。
+  3. darwin canonical 豁免缺口：豁免只覆盖 /var→/private/var，不覆盖 /tmp→/private/tmp（IPC sun_path 短路径 sandbox 的标准形态）→ /tmp home 下 apply 全部 compensated（journal 根非 canonical）。修复：豁免扩为 darwin 系统级 symlink 根（/var、/tmp、/etc；r8 probes +2：/tmp 根接受 + 无关 realpath 仍拒）。
+  另：applyRollback 的 catch 此前吞掉 undo 错误（recovery 只有终态无诊断）——failure 文本现在经内部返回值穿透到 ApplyResult 并落 daemon 日志（契约不变）。
+- 浏览器验收（真实生产组合宿主 `scripts/dsh-release-evidence.sh.ts --hold`；截图 steward-workflow-4.2-{agent-stream,applied-mutation-diff,rolled-back,width-1100px,width-680px,approved,full-chain}.png，全程 0 JS 错误）：organize run（绑定 dsh session-2）→ Validate（3/3 checks passed）→ Approve（grant_3c27…）→ Apply（applied；mutation diff 3 行 relPath/semantic/revision；磁盘 split 真实落盘 `release-evidence-skill-exec/SKILL.md`、`-plan/SKILL.md`、源 `.SKILL.md`）→ Prepare rollback（grant minted）→ Rollback(replay)（timeline `rollback: applied · 3 mutations`；磁盘 find 恢复为仅 `skills/release-evidence-skill/SKILL.md`）；agent stream 真实帧（turn-start + tool-call skills.propose）；1100px/680px 强制容器宽度 scrollWidth===clientWidth。
+- 门禁：`pnpm test` 462/462（54 files）；typecheck 0；webui check 0/0；build；`vp fmt --check` 473 clean；`git diff --check` clean；`openspec validate --all --strict` 9/9。

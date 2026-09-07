@@ -26,16 +26,28 @@ vi.mock("../stores/connection.svelte", () => ({
 }));
 
 import {
+  applyStewardProposal,
+  applyStewardRollback,
+  approveStewardProposal,
   applyStewardRuntimeConfigPatch,
   clampInstructions,
+  framesForCurrentRun,
+  isReverseProposalPlaceholder,
   loadStewardRuntimeConfig,
+  loadStewardStreamFrames,
+  prepareStewardRollback,
+  proposalStates,
   resetStewardWorkflowSelections,
+  resetStewardWorkflowEvidence,
   runtimeConfigState,
   selectionFor,
   startStewardWorkflowRun,
+  streamFramesState,
   toggleSelectedSkill,
+  validateStewardProposal,
   workflowRunState,
   workflowTargetKey,
+  workflowTimeline,
   STEWARD_INSTRUCTIONS_MAX,
 } from "../stores/steward-workflow.svelte";
 import type { WorkspaceProviderTarget } from "$shared/contracts/workspaces.js";
@@ -82,6 +94,7 @@ beforeEach(() => {
   connection.generation = 0;
   connection.rpc = null;
   resetStewardWorkflowSelections();
+  resetStewardWorkflowEvidence();
   runtimeConfigState.view = null;
   runtimeConfigState.loading = false;
   runtimeConfigState.error = null;
@@ -242,5 +255,182 @@ describe("runtime config projection", () => {
       view: settingsView,
     });
     expect((await freshPatch) as { revision?: number }).toMatchObject({ revision: 5 });
+  });
+});
+
+describe("proposal workflow states (task 4.2)", () => {
+  const PROPOSAL = "spp_37d173a4dfdc9f16";
+  const AUDIT = "aud_0123456789abcdef";
+
+  const validation = (overall: "valid" | "invalid" | "stale") => ({
+    proposalId: PROPOSAL,
+    overall,
+    checks: [
+      { name: "scope", status: "passed", detail: "inside provider root" },
+      {
+        name: "revision",
+        status: overall === "valid" ? "passed" : "failed",
+        detail: "fingerprint",
+      },
+    ],
+  });
+  const grant = {
+    grantId: "grant_0123456789abcdef",
+    fingerprint: "ab".repeat(32),
+    issuedAt: "2026-09-07T00:00:00.000Z",
+  };
+  const applyResult = (outcomeStatus: "applied" | "compensated" | "recovery-required") => ({
+    outcomeStatus,
+    auditId: AUDIT,
+    auditStatus: "applied",
+    mutations: [
+      {
+        relPath: "skills/release-evidence-skill/SKILL.md",
+        beforeRevision: "aa".repeat(32),
+        afterRevision: "bb".repeat(32),
+        semantic: "content",
+      },
+    ],
+  });
+
+  it("records the full validate→approve→apply fact chain with timeline events", async () => {
+    connection.rpc = {
+      skillSteward: {
+        validate: () => Promise.resolve(validation("valid")),
+        approve: () => Promise.resolve(grant),
+        apply: () => Promise.resolve(applyResult("applied")),
+      },
+    };
+    expect((await validateStewardProposal(PROPOSAL))?.overall).toBe("valid");
+    expect(await approveStewardProposal(PROPOSAL)).toEqual(grant);
+    const applied = await applyStewardProposal(PROPOSAL);
+    expect(applied?.outcomeStatus).toBe("applied");
+    const state = proposalStates[PROPOSAL]!;
+    expect(state.validation?.overall).toBe("valid");
+    expect(state.grant?.grantId).toBe(grant.grantId);
+    expect(state.apply?.mutations[0]?.semantic).toBe("content");
+    expect(state.busy).toBeNull();
+    const kinds = workflowTimeline.map((event) => event.kind);
+    expect(kinds).toEqual(["validated", "approved", "applied"]);
+    expect(workflowTimeline[2]?.auditId).toBe(AUDIT);
+    expect(workflowTimeline[2]?.text).toContain("1 mutations");
+  });
+
+  it("projects recovery-required terminal states and typed errors without faking success", async () => {
+    connection.rpc = {
+      skillSteward: { apply: () => Promise.resolve(applyResult("recovery-required")) },
+    };
+    const result = await applyStewardProposal(PROPOSAL);
+    expect(result?.outcomeStatus).toBe("recovery-required");
+    expect(proposalStates[PROPOSAL]!.apply?.outcomeStatus).toBe("recovery-required");
+
+    connection.rpc = {
+      skillSteward: { apply: () => Promise.reject(new Error("grant already consumed")) },
+    };
+    expect(await applyStewardProposal(PROPOSAL)).toBeNull();
+    expect(proposalStates[PROPOSAL]!.error).toContain("grant already consumed");
+    expect(workflowTimeline.at(-1)?.kind).toBe("error");
+  });
+
+  it("handles both rollback forms: grant replay and separately-approved reverse proposal", async () => {
+    // split/merge 形态：占位零 id → 直接 applyRollback(auditId)。
+    connection.rpc = {
+      skillSteward: {
+        prepareRollback: () =>
+          Promise.resolve({
+            reverseProposalId: `spp_${"0".repeat(16)}`,
+            note: "Rollback grant minted; call applyRollback to consume it.",
+          }),
+        applyRollback: () => Promise.resolve(applyResult("applied")),
+      },
+    };
+    expect(isReverseProposalPlaceholder(`spp_${"0".repeat(16)}`)).toBe(true);
+    expect(isReverseProposalPlaceholder(PROPOSAL)).toBe(false);
+    const prep = await prepareStewardRollback(PROPOSAL, AUDIT);
+    expect(prep?.note).toContain("applyRollback");
+    expect(proposalStates[PROPOSAL]!.rollbackPrep?.reverseProposalId).toBe(`spp_${"0".repeat(16)}`);
+    const rolled = await applyStewardRollback(PROPOSAL, AUDIT);
+    expect(rolled?.outcomeStatus).toBe("applied");
+
+    // enablement 形态：真实 reverse id → approve + apply 走正常提案链。
+    const REVERSE = "spp_ffffffffffffffff";
+    connection.rpc = {
+      skillSteward: {
+        prepareRollback: () =>
+          Promise.resolve({
+            reverseProposalId: REVERSE,
+            note: "Reverse edit proposal prepared; requires separate human approval.",
+          }),
+        approve: () => Promise.resolve(grant),
+        apply: () => Promise.resolve(applyResult("applied")),
+      },
+    };
+    const prep2 = await prepareStewardRollback(PROPOSAL, AUDIT);
+    expect(isReverseProposalPlaceholder(prep2?.reverseProposalId)).toBe(false);
+    expect(await approveStewardProposal(REVERSE)).toEqual(grant);
+    expect((await applyStewardProposal(REVERSE))?.outcomeStatus).toBe("applied");
+    const kinds = workflowTimeline.map((event) => event.kind);
+    expect(kinds).toEqual(
+      expect.arrayContaining(["rollback-prepared", "rolled-back", "approved", "applied"]),
+    );
+  });
+
+  it("drops a stale proposal response after a newer request takes the gate", async () => {
+    const slow = deferred<unknown>();
+    const fast = validation("stale");
+    let call = 0;
+    connection.rpc = {
+      skillSteward: {
+        validate: () => {
+          call += 1;
+          return call === 1 ? slow.promise : Promise.resolve(fast);
+        },
+      },
+    };
+    const first = validateStewardProposal(PROPOSAL);
+    const second = validateStewardProposal(PROPOSAL);
+    expect((await second)?.overall).toBe("stale");
+    slow.resolve(validation("valid"));
+    expect(await first).toBeNull();
+    expect(proposalStates[PROPOSAL]!.validation?.overall).toBe("stale");
+  });
+
+  it("loads stream frames and filters them to the current run's dsh session", async () => {
+    const frames = [
+      { seq: 1, at: "t1", runId: "sr_a", sessionId: "session-1", kind: "turn-start" },
+      {
+        seq: 2,
+        at: "t2",
+        runId: "sr_a",
+        sessionId: "session-1",
+        kind: "tool-call",
+        toolName: "skills.list_context",
+      },
+      {
+        seq: 3,
+        at: "t3",
+        runId: "sr_b",
+        sessionId: "session-2",
+        kind: "tool-result",
+        toolName: "skills.relations",
+      },
+    ] as never[];
+    connection.rpc = { dsh: { sessions: { streams: () => Promise.resolve({ frames }) } } };
+    await loadStewardStreamFrames();
+    expect(streamFramesState.frames).toHaveLength(3);
+
+    workflowRunState.run = {
+      snapshotId: "snap_x" as never,
+      terminal: "completed",
+      acceptedResponses: 1,
+      droppedLateResponses: 0,
+      toolCalls: 2,
+      proposals: [],
+      dshSessionId: "session-1",
+    };
+    const scoped = framesForCurrentRun();
+    expect(scoped).toHaveLength(2);
+    expect(scoped.every((frame) => frame.sessionId === "session-1")).toBe(true);
+    expect(scoped.some((frame) => frame.kind === "tool-call")).toBe(true);
   });
 });
