@@ -21,7 +21,7 @@
 
 <h1 align="center">Skill Creator</h1>
 
-Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 daemon，daemon 通过 OpenTray 承载 Svelte WebUI，并以 ccski SDK 发现、校验和安装 `SKILL.md` 技能；Workspace/Provider 投影、权限边界和跨路由体验属于 Skill Creator，而不是 ccski。
+Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 daemon，daemon 以官方 DSH（DeepSeek Harness）Web 组合宿主作为默认入口承载技能管家与三个管理 App，并以 ccski SDK 发现、校验和安装 `SKILL.md` 技能；Workspace/Provider 投影、权限边界和跨路由体验属于 Skill Creator，而不是 ccski。DSH host 不可用时 daemon 自动降级为 Manager-only 恢复界面（SPA），不阻塞启动。
 
 ```text
                                Skill Creator
@@ -45,13 +45,13 @@ Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 da
 
 ## 产品边界
 
-| Surface                    | 责任                                                                                                                                      | 写入边界                                                                                    |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `/workspaces` home         | 索引 Global 与 Imported Workspace，提供导入与移除恢复入口                                                                                 | Remove Workspace 只删除 registry entry，不删除用户目录                                      |
-| `/workspaces` provider tab | 在一个 Workspace 的 Provider 中发现、筛选、查看、校验、启用或禁用技能；对比上游检查并按需重装过时技能                                     | 每次操作显式携带 Workspace ID + Provider ID                                                 |
-| Global Workspace（`~`）    | 聚合各 Agent 的全局 skills roots                                                                                                          | 可读/可管理现有技能，不作为 Creator 或 Repository 的写入目标                                |
-| `/creator`                 | 在已导入 Workspace.Provider 中创建、加载、编辑和删除 `SKILL.md`；查看 change log（Agent 会话由 DSH host 唯一承载，3.2 移除内嵌 ACP 面板） | `workspace`+`provider` 预选新建；再加 `skill` 加载编辑；更新和删除需要内容 revision         |
-| `/repository`              | 扫描 Git 仓库、预览技能、dry-run、多目标安装并复核结果；管理 curated 与自建 Discover 源                                                   | 扫描会话固定到一个 commit；可多选已导入 Workspace.Provider 写入目标；用户源仅 https Git URL |
+| Surface                    | 责任                                                                                                                                               | 写入边界                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `/workspaces` home         | 索引 Global 与 Imported Workspace，提供导入与移除恢复入口                                                                                          | Remove Workspace 只删除 registry entry，不删除用户目录                                      |
+| `/workspaces` provider tab | 在一个 Workspace 的 Provider 中发现、筛选、查看、校验、启用或禁用技能；对比上游检查并按需重装过时技能；`Workflow` 标签承载技能管家工作流（见下文） | 每次操作显式携带 Workspace ID + Provider ID                                                 |
+| Global Workspace（`~`）    | 聚合各 Agent 的全局 skills roots                                                                                                                   | 可读/可管理现有技能，不作为 Creator 或 Repository 的写入目标                                |
+| `/creator`                 | 在已导入 Workspace.Provider 中创建、加载、编辑和删除 `SKILL.md`；查看 change log（Agent 会话由 DSH host 唯一承载，3.2 移除内嵌 ACP 面板）          | `workspace`+`provider` 预选新建；再加 `skill` 加载编辑；更新和删除需要内容 revision         |
+| `/repository`              | 扫描 Git 仓库、预览技能、dry-run、多目标安装并复核结果；管理 curated 与自建 Discover 源                                                            | 扫描会话固定到一个 commit；可多选已导入 Workspace.Provider 写入目标；用户源仅 https Git URL |
 
 Workspace 是技能作用域的第一层，Provider 是其中的 Agent skills root。Global Workspace（`~`）从社区 catalog 解析本机 Agent 全局目录；Imported Workspace 从其 canonical directory 派生每个 Provider 根目录。用户只在导入 Workspace 时提交目录路径；注册后，技能读写使用 daemon 验证的 `WorkspaceProviderTarget`、opaque Workspace ID 和 Skill ID，不由 WebUI 拼接输出路径。
 
@@ -123,7 +123,7 @@ dist/
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `start`         | 启动 daemon，等待 WebUI 与 tray 完成挂载，然后显示原生窗口；web 模式打开浏览器；headless 时只提示 `openinbrowser`，不自动打开 |
 | `start --web`   | 以 web 模式启动：只挂纯 tray 图标（菜单 + 图标），不创建原生窗口，WebUI 在系统浏览器打开（Linux 默认）                        |
-| `open`          | 显示并聚焦现有 tray 窗口；web 模式降级为打开浏览器；headless 时失败并提示 `openinbrowser`                                     |
+| `open`          | 显示并聚焦现有 tray 窗口；web 模式降级为打开浏览器；headless 时不可用并提示 `openinbrowser`                                   |
 | `openinbrowser` | 显式在系统浏览器打开当前 daemon 的带 token WebUI URL                                                                          |
 | `status`        | 输出 PID、版本、HTTP 端口、tray 状态（mounted/web/headless）和可用的 tray 错误                                                |
 | `stop`          | 停止正式 daemon；若正式 endpoint 不存在则发现开发 daemon，并等待 endpoint 释放                                                |
@@ -140,6 +140,33 @@ pnpm skill-creator openinbrowser
 pnpm skill-creator stop
 ```
 
+以上命令在构建产物（`dist/`，与发布包同内容）上实测：`start` headless 输出恢复提示并以退出码 0 返回；`status` 输出 pid/版本/端口/tray 终态与带 token 的 WebUI URL；`open` 在 headless 态不可用并提示 `openinbrowser`；`openinbrowser` 打印并调用系统浏览器；`stop` 后 HTTP endpoint 立即释放，再次 `status` 报 ENOENT 并给出 `start` 恢复入口。作为 npm 包直接安装（`npm install <tarball>`）目前被 `ccski: link:../ccski` 阻塞（npm 对 `link:` spec 的外部安装会静默退出）——消除该依赖或把其必要代码打入产物属于发布清单（clean-install 验证）的验收项。
+
+## 技能管家（Skill Steward）
+
+技能管家是 DSH-hosted 的维护工作流：选择任务与范围 → 运行 → 审阅证据 → 人工批准 → 应用 → 必要时回滚。入口在 Workspaces 的 provider 视图 **Workflow** 标签。
+
+### 模型配置
+
+- 打开 Workflow 标签即显示当前 runtime config（模型、preset、approval 策略、revision）。preset 为 `deterministic`（内置脚本化 transport，零凭据、可离线）或 `live`（真实 provider）。
+- 切到 `live` 需要先为所选 provider 写入 API key（凭据存 daemon 私有文件 `0600`，UI 只回显 configured 状态，永不回显值）。
+- approval 策略 `ask` / `never` 只影响 agent 运行时的交互策略；**apply 永远要求人工批准的一次性 grant**，该策略不构成授权放宽。
+
+### 维护流程
+
+1. 选任务：`Check`（只读体检）、`Optimize`（编辑优化）、`Organize`（拆分/合并/启停整理）。
+2. 选范围：勾选技能子集（留空 = 整个 Provider），可附加上限 2000 字的补充指令。
+3. `Run`：daemon 建快照、agent 通过五个域白名单工具执行（每次调用回 Manager registry 审计），产出提案。
+4. 审阅：每张提案卡 `Validate`（逐项 checks）→ `Approve`（铸造一次性 grant，绑定 patch fingerprint 与全部输入 revision）→ `Apply`（journaled 事务；mutation diff 表列出 relPath/语义/revision 变化）。
+5. 回滚：`Prepare rollback` 后按提案类型二选一——启停类逆操作是反向提案（需再走 Approve reverse / Apply reverse）；拆分/合并类直接 `Rollback (replay)` 反向重放 journal。磁盘逐字节恢复由事务层保证。
+
+### 恢复流程
+
+- **DSH host 不可用**（缺包/版本不符/插件失败）：daemon 显式降级为 Manager-only 恢复界面（无 Agent/会话/聊天面），`status` 的 `dsh` 字段携带降级原因；重启 daemon 是恢复组合宿主的入口。
+- **apply 终态 `recovery-required` / `compensated`**：提案卡显示横幅与 daemon 侧失败原因；`compensated` 表示事务内已自动回滚，`recovery-required` 表示需要按提示处理残留（文件状态被保全，不静默覆盖）。处理后重新运行任务生成新提案——revision 漂移的旧提案在 validation 即被拒绝（`stale`）。
+- **断线重连**：任务/范围选择、runtime config 与最近一次 run 投影跨重连存活；迟到响应一律不覆盖新状态。
+- **daemon 重启**：`skill-creator stop && skill-creator start`；未消费的审批 grant 全部失效（不重放授权），需要重新批准。
+
 ## 运行架构
 
 ```text
@@ -152,6 +179,8 @@ src/daemon/ipc-server.ts ---------------------- single-instance owner
     |
     +--> src/daemon/index.ts ------------------ lifecycle/status
     |       |-- WebServer @ 127.0.0.1:random
+    |       |-- dsh-host-lifecycle.ts -------- official DSH host (default entry;
+    |       |                                    failure degrades to SPA recovery)
     |       `-- TrayHost -> OpenTray ext-webview
     |
     +--> src/daemon/rpc-router.ts
@@ -162,6 +191,9 @@ src/daemon/ipc-server.ts ---------------------- single-instance owner
                     |-- repository-service.ts  pinned clone lifecycle
                     |-- source-registry.ts --- curated + user Discover sources
                     |-- skills-update-service.ts  lock-hash update check/apply
+                    |-- steward/ --------------- Skill Steward pipeline + journal
+                    |       `-- dsh-session-binder -- run↔DSH session + stream frames
+                    |-- dsh-settings.ts ------- steward model/preset/permissions
                     `-- acp-bridge-service.ts  [internal legacy] agent subprocess + fs security gate（产品入口已移除，3.2）
 
 src/shared/rpc-contract.ts
@@ -172,14 +204,16 @@ src/shared/rpc-contract.ts
 
 浏览器安全的契约由 `src/shared/rpc-contract.ts` 统一组合，具体 schema 物理拆分在 `src/shared/contracts/`：
 
-| RPC module   | Procedures                                                                    |
-| ------------ | ----------------------------------------------------------------------------- |
-| `skills`     | `list`, `info`, `toggle`, `validate`, `update.check`, `update.apply`          |
-| `workspace`  | `list`, `add`, `remove`, `setActive`                                          |
-| `creator`    | `save`, `load`, `remove`, `revisions`                                         |
-| `repository` | `scan`, `preview`, `install`, `sources.list`, `sources.add`, `sources.remove` |
-| `daemon`     | `status`                                                                      |
-| `acp`        | `agents.list`, `session.open`, `session.close`（internal legacy，非产品入口） |
+| RPC module     | Procedures                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `skills`       | `list`, `info`, `toggle`, `validate`, `update.check`, `update.apply`                                                           |
+| `workspace`    | `list`, `add`, `remove`, `setActive`                                                                                           |
+| `creator`      | `save`, `load`, `remove`, `revisions`                                                                                          |
+| `repository`   | `scan`, `preview`, `install`, `sources.list`, `sources.add`, `sources.remove`                                                  |
+| `daemon`       | `status`                                                                                                                       |
+| `skillSteward` | `startRun`, `validate`, `approve`, `apply`, `prepareRollback`, `applyRollback`（人类审批面；apply/rollback 为 journaled 事务） |
+| `dsh`          | `settings.get`, `settings.update`, `credentials.set`, `credentials.clear`, `sessions.streams`（脱敏 stream 帧）                |
+| `acp`          | `agents.list`, `session.open`, `session.close`（internal legacy，非产品入口）                                                  |
 
 WebUI 直接从共享契约推导 client 类型；daemon 通过同一契约实现 handler。网络输入和输出都经过 Zod runtime validation。
 
