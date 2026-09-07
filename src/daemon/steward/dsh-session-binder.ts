@@ -253,12 +253,15 @@ export function createDshSessionBinder(options: DshSessionBinderOptions) {
         recordedToolCallIds.set(dshSessionId, seen);
       }
       if (seen.has(call.id)) continue;
+      // 官方契约：tool/call 的 arguments 是「原始 JSON 字符串」（ui-chat 投影
+      // argsRaw = arguments 后 JSON.parse；对象值会使官方 transcript 渲染器
+      // deriveSummary/firstLine 崩溃——4.1 浏览器取证实测）。
       const callSeq = session.append("tool/call", {
         turn: 1,
         step: 1,
         callId: call.id,
         name: call.tool,
-        arguments: {},
+        arguments: JSON.stringify(call.input ?? {}),
       }).seq;
       const isError = call.result.kind !== "ok";
       session.append(

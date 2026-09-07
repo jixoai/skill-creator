@@ -125,6 +125,13 @@ describe("manager tools into official transcript (task 2.2)", () => {
       for (const call of runRecord!.toolCalls!) {
         expect(transcriptCallIds.has(call.id)).toBe(true);
       }
+      // 官方渲染器契约（4.1 取证实测）：arguments 必须是可 JSON.parse 的字符串
+      // （ui-chat 把它直接当 argsRaw 用；对象值会让官方 transcript 崩溃）。
+      for (const event of callEvents) {
+        const raw = (event.data as { arguments?: unknown }).arguments;
+        expect(typeof raw).toBe("string");
+        expect(typeof JSON.parse(raw as string)).toBe("object");
+      }
       expect(resultEvents.length).toBe(callEvents.length);
       // 事件顺序：user → tool rounds → assistant → step/end → turn/end。
       const types = log.map((event) => event.type);
