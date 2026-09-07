@@ -19,6 +19,7 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import type { z } from "zod";
 import type { CapabilityRegistry } from "../capability/core.js";
 import { uiCardForCapability, type UiCardRegistry } from "./cards.js";
+import type { McpProposalStore } from "./proposals.js";
 
 /** 双形态的 authority 面选择。 */
 export type McpFace = "in-process" | "stdio";
@@ -28,6 +29,8 @@ export interface SkillCreatorMcpDeps {
   face: McpFace;
   /** ui:// 卡片注册表（daemon 级；ok 结果按能力面附卡）。 */
   cards: UiCardRegistry;
+  /** mutation proposal 存储（形态 A；stdio 形态忽略——mutation 不注册）。 */
+  proposals?: McpProposalStore;
 }
 
 /** MCP 工具名：capability 名 `.` → `_`（MCP 名字字符集 [a-zA-Z0-9_-]）。 */
@@ -105,7 +108,52 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
   );
 
   for (const descriptor of deps.capabilities.describe()) {
-    if (descriptor.authority === "approved-mutation") continue;
+    if (descriptor.authority === "approved-mutation") {
+      // 4.4 authority：mutation 一律产 proposal 待审批（不直接写盘）。stdio 形态
+      // 收窄为 readonly + propose-only（client 自持结果，不入 Manager 存储）——
+      // 只在形态 A 注册 propose 变体。
+      if (deps.face !== "in-process" || !deps.proposals) continue;
+      const definition = deps.capabilities.definitionOf(descriptor.name);
+      const input = definition?.input as z.ZodObject | undefined;
+      const shape =
+        input && typeof (input as unknown as { shape?: object }).shape === "object"
+          ? input.shape
+          : null;
+      const proposeName = `${mcpToolName(descriptor.name)}_propose`;
+      const proposeResult = (view: {
+        proposalId: string;
+        capability: string;
+        status: string;
+      }) => ({
+        content: [
+          {
+            type: "text" as const,
+            text: safeJson({
+              kind: "proposed",
+              proposalId: view.proposalId,
+              capability: view.capability,
+              status: view.status,
+              note: "Awaiting human approval in the Skill Creator UI.",
+            }),
+          },
+        ],
+      });
+      if (shape) {
+        server.tool(
+          proposeName,
+          `Propose: ${descriptor.description} A human approves it in the Skill Creator UI before execution.`,
+          shape,
+          async (args) => proposeResult(deps.proposals!.create(descriptor.name, args)),
+        );
+      } else {
+        server.tool(
+          proposeName,
+          `Propose: ${descriptor.description} A human approves it in the Skill Creator UI before execution.`,
+          async () => proposeResult(deps.proposals!.create(descriptor.name, undefined)),
+        );
+      }
+      continue;
+    }
     const definition = deps.capabilities.definitionOf(descriptor.name);
     const input = definition?.input as z.ZodObject | undefined;
     const shape = input && typeof (input as unknown as { shape?: object }).shape === "object"

@@ -169,6 +169,19 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           html: domain.uiCards.get(input.uri),
         })),
       },
+      proposals: {
+        list: rpc.agent.proposals.list.handler(() => ({
+          proposals: domain.mcpProposals.list(),
+        })),
+        approve: rpc.agent.proposals.approve.handler(async ({ input }) => ({
+          proposal: (await domain.mcpProposals.approve(input.proposalId)).view,
+        })),
+        reject: rpc.agent.proposals.reject.handler(({ input }) => {
+          const rejected = domain.mcpProposals.reject(input.proposalId);
+          if (!rejected) throw new DomainError("NOT_FOUND", `proposal not found: ${input.proposalId}`);
+          return { proposal: rejected.view };
+        }),
+      },
       sessions: {
         list: rpc.agent.sessions.list.handler(async () => ({
           sessions: domain.agentSessions.list(),

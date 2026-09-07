@@ -27,6 +27,8 @@ import {
   AgentSessionAnswerResultSchema,
   AgentCardGetInputSchema,
   AgentCardGetResultSchema,
+  AgentMcpProposalViewSchema,
+  AgentProposalDecisionInputSchema,
   AgentSessionPromptInputSchema,
   AgentSessionPromptResultSchema,
   AgentSessionStreamInputSchema,
@@ -293,6 +295,18 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     /** ui:// 卡片资源代理（task 4.2；面板按 tool-result 的 resourceUri 拉取）。 */
     card: {
       get: oc.input(AgentCardGetInputSchema).output(AgentCardGetResultSchema),
+    },
+    /** MCP mutation proposal 审批链（task 4.4；Manager authority 的决定面）。 */
+    proposals: {
+      list: oc
+        .input(z.object({}))
+        .output(z.object({ proposals: z.array(AgentMcpProposalViewSchema) })),
+      approve: oc
+        .input(AgentProposalDecisionInputSchema)
+        .output(z.object({ proposal: AgentMcpProposalViewSchema })),
+      reject: oc
+        .input(AgentProposalDecisionInputSchema)
+        .output(z.object({ proposal: AgentMcpProposalViewSchema })),
     },
     /** 面板会话：内核 agent 会话的生命周期投影（task 2.2；旧 dsh.* 收敛并入）。 */
     sessions: {

@@ -146,6 +146,23 @@ export const AgentCardGetResultSchema = z.object({
   html: z.string().nullable(),
 });
 
+/** MCP mutation proposal 的浏览器安全投影（task 4.4）。 */
+export const AgentMcpProposalViewSchema = z.object({
+  proposalId: z.string().min(1),
+  capability: z.string().min(1),
+  input: z.unknown(),
+  status: z.enum(["pending", "approved", "rejected", "executed", "failed"]),
+  createdAt: z.string().min(1),
+  decidedAt: z.string().optional(),
+});
+/** proposal 投影。 */
+export type AgentMcpProposalView = z.infer<typeof AgentMcpProposalViewSchema>;
+
+/** 审批输入。 */
+export const AgentProposalDecisionInputSchema = z.object({
+  proposalId: z.string().min(1),
+});
+
 export {
   DshStewardSettingsViewSchema as AgentSettingsViewSchema,
   DshSettingsUpdateSchema as AgentSettingsUpdateSchema,

@@ -8,6 +8,7 @@
 <script lang="ts">
   import IconChevronRight from "@lucide/svelte/icons/chevron-right";
   import AgentCard from "./AgentCard.svelte";
+  import AgentProposalCard from "./AgentProposalCard.svelte";
 
   let {
     toolName,
@@ -27,6 +28,29 @@
       return JSON.stringify(payload, null, 2);
     } catch {
       return String(payload);
+    }
+  });
+
+  /** propose 结果（task 4.4）：kind "proposed" 的 mutation proposal 待审批卡。 */
+  const proposed = $derived.by(() => {
+    if (phase !== "result") return null;
+    const text = payloadText;
+    if (!text.startsWith("{")) return null;
+    try {
+      const parsed = JSON.parse(text) as {
+        kind?: string;
+        proposalId?: unknown;
+        capability?: unknown;
+        status?: unknown;
+      };
+      if (parsed.kind !== "proposed" || typeof parsed.proposalId !== "string") return null;
+      return {
+        proposalId: parsed.proposalId,
+        capability: typeof parsed.capability === "string" ? parsed.capability : toolName,
+        status: typeof parsed.status === "string" ? parsed.status : "pending",
+      };
+    } catch {
+      return null;
     }
   });
 
@@ -69,7 +93,14 @@
 </script>
 
 <div class="rounded-md border border-border bg-muted/30 text-[11px]">
-  {#if uiCard}
+  {#if proposed}
+    <AgentProposalCard
+      proposalId={proposed.proposalId}
+      capability={proposed.capability}
+      input={payload}
+      status={proposed.status}
+    />
+  {:else if uiCard}
     <AgentCard resourceUri={uiCard.resourceUri} title={uiCard.title} />
   {/if}
   <button

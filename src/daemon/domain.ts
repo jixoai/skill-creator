@@ -42,6 +42,7 @@ import {
 } from "./capability/core.js";
 import { createDomainCapabilities } from "./capability/domain-capabilities.js";
 import { UiCardRegistry } from "./mcp/cards.js";
+import { createMcpProposalStore, type McpProposalStore } from "./mcp/proposals.js";
 import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
 import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
 import type { HarnessAdapter } from "./steward/harness-adapter.js";
@@ -91,6 +92,8 @@ export interface DaemonDomain {
   managerCapabilities: CapabilityRegistry;
   /** ui:// 卡片资源注册表（task 4.2；agent.card.get 代理读取）。 */
   uiCards: UiCardRegistry;
+  /** MCP mutation proposal 链（task 4.4；审批执行经 managerCapabilities）。 */
+  mcpProposals: McpProposalStore;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
@@ -135,6 +138,12 @@ export function createDaemonDomain(
     },
     uiCards: new UiCardRegistry(),
   } as DaemonDomain;
+  // proposal 链在 capabilities 就绪后构造（审批执行的依赖注入）。
+  Object.defineProperty(domain, "mcpProposals", {
+    value: createMcpProposalStore(domain.managerCapabilities),
+    enumerable: true,
+    writable: false,
+  });
   // manager 能力面：结构化子集依赖（不含自身），构造后冻结为普通属性。
   const managerCapabilities = createCapabilityRegistry(createDomainCapabilities(domain));
   Object.defineProperty(domain, "managerCapabilities", {
