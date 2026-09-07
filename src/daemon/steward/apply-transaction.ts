@@ -1000,6 +1000,9 @@ export async function scanUnfinishedJournals(storeDir: string): Promise<Unfinish
       continue;
     }
     if (entries.length === 0) continue;
+    // Codex 2.3e：终态 commit 行 = 事务已完成（崩溃/截断/删行才残留）；
+    // 已完成 journal 不阻塞任何后续 apply。
+    if (entries[entries.length - 1]!.step === "commit") continue;
     unfinished.push({
       proposalId,
       journalPath,

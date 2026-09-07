@@ -25,8 +25,8 @@
 - [x] 2.3d 在相同事务上实现 split/merge，包含资源映射和源技能禁用。
   - Evidence: 89b6c03；资源映射落盘、名冲突零写入、中途补偿、rollback 恢复完整树+启停（journal replay 测试）。
   - Evidence: scripts/references/assets 有效；目标名称冲突零写入；中途失败补偿；成功 rollback 恢复完整树和启停状态。
-- [ ] 2.3e 增加每个写边界的 crash/restart recovery fixtures。
-  - Evidence: journal 不丢，重启不重放 grant；不完整恢复封锁目标写入并提供逐项诊断。
+- [x] 2.3e 增加每个写边界的 crash/restart recovery fixtures。
+  - Evidence: journal 不丢（常驻 0600 append fd 逐行 fsync + O_EXCL 独占创建 + store-anchor 进程生命周期 inode 锚，R11/R12/55e0a98）；重启不重放 grant（invalidateUnconsumedGrants + grant consumedAt 持久化）；不完整恢复封锁目标写入并提供逐项诊断（本提交：apply 入口恢复闸——scanUnfinishedJournals 只上报无终态 commit 行/损坏的 journal，同 target 残留与不可解析的重启残留封锁 apply 并逐项列出 id/步数/末步/损坏态；不同 target 的已知残留不干扰；已 commit 的 journal 永不阻塞）。负例 ×3（同 target 残留封锁 + 诊断含 id、committed 不阻塞的正向流、重启残留保守封锁）。
 - [x] 2.3f 串联 snapshot、finding、proposal、validation、approval、apply、audit、rollback。
   - Evidence: 5781109 skillSteward RPC 六端点 + e2e 全链测试（check→proposal→approve→apply→byte-rollback）。
   - Files: `src/daemon/steward-service.ts`, `src/shared/rpc-contract.ts`, `src/shared/contracts/skill-steward.ts`.
@@ -47,5 +47,4 @@
 - [x] 2.5 运行 runtime focused tests plus `pnpm typecheck`, `pnpm build`, `git diff --check`, `openspec validate --all --strict`。
   - Evidence: artifacts/verification.md 门禁记录（303/303、tsc 0、svelte 0/0、build、fmt、diff、openspec 9/9）。
 
-<!-- 进度注（2026-09-06）：2.3e 部分完成（scanUnfinishedJournals + 测试，20ec083；恢复闸门未接入 apply 入口）；2.4a 部分完成（新 runtime 的 cancel/并发锁/迟到事件已测；adapter 强制 deadline 属 DSH 阶段）。详见 artifacts/verification.md 未验证项。 -->
-<!-- 进度注（2026-09-07）：2.3e 增量（R13 保留 P2 的 owner 落地，本提交）：新 `src/daemon/steward/store-anchor.ts` 进程生命周期 inode 锚——journal 目录/backup root 首见锚定 + 跨调用复验（同路径目录换体 → UNAVAILABLE/recovery，替换目录不能成为新事实源；`resetStoreAnchors()` 建模重启语义）；`prepareBackupRoot` 先 mkdir 再锚定；`readBackupManifest` 手工 parser 替换为 strict Zod `BackupManifestLineSchema`（未知字段/穿越 from/坏 sha/坏 byteSize 拒绝）。负例 ×4（跨调用 backup root 换体、journal 目录换体事实源拒绝、重启等价重锚、manifest 四类坏行）。apply 入口的目标封锁闸仍开放。 -->
+<!-- 进度注（2026-09-07）：2.3e 完成——三段式：20ec083 scanUnfinishedJournals；55e0a98 store-anchor inode 锚 + manifest strict Zod；本提交 apply 入口恢复闸（同 target 残留/重启残留封锁 + 逐项诊断）。2.4a 部分完成（新 runtime 的 cancel/并发锁/迟到事件已测；adapter 强制 deadline 属 DSH 阶段）。详见 artifacts/verification.md。 -->

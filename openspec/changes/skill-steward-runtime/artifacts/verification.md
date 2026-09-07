@@ -48,3 +48,11 @@ openspec validate --all --strict -> 9 passed, 0 failed
 - 负例（`test/r8-independent-probes.test.ts` [2.3e] ×4）：跨调用 backup root 换体 → 读写均拒绝且替换目录零字节；journal 目录换体 → 不再是事实源；resetStoreAnchors → 重启等价重锚；manifest 未知字段/穿越/坏 hash/坏 size 四类拒绝。
 - 门禁：contracts 42/42、runtime 66/66、probes 18/18、全量 434/434（52 files）、typecheck 0、webui 0/0、fmt 全树、openspec 9/9。
 - 未验证项更新：2.3e 的「不完整恢复封锁目标写入」（apply 入口闸）仍开放；boot 显式接线目前由首见锚定承载（store 初始化路径未显式调用——首见即 daemon 生命周期内第一次使用，语义等价）。
+
+## 2.3e 收尾：apply 入口恢复闸（本提交）
+
+- `scanUnfinishedJournals` 语义修正：终态 commit 行 = 事务已完成（不再上报，绝不阻塞后续 apply）；只上报无 commit 行的残留与损坏 journal。
+- `approval-service.apply` 前置恢复闸：扫描未完成 journal——同 target 残留（含自身重复 apply 的残留）封锁该 target 写入；proposal 不可解析的重启残留（target 未知）保守封锁全部 apply；不同 target 的已知残留不互相干扰。拒绝信息逐项诊断（id/步数/末步/损坏态）。
+- 负例 ×3：真实 apply→剥离 commit 行→新快照 disable 提交→apply 被封锁且诊断含残留 id；committed journal 不阻塞（正向：第一次 apply 后同 target 第二个 proposal 正常 applied）；预置不可解析重启残留→任何 apply 被保守封锁。
+- 门禁：contracts 42/42、runtime 69/69、probes 18/18、全量 437/437（52 files）、typecheck 0、webui 0/0、fmt 全树、openspec 9/9。
+- 2.3e 三项验收对照：journal 不丢（append fd + 逐行 fsync + O_EXCL + inode 锚）✓；重启不重放 grant（invalidateUnconsumedGrants）✓；不完整恢复封锁目标写入 + 逐项诊断（本闸）✓。

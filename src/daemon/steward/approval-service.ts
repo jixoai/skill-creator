@@ -45,6 +45,7 @@ import { DomainError } from "../domain-error.js";
 import type { StewardAuditStore } from "./audit-store.js";
 import {
   applyProposalTransaction,
+  scanUnfinishedJournals,
   undoJournalSteps,
   type ApplyOutcome,
 } from "./apply-transaction.js";
@@ -258,6 +259,32 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       // fingerprint 复核（proposal 在批准后被替换/篡改）。
       if (fingerprintOf(entry.proposal) !== grant.fingerprint) {
         throw new DomainError("CONFLICT", "Patch fingerprint does not match the consumed grant.");
+      }
+      // Codex 2.3e 恢复闸：apply 前扫描未完成 journal（无终态 commit 行 / 损坏）。
+      // 同 target 的崩溃残留封锁该 target 的后续写入；proposal 已不可解析的重启残留
+      // （target 未知）保守封锁全部 apply；不同 target 的已知残留不互相干扰。
+      // 逐项诊断列出每个残留（id/步数/末步/是否损坏）。
+      const unfinished = await scanUnfinishedJournals(stewardStoreDir());
+      const blockers = unfinished.filter((op) => {
+        if (op.proposalId === proposalId) return true; // 自身残留（重复 apply）。
+        const known = proposals.get(op.proposalId as StewardProposalId);
+        if (!known) return true; // 重启残留：target 不可知 → 保守封锁。
+        return (
+          known.snapshot.target.workspaceId === entry.snapshot.target.workspaceId &&
+          known.snapshot.target.providerId === entry.snapshot.target.providerId
+        );
+      });
+      if (blockers.length > 0) {
+        const diagnostic = blockers
+          .map(
+            (op) =>
+              `${op.proposalId}(${op.corrupt ? "corrupt" : `${op.steps} steps, last=${op.lastStep}`})`,
+          )
+          .join(", ");
+        throw new DomainError(
+          "UNAVAILABLE",
+          `Unfinished steward journal(s) block this target until recovery: ${diagnostic}; recovery required.`,
+        );
       }
       const outcome = await applyProposalTransaction(entry.proposal, entry.snapshot, {
         workspaces: deps.workspaces,

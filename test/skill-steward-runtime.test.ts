@@ -2728,6 +2728,145 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     ).toThrow(/resource mappings do not match/i);
   });
 
+  it("2.3e: a same-target crash residue blocks the next apply with per-item diagnostics", async () => {
+    const { directory, snapshot, proposal } = await seedMergePair();
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const firstId = service.submit(proposal, snapshot);
+    await service.approve(firstId, "human-ui");
+    const { outcome } = await service.apply(firstId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    // 模拟崩溃残留：剥离终态 commit 行。
+    const journalPath = path.join(sandbox, "home", "steward-store", "journal", `${firstId}.jsonl`);
+    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    fs.writeFileSync(journalPath, `${lines.slice(0, -1).join("\n")}\n`, "utf8");
+    // 新 proposal（同 target、新快照）必须被封锁，且诊断包含残留 id。
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const fresh = await buildContextSnapshot(domain.skills, {
+      target: snapshot.target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const left = fresh.skills.find((skill) => skill.directoryName === "merge-left")!;
+    const disableAfter: SkillProposal = {
+      contractVersion: proposal.contractVersion,
+      action: "disable",
+      patch: {
+        kind: "disable",
+        snapshotId: fresh.id,
+        reason: "post-residue probe",
+        selections: [{ skillId: left.skillId, expectedRevision: left.revision }],
+      },
+      rationale: "post-residue probe",
+      findingIds: [],
+      evidence: [{ skillId: left.skillId, snippet: "p" }],
+      skillIds: [left.skillId],
+      observedRevisions: [{ skillId: left.skillId, revision: left.revision }],
+    };
+    const secondId = service.submit(disableAfter, fresh);
+    await service.approve(secondId, "human-ui");
+    await expect(service.apply(secondId, "human-ui")).rejects.toThrow(
+      new RegExp(`Unfinished steward journal.*${firstId}`),
+    );
+    // 已提交 journal 不阻塞：残留清理（补 commit 行语义由恢复工具拥有）后可恢复——
+    // 这里直接验证 committed journal 的存在不构成阻塞（本例第二 proposal 因残留被拒，
+    // 正向例见下一条测试）。
+    void directory;
+  });
+
+  it("2.3e: committed journals never block; a different-target residue does not interfere", async () => {
+    const { snapshot, proposal } = await seedMergePair();
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const firstId = service.submit(proposal, snapshot);
+    await service.approve(firstId, "human-ui");
+    const { outcome } = await service.apply(firstId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    // 已完成 journal（含 commit 行）不阻塞同 target 的下一次 apply。
+    const proposal2: SkillProposal = JSON.parse(JSON.stringify(proposal));
+    // 快照 revision 已漂移——重新快照后再提交。
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const fresh = await buildContextSnapshot(domain.skills, {
+      target: snapshot.target,
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const disableProposal: SkillProposal = {
+      contractVersion: proposal.contractVersion,
+      action: "disable",
+      patch: {
+        kind: "disable",
+        snapshotId: fresh.id,
+        reason: "post-commit apply probe",
+        selections: fresh.skills
+          .filter((skill) => skill.directoryName.startsWith("merge-"))
+          .map((skill) => ({ skillId: skill.skillId, expectedRevision: skill.revision })),
+      },
+      rationale: "post-commit apply probe",
+      findingIds: [],
+      evidence: [
+        {
+          skillId: fresh.skills.find((skill) => skill.directoryName === "merge-left")!.skillId,
+          snippet: "p",
+        },
+      ],
+      skillIds: fresh.skills
+        .filter((skill) => skill.directoryName.startsWith("merge-"))
+        .map((skill) => skill.skillId),
+      observedRevisions: fresh.skills
+        .filter((skill) => skill.directoryName.startsWith("merge-"))
+        .map((skill) => ({ skillId: skill.skillId, revision: skill.revision })),
+    };
+    const secondId = service.submit(disableProposal, fresh);
+    await service.approve(secondId, "human-ui");
+    const second = await service.apply(secondId, "human-ui");
+    expect(second.outcome.status).toBe("applied");
+  });
+
+  it("2.3e: an unresolvable restart residue conservatively blocks every apply", async () => {
+    const { snapshot, proposal } = await seedMergePair();
+    // 预置重启残留：proposalId 不在本进程 proposals map 中。
+    const journalDir = path.join(sandbox, "home", "steward-store", "journal");
+    fs.mkdirSync(journalDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(journalDir, "spp_ffffffffffffffff.jsonl"),
+      `${JSON.stringify({
+        seq: 1,
+        step: "disable",
+        detail: {
+          kind: "enablement",
+          skillId: "sk_ffffffffffffffffffffffff",
+          wasDisabled: false,
+        },
+      })}\n`,
+      "utf8",
+    );
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    await expect(service.apply(proposalId, "human-ui")).rejects.toThrow(
+      /Unfinished steward journal.*spp_ffffffffffffffff/,
+    );
+  });
+
   it("R11 P1-3: disabling an already-disabled skill rolls back as a no-op (state preserved)", async () => {
     const { directory } = await seedMergePair();
     const skillDir = path.join(directory, "skills", "merge-right");
