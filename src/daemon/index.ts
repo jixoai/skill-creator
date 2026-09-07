@@ -21,6 +21,7 @@ import { createDaemonDomain, type DaemonDomain } from "./domain.js";
 import { IpcServer } from "./ipc-server.js";
 import { WebServer } from "./web-server.js";
 import { mountProductionDshHost, type ProductionDshHost } from "./dsh-host-lifecycle.js";
+import { createDshSessionBinder } from "./steward/dsh-session-binder.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
 import { log } from "./log.js";
 import type { OpenTrayAppLaunchOptions } from "opentray";
@@ -221,6 +222,19 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
   } else {
     status.dsh = { mounted: false, reason: dshHost.reason };
     log(`dsh composition host unavailable (SPA recovery active): ${dshHost.reason}`);
+  }
+  // 4.2：DSH host 挂载后把 session binder 接入 steward pipeline——生产 run 绑定
+  // 官方 session 并把 turn/tool 事件喂进脱敏 stream 环形缓冲（dsh.sessions.streams
+  // 的生产数据源）。host 降级时 binder 保持缺席（run 不绑定，stream 空）。
+  if (dshHost.mounted && dshHost.profile) {
+    const profile = dshHost.profile;
+    domain.skillSteward.setDshSessionBinder(
+      createDshSessionBinder({
+        host: () => (dshHost.mounted ? profile : null),
+        createCollector: (runId, sessionId) =>
+          domain.dshSettings.createStreamCollector(runId, sessionId),
+      }),
+    );
   }
 
   const performStop = async (): Promise<void> => {

@@ -20,10 +20,22 @@ export interface DirIdentity {
   ino: number;
 }
 
+/** darwin 系统级 symlink 根：给定路径在这些根下时返回 /private 归一形式。 */
+function darwinSystemAlias(dir: string): string | null {
+  if (process.platform !== "darwin") return null;
+  for (const root of ["/var", "/tmp", "/etc"]) {
+    if (dir === root || dir.startsWith(`${root}/`)) return `/private${dir}`;
+  }
+  return null;
+}
+
 /**
  * root 必须是 Manager 持有的 canonical 目录：lstat 为真实目录（非 symlink），
- * 且 realpath(root) 与 root 全等。唯一豁免：darwin 的 /var ↔ /private/var 前缀
- * （系统级 alias，mkdtemp 沙箱天然携带；非攻击面）。返回 {dev,ino} 身份。
+ * 且 realpath(root) 与 root 全等。豁免：darwin 的系统级 symlink 根前缀
+ * （/var → /private/var、/tmp → /private/tmp、/etc → /private/etc；
+ * mkdtemp 沙箱与 /tmp 短路径 sandbox（IPC sun_path 限制）天然携带；非攻击面
+ * ——realpath 归一后的 inode 身份仍是后续 anchor/verify 的事实源）。
+ * 返回 {dev,ino} 身份。
  */
 export async function assertCanonicalDirectory(dir: string): Promise<DirIdentity> {
   const stat = await fs.lstat(dir).catch(() => null);
@@ -34,8 +46,7 @@ export async function assertCanonicalDirectory(dir: string): Promise<DirIdentity
     );
   }
   const real = await fs.realpath(dir);
-  const darwinAlias =
-    process.platform === "darwin" && dir.startsWith("/var/") ? `/private${dir}` : null;
+  const darwinAlias = darwinSystemAlias(dir);
   if (real !== dir && real !== darwinAlias) {
     throw new DomainError(
       "INVALID_OPERATION",

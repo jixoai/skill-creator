@@ -55,6 +55,9 @@ export function createSkillStewardPipelineService(deps: {
   dshSessionBinder?: DshSessionBinder;
 }) {
   const store = createStewardAuditStore();
+  // 4.2：DSH host 在 daemon 内晚于 domain 组合挂载——binder 经此运行时注入点
+  // 接入（host 降级时保持 null，run 不绑定 session，stream 为空——typed 缺席）。
+  let activeBinder = deps.dshSessionBinder ?? null;
   const approval = createStewardApprovalService({
     workspaces: deps.workspaces,
     skills: deps.skills,
@@ -84,7 +87,7 @@ export function createSkillStewardPipelineService(deps: {
     const runId = StewardRunIdSchema.parse(`sr_${randomBytes(12).toString("hex")}`);
     // task 2.1：run ↔ DSH session 绑定（宿主可用时）。失败降级为无绑定，不阻塞 run。
     let dshSessionId: string | undefined;
-    const binder = deps.dshSessionBinder;
+    const binder = activeBinder;
     if (binder) {
       const workspaceDir = deps.workspaces.resolveWritable(input.target).directory;
       const bound = await binder.openBoundSession({
@@ -161,6 +164,10 @@ export function createSkillStewardPipelineService(deps: {
 
   return {
     startRun,
+    /** 运行时注入/替换 DSH session binder（bootDaemon 在 DSH host 挂载后调用）。 */
+    setDshSessionBinder(binder: DshSessionBinder | null): void {
+      activeBinder = binder;
+    },
     validate: (proposalId: StewardProposalId): Promise<SkillValidationResult> =>
       approval.validate(proposalId),
     approve: async (proposalId: StewardProposalId): Promise<SkillStewardApproveResult> => {
@@ -180,7 +187,7 @@ export function createSkillStewardPipelineService(deps: {
     prepareRollback: (auditId: string): Promise<SkillStewardRollbackResult> =>
       approval.prepareRollback(auditId, "human-ui"),
     applyRollback: async (auditId: string): Promise<SkillStewardApplyResult> => {
-      const { audit } = await approval.applyRollback(auditId, "human-ui");
+      const { audit, failure } = await approval.applyRollback(auditId, "human-ui");
       return {
         outcomeStatus:
           audit.status === "rolled-back"
@@ -191,6 +198,7 @@ export function createSkillStewardPipelineService(deps: {
         auditId: audit.id,
         auditStatus: audit.status,
         mutations: audit.mutations,
+        ...(failure !== undefined ? { failure } : {}),
       };
     },
   };

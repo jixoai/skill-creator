@@ -3011,3 +3011,48 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     }
   });
 });
+
+describe("resource-less proposal bijection (4.2 productization finding)", () => {
+  it("expectedJournalStepsOf omits zero-count kinds so resource-less splits can roll back", async () => {
+    const { expectedJournalStepsOf } = await import("../src/daemon/steward/journal-schema.js");
+    const snapshot = loadSnapshot();
+    const skill = snapshot.skills[0]!;
+    const proposal: SkillProposal = {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "split",
+      patch: {
+        kind: "split",
+        snapshotId: snapshot.id,
+        source: { skillId: skill.skillId, expectedRevision: skill.revision },
+        targets: [
+          {
+            directoryName: `${skill.directoryName}-plan`,
+            frontmatter: { name: `${skill.directoryName}-plan`, description: "plan half" },
+            body: "# plan\n",
+            resources: [],
+          },
+          {
+            directoryName: `${skill.directoryName}-exec`,
+            frontmatter: { name: `${skill.directoryName}-exec`, description: "exec half" },
+            body: "# exec\n",
+            resources: [],
+          },
+        ],
+      },
+      rationale: "resource-less split bijection probe",
+      findingIds: [],
+      evidence: [{ skillId: skill.skillId, path: "SKILL.md", snippet: "probe" }],
+      skillIds: [skill.skillId],
+      observedRevisions: [{ skillId: skill.skillId, revision: skill.revision }],
+    };
+    const expected = expectedJournalStepsOf(proposal, snapshot);
+    expect(expected.kinds.get("resource")).toBeUndefined();
+    expect([...expected.kinds.entries()].sort()).toEqual(
+      [
+        ["create-target", 2],
+        ["disable", 1],
+        ["precheck", 1],
+      ].sort(),
+    );
+  });
+});

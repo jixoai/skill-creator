@@ -258,7 +258,13 @@ export function expectedJournalStepsOf(
   const directoryNames = new Set<string>();
   const skillIds = new Set<string>();
   const resourceMappings: string[] = [];
-  const bump = (kind: string, n = 1) => kinds.set(kind, (kinds.get(kind) ?? 0) + n);
+  const bump = (kind: string, n = 1) => {
+    // 4.2 产品化实测修复：零计数不入表——observed 侧只累计实际出现的 kind，
+    // expected 若为无资源的 split/merge 写入 resource:0 会使 size 比对必然失配
+    // （resource-less 提案的 rollback 全部误报 recovery-required）。
+    if (n <= 0) return;
+    kinds.set(kind, (kinds.get(kind) ?? 0) + n);
+  };
   const patch = proposal.patch;
   if (patch.kind === "edit") {
     bump("edit", patch.edits.length);

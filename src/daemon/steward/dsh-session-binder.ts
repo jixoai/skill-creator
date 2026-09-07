@@ -30,6 +30,7 @@ import {
   type SkillToolCall,
 } from "../../shared/contracts/skill-steward.js";
 import type { MinimalDshWebHost } from "./dsh-web-host.js";
+import type { DshStreamCollector } from "./dsh-settings.js";
 
 /** 绑定失败（闭合 union；缺宿主不是错误路径）。 */
 export type StewardSessionBindingFailure =
@@ -120,10 +121,26 @@ function narrowHostSurface(ctx: unknown): DshHostSessionSurface | StewardSession
 export interface DshSessionBinderOptions {
   /** 宿主提供者（懒求值：daemon 未拥有 host 时返回 null）。 */
   host: () => MinimalDshWebHost | null;
+  /**
+   * 4.2：帧收集器工厂（dsh.settings 环形缓冲）。提供时，绑定会话的 turn/tool
+   * 事件同步进入脱敏 stream 投影（dsh.sessions.streams 的生产数据源）；
+   * 收集器失败只丢帧，不影响绑定主链。
+   */
+  createCollector?: (runId: string, sessionId: string) => Promise<DshStreamCollector>;
 }
 
 /** 创建绑定服务。 */
 export function createDshSessionBinder(options: DshSessionBinderOptions) {
+  const collectors = new Map<string, Promise<DshStreamCollector | null>>();
+  const collectorFor = (runId: string, sessionId: string): Promise<DshStreamCollector | null> => {
+    if (!options.createCollector) return Promise.resolve(null);
+    let collector = collectors.get(sessionId);
+    if (!collector) {
+      collector = options.createCollector(runId, sessionId).catch(() => null);
+      collectors.set(sessionId, collector);
+    }
+    return collector;
+  };
   /** 已投影的 tool call id（per session；重连/重渲染幂等，不重复投影）。 */
   const recordedToolCallIds = new Map<string, Set<string>>();
 
@@ -174,6 +191,9 @@ export function createDshSessionBinder(options: DshSessionBinderOptions) {
       }),
       { surfaceOp: "append" },
     );
+    void collectorFor(input.runId, session.id).then((collector) => {
+      collector?.onTurnStart(input.taskText);
+    });
     return { ok: true, dshSessionId: session.id };
   }
 
@@ -284,6 +304,10 @@ export function createDshSessionBinder(options: DshSessionBinderOptions) {
       );
       seen.add(call.id);
       projected += 1;
+      // 4.2：同一投影同步进 stream 帧（幂等性由上方 seen 集合保证；失败只丢帧）。
+      void collectorFor(call.runId, dshSessionId).then((collector) => {
+        collector?.onToolCall(call);
+      });
     }
     return { ok: true, projected };
   }

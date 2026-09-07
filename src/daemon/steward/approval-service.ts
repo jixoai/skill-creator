@@ -521,7 +521,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
   async function applyRollback(
     auditId: string,
     principal: "human-ui" | "manager-recovery",
-  ): Promise<{ audit: StewardAuditRecord }> {
+  ): Promise<{ audit: StewardAuditRecord; failure?: string }> {
     const audit = audits.get(auditId);
     if (!audit) throw new DomainError("NOT_FOUND", `Audit record not found: ${auditId}`);
     if (audit.status !== "applied") {
@@ -569,6 +569,10 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
         backupJournalPath: journalPath,
       });
     } catch (error) {
+      // 4.2 产品化实测：undo 失败原因必须可见（否则 recovery-required 只有终态
+      // 没有诊断）。failure 经内部返回值穿透到 ApplyResult（审计记录契约不变）。
+      const failureText = error instanceof Error ? error.message : String(error);
+      console.error(`[steward] applyRollback undo failed (${auditId}): ${failureText}`);
       const recovery: StewardAuditRecord = {
         id: StewardAuditIdSchema.parse(`aud_${randomBytes(8).toString("hex")}`),
         runId: audit.runId,
@@ -582,7 +586,7 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       };
       audits.set(recovery.id, recovery);
       await deps.store.appendAudit(recovery);
-      return { audit: recovery };
+      return { audit: recovery, failure: failureText };
     }
     audit.status = "rolled-back";
     await deps.store.appendAudit(audit);

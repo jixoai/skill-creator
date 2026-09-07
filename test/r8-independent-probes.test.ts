@@ -579,3 +579,37 @@ describe("Codex R8 independent probes (regression-ized)", () => {
     );
   });
 });
+
+describe("darwin system symlink roots (4.2 /tmp sandbox finding)", () => {
+  it("accepts /tmp-based roots whose realpath is /private/tmp (IPC-short-path sandboxes)", async () => {
+    const { assertCanonicalDirectory } = await import("../src/daemon/steward/dir-identity.js");
+    const dir = fsSync.mkdtempSync("/tmp/steward-canonical-");
+    try {
+      const identity = await assertCanonicalDirectory(dir);
+      expect(identity.ino).toBeGreaterThan(0);
+      // 归一事实源仍是 realpath 的 inode：/private/tmp 视角读取同一身份。
+      const viaPrivate = await assertCanonicalDirectory(
+        fsSync.realpathSync(dir).replace(/^\/private/, ""),
+      );
+      expect(viaPrivate.ino).toBe(identity.ino);
+    } finally {
+      fsSync.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still rejects a root whose realpath is an unrelated location", async () => {
+    const { assertCanonicalDirectory } = await import("../src/daemon/steward/dir-identity.js");
+    const real = fsSync.mkdtempSync(path.join(os.tmpdir(), "steward-canonical-real-"));
+    const aliased = fsSync.mkdtempSync(path.join(os.tmpdir(), "steward-canonical-alias-"));
+    const link = path.join(aliased, "linked");
+    fsSync.symlinkSync(real, link, "dir");
+    try {
+      await expect(assertCanonicalDirectory(link)).rejects.toThrow(
+        /not a real directory|not canonical/i,
+      );
+    } finally {
+      fsSync.rmSync(aliased, { recursive: true, force: true });
+      fsSync.rmSync(real, { recursive: true, force: true });
+    }
+  });
+});
