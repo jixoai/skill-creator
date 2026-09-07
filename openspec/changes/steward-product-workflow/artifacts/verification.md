@@ -42,3 +42,18 @@
 - 复现事实（4.8 owner）：`npm install <skill-creator-2.0.0.tgz>` 于干净目录在解析 `ccski@link:../ccski` 时静默 exit 1（npm 11.19，node 24.20/26.1 与 legacy-peer-deps/16GB heap 均复现；单独安装任意依赖正常）。本地 `../ccski` 领先发布版 2.4.0 两个提交（`customDirs`/`customProvider`——本仓 provider 投影依赖该特性，不能直接换 registry 版本）。已在 README CLI 节如实记录；「消除 link: 或依法打入产物」归 4.8 发布清单验收。
 - README 新增/同步：「技能管家（Skill Steward）」章节（模型配置/维护流程/恢复流程）；intro 与产品边界表（DSH 默认入口 + Workflow 标签）；运行架构树（+dsh-host-lifecycle、steward/、dsh-session-binder、dsh-settings）；RPC 表（+skillSteward 六端点、dsh settings/credentials/sessions）；CLI `open` 行为措辞对齐实测。
 - 门禁：462/462（54 files）；typecheck 0；`vp fmt --check` 473 clean；`git diff --check` clean；openspec 9/9（本轮仅 README/openspec 文档变更）。
+
+## 4.4 实测注记（发布 smoke + release checklist）
+
+- `scripts/steward-smoke.sh.ts` 由 agent-steward 1.9 的 fixture-only smoke 重写为发布 smoke（旧脚本证据在 archive/2026-09-06-agent-steward）。真实 `bootDaemon` ×8 场景，全部断言 + 证据落盘 `artifacts/steward-smoke.json`，连续 3 次运行 exit 0：
+  - clean start：`/api/health` ok + DSH host mounted（149 entries）。
+  - workspace mutation：import + `creator.save` 落盘，sha256 入证据。
+  - stale conflict：optimize 提案后外部编辑 → `validate=stale`；`approve` 拒绝文案 `Proposal is stale; approval requires a valid validation.`（类型化 CONFLICT）。
+  - approval：重跑 → `valid`（checks 计数）→ grant（grantId + fingerprint）。
+  - apply：`applied` + mutation（relPath/semantic/revision）+ 前后 sha256。
+  - rollback：edit 类走 reverse proposal（prepareRollback → validate reverse → approve reverse → apply reverse），字节恢复到预 apply 快照（快照含外部编辑——恢复语义即快照事实）。
+  - stop/restart：endpoint 拒连；同 home 重启 health ok、workspace registry 持久化（kind=directory）、技能重发现、端口变化入证据。
+  - DSH unavailable：`status.dsh.mounted:false` + `ENOTDIR …` typed reason + SPA 200 无 `__DSH_BOOT__`、daemon 存活。
+- 调试中发现并修复的脚本缺陷（真实教训，已写入 release checklist 勿回退）：① 裸 `try/finally + process.exit(0)` 会把未捕获异常吞成成功退出码（rollback 断言失败时表现为静默 exit 0）→ 补 catch 记录后 exit 1；② edit 提案 rollback 是 reverse-proposal 形态（直接 `applyRollback` 得 `No unconsumed rollback grant`）；③ 回滚基线是快照字节而非漂移前字节；④ 源码态默认 webuiDir 解析到 `webui/static`（无 index.html，DSH 降级恢复面 404）→ 显式 `webuiDir=webui/build`。
+- `docs/release/skill-steward.md`：smoke 命令/场景断言表、门禁清单、生产包命令实测流程（4.3 节）、已知 clean-install 阻塞（npm `link:` spec 静默崩溃复现 + ccski 本地领先 2.4.0 两提交的处置决策归 4.8）、发布证据索引（4.4/4.6/4.7/4.8 四份 artifact）。
+- 门禁：462/462（54 files）；typecheck 0；webui check 0/0；`pnpm build`；`vp fmt --check` 475 clean；`git diff --check` clean；openspec 9/9。

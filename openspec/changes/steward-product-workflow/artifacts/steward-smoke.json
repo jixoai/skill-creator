@@ -1,0 +1,67 @@
+{
+  "script": "scripts/steward-smoke.sh.ts",
+  "generatedAt": "2026-09-07T03:57:36.110Z",
+  "node": "v24.20.0",
+  "cleanStart": {
+    "port": 52340,
+    "healthOk": true,
+    "dshMounted": true,
+    "dshEntries": 149
+  },
+  "workspaceMutation": {
+    "workspaceId": "ws_cb3cb410ae056520e53d1207",
+    "skillFile": "skills/smoke-skill/SKILL.md",
+    "sha256": "bd4f9366c0bc07a304dbd89844826651d5b91cb700614c5d7010dd7341cdecf3"
+  },
+  "staleConflict": {
+    "proposalId": "spp_dfc7aaed5e70a32e",
+    "validation": "stale",
+    "approveRejected": "Proposal is stale; approval requires a valid validation."
+  },
+  "approvalAndApply": {
+    "proposalId": "spp_cfddff0fff0a6b36",
+    "validation": "valid",
+    "checksPassed": "2/2",
+    "grantId": "grant_a37b19f7839762ac",
+    "fingerprint": "sha256:304be9e13",
+    "auditId": "aud_a8d94d685e1c55f0",
+    "outcome": "applied",
+    "mutations": [
+      {
+        "relPath": "SKILL.md",
+        "semantic": "content",
+        "before": "sha256:8",
+        "after": "sha256:c"
+      }
+    ],
+    "sha256Before": "bd4f9366c0bc07a304dbd89844826651d5b91cb700614c5d7010dd7341cdecf3",
+    "sha256After": "c213113848a55ca7672926b84755bc8e89a3763146e90a511d2f2b284018467d"
+  },
+  "rollback": {
+    "auditId": "aud_a8d94d685e1c55f0",
+    "form": "reverse-proposal (edit)",
+    "preparedNote": "Reverse edit proposal prepared from snapshot bytes; requires separate human approval.",
+    "reverseProposalId": "spp_ea21c8e9086435f2",
+    "outcome": "applied",
+    "mutations": [
+      "SKILL.md"
+    ],
+    "sha256Restored": "8344e3b7eda6e8ffb18d2c1fad944c53361403dd14b7910fce016518e9324bc8",
+    "bytesRestored": true
+  },
+  "stopAndRestart": {
+    "firstPort": 52340,
+    "endpointReleased": true,
+    "restartPort": 52410,
+    "healthOk": true,
+    "workspacePersisted": true,
+    "skillRediscovered": true
+  },
+  "dshUnavailable": {
+    "mounted": false,
+    "reason": "ENOTDIR: not a directory, mkdir '/tmp/steward-smoke-dsh-Arw31q/not-a-dir/profiles/web'",
+    "spaStatus": 200,
+    "dshBootAbsent": true,
+    "daemonAlive": true
+  }
+}
