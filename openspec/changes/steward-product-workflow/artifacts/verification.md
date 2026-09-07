@@ -98,3 +98,16 @@ fmt --check 全绿、smoke 重跑 exit 0、全量 462/462、typecheck 0。教训
 - Node 锁定 `>=22.13.0`（DSH code-runtime 依赖 `node:module` 的 `stripTypeScriptTypes`）；验证于 v24.20.0 / npm 11.19.0 / 96 tarball entries。DSH mounted 149 entries 含 `@skill-creator/dsh-client`；`/api/health` ok、`/` 401（代理应答）、`/manager/dsh-island.js` 200；restart 后 DSH 重挂载。license：skill-creator / ccski / @deepseek-ai 闭包均 MIT。
 - CLI `status` 增 DSH 健康行 + `--json` 完整状态（安装态取证面）；根 tsconfig 覆盖 vendored plugin d.ts；README/docs 发布清单同步为「已解除阻塞」。
 - 门禁（逐条独立执行）：467/467（56 files）；typecheck 0；webui check 0/0；build；`vp fmt --check` 512 clean（修正 2 文件后复验）；`git diff --check` clean；openspec 9/9。
+
+## 4.9 实测注记（复核修复）
+
+- 四项修复的落点：codex-adapter/pipeline-service 的 `permissionRequests` 改由实际 handler 决定（codex onRequest 拒绝一切授权请求→false；pipeline 无 permission handler→false；fixture sink.permission 真实等待→true）；StewardView 轮询仅在 running 态挂 1s interval（`selectedStatus` primitive derived，状态翻转即清理）；连续 ≥3 次轮询失败上浮 role=alert 横幅；pollOnce 每次 await 后 runId scope guard；全部 `as never` 改为 branded 签名（StewardBackendId/ProposalId/StewardProposalId/StewardAuditId）。
+- 组件交互测试（`steward-view.test.ts`，jsdom + svelte client 入口直连 + lucide 替身）7/7：restriction 徽章、终态停轮询（选中仅 1 次显式拉取、5s 零追加）、running 1s 轮询 + 终态翻转即停、失败横幅 3 次阈值 + 恢复清除、迟到响应不写新 scope、no-cancellation 禁用 Cancel、typed approve（无断言接受）。
+- 真实浏览器证据（dev daemon + DSH 149 entries + 真 codex backend handshake）：
+  - 终态停轮询的 WS 实证——`WebSocket.prototype.send` 计数：终态 run 选中 = 2 发送（events+runs 刷新），其后 6/16s 零新增；期间唯一周期发送为连接层 `{"type":"ping"}` keepalive。
+  - 键盘 Tab 链（radio→Start run→palette，截图 keyboard-focus）；111 字符长路径 workspace 导入 + 长 skill 名；空态（empty-state-wide/1100/680）与断线错误态（daemon 停机后「Cannot authenticate」横幅）截图；重启 + 新 token reload 恢复（skills 重列）。
+  - 1100/680 强制容器宽度 outlet scrollWidth===clientWidth（空态与 applied 态各测）；全程 0 JS 错误。
+  - apply 文件验证：evidence-skill SKILL.md sha256 `d2c60888…`→`7f9e801a…`，`steward-optimized` 标记落盘 1 处，UI mutation diff（sha256:d→sha256:7）与磁盘一致。
+- 点击实测暴露的 daemon 缺陷：pipeline `sink.get` 恒 null → 确定性 optimize 的 validate 步骤 NOT_FOUND（提案已铸出但 terminal=failed，终态误导）。修复为 run 内 Map；`skill-steward-runtime.test.ts` 补 `optimizeRun.terminal === "completed"` 回归钉（72/72）。
+- 环境注记：门禁期间外部 worktree 的 vite build/dev 造成 load ~10，cli-lifecycle/dsh-official-profile 偶发超时抖动均可单跑复绿；另清理早前会话泄漏的 35 个 `dsh-manager-island-live` 进程（非本任务代码问题，如实记录）。
+- 门禁（逐条独立执行）：474/474（57 files，+7 组件测试）；typecheck 0；webui check 0/0；build；`vp fmt --check` 514 clean（修正 1 文件后复验）；`git diff --check` clean；openspec 9/9。

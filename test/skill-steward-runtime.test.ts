@@ -967,8 +967,11 @@ describe("skill steward pipeline end-to-end (task 2.3f)", () => {
     expect(run.toolCalls).toBeGreaterThan(0);
     expect(run.proposals.length).toBeGreaterThanOrEqual(0); // check 场景只报 finding 时不强求提案
 
-    // 2. 用 optimize 场景拿一个 edit 提案走完整审批链。
+    // 2. 用 optimize 场景拿一个 edit 提案走完整审批链。terminal 必须 completed：
+    //    4.9 浏览器实测曾因 pipeline sink.get 恒 null 使 validate 步骤 NOT_FOUND
+    //    失败（提案已铸出但终态 failed）——此处钉死该回归。
     const optimizeRun = await domain.skillSteward.startRun({ target, taskKind: "optimize" });
+    expect(optimizeRun.terminal).toBe("completed");
     expect(optimizeRun.proposals).toHaveLength(1);
     const proposalId = optimizeRun.proposals[0]!.proposalId;
 

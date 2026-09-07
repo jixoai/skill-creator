@@ -28,6 +28,8 @@ import type {
   SkillStewardApplyResult,
   SkillStewardRollbackResult,
   SkillStewardRunResult,
+  StewardAuditId,
+  StewardProposalId,
   StewardTaskKind,
   SkillValidationResult,
 } from "$shared/contracts/skill-steward.js";
@@ -285,14 +287,14 @@ export function framesForCurrentRun(): DshSessionStreamFrame[] {
 
 /** 校验一个提案（report only；stale/invalid 原样投影）。 */
 export async function validateStewardProposal(
-  proposalId: string,
+  proposalId: StewardProposalId,
 ): Promise<SkillValidationResult | null> {
   const request = proposalGate.issue();
   const state = proposalStateFor(proposalId);
   state.busy = "validate";
   state.error = null;
   try {
-    const result = await requireRpc().skillSteward.validate({ proposalId: proposalId as never });
+    const result = await requireRpc().skillSteward.validate({ proposalId });
     if (!request.isCurrent()) return null;
     state.validation = result;
     appendTimeline("validated", {
@@ -312,14 +314,14 @@ export async function validateStewardProposal(
 
 /** 人类审批（铸一次性 grant；stale/unknown 提案由 typed RPC 失败呈现）。 */
 export async function approveStewardProposal(
-  proposalId: string,
+  proposalId: StewardProposalId,
 ): Promise<SkillStewardApproveResult | null> {
   const request = proposalGate.issue();
   const state = proposalStateFor(proposalId);
   state.busy = "approve";
   state.error = null;
   try {
-    const result = await requireRpc().skillSteward.approve({ proposalId: proposalId as never });
+    const result = await requireRpc().skillSteward.approve({ proposalId });
     if (!request.isCurrent()) return null;
     state.grant = result;
     appendTimeline("approved", {
@@ -339,14 +341,14 @@ export async function approveStewardProposal(
 
 /** 消费 grant 执行 journaled apply（applied/compensated/recovery-required 全终态投影）。 */
 export async function applyStewardProposal(
-  proposalId: string,
+  proposalId: StewardProposalId,
 ): Promise<SkillStewardApplyResult | null> {
   const request = proposalGate.issue();
   const state = proposalStateFor(proposalId);
   state.busy = "apply";
   state.error = null;
   try {
-    const result = await requireRpc().skillSteward.apply({ proposalId: proposalId as never });
+    const result = await requireRpc().skillSteward.apply({ proposalId });
     if (!request.isCurrent()) return null;
     state.apply = result;
     appendTimeline("applied", {
@@ -378,15 +380,15 @@ export function isReverseProposalPlaceholder(proposalId: string | undefined): bo
 
 /** 准备 rollback（Manager 派生 reverse proposal / rollback grant，note 原样呈现）。 */
 export async function prepareStewardRollback(
-  proposalId: string,
-  auditId: string,
+  proposalId: StewardProposalId,
+  auditId: StewardAuditId,
 ): Promise<SkillStewardRollbackResult | null> {
   const request = proposalGate.issue();
   const state = proposalStateFor(proposalId);
   state.busy = "prepare-rollback";
   state.error = null;
   try {
-    const result = await requireRpc().skillSteward.prepareRollback({ auditId: auditId as never });
+    const result = await requireRpc().skillSteward.prepareRollback({ auditId });
     if (!request.isCurrent()) return null;
     state.rollbackPrep = result;
     appendTimeline("rollback-prepared", {
@@ -410,15 +412,15 @@ export async function prepareStewardRollback(
 
 /** 执行 rollback（消费 rollback grant 反向重放 journal；终态同 apply）。 */
 export async function applyStewardRollback(
-  proposalId: string,
-  auditId: string,
+  proposalId: StewardProposalId,
+  auditId: StewardAuditId,
 ): Promise<SkillStewardApplyResult | null> {
   const request = proposalGate.issue();
   const state = proposalStateFor(proposalId);
   state.busy = "apply-rollback";
   state.error = null;
   try {
-    const result = await requireRpc().skillSteward.applyRollback({ auditId: auditId as never });
+    const result = await requireRpc().skillSteward.applyRollback({ auditId });
     if (!request.isCurrent()) return null;
     state.rollbackResult = result;
     appendTimeline("rolled-back", {

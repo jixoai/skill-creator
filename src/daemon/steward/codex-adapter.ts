@@ -158,7 +158,10 @@ export function createCodexAppServerAdapter(options: CodexAdapterOptions = {}): 
         version,
         streamingEvents: true,
         cancellation: true,
-        permissionRequests: true,
+        // 由实际 handler/restriction 决定（4.9）：run 的 onRequest 对全部授权类
+        // server request 统一 respondError 拒绝——用户永远不会收到可裁决的
+        // permission request，capability 不得宣称 true。
+        permissionRequests: false,
         executionRoot: "isolated",
       };
     },

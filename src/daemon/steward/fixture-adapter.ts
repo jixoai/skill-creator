@@ -117,6 +117,8 @@ export function createFixtureHarnessAdapter(options: FixtureAdapterOptions = {})
         version,
         streamingEvents: true,
         cancellation: true,
+        // 由实际 handler 决定（4.9）：run 的 permission behavior 走
+        // sink.permission 等待人类裁决——capability 如实为 true。
         permissionRequests: true,
         executionRoot: "isolated",
       };

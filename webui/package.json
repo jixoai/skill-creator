@@ -39,6 +39,7 @@
     "clsx": "^2.1.1",
     "execa": "^9.6.1",
     "http-proxy": "^1.18.1",
+    "jsdom": "^30.0.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "shadcn-svelte": "^1.4.1",

@@ -80,7 +80,9 @@ export function createSkillStewardPipelineService(deps: {
         version: "fixture-1",
         streamingEvents: true,
         cancellation: true,
-        permissionRequests: true,
+        // 由实际 handler 决定（4.9）：确定性 pipeline 不注册 permission handler，
+        // run 期间不会产生 permission request——capability 如实为 false。
+        permissionRequests: false,
         executionRoot: "isolated",
       },
     });
@@ -98,14 +100,20 @@ export function createSkillStewardPipelineService(deps: {
       if (bound.ok) dshSessionId = bound.dshSessionId;
     }
     const proposals: SkillStewardRunResult["proposals"] = [];
+    // 本 run 内 store 的提案（4.9 浏览器实测修复）：registry 的
+    // skills.validate_proposal 先经 get 校验提案存在——返回 null 会让确定性
+    // optimize 场景在 validate 步骤永远 NOT_FOUND 失败（terminal=failed 但
+    // 提案已铸出，终态误导）。提案本体保存在本 run 闭包，终态后随 run 丢弃。
+    const storedProposals = new Map<StewardProposalId, SkillProposal>();
     const sink = {
       store(proposal: SkillProposal): StewardProposalId {
         const proposalId = approval.submit(proposal, snapshot, runId);
+        storedProposals.set(proposalId, proposal);
         proposals.push({ proposalId, action: proposal.action });
         return proposalId;
       },
       get(proposalId: StewardProposalId) {
-        return null;
+        return storedProposals.get(proposalId) ?? null;
       },
     };
     const output = await runFixtureStewardScenario({

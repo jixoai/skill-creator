@@ -3,8 +3,10 @@
   「运行列表、实时事件、推荐队列、approval/reject、stale run 和失败原因；
   不把历史写入 localStorage。」
   正交意图：
-  1. backend 状态 + 显式选择 + 启动 run（typed unavailable 可见，无自动 fallback）。
-  2. 选中 run 的实时事件轮询（running 期间增量拉取，代次门防 stale 投影）。
+  1. backend 状态 + 显式选择 + 启动 run（typed unavailable 可见，无自动 fallback；
+     cancellation/permission capability 由 daemon 的实际 handler 决定并如实展示）。
+  2. 选中 run 的实时事件轮询（4.9 修复）：仅 running 态 1s 增量拉取，终态停止
+     高频刷新；迟到响应经 runId scope guard 不写入新 scope；连续失败可见。
   3. 审批门：permission 一次性裁决、proposal approve/reject、终态/失败原因展示。
 -->
 <script lang="ts">
@@ -24,9 +26,11 @@
   import type {
     BackendStatus,
     RunEvent,
+    StewardBackendId,
     StewardRun,
     StewardRunId,
   } from "$shared/contracts/agent-steward.js";
+  import type { ProposalId } from "$shared/contracts/skill-intelligence.js";
   import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
@@ -51,7 +55,8 @@
   // ---- backend 状态 ----
   let backends = $state<BackendStatus[] | null>(null);
   let backendsError = $state<string | null>(null);
-  let selectedBackend = $state<string>("");
+  /** 选中 backend（radio 赋值来自 server 投影的 StewardBackendId，无字符串断言）。 */
+  let selectedBackend = $state<StewardBackendId | null>(null);
   let starting = $state(false);
 
   // ---- run 列表 + 选中 run ----
@@ -80,7 +85,7 @@
     backendsError = result.error;
     if (!selectedBackend) {
       selectedBackend =
-        result.backends?.find((b) => b.state === "available")?.capabilities.backendId ?? "";
+        result.backends?.find((b) => b.state === "available")?.capabilities.backendId ?? null;
     }
   }
 
@@ -100,24 +105,39 @@
     }
   }
 
-  // ---- 事件轮询：选中 run 运行期间每秒增量拉取 ----
+  // ---- 事件轮询（4.9 修复）：仅在选中 run 处于 running 态时以 1s 增量拉取；
+  //      终态（completed/cancelled/failed/disconnected/unavailable/stopped）停止
+  //      高频刷新——选中/启动时的单次显式 pollOnce 不受影响。 ----
+  /** 选中 run 的状态（primitive derived：同值刷新不重跑轮询 effect）。 */
+  const selectedStatus = $derived(selectedRun?.status ?? null);
   $effect(() => {
     const runId = selectedRunId;
     if (!runId) return;
-    const status = untrack(() => selectedRun?.status ?? "running");
+    const status = selectedStatus;
+    if (status !== "running") return;
     const timer = setInterval(() => void pollOnce(runId), 1000);
-    if (status === "running") void pollOnce(runId);
-    else void pollOnce(runId);
     return () => clearInterval(timer);
   });
+
+  /** 连续轮询失败计数（≥3 上浮为可见错误；成功即复位）。 */
+  let pollFailures = 0;
+  let pollError = $state<string | null>(null);
 
   async function pollOnce(runId: StewardRunId): Promise<void> {
     const after = untrack(() => lastSeq);
     const result = await pollStewardEvents(runId, after);
-    if (!result.status && !result.error && result.events.length === 0) return;
+    // scope guard（4.9 修复）：切 run/切 route 后，迟到的旧响应不得写入新 scope。
+    if (untrack(() => selectedRunId) !== runId) return;
     if (result.error) {
-      return; // 单次轮询失败静默；下次轮询重试
+      pollFailures += 1;
+      if (pollFailures >= 3) {
+        pollError = `${result.error} (${pollFailures} consecutive failed polls — still retrying)`;
+      }
+      return;
     }
+    pollFailures = 0;
+    pollError = null;
+    if (!result.status && result.events.length === 0) return;
     if (result.events.length > 0) {
       events = [...untrack(() => events), ...result.events];
       lastSeq = result.events[result.events.length - 1]!.seq;
@@ -125,6 +145,7 @@
     if (result.status) {
       // 状态推进时同步刷新 run 投影（含 recommendations/proposals）。
       const list = await loadStewardRuns();
+      if (untrack(() => selectedRunId) !== runId) return;
       if (list.runs) {
         runs = list.runs;
         selectedRun = list.runs.find((run) => run.runId === runId) ?? null;
@@ -134,10 +155,11 @@
 
   async function handleStart(): Promise<void> {
     const target = providerTarget;
-    if (!target || !selectedBackend || starting) return;
+    const backendId = selectedBackend;
+    if (!target || !backendId || starting) return;
     starting = true;
     try {
-      const result = await startStewardRun({ backendId: selectedBackend as never, target });
+      const result = await startStewardRun({ backendId, target });
       if (!result.run && !result.error) return;
       if (result.error) {
         showToast(`Steward run failed to start: ${result.error}`);
@@ -186,12 +208,12 @@
     }
   }
 
-  async function handleApprove(proposalId: string): Promise<void> {
+  async function handleApprove(proposalId: ProposalId): Promise<void> {
     const runId = selectedRunId;
     if (!runId || actionBusy) return;
     actionBusy = true;
     try {
-      const result = await approveStewardProposal({ runId, proposalId: proposalId as never });
+      const result = await approveStewardProposal({ runId, proposalId });
       if (result.error) showToast(`Approve failed: ${result.error}`);
       else if (result.result) {
         showToast(
@@ -204,12 +226,12 @@
     }
   }
 
-  async function handleReject(proposalId: string): Promise<void> {
+  async function handleReject(proposalId: ProposalId): Promise<void> {
     const runId = selectedRunId;
     if (!runId || actionBusy) return;
     actionBusy = true;
     try {
-      const result = await rejectStewardProposal({ runId, proposalId: proposalId as never });
+      const result = await rejectStewardProposal({ runId, proposalId });
       if (result.error) showToast(`Reject failed: ${result.error}`);
       else void pollOnce(runId);
     } finally {
@@ -304,6 +326,12 @@
                   <span class="font-medium">{backend.capabilities.backendId}</span>
                   {#if backend.state === "available"}
                     <Badge variant="outline">{backend.capabilities.version}</Badge>
+                    {#if backend.capabilities.permissionRequests === false}
+                      <Badge variant="outline">no runtime approvals</Badge>
+                    {/if}
+                    {#if backend.capabilities.cancellation === false}
+                      <Badge variant="outline">no cancellation</Badge>
+                    {/if}
                   {:else}
                     <Badge variant="destructive">unavailable</Badge>
                   {/if}
@@ -332,7 +360,10 @@
             size="sm"
             variant="outline"
             class="h-8 gap-1.5"
-            disabled={actionBusy}
+            disabled={actionBusy || selectedRun.capabilities.cancellation === false}
+            title={selectedRun.capabilities.cancellation === false
+              ? "This backend does not support cancellation."
+              : undefined}
             onclick={() => void handleCancel()}
           >
             <IconX class="h-3.5 w-3.5" /> Cancel run
@@ -393,6 +424,14 @@
             class="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
           >
             {selectedRun.error}
+          </div>
+        {/if}
+        {#if pollError}
+          <div
+            class="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            role="alert"
+          >
+            Event polling failed: {pollError}
           </div>
         {/if}
         {#if selectedRun.status === "running" && selectedRun.phase !== "awaiting-approval" && selectedRun.phase !== "applying"}

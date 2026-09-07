@@ -50,6 +50,12 @@ import {
   workflowTimeline,
   STEWARD_INSTRUCTIONS_MAX,
 } from "../stores/steward-workflow.svelte";
+import {
+  StewardAuditIdSchema,
+  StewardProposalIdSchema,
+  StewardSnapshotIdSchema,
+} from "$shared/contracts/skill-steward.js";
+import { SkillIdSchema } from "$shared/contracts/skills.js";
 import type { WorkspaceProviderTarget } from "$shared/contracts/workspaces.js";
 
 const targetA: WorkspaceProviderTarget = {
@@ -114,12 +120,14 @@ describe("steward workflow selection (task 4.1 stores)", () => {
     const b = selectionFor(targetB);
     expect(a).not.toBe(b);
 
-    toggleSelectedSkill(targetA, "sk_first" as never);
-    toggleSelectedSkill(targetA, "sk_first" as never);
+    const first = SkillIdSchema.parse("sk_f12fffffffffffffffffffff");
+    const second = SkillIdSchema.parse("sk_2ecfeeeeeeeeeeeeeeeeeeee");
+    toggleSelectedSkill(targetA, first);
+    toggleSelectedSkill(targetA, first);
     expect(a.selectedSkillIds).toEqual([]);
-    toggleSelectedSkill(targetA, "sk_first" as never);
-    toggleSelectedSkill(targetA, "sk_second" as never);
-    expect(a.selectedSkillIds).toEqual(["sk_first", "sk_second"]);
+    toggleSelectedSkill(targetA, first);
+    toggleSelectedSkill(targetA, second);
+    expect(a.selectedSkillIds).toEqual([first, second]);
     expect(b.selectedSkillIds).toEqual([]);
 
     a.taskKind = "organize";
@@ -259,8 +267,9 @@ describe("runtime config projection", () => {
 });
 
 describe("proposal workflow states (task 4.2)", () => {
-  const PROPOSAL = "spp_37d173a4dfdc9f16";
-  const AUDIT = "aud_0123456789abcdef";
+  // 走真实 schema parse（4.9：不用 as never 强行接受输入）。
+  const PROPOSAL = StewardProposalIdSchema.parse("spp_37d173a4dfdc9f16");
+  const AUDIT = StewardAuditIdSchema.parse("aud_0123456789abcdef");
 
   const validation = (overall: "valid" | "invalid" | "stale") => ({
     proposalId: PROPOSAL,
@@ -353,7 +362,7 @@ describe("proposal workflow states (task 4.2)", () => {
     expect(rolled?.outcomeStatus).toBe("applied");
 
     // enablement 形态：真实 reverse id → approve + apply 走正常提案链。
-    const REVERSE = "spp_ffffffffffffffff";
+    const REVERSE = StewardProposalIdSchema.parse("spp_ffffffffffffffff");
     connection.rpc = {
       skillSteward: {
         prepareRollback: () =>
@@ -414,13 +423,13 @@ describe("proposal workflow states (task 4.2)", () => {
         kind: "tool-result",
         toolName: "skills.relations",
       },
-    ] as never[];
+    ];
     connection.rpc = { dsh: { sessions: { streams: () => Promise.resolve({ frames }) } } };
     await loadStewardStreamFrames();
     expect(streamFramesState.frames).toHaveLength(3);
 
     workflowRunState.run = {
-      snapshotId: "snap_x" as never,
+      snapshotId: StewardSnapshotIdSchema.parse("snap_0123456789abcdef"),
       terminal: "completed",
       acceptedResponses: 1,
       droppedLateResponses: 0,
