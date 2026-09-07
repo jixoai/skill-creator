@@ -2,7 +2,7 @@
 
 ## 1. capability-core 抽取（行为不变重构）
 
-- [ ] 1.1 建立能力定义层：名称 + Zod 输入输出 + handler + authority class（readonly/proposal/approved-mutation），把 skillSteward 工具 registry 的既有能力逐项迁入，工具 registry 改为消费 capability-core 投影。
+- [x] 1.1 建立能力定义层：名称 + Zod 输入输出 + handler + authority class（readonly/proposal/approved-mutation），把 skillSteward 工具 registry 的既有能力逐项迁入，工具 registry 改为消费 capability-core 投影。
   - Files: `src/daemon/steward/tool-registry.ts`, `src/daemon/capability/`（新）, `test/`。
   - Acceptance: 全量测试不改断言即绿；capability 清单与既有工具面一一对应（差异表落 artifacts）。
 - [ ] 1.2 workspace/creator/repository 能力登记：list/inspect/validate（readonly）、toggle 与 skills update apply（approved-mutation——直接写盘/重装写入）、skills update check（readonly——lock hash 对比不写盘）、creator 读写（approved-mutation）、repository preview/install（approved-mutation）进 capability-core。
