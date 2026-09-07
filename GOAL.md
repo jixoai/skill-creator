@@ -50,10 +50,13 @@ Manager-only 恢复可用不代表 Agent 集成完成。
 | 5     | 退役 hosted 形态                                         | 产物无 web-composition 残留、门禁绿            |
 | 6     | 产品验收与发布证据                                       | 端到端磁盘验证、clean-install drill、文档同步  |
 
-前五个 change（skill-steward-contracts/runtime、dsh-runtime-integration、
-dsh-webui-composition、steward-product-workflow）已归档；其 Manager authority、steward
-协议、安全不变量与测试资产继续有效。宿主化路径（入口桥/island/DSH web 宿主）按
-dsh-kernel-rebase 阶段 5 退役。每次只推进一个阶段；不提前实现另一阶段的面。
+六个阶段全部完成（2026-09-08）：capability-core（3fb6bb3/d4bce7a）、headless 内核
+（0218bdf/408062a/7b33730）、Agent 面板（13a703f）、MCP 供给（9be8001/f21125e/
+a388310）、退役 hosted 形态（649a5cc）、验收与证据（端到端 authority 链 +
+clean-install drill 内核形态 PASS + 全量门禁绿）。前五个 change
+（skill-steward-contracts/runtime、dsh-runtime-integration、dsh-webui-composition、
+steward-product-workflow）已归档；其 Manager authority、steward 协议、安全不变量与
+测试资产继续有效。宿主化路径（入口桥/island/DSH web 宿主）已按阶段 5 退役。
 
 ## Decide And Act
 

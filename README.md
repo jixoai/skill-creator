@@ -21,7 +21,7 @@
 
 <h1 align="center">Skill Creator</h1>
 
-Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 daemon，daemon 以官方 DSH（DeepSeek Harness）Web 组合宿主作为默认入口承载技能管家与三个管理 App，并以 ccski SDK 发现、校验和安装 `SKILL.md` 技能；Workspace/Provider 投影、权限边界和跨路由体验属于 Skill Creator，而不是 ccski。DSH host 不可用时 daemon 自动降级为 Manager-only 恢复界面（SPA），不阻塞启动。
+Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 daemon，daemon 以自己的 shell（SPA + ChromeTabs 三 App）作为唯一宿主：右侧 Agent 面板承载聊天对话，DSH（DeepSeek Harness）只作为 headless 内核（agent/session/llm/approval）驱动会话；Manager 的领域能力以 MCP server（`/mcp`，同一实现另有 `skill-creator mcp` stdio 形态）供给内核与外部 client——mutation 一律产 proposal 待人工审批。技能的发现、校验和安装以 ccski SDK 完成；Workspace/Provider 投影、权限边界和跨路由体验属于 Skill Creator，而不是 ccski。内核不可用时 daemon 降级为 Manager-only 面，不阻塞启动。
 
 ```text
                                Skill Creator
@@ -50,7 +50,7 @@ Skill Creator 是本地优先的 Agent 技能工作台。薄 CLI 管理单例 da
 | `/workspaces` home         | 索引 Global 与 Imported Workspace，提供导入与移除恢复入口                                                                                          | Remove Workspace 只删除 registry entry，不删除用户目录                                      |
 | `/workspaces` provider tab | 在一个 Workspace 的 Provider 中发现、筛选、查看、校验、启用或禁用技能；对比上游检查并按需重装过时技能；`Workflow` 标签承载技能管家工作流（见下文） | 每次操作显式携带 Workspace ID + Provider ID                                                 |
 | Global Workspace（`~`）    | 聚合各 Agent 的全局 skills roots                                                                                                                   | 可读/可管理现有技能，不作为 Creator 或 Repository 的写入目标                                |
-| `/creator`                 | 在已导入 Workspace.Provider 中创建、加载、编辑和删除 `SKILL.md`；查看 change log（Agent 会话由 DSH host 唯一承载，3.2 移除内嵌 ACP 面板）          | `workspace`+`provider` 预选新建；再加 `skill` 加载编辑；更新和删除需要内容 revision         |
+| `/creator`                 | 在已导入 Workspace.Provider 中创建、加载、编辑和删除 `SKILL.md`；查看 change log（Agent 会话由右侧面板承载，见下文）                              | `workspace`+`provider` 预选新建；再加 `skill` 加载编辑；更新和删除需要内容 revision         |
 | `/repository`              | 扫描 Git 仓库、预览技能、dry-run、多目标安装并复核结果；管理 curated 与自建 Discover 源                                                            | 扫描会话固定到一个 commit；可多选已导入 Workspace.Provider 写入目标；用户源仅 https Git URL |
 
 Workspace 是技能作用域的第一层，Provider 是其中的 Agent skills root。Global Workspace（`~`）从社区 catalog 解析本机 Agent 全局目录；Imported Workspace 从其 canonical directory 派生每个 Provider 根目录。用户只在导入 Workspace 时提交目录路径；注册后，技能读写使用 daemon 验证的 `WorkspaceProviderTarget`、opaque Workspace ID 和 Skill ID，不由 WebUI 拼接输出路径。
@@ -144,7 +144,14 @@ pnpm skill-creator stop
 
 ## 技能管家（Skill Steward）
 
-技能管家是 DSH-hosted 的维护工作流：选择任务与范围 → 运行 → 审阅证据 → 人工批准 → 应用 → 必要时回滚。入口在 Workspaces 的 provider 视图 **Workflow** 标签。
+技能管家是 Manager-owned 的维护工作流：选择任务与范围 → 运行 → 审阅证据 → 人工批准 → 应用 → 必要时回滚。入口在 Workspaces 的 provider 视图 **Workflow** 标签。
+
+## Agent 面板与 MCP 能力面
+
+- **Agent 面板**：shell 级右栏 drawer（≥720px 常驻 440px，窄屏单屏覆盖），跨 tab 存活。会话列表/新建/切换、对话流（工具行可展开输入/结果）、ask_user_question 审批卡、model/preset/approval 配置投影；断线可见与恢复。
+- **headless 内核**：daemon 内 boot 单 `dsh-base` bundle（无 DSH webui/HTTP 面）；产品 preset 只含 persona + ask-user，bash/fs/web 等通用工具行禁用；官方 `@deepseek-ai/dsh-mcp-client` 桥把 Manager 能力注册为 `mcp__skill-creator__*` 工具。
+- **MCP 面**：`/mcp`（loopback + Bearer web token，stateless streamable HTTP）与 `skill-creator mcp`（stdio，readonly 收窄）同一实现；技能文档另有只读 resource 模板。工具结果按能力面自动附带 `ui://` 视觉卡（skill 信息/finding/proposal/安装结果，含应用内跳转），面板以沙箱 iframe 渲染，不可信文本强制转义。
+- **authority 红线**：MCP mutation 一律产 proposal（`*_propose` 工具）待人工在面板审批后经 Manager 执行；Manager 永远拥有路径、revision、启停、安装、更新与审批 authority。
 
 ### 模型配置
 
@@ -162,7 +169,7 @@ pnpm skill-creator stop
 
 ### 恢复流程
 
-- **DSH host 不可用**（缺包/版本不符/插件失败）：daemon 显式降级为 Manager-only 恢复界面（无 Agent/会话/聊天面），`status` 的 `dsh` 字段携带降级原因；重启 daemon 是恢复组合宿主的入口。
+- **DSH 内核不可用**（缺包/版本不符/插件失败）：daemon 显式降级为 Manager-only 面（无 Agent 会话；`agent.*` 返回 typed UNAVAILABLE），`status` 的 `dsh` 字段携带降级原因；重启 daemon 是恢复内核的入口。
 - **apply 终态 `recovery-required` / `compensated`**：提案卡显示横幅与 daemon 侧失败原因；`compensated` 表示事务内已自动回滚，`recovery-required` 表示需要按提示处理残留（文件状态被保全，不静默覆盖）。处理后重新运行任务生成新提案——revision 漂移的旧提案在 validation 即被拒绝（`stale`）。
 - **断线重连**：任务/范围选择、runtime config 与最近一次 run 投影跨重连存活；迟到响应一律不覆盖新状态。
 - **daemon 重启**：`skill-creator stop && skill-creator start`；未消费的审批 grant 全部失效（不重放授权），需要重新批准。
@@ -178,9 +185,9 @@ src/cli/cli.ts
 src/daemon/ipc-server.ts ---------------------- single-instance owner
     |
     +--> src/daemon/index.ts ------------------ lifecycle/status
-    |       |-- WebServer @ 127.0.0.1:random
-    |       |-- dsh-host-lifecycle.ts -------- official DSH host (default entry;
-    |       |                                    failure degrades to SPA recovery)
+    |       |-- WebServer @ 127.0.0.1:random -- SPA + /ws/rpc + /mcp (MCP face)
+    |       |-- dsh-host-lifecycle.ts -------- headless DSH kernel mount
+    |       |                                    (failure degrades to manager-only)
     |       `-- TrayHost -> OpenTray ext-webview
     |
     +--> src/daemon/rpc-router.ts
@@ -192,8 +199,17 @@ src/daemon/ipc-server.ts ---------------------- single-instance owner
                     |-- source-registry.ts --- curated + user Discover sources
                     |-- skills-update-service.ts  lock-hash update check/apply
                     |-- steward/ --------------- Skill Steward pipeline + journal
-                    |       `-- dsh-session-binder -- run↔DSH session + stream frames
-                    |-- dsh-settings.ts ------- steward model/preset/permissions
+                    |       `-- dsh-session-binder -- run↔kernel session + stream frames
+                    |-- kernel/ ---------------- headless dsh-base boot + agent
+                    |       |-- dsh-kernel ------- profile + tool-surface policy + MCP row
+                    |       |-- agent-sessions --- panel sessions + stream + answerer
+                    |       `-- product-prompt --- versioned best-practices section
+                    |-- mcp/ -------------------- skill-creator MCP server
+                    |       |-- skill-creator-mcp - capability tools + resources
+                    |       |-- cards ------------- ui:// card templates (escaped)
+                    |       `-- proposals --------- mutation→proposal approval chain
+                    |-- capability/ ------------- capability-core + domain registry
+                    |-- dsh-settings.ts ------- model/preset/permissions
                     `-- acp-bridge-service.ts  [internal legacy] agent subprocess + fs security gate（产品入口已移除，3.2）
 
 src/shared/rpc-contract.ts
@@ -212,7 +228,7 @@ src/shared/rpc-contract.ts
 | `repository`   | `scan`, `preview`, `install`, `sources.list`, `sources.add`, `sources.remove`                                                  |
 | `daemon`       | `status`                                                                                                                       |
 | `skillSteward` | `startRun`, `validate`, `approve`, `apply`, `prepareRollback`, `applyRollback`（人类审批面；apply/rollback 为 journaled 事务） |
-| `dsh`          | `settings.get`, `settings.update`, `credentials.set`, `credentials.clear`, `sessions.streams`（脱敏 stream 帧）                |
+| `agent`        | `sessions.list/streams`, `session.create/prompt/cancel/stream/answer`, `card.get`, `proposals.list/approve/reject`, `settings.get/update`, `credentials.set/clear`（面板 + 审批链 + 配置投影） |
 | `acp`          | `agents.list`, `session.open`, `session.close`（internal legacy，非产品入口）                                                  |
 
 WebUI 直接从共享契约推导 client 类型；daemon 通过同一契约实现 handler。网络输入和输出都经过 Zod runtime validation。

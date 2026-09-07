@@ -44,6 +44,6 @@
 
 ## 6. 产品验收与发布证据
 
-- [ ] 6.1 端到端：面板会话 → 工具行 → 审批 → apply → 磁盘验证 → rollback；steward 四 action 回归。
-- [ ] 6.2 clean-install drill 更新：内核形态断言（无 dsh-client vendor、内核 mounted、面板可用、MCP 面可用）。
-- [ ] 6.3 全量门禁（逐条独立）+ README/AGENTS/GOAL 产品真相同步 + 归档准备。
+- [x] 6.1 端到端：面板会话 → 工具行 → 审批 → apply → 磁盘验证 → rollback；steward 四 action 回归。
+- [x] 6.2 clean-install drill 更新：内核形态断言（无 dsh-client vendor、内核 mounted、面板可用、MCP 面可用）。
+- [x] 6.3 全量门禁（逐条独立）+ README/AGENTS/GOAL 产品真相同步 + 归档准备。

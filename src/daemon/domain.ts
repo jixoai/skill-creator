@@ -132,16 +132,16 @@ export function createDaemonDomain(
     },
     uiCards: new UiCardRegistry(),
   } as DaemonDomain;
-  // proposal 链在 capabilities 就绪后构造（审批执行的依赖注入）。
-  Object.defineProperty(domain, "mcpProposals", {
-    value: createMcpProposalStore(domain.managerCapabilities),
-    enumerable: true,
-    writable: false,
-  });
-  // manager 能力面：结构化子集依赖（不含自身），构造后冻结为普通属性。
+  // manager 能力面先就绪（结构化子集依赖，不含自身），proposal 链随后注入其
+  // 审批执行依赖——顺序即依赖方向。
   const managerCapabilities = createCapabilityRegistry(createDomainCapabilities(domain));
   Object.defineProperty(domain, "managerCapabilities", {
     value: managerCapabilities,
+    enumerable: true,
+    writable: false,
+  });
+  Object.defineProperty(domain, "mcpProposals", {
+    value: createMcpProposalStore(managerCapabilities),
     enumerable: true,
     writable: false,
   });

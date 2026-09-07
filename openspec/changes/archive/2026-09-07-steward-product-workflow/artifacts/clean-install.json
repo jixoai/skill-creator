@@ -1,26 +1,23 @@
 {
   "artifactVersion": 1,
-  "generatedAt": "2026-09-07T04:43:06.504Z",
+  "generatedAt": "2026-09-07T22:51:38.873Z",
   "generator": "scripts/clean-install-check.sh.ts",
   "nodeVersion": "v24.20.0",
   "npmVersion": "11.19.0",
   "pack": {
     "tarball": "skill-creator-2.0.0.tgz",
-    "fileCount": 96
+    "fileCount": 91
   },
   "install": {
-    "sandbox": "/tmp/sc-clean-install-fc60iA",
+    "sandbox": "/tmp/sc-clean-install-u1yJ0J",
     "exitCode": 0,
-    "installedRoot": "/tmp/sc-clean-install-fc60iA/app/node_modules/skill-creator",
+    "installedRoot": "/tmp/sc-clean-install-u1yJ0J/app/node_modules/skill-creator",
     "ccskiAbsentFromInstall": true,
     "daemonHasNoCcskiImport": true,
     "dshBaseResolvable": true,
     "bundledAssets": {
       "dist/cli.js": true,
-      "dist/webui/index.html": true,
-      "dist/webui/dsh-island.js": true,
-      "dist/dsh-client/lib/client.js": true,
-      "dist/dsh-client/package.json": true
+      "dist/webui/index.html": true
     }
   },
   "licenses": {
@@ -32,16 +29,15 @@
   "lifecycle": {
     "startExit": 0,
     "dshMounted": true,
-    "dshEntries": 149,
-    "dshHasManagerPlugin": true,
-    "dshActivationHasPlugin": true,
+    "dshEntries": 88,
+    "dshHasAgentPresetsRow": true,
     "tray": "headless",
     "http": {
       "healthOk": true,
-      "spaFallbackNotServedAtRoot": true,
-      "rootStatus": 401,
-      "dshPortAlive": true,
-      "islandAssetOk": true
+      "spaFallbackNotServedAtRoot": false,
+      "rootStatus": 200,
+      "dshPortAlive": false,
+      "islandAssetOk": false
     },
     "stopExit": 0,
     "endpointReleased": true,

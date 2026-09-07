@@ -124,6 +124,9 @@ importers:
       '@deepseek-ai/dsh-agent-loop':
         specifier: 0.1.2-rc.1
         version: 0.1.2-rc.1(b439f35cbe316bcb469bc5c5afd8b06f)
+      '@deepseek-ai/dsh-agent-presets':
+        specifier: 0.1.2-rc.1
+        version: 0.1.2-rc.1
       '@deepseek-ai/dsh-agent-tool-presentation':
         specifier: 0.1.2-rc.1
         version: 0.1.2-rc.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-tools@0.1.2-rc.1(de5e1ff2d608fbe22667925341ad1dfc))

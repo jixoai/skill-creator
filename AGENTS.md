@@ -88,9 +88,17 @@ Repository         = clone + pin commit + scan + preview + install
 Source             = Discover feed 的 curated 或 user Git 源（sources.json）
 Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply）
 Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
-Agent Runtime      = 目标为官方 DSH Agent/session/tools/prompt composition；fixture 仅测试，Codex 后端暂不纳入交付
-ACP Bridge         = internal legacy：generic ACP session 已从产品入口移除（3.2），
-                      Agent 会话由 DSH host 唯一承载；daemon 内诊断面保留但不扩张
+Agent Kernel       = headless DSH 内核：单 dsh-base bundle + 产品 preset（persona/ask-user）
+                      + 工具面收窄（禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
+Agent Panel        = shell 级右栏 drawer：agent.* RPC 消费内核会话（帧流/审批/配置）
+capability-core    = 领域能力层：name + Zod IO + handler + authority class
+                      （readonly/proposal/approved-mutation）；MCP 与 steward 共同投影
+skill-creator-mcp  = MCP server 双形态：daemon 内 /mcp（Bearer）+ skill-creator mcp
+                      （stdio readonly）；mutation 一律 *_propose 产 proposal 待审批
+ui:// Cards        = 工具结果附带的视觉卡（skill/finding/proposal/install 四类）；
+                      沙箱 iframe 渲染 + postMessage 导航；不可信文本模板层转义
+ACP Bridge         = internal legacy：generic ACP session 已从产品入口移除，
+                      daemon 内诊断面保留但不扩张
 ```
 
 核心约束：
@@ -126,6 +134,9 @@ Browser (web mode)-+                  |          |
                  |                    +-- skills (ccski) + skillsUpdate (lock hash)
                  |                    +-- creator / repository (Git)
                  |                    +-- sourceRegistry (sources.json)
+                 |                    +-- capability (capability-core + manager registry)
+                 |                    +-- kernel (headless dsh-base + agent sessions)
+                 |                    +-- mcp (skill-creator-mcp + ui cards + proposals)
                  |                    +-- acpBridge (agent 子进程池 + fs 安全门)
                  |                               |
                  | OpenTray -> ext-webview ------+--> native tray/window
@@ -426,7 +437,7 @@ src/
 |-- daemon/
 |   |-- index.ts -------------- [4] lock / HTTP / retained app window / teardown
 |   |-- domain.ts ------------- [2] domain module composition / dependency wiring
-|   |-- rpc-router.ts ---------- [5] skill+update / workspace+creator / repository+sources / status+acp / error boundary
+|   |-- rpc-router.ts ---------- [5] skill+update / workspace+creator / repository+sources / agent+card+proposals / status+acp / error boundary
 |   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
 |   |-- creator-service.ts ----- [3] create / round-trip update / revision delete / change log
 |   |-- repository-service.ts -- [3] pinned lifecycle / inspect / preview-install
@@ -442,6 +453,19 @@ src/
 |   |   |-- persistence.ts ---- [2] strict load / atomic commit
 |   |   `-- projection.ts ----- [2] dynamic counts / availability projection
 |   |-- path-safety.ts --------- [3] identity / containment / atomic revision write
+|   |-- capability/
+|   |   |-- core.ts ------------ [2] 能力定义 + registry（闭合面 / principal 边界 / 投影）
+|   |   `-- domain-capabilities.ts [2] contract-map 20 项能力登记（authority 标注）
+|   |-- kernel/
+|   |   |-- dsh-kernel.ts ------ [3] headless profile boot / 工具面收窄 / mcp row
+|   |   |-- agent-sessions.ts -- [4] 面板会话面 / 帧流投影 / user-questions answerer
+|   |   `-- product-prompt.ts -- [2] 版本化最佳实践 system prompt section
+|   |-- mcp/
+|   |   |-- skill-creator-mcp.ts [3] MCP server（tools / resources / propose 变体）
+|   |   |-- cards.ts ----------- [3] ui:// 卡片模板（escape 强制）+ 资源注册表
+|   |   `-- proposals.ts ------- [2] mutation→proposal 审批链 + 审计
+|   |-- dsh-host-lifecycle.ts -- [2] 内核宿主挂载 / 降级 / 有界停止
+|   |-- dsh-profile-support.ts - [2] heal 镜像 + 传递闭包补全（kernel 共用）
 |   |-- opentray-windows-host.ts [1] win32 native material comparator bridge
 |   |-- web-server.ts ---------- [3] SPA / auth upgrade / bounded oRPC lifecycle
 |   |-- ipc-server.ts ---------- [4] lock / protocol / dispatch / bounded acknowledged stop
@@ -507,6 +531,9 @@ ACP agent discovery which -----> exit-code projection ----------------> availabl
 ACP stdio 帧 -------------------> 结构 parser（method/result/error）---> 帧桥转发 / 丢弃
 ACP fs read/write 请求 ---------> daemon 代执行 containment+原子写 --> agent 无文件句柄
 static request path -----------> resolved-root containment ----------> read asset
+/mcp Bearer token ------------> exact web token ---------------------> MCP tools/resources
+MCP mutation call ------------> *_propose 产 proposal ----------------> 人工审批后 human-ui 执行
+ui:// 卡片字段 --------------> 模板层 HTML escape -------------------> 沙箱 iframe 渲染
 IPC bytes ---------------------> frame size + schema + protocol ------> CLI command
 ```
 
@@ -525,6 +552,9 @@ IPC bytes ---------------------> frame size + schema + protocol ------> CLI comm
 11. ACP agent 子进程永不获得原始文件句柄：`fs/read_text_file`、`fs/write_text_file` 请求由 daemon 在 Workspace Provider containment 内代为执行（写入走原子写）；session 由 daemon 持有 opaque ID，close 与 daemon stop 有界回收子进程，不留 orphan。
 12. `repository.sources.*` 只接受 https Git URL；user 源与 curated 内置源 id 命名空间隔离，内置源不可被 remove；sources.json 是 server-owned 持久化，WebUI 不写 localStorage。
 13. `skills.update.apply` 只能重装 check 已确认过时的 selected skills；lock/GitHub API 不可用一律投影为 skipped/unavailable，不得伪装成功或抛基础设施错误。
+14. 内核工具面收窄（design D1）：通用 bash/fs/web/skill 发现行禁用；产品 agent 的 global 工具面 deny 收窄到 allowlist（ask_user_question）+ mcp__skill-creator__*；负面场景有测试钉死。
+15. MCP 面 authority 红线：mutation 一律 `*_propose` 产 proposal（不直接写盘），审批执行经 Manager 进程内 registry 以 human-ui 主体进行；stdio 形态不注册 mutation（含 propose）。
+16. `/mcp` 只在 loopback manager origin 上暴露且必须 Bearer web token；`ui://` 卡片模板对不可信文本强制 escape，面板 iframe 无 same-origin/top-navigation 权限。
 
 ## 6. 文件意图法
 
