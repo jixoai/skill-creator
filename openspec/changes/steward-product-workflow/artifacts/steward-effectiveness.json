@@ -1,0 +1,388 @@
+{
+  "script": "scripts/steward-effectiveness.sh.ts",
+  "generatedAt": "2026-09-07T04:21:46.155Z",
+  "analyzerVersion": "deterministic analyzeDocuments (src/daemon/skill-intelligence/analyzer.ts)",
+  "modelVersion": "steward-deterministic transport (no live LLM; real token consumption = 0)",
+  "policies": {
+    "baseline": "propose on ANY finding (severity-agnostic)",
+    "candidate": "propose only on warning+ findings of structural kinds (conflict / doc defect); info-level findings (wide-trigger-surface, shared-resource-path, overlapping-responsibility) go to human review only"
+  },
+  "docIntegrity": {
+    "note": "evaluation is read-only over fixtures; skill sha256 recorded per case",
+    "skillsHashed": 17
+  },
+  "baselineSummary": {
+    "hits": 5,
+    "misses": 0,
+    "falseAlarms": 2,
+    "correctlyQuiet": 3
+  },
+  "candidateSummary": {
+    "hits": 5,
+    "misses": 0,
+    "falseAlarms": 0,
+    "correctlyQuiet": 5
+  },
+  "tokenAccounting": {
+    "estimateNote": "tokenEstimate = content chars / 4 per case (upper-bound heuristic)",
+    "realNote": "realLlmTokens = 0 for every case: deterministic transport performs no model call",
+    "perCaseEstimateTotal": 796
+  },
+  "cases": [
+    {
+      "case": "01-conflict-duplicate-trigger",
+      "expectTrigger": true,
+      "expectedKinds": ["duplicate-trigger"],
+      "category": "conflict-pair",
+      "judgmentReason": "Two enabled skills compete for the same Bash trigger token; the trigger surface is contested.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 103,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "deploy-frontend",
+          "sha256": "3149f472731117b9dd03e485a2f682f3b54d1f557a37c05202ef29f7ca35badc"
+        },
+        {
+          "directory": "deploy-static-site",
+          "sha256": "85d9f7f9592037adb1e36075af64db45039bbd5b1c37322053ab4f79f4afd5b7"
+        }
+      ],
+      "findingsRaw": [
+        {
+          "kind": "duplicate-trigger",
+          "severity": "warning",
+          "message": "Enabled skills share trigger tokens: Bash.",
+          "skillIds": ["sk_eval000000000000000", "sk_eval010000000000000"]
+        }
+      ],
+      "baseline": {
+        "propose": true,
+        "verdict": "hit"
+      },
+      "candidate": {
+        "propose": true,
+        "reviewOnlyKinds": [],
+        "verdict": "hit"
+      }
+    },
+    {
+      "case": "02-conflict-mutually-exclusive",
+      "expectTrigger": true,
+      "expectedKinds": ["mutually-exclusive-rules", "duplicate-trigger"],
+      "category": "conflict-pair",
+      "judgmentReason": "Shared trigger plus opposing directives (never vs always) on the same operation.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 107,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "auto-migrate",
+          "sha256": "7dd8021e6ed5bdf145099fd9776feac6f0672ae05adac80694bf1a9fb9b237ff"
+        },
+        {
+          "directory": "lock-production",
+          "sha256": "7292638553da5b50b6b87b996128351779d670265291be2326141a3b2490dd68"
+        }
+      ],
+      "findingsRaw": [
+        {
+          "kind": "mutually-exclusive-rules",
+          "severity": "error",
+          "message": "Skills give opposing directives on shared triggers (Bash).",
+          "skillIds": ["sk_eval000000000000000", "sk_eval010000000000000"]
+        },
+        {
+          "kind": "duplicate-trigger",
+          "severity": "warning",
+          "message": "Enabled skills share trigger tokens: Bash.",
+          "skillIds": ["sk_eval000000000000000", "sk_eval010000000000000"]
+        }
+      ],
+      "baseline": {
+        "propose": true,
+        "verdict": "hit"
+      },
+      "candidate": {
+        "propose": true,
+        "reviewOnlyKinds": [],
+        "verdict": "hit"
+      }
+    },
+    {
+      "case": "03-overlap-duplicate-name",
+      "expectTrigger": true,
+      "expectedKinds": ["duplicate-name"],
+      "category": "overlap-pair",
+      "judgmentReason": "Two skills share the frontmatter name; invocation cannot distinguish them.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 100,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "code-review-a",
+          "sha256": "ea8374de512e145cc5ddb8e1b8beb7c517dd79e3871c94da6180c7c92d5a0b00"
+        },
+        {
+          "directory": "code-review-b",
+          "sha256": "ddd95d8c2b022be5ac39e34f87541348f04eeab1a227cef48860c0985deb539b"
+        }
+      ],
+      "findingsRaw": [
+        {
+          "kind": "duplicate-name",
+          "severity": "error",
+          "message": "Two skills share the name \"code-review\".",
+          "skillIds": ["sk_eval000000000000000", "sk_eval010000000000000"]
+        }
+      ],
+      "baseline": {
+        "propose": true,
+        "verdict": "hit"
+      },
+      "candidate": {
+        "propose": true,
+        "reviewOnlyKinds": [],
+        "verdict": "hit"
+      }
+    },
+    {
+      "case": "04-doc-defect-missing-description",
+      "expectTrigger": true,
+      "expectedKinds": ["missing-description"],
+      "category": "doc-defect",
+      "judgmentReason": "A skill without a frontmatter description cannot be surfaced in catalogs.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 29,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "summarize-notes",
+          "sha256": "01f587b53be8ea209b75897e5a80de0f35608b7a85f20bb871bfc33015a47dd2"
+        }
+      ],
+      "findingsRaw": [
+        {
+          "kind": "validation-error",
+          "severity": "error",
+          "message": "Skill \"summarize-notes\" has structural validation errors.",
+          "skillIds": ["sk_eval000000000000000"]
+        },
+        {
+          "kind": "missing-description",
+          "severity": "warning",
+          "message": "Skill \"summarize-notes\" has no frontmatter description.",
+          "skillIds": ["sk_eval000000000000000"]
+        }
+      ],
+      "baseline": {
+        "propose": true,
+        "verdict": "hit"
+      },
+      "candidate": {
+        "propose": true,
+        "reviewOnlyKinds": [],
+        "verdict": "hit"
+      }
+    },
+    {
+      "case": "05-companion-shared-conflict",
+      "expectTrigger": true,
+      "expectedKinds": ["duplicate-trigger", "shared-resource-path"],
+      "category": "companion-script",
+      "judgmentReason": "Two enabled skills drive the same companion script from the same trigger; deploy and rollback must not race.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 98,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "svc-deploy",
+          "sha256": "41a0de1475217f8326db1a00785f35abcd33f1a191410669b20f101cc240f8df"
+        },
+        {
+          "directory": "svc-rollback",
+          "sha256": "1ea5b281d87676a5fe0ed5c9b6efe710e474150810a89baf907bddf8b032fe3a"
+        }
+      ],
+      "findingsRaw": [
+        {
+          "kind": "duplicate-trigger",
+          "severity": "warning",
+          "message": "Enabled skills share trigger tokens: Bash.",
+          "skillIds": ["sk_eval000000000000000", "sk_eval010000000000000"]
+        },
+        {
+          "kind": "shared-resource-path",
+          "severity": "info",
+          "message": "Skills reference the same resource paths: scripts/service.sh.",
+          "skillIds": ["sk_eval000000000000000", "sk_eval010000000000000"]
+        }
+      ],
+      "baseline": {
+        "propose": true,
+        "verdict": "hit"
+      },
+      "candidate": {
+        "propose": true,
+        "reviewOnlyKinds": ["shared-resource-path"],
+        "verdict": "hit"
+      }
+    },
+    {
+      "case": "06-distinct-pair",
+      "expectTrigger": false,
+      "expectedKinds": [],
+      "category": "distinct-pair",
+      "judgmentReason": "Disjoint trigger tokens, disjoint companion scripts and non-overlapping descriptions.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 80,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "lint-code",
+          "sha256": "d5d1f112882add60ad40e385f15657d9d4a47cf20bce71f18152af2d447e62c0"
+        },
+        {
+          "directory": "run-tests",
+          "sha256": "d4a2b5105de1dbf79c6ca1b598ead0effba85dca648a2848f2b2ef82bce7a116"
+        }
+      ],
+      "findingsRaw": [],
+      "baseline": {
+        "propose": false,
+        "verdict": "correctly-quiet"
+      },
+      "candidate": {
+        "propose": false,
+        "reviewOnlyKinds": [],
+        "verdict": "correctly-quiet"
+      }
+    },
+    {
+      "case": "07-healthy-single",
+      "expectTrigger": false,
+      "expectedKinds": [],
+      "category": "healthy-single",
+      "judgmentReason": "Single well-formed skill with a narrow trigger and complete metadata.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 45,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "catalog-index",
+          "sha256": "548de4707ab11ffb814d8717dea06df45e90d8940ca5ff6b6d18c33d2379d711"
+        }
+      ],
+      "findingsRaw": [],
+      "baseline": {
+        "propose": false,
+        "verdict": "correctly-quiet"
+      },
+      "candidate": {
+        "propose": false,
+        "reviewOnlyKinds": [],
+        "verdict": "correctly-quiet"
+      }
+    },
+    {
+      "case": "08-companion-aligned",
+      "expectTrigger": false,
+      "expectedKinds": [],
+      "category": "companion-script",
+      "judgmentReason": "Each companion script belongs to exactly one skill and the trigger tokens are disjoint.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 85,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "build-app",
+          "sha256": "57ddb5320c5a6e5cf5cd4a0e200fd7b8a48657cc11d3d2e260846897e61cd553"
+        },
+        {
+          "directory": "deploy-app",
+          "sha256": "b6e0ed195169475d47773a247d4058f736583d517fa721cdb97f359117372e99"
+        }
+      ],
+      "findingsRaw": [],
+      "baseline": {
+        "propose": false,
+        "verdict": "correctly-quiet"
+      },
+      "candidate": {
+        "propose": false,
+        "reviewOnlyKinds": [],
+        "verdict": "correctly-quiet"
+      }
+    },
+    {
+      "case": "09-wide-trigger-only",
+      "expectTrigger": false,
+      "expectedKinds": ["wide-trigger-surface"],
+      "category": "wide-trigger-only",
+      "judgmentReason": "Wildcard trigger is review-worthy background info, not a maintenance action on its own.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 46,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "everything-helper",
+          "sha256": "77643b354584ab1c9a6839a6dddfb7be815f8ec43b541897be6db0399f7f12a9"
+        }
+      ],
+      "findingsRaw": [
+        {
+          "kind": "wide-trigger-surface",
+          "severity": "info",
+          "message": "Skill \"everything-helper\" declares a wildcard trigger and may compete for every prompt.",
+          "skillIds": ["sk_eval000000000000000"]
+        }
+      ],
+      "baseline": {
+        "propose": true,
+        "verdict": "false-alarm"
+      },
+      "candidate": {
+        "propose": false,
+        "reviewOnlyKinds": ["wide-trigger-surface"],
+        "verdict": "correctly-quiet"
+      }
+    },
+    {
+      "case": "10-overlap-descriptions-only",
+      "expectTrigger": false,
+      "expectedKinds": ["overlapping-responsibility"],
+      "category": "overlap-pair",
+      "judgmentReason": "Descriptions overlap but triggers and scripts are disjoint; a human review hint, not a proposal.",
+      "usageHistory": "unknown",
+      "tokenEstimate": 103,
+      "realLlmTokens": 0,
+      "skills": [
+        {
+          "directory": "report-metrics",
+          "sha256": "58829790ab573672e7a91f2335bb7b92f818fd37e82ba15a45e35ba69514ea9e"
+        },
+        {
+          "directory": "report-signals",
+          "sha256": "d8d3392ef0f9766592eee40b871266ef260ce3ba409ffb9ec70dcba744547973"
+        }
+      ],
+      "findingsRaw": [
+        {
+          "kind": "overlapping-responsibility",
+          "severity": "info",
+          "message": "Descriptions overlap (75% shared terms); review whether responsibilities should be split.",
+          "skillIds": ["sk_eval000000000000000", "sk_eval010000000000000"]
+        }
+      ],
+      "baseline": {
+        "propose": true,
+        "verdict": "false-alarm"
+      },
+      "candidate": {
+        "propose": false,
+        "reviewOnlyKinds": ["overlapping-responsibility"],
+        "verdict": "correctly-quiet"
+      }
+    }
+  ]
+}

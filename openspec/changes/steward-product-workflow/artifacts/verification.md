@@ -82,3 +82,11 @@ fmt --check 全绿、smoke 重跑 exit 0、全量 462/462、typecheck 0。教训
 - rollback 双形态各覆盖两类：edit/disable = reverse-proposal（独立审批 + apply）；split/merge = grant-replay（journal 反向重放）。全部 case 断言回滚后 Provider 树与跑前逐项相等。
 - live 模型 blocker：`PRESET_REQUIRES_CREDENTIAL`（provider `steward-deterministic` 无凭据）——按验收条款记录，不以 unavailable 冒充通过；deterministic 四 action 全链已证。
 - 门禁（逐条独立执行）：464/464（55 files）；typecheck 0；webui check 0/0；build；`vp fmt --check` 478 clean；`git diff --check` clean；openspec 9/9。
+
+## 4.7 实测注记（可解释评估）
+
+- 输入面：`test/fixtures/steward/evaluation/` 10 条（5 应触发：冲突对×2/分工重叠对/文档缺陷/配套脚本技能；5 不应触发：分工清晰对/健康单技能/配套脚本各归其主/仅 info 宽触发面/仅 info 描述重叠）。首轮 harness 用目录名替代 frontmatter name 导致 03 漏报——改为解析 frontmatter（与真实快照同源）后全绿；该差异本身即「评估必须走真实投影面」的证据。
+- 双策略（真实 analyzeDocuments 路径）：baseline 5 hit / 2 false-alarm；candidate（warning+ 结构化类别门，info 转人工复核）5 hit / 0 false-alarm / 5 quiet。逐条原始结果+判断理由在 `steward-effectiveness.json`，矩阵与逐优化判定（收益/风险/保留/明确拒绝项）在 `artifacts/effectiveness.md`。
+- token：估算（chars/4）与真实消耗（deterministic=0）分列记录；live 真实消耗随 4.6 凭据 blocker 补验。usage 全部 unknown（无遥测源，不默认 0）。完整性：每 case 记录 SKILL.md sha256，评估只读零变更。
+- 回归固化：`test/steward-effectiveness.test.ts` 3/3（含「baseline 误报恰为 09/10」的反向断言——fixture/analyzer 漂移立即显式失败）。
+- 门禁：467/467（56 files）；typecheck 0；webui check 0/0；`vp fmt --check` 509 clean；`git diff --check` clean；openspec 9/9。

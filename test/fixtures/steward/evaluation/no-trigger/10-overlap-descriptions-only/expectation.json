@@ -1,0 +1,7 @@
+{
+  "expectTrigger": false,
+  "expectedKinds": ["overlapping-responsibility"],
+  "category": "overlap-pair",
+  "reason": "Descriptions overlap but triggers and scripts are disjoint; a human review hint, not a proposal.",
+  "usageHistory": "unknown"
+}

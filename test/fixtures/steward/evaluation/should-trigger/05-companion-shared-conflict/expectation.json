@@ -1,0 +1,7 @@
+{
+  "expectTrigger": true,
+  "expectedKinds": ["duplicate-trigger", "shared-resource-path"],
+  "category": "companion-script",
+  "reason": "Two enabled skills drive the same companion script from the same trigger; deploy and rollback must not race.",
+  "usageHistory": "unknown"
+}

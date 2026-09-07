@@ -1,0 +1,7 @@
+{
+  "expectTrigger": true,
+  "expectedKinds": ["missing-description"],
+  "category": "doc-defect",
+  "reason": "A skill without a frontmatter description cannot be surfaced in catalogs.",
+  "usageHistory": "unknown"
+}

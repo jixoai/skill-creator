@@ -1,0 +1,7 @@
+{
+  "expectTrigger": false,
+  "expectedKinds": [],
+  "category": "companion-script",
+  "reason": "Each companion script belongs to exactly one skill and the trigger tokens are disjoint.",
+  "usageHistory": "unknown"
+}

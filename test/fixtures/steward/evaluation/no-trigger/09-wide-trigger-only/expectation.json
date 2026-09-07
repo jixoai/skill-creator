@@ -1,0 +1,7 @@
+{
+  "expectTrigger": false,
+  "expectedKinds": ["wide-trigger-surface"],
+  "category": "wide-trigger-only",
+  "reason": "Wildcard trigger is review-worthy background info, not a maintenance action on its own.",
+  "usageHistory": "unknown"
+}

@@ -1,0 +1,7 @@
+{
+  "expectTrigger": false,
+  "expectedKinds": [],
+  "category": "distinct-pair",
+  "reason": "Disjoint trigger tokens, disjoint companion scripts and non-overlapping descriptions.",
+  "usageHistory": "unknown"
+}

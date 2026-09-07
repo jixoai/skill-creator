@@ -1,0 +1,7 @@
+{
+  "expectTrigger": true,
+  "expectedKinds": ["mutually-exclusive-rules", "duplicate-trigger"],
+  "category": "conflict-pair",
+  "reason": "Shared trigger plus opposing directives (never vs always) on the same operation.",
+  "usageHistory": "unknown"
+}

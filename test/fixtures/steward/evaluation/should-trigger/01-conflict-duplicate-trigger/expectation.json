@@ -1,0 +1,7 @@
+{
+  "expectTrigger": true,
+  "expectedKinds": ["duplicate-trigger"],
+  "category": "conflict-pair",
+  "reason": "Two enabled skills compete for the same Bash trigger token; the trigger surface is contested.",
+  "usageHistory": "unknown"
+}

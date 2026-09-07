@@ -1,0 +1,7 @@
+{
+  "expectTrigger": true,
+  "expectedKinds": ["duplicate-name"],
+  "category": "overlap-pair",
+  "reason": "Two skills share the frontmatter name; invocation cannot distinguish them.",
+  "usageHistory": "unknown"
+}

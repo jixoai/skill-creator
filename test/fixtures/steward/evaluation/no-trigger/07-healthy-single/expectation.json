@@ -1,0 +1,7 @@
+{
+  "expectTrigger": false,
+  "expectedKinds": [],
+  "category": "healthy-single",
+  "reason": "Single well-formed skill with a narrow trigger and complete metadata.",
+  "usageHistory": "unknown"
+}
