@@ -74,3 +74,11 @@
 `artifacts/steward-smoke.json` 两文件失败。本任务（4.5）补跑 `vp fmt` 修正后复验：
 fmt --check 全绿、smoke 重跑 exit 0、全量 462/462、typecheck 0。教训并入流程：
 门禁必须逐条独立执行并以各自退出码为准，不使用 && 链。
+
+## 4.6 实测注记（三任务四 action 端到端验收）
+
+- `scripts/steward-acceptance.sh.ts`（真实 bootDaemon + DSH host 149 entries + 生产 session-binder；连续两次 exit 0）：六 case 全链各记录 id 链与 Provider 前后树（`steward-acceptance.json`）；矩阵与故障/blocker 总结在 `artifacts/acceptance.md`。
+- fixture action 面补齐：`SkillStewardRunInputSchema.scenario` 增 `organize-disable`/`organize-merge`；`buildDeterministicDisableProposal`（revision-bound selection）与 `buildDeterministicMergeProposal`（双源 + 资产 copy 映射，`<2` 技能 fail-closed）。runtime 回归 +2（72/72）：disable 提案形状、merge 提案形状 + 单技能 fail-closed。
+- rollback 双形态各覆盖两类：edit/disable = reverse-proposal（独立审批 + apply）；split/merge = grant-replay（journal 反向重放）。全部 case 断言回滚后 Provider 树与跑前逐项相等。
+- live 模型 blocker：`PRESET_REQUIRES_CREDENTIAL`（provider `steward-deterministic` 无凭据）——按验收条款记录，不以 unavailable 冒充通过；deterministic 四 action 全链已证。
+- 门禁（逐条独立执行）：464/464（55 files）；typecheck 0；webui check 0/0；build；`vp fmt --check` 478 clean；`git diff --check` clean；openspec 9/9。

@@ -28,6 +28,8 @@ export type FixtureScenario =
   | "valid-check"
   | "valid-optimize"
   | "valid-organize"
+  | "organize-disable"
+  | "organize-merge"
   | "malformed"
   | "stale"
   | "disconnect"
@@ -115,6 +117,101 @@ function buildDeterministicEditProposal(
       evidence: [{ skillId: skill.skillId, path: "SKILL.md", snippet: skill.content.slice(0, 60) }],
       skillIds: [skill.skillId],
       observedRevisions: [{ skillId: skill.skillId, revision }],
+    },
+  };
+}
+
+/** 从快照确定性构造一个 disable proposal（4.6 organize-disable 场景）。 */
+function buildDeterministicDisableProposal(snapshot: SkillStewardContextSnapshot): {
+  proposal: SkillProposal;
+} {
+  const skill = snapshot.skills[0]!;
+  return {
+    proposal: {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "disable",
+      patch: {
+        kind: "disable",
+        snapshotId: snapshot.id,
+        selections: [{ skillId: skill.skillId, expectedRevision: skill.revision }],
+        reason: `Deterministic organize: ${skill.name} is retired by the acceptance scenario.`,
+      },
+      rationale: "Deterministic organize: disable one skill with a revision-bound selection.",
+      findingIds: [],
+      evidence: [{ skillId: skill.skillId, path: "SKILL.md", snippet: skill.content.slice(0, 60) }],
+      skillIds: [skill.skillId],
+      observedRevisions: [{ skillId: skill.skillId, revision: skill.revision }],
+    },
+  };
+}
+
+/** 从快照确定性构造一个 merge proposal（4.6 organize-merge 场景；需 ≥2 技能）。 */
+function buildDeterministicMergeProposal(snapshot: SkillStewardContextSnapshot): {
+  proposal: SkillProposal;
+} {
+  const [first, second] = [snapshot.skills[0]!, snapshot.skills[1]!];
+  const targetName = `${first.directoryName}-and-${second.directoryName}`
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-");
+  const assetOf = (skill: (typeof snapshot)["skills"][number]) =>
+    snapshot.resources.find(
+      (resource) => resource.skillId === skill.skillId && resource.relPath !== "SKILL.md",
+    );
+  const firstAsset = assetOf(first);
+  const secondAsset = assetOf(second);
+  return {
+    proposal: {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "merge",
+      patch: {
+        kind: "merge",
+        snapshotId: snapshot.id,
+        sources: [
+          { skillId: first.skillId, expectedRevision: first.revision },
+          { skillId: second.skillId, expectedRevision: second.revision },
+        ],
+        target: {
+          directoryName: targetName,
+          frontmatter: {
+            name: targetName,
+            description: `Merged ${first.name} and ${second.name} by the acceptance scenario.`,
+          },
+          body: `# ${targetName}\n\nMerged ${first.name} and ${second.name}; sources stay on disk disabled.\n`,
+          resources: [
+            ...(firstAsset
+              ? [
+                  {
+                    sourceSkillId: first.skillId,
+                    sourcePath: firstAsset.relPath,
+                    targetPath: `${first.directoryName}-asset`,
+                    strategy: "copy" as const,
+                  },
+                ]
+              : []),
+            ...(secondAsset
+              ? [
+                  {
+                    sourceSkillId: second.skillId,
+                    sourcePath: secondAsset.relPath,
+                    targetPath: `${second.directoryName}-asset`,
+                    strategy: "copy" as const,
+                  },
+                ]
+              : []),
+          ],
+        },
+      },
+      rationale: "Deterministic organize: merge two skills into one revision-bound target.",
+      findingIds: [],
+      evidence: [
+        { skillId: first.skillId, path: "SKILL.md", snippet: first.content.slice(0, 60) },
+        { skillId: second.skillId, path: "SKILL.md", snippet: second.content.slice(0, 60) },
+      ],
+      skillIds: [first.skillId, second.skillId],
+      observedRevisions: [
+        { skillId: first.skillId, revision: first.revision },
+        { skillId: second.skillId, revision: second.revision },
+      ],
     },
   };
 }
@@ -256,6 +353,26 @@ export async function runFixtureAgent(
     case "valid-organize": {
       emit({ kind: "stage", stage: "proposing" });
       const { proposal } = buildDeterministicSplitProposal(snapshot);
+      const proposed = await callTool("skills.propose", { proposal });
+      if (proposed.kind !== "ok") return done("failed", "propose rejected");
+      emit({ kind: "proposal", proposal });
+      return done("completed", "proposal awaits human approval");
+    }
+    // 4.6 端到端验收：organize 的另两类 action 形态（disable / merge）。
+    case "organize-disable": {
+      emit({ kind: "stage", stage: "proposing" });
+      const { proposal } = buildDeterministicDisableProposal(snapshot);
+      const proposed = await callTool("skills.propose", { proposal });
+      if (proposed.kind !== "ok") return done("failed", "propose rejected");
+      emit({ kind: "proposal", proposal });
+      return done("completed", "proposal awaits human approval");
+    }
+    case "organize-merge": {
+      if (snapshot.skills.length < 2) {
+        return done("failed", "merge scenario requires at least two skills in scope");
+      }
+      emit({ kind: "stage", stage: "proposing" });
+      const { proposal } = buildDeterministicMergeProposal(snapshot);
       const proposed = await callTool("skills.propose", { proposal });
       if (proposed.kind !== "ok") return done("failed", "propose rejected");
       emit({ kind: "proposal", proposal });

@@ -1219,6 +1219,8 @@ export const SkillStewardRunInputSchema = z.object({
       "valid-check",
       "valid-optimize",
       "valid-organize",
+      "organize-disable",
+      "organize-merge",
       "malformed",
       "stale",
       "disconnect",

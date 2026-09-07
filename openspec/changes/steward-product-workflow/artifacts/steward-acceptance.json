@@ -1,0 +1,193 @@
+{
+  "script": "scripts/steward-acceptance.sh.ts",
+  "generatedAt": "2026-09-07T04:09:53.610Z",
+  "node": "v24.20.0",
+  "cases": {
+    "check-single": {
+      "run": {
+        "snapshotId": "snap_e07c1dc26e9f8f7f",
+        "dshSessionId": "session-1",
+        "toolCalls": 2,
+        "terminal": "completed",
+        "proposals": []
+      }
+    },
+    "check-multi": {
+      "run": {
+        "snapshotId": "snap_4482f09492570795",
+        "dshSessionId": "session-2",
+        "toolCalls": 2,
+        "terminal": "completed",
+        "proposals": []
+      },
+      "toolNames": ["skills.list_context", "skills.relations"]
+    },
+    "optimize-edit": {
+      "run": {
+        "snapshotId": "snap_1b1948f3dbaa2d19",
+        "dshSessionId": "session-3",
+        "toolCalls": 3,
+        "terminal": "failed",
+        "proposals": [
+          {
+            "proposalId": "spp_44a4326187b26611",
+            "action": "edit"
+          }
+        ]
+      },
+      "proposalId": "spp_44a4326187b26611",
+      "validation": "valid (2/2)",
+      "grantId": "grant_8307f7e386a937a1",
+      "auditId": "aud_8410d82cdf491b35",
+      "outcome": "applied",
+      "rollbackForm": "reverse-proposal",
+      "rollbackOutcome": "applied",
+      "treeApplied": {
+        "audit-logs/scripts/audit-logs.sh": "file",
+        "audit-logs/SKILL.md": "file",
+        "deploy-api/scripts/deploy-api.sh": "file",
+        "deploy-api/SKILL.md": "file",
+        "deploy-web/scripts/deploy-web.sh": "file",
+        "deploy-web/SKILL.md": "file"
+      },
+      "treeRestored": {
+        "audit-logs/scripts/audit-logs.sh": "file",
+        "audit-logs/SKILL.md": "file",
+        "deploy-api/scripts/deploy-api.sh": "file",
+        "deploy-api/SKILL.md": "file",
+        "deploy-web/scripts/deploy-web.sh": "file",
+        "deploy-web/SKILL.md": "file"
+      }
+    },
+    "organize-disable": {
+      "run": {
+        "snapshotId": "snap_2da4f600d7b99ad7",
+        "dshSessionId": "session-4",
+        "toolCalls": 1,
+        "terminal": "completed",
+        "proposals": [
+          {
+            "proposalId": "spp_40efe64414383093",
+            "action": "disable"
+          }
+        ]
+      },
+      "proposalId": "spp_40efe64414383093",
+      "validation": "valid (2/2)",
+      "grantId": "grant_2d6e042048a6e875",
+      "auditId": "aud_2811b4fb847bf1ff",
+      "outcome": "applied",
+      "rollbackForm": "reverse-proposal",
+      "rollbackOutcome": "applied",
+      "treeApplied": {
+        "audit-logs/.SKILL.md": "disabled-doc",
+        "audit-logs/scripts/audit-logs.sh": "file",
+        "deploy-api/scripts/deploy-api.sh": "file",
+        "deploy-api/SKILL.md": "file",
+        "deploy-web/scripts/deploy-web.sh": "file",
+        "deploy-web/SKILL.md": "file"
+      },
+      "treeRestored": {
+        "audit-logs/scripts/audit-logs.sh": "file",
+        "audit-logs/SKILL.md": "file",
+        "deploy-api/scripts/deploy-api.sh": "file",
+        "deploy-api/SKILL.md": "file",
+        "deploy-web/scripts/deploy-web.sh": "file",
+        "deploy-web/SKILL.md": "file"
+      }
+    },
+    "organize-split": {
+      "run": {
+        "snapshotId": "snap_3b378a06c6909535",
+        "dshSessionId": "session-5",
+        "toolCalls": 1,
+        "terminal": "completed",
+        "proposals": [
+          {
+            "proposalId": "spp_655b79c1df33a8d4",
+            "action": "split"
+          }
+        ]
+      },
+      "proposalId": "spp_655b79c1df33a8d4",
+      "validation": "valid (3/3)",
+      "grantId": "grant_7e48c5d118c309aa",
+      "auditId": "aud_ceae611ad72e136a",
+      "outcome": "applied",
+      "rollbackForm": "grant-replay",
+      "rollbackOutcome": "applied",
+      "treeApplied": {
+        "audit-logs/scripts/audit-logs.sh": "file",
+        "audit-logs/SKILL.md": "file",
+        "deploy-api/scripts/deploy-api.sh": "file",
+        "deploy-api/SKILL.md": "file",
+        "deploy-web/.SKILL.md": "disabled-doc",
+        "deploy-web/scripts/deploy-web.sh": "file",
+        "deploy-web-exec/SKILL.md": "file",
+        "deploy-web-plan/SKILL.md": "file"
+      },
+      "treeRestored": {
+        "audit-logs/scripts/audit-logs.sh": "file",
+        "audit-logs/SKILL.md": "file",
+        "deploy-api/scripts/deploy-api.sh": "file",
+        "deploy-api/SKILL.md": "file",
+        "deploy-web/scripts/deploy-web.sh": "file",
+        "deploy-web/SKILL.md": "file"
+      }
+    },
+    "organize-merge": {
+      "run": {
+        "snapshotId": "snap_6ea5919f1bcb37ef",
+        "dshSessionId": "session-6",
+        "toolCalls": 1,
+        "terminal": "completed",
+        "proposals": [
+          {
+            "proposalId": "spp_ece0ced74a7044b9",
+            "action": "merge"
+          }
+        ]
+      },
+      "proposalId": "spp_ece0ced74a7044b9",
+      "validation": "valid (3/3)",
+      "grantId": "grant_a84b418f18141ee5",
+      "auditId": "aud_12af0c0f7a8d8986",
+      "outcome": "applied",
+      "rollbackForm": "grant-replay",
+      "rollbackOutcome": "applied",
+      "treeApplied": {
+        "audit-logs/scripts/audit-logs.sh": "file",
+        "audit-logs/SKILL.md": "file",
+        "deploy-api/.SKILL.md": "disabled-doc",
+        "deploy-api/scripts/deploy-api.sh": "file",
+        "deploy-api-and-deploy-web/deploy-api-asset": "file",
+        "deploy-api-and-deploy-web/deploy-web-asset": "file",
+        "deploy-api-and-deploy-web/SKILL.md": "file",
+        "deploy-web/.SKILL.md": "disabled-doc",
+        "deploy-web/scripts/deploy-web.sh": "file"
+      },
+      "treeRestored": {
+        "audit-logs/scripts/audit-logs.sh": "file",
+        "audit-logs/SKILL.md": "file",
+        "deploy-api/scripts/deploy-api.sh": "file",
+        "deploy-api/SKILL.md": "file",
+        "deploy-web/scripts/deploy-web.sh": "file",
+        "deploy-web/SKILL.md": "file"
+      }
+    },
+    "malformed": {
+      "terminal": "failed",
+      "proposals": 0
+    },
+    "approvalReplay": {
+      "proposalId": "spp_209c5f0d5ed00baa",
+      "grantId": "grant_623c57d8c77ae614",
+      "secondApproveRejected": "Proposal is stale; approval requires a valid validation."
+    },
+    "liveModelBlocker": {
+      "outcome": "rejected",
+      "code": "PRESET_REQUIRES_CREDENTIAL",
+      "detail": "preset \"live\" requires a stored credential for provider \"steward-deterministic\""
+    }
+  }
+}

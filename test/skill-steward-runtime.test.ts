@@ -245,6 +245,34 @@ describe("fixture runtime scenarios (task 2.2)", () => {
     expect(proposalResponsePatch(proposal)?.kind).toBe("split");
   });
 
+  it("organize-disable proposes a revision-bound disable selection (4.6)", async () => {
+    const output = await run("organize-disable");
+    expect(output.result.terminalReason).toBe("completed");
+    const proposal = output.acceptedResponses.find((response) => response.kind === "proposal");
+    const patch = proposalResponsePatch(proposal);
+    expect(patch?.kind).toBe("disable");
+    expect(output.toolCalls.some((call) => call.tool === "skills.propose")).toBe(true);
+  });
+
+  it("organize-merge proposes a two-source merge and fails closed below two skills (4.6)", async () => {
+    const output = await run("organize-merge");
+    expect(output.result.terminalReason).toBe("completed");
+    const proposal = output.acceptedResponses.find((response) => response.kind === "proposal");
+    const patch = proposalResponsePatch(proposal);
+    expect(patch?.kind).toBe("merge");
+
+    // 单技能快照：场景 fail-closed，不产出提案。
+    const single = await runFixtureStewardScenario({
+      runId: RUN_ID,
+      scenario: "organize-merge",
+      snapshot: { ...snapshot, skills: snapshot.skills.slice(0, 1) },
+      proposals: makeSink(),
+      validate: () => ({ overall: "valid", checks: [{ name: "bind", status: "passed" }] }),
+    });
+    expect(single.result.terminalReason).toBe("failed");
+    expect(single.acceptedResponses.some((response) => response.kind === "proposal")).toBe(false);
+  });
+
   it("malformed and stale proposals are rejected without drafts", async () => {
     for (const scenario of ["malformed", "stale"] as const) {
       const sink = makeSink();
