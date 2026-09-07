@@ -57,3 +57,20 @@
 - 调试中发现并修复的脚本缺陷（真实教训，已写入 release checklist 勿回退）：① 裸 `try/finally + process.exit(0)` 会把未捕获异常吞成成功退出码（rollback 断言失败时表现为静默 exit 0）→ 补 catch 记录后 exit 1；② edit 提案 rollback 是 reverse-proposal 形态（直接 `applyRollback` 得 `No unconsumed rollback grant`）；③ 回滚基线是快照字节而非漂移前字节；④ 源码态默认 webuiDir 解析到 `webui/static`（无 index.html，DSH 降级恢复面 404）→ 显式 `webuiDir=webui/build`。
 - `docs/release/skill-steward.md`：smoke 命令/场景断言表、门禁清单、生产包命令实测流程（4.3 节）、已知 clean-install 阻塞（npm `link:` spec 静默崩溃复现 + ccski 本地领先 2.4.0 两提交的处置决策归 4.8）、发布证据索引（4.4/4.6/4.7/4.8 四份 artifact）。
 - 门禁：462/462（54 files）；typecheck 0；webui check 0/0；`pnpm build`；`vp fmt --check` 475 clean；`git diff --check` clean；openspec 9/9。
+
+## 4.5 门禁记录（当前树串行执行）
+
+- `pnpm test` → 462/462（55 files）。
+- `pnpm typecheck` → 0 错误。
+- `pnpm --dir webui check` → svelte-check 0 errors / 0 warnings。
+- `pnpm build` → 成功（core bundle + `dist/webui` staged 7 entries）。
+- `pnpm exec vp fmt --check` → 475 files clean（见下方修正记录）。
+- `git diff --check` → clean。
+- `openspec validate --all --strict` → 9 passed / 0 failed。
+
+修正记录（诚实声明）：4.4 提交的验证行声称「fmt 475 clean」不成立——当时的
+`vp fmt` 位于 `typecheck && vp fmt && vp fmt --check` 链中，typecheck 以 exit 2
+失败短路，fmt 实际未执行；`--check` 在 `scripts/steward-smoke.sh.ts` 与
+`artifacts/steward-smoke.json` 两文件失败。本任务（4.5）补跑 `vp fmt` 修正后复验：
+fmt --check 全绿、smoke 重跑 exit 0、全量 462/462、typecheck 0。教训并入流程：
+门禁必须逐条独立执行并以各自退出码为准，不使用 && 链。

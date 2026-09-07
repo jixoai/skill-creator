@@ -133,7 +133,9 @@ try {
     dshMounted: true,
     dshEntries: daemon.status.dsh?.entries?.length ?? 0,
   };
-  console.log(`clean start: port=${daemon.port} dsh entries=${daemon.status.dsh?.entries?.length ?? 0}`);
+  console.log(
+    `clean start: port=${daemon.port} dsh entries=${daemon.status.dsh?.entries?.length ?? 0}`,
+  );
 
   const workspace = daemon.domain.workspaces.import(workspaceDir, "smoke-ws");
   await daemon.domain.creator.save({
@@ -310,7 +312,9 @@ try {
     dshBootAbsent: !spaBody.includes("__DSH_BOOT__"),
     daemonAlive: await healthOk(degraded.port),
   };
-  console.log(`DSH unavailable: reason="${degraded.status.dsh?.reason}" SPA=${spa.status} daemon alive`);
+  console.log(
+    `DSH unavailable: reason="${degraded.status.dsh?.reason}" SPA=${spa.status} daemon alive`,
+  );
   await degraded.stop();
   fs.rmSync(degradedSandbox, { recursive: true, force: true });
 
