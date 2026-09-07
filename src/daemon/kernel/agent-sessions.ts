@@ -19,11 +19,11 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "@deepseek-ai/cordis";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
-import { redactDshPayload, type DshSessionStreamFrame } from "../../shared/contracts/dsh-runtime.js";
-import type {
-  AgentSessionStatus,
-  AgentSessionSummary,
-} from "../../shared/contracts/agent.js";
+import {
+  redactDshPayload,
+  type DshSessionStreamFrame,
+} from "../../shared/contracts/dsh-runtime.js";
+import type { AgentSessionStatus, AgentSessionSummary } from "../../shared/contracts/agent.js";
 import { DomainError } from "../domain-error.js";
 import type { DshKernelHandle } from "./dsh-kernel.js";
 import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
@@ -233,11 +233,11 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         kind: "approval-request",
         payload: redactDshPayload({ questions: request.questions ?? [] }),
       });
-      return await new Promise<{ answers: Array<{ id: string; selected: string[]; custom?: string }> }>(
-        (resolve) => {
-          entry.pending.set(requestSeq, { requestSeq, resolve });
-        },
-      );
+      return await new Promise<{
+        answers: Array<{ id: string; selected: string[]; custom?: string }>;
+      }>((resolve) => {
+        entry.pending.set(requestSeq, { requestSeq, resolve });
+      });
     });
   }
 

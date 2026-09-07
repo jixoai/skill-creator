@@ -184,13 +184,9 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     /** List Global and imported Workspaces with fresh Provider counts. */
     list: oc.input(z.object({})).output(z.object({ workspaces: z.array(WorkspaceSchema) })),
     /** Import a canonical directory workspace. */
-    add: oc
-      .input(WorkspaceAddInputSchema)
-      .output(z.object({ workspace: WorkspaceSchema })),
+    add: oc.input(WorkspaceAddInputSchema).output(z.object({ workspace: WorkspaceSchema })),
     /** Remove an imported workspace registration. */
-    remove: oc
-      .input(WorkspaceRemoveInputSchema)
-      .output(z.object({ activeId: WorkspaceIdSchema })),
+    remove: oc.input(WorkspaceRemoveInputSchema).output(z.object({ activeId: WorkspaceIdSchema })),
     /** Select the active workspace. */
     setActive: oc
       .input(WorkspaceSetActiveInputSchema)
@@ -202,9 +198,7 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     /** Load an editable skill document. */
     load: oc.input(SkillsInfoInputSchema).output(SkillDocumentSchema),
     /** Revision-check and delete one skill. */
-    remove: oc
-      .input(CreatorRemoveInputSchema)
-      .output(z.object({ removed: z.literal(true) })),
+    remove: oc.input(CreatorRemoveInputSchema).output(z.object({ removed: z.literal(true) })),
     /** Read revision history for one skill (change 5: change log sub-view). */
     revisions: oc.input(CreatorRevisionsInputSchema).output(CreatorRevisionsResultSchema),
   },
@@ -212,9 +206,7 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     /** Clone, pin, and scan a repository source. */
     scan: oc.input(RepositoryScanInputSchema).output(RemoteRepoScanSchema),
     /** Preview one skill from a pinned repository session. */
-    preview: oc
-      .input(RepositoryPreviewInputSchema)
-      .output(RemoteSkillPreviewSchema),
+    preview: oc.input(RepositoryPreviewInputSchema).output(RemoteSkillPreviewSchema),
     /** Preview or install selected remote skills. */
     install: oc.input(RepositoryInstallInputSchema).output(InstallResultSchema),
     sources: {
@@ -327,9 +319,7 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       /** 取消当前活动（幂等）。 */
       cancel: oc.input(AgentSessionCancelInputSchema).output(AgentSessionCancelResultSchema),
       /** 回答一个待答审批/提问请求（approval-request 帧的应答通道）。 */
-      answer: oc
-        .input(AgentSessionAnswerInputSchema)
-        .output(AgentSessionAnswerResultSchema),
+      answer: oc.input(AgentSessionAnswerInputSchema).output(AgentSessionAnswerResultSchema),
       /** 增量帧读取（afterSeq 游标 + status 快照）。 */
       stream: oc.input(AgentSessionStreamInputSchema).output(AgentSessionStreamResultSchema),
     },

@@ -49,7 +49,10 @@ function stubRegistry() {
   return { registry, executions };
 }
 
-async function connect(face: "in-process" | "stdio", proposals?: ReturnType<typeof createMcpProposalStore>) {
+async function connect(
+  face: "in-process" | "stdio",
+  proposals?: ReturnType<typeof createMcpProposalStore>,
+) {
   const { registry } = stubRegistry();
   const server = createSkillCreatorMcpServer({
     capabilities: registry,

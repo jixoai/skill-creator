@@ -67,14 +67,22 @@ describe("capability-core registry", () => {
   });
 
   it("denies approved-mutation capabilities for the agent principal only", async () => {
-    const agentDenied = await registry.call("skills.apply_proposal", { proposalId: "prop_x" }, "agent");
+    const agentDenied = await registry.call(
+      "skills.apply_proposal",
+      { proposalId: "prop_x" },
+      "agent",
+    );
     expect(agentDenied).toEqual({
       kind: "denied",
       reason: "principal-forbidden",
       requestedOperation: "skills.apply_proposal",
     });
     // human-ui / manager-recovery 到达 handler（apply 未注入 → UNAVAILABLE，而非 denied）。
-    const humanUi = await registry.call("skills.apply_proposal", { proposalId: "prop_x" }, "human-ui");
+    const humanUi = await registry.call(
+      "skills.apply_proposal",
+      { proposalId: "prop_x" },
+      "human-ui",
+    );
     expect(humanUi).toMatchObject({ kind: "failed", code: "UNAVAILABLE" });
   });
 
@@ -127,7 +135,11 @@ describe("steward capability migration is one-to-one (tasks 1.1)", () => {
 
   it("keeps snapshot-scoped lookups typed (inspect unknown skill)", async () => {
     // 合法 SkillId 形状但不在快照内 → NOT_FOUND（非法形状则 INVALID_OPERATION）。
-    const result = await registry.call("skills.inspect", { skillId: "sk_deadbeefdeadbeefdeadbeef" }, "agent");
+    const result = await registry.call(
+      "skills.inspect",
+      { skillId: "sk_deadbeefdeadbeefdeadbeef" },
+      "agent",
+    );
     expect(result).toMatchObject({ kind: "failed", code: "NOT_FOUND" });
   });
 });

@@ -102,25 +102,14 @@ process.env.SKILL_CREATOR_DISABLE_TRAY = "1";
 const { setHomeOverride } = await import("../src/shared/paths.ts");
 setHomeOverride(stateHome);
 
-// —— 组合 webuiDir：真实 SPA build（恢复夹具）+ island 资产（/manager/* 前缀）——
+// —— webuiDir：真实 SPA build（内核形态唯一 WebUI 面）——
 const spaBuild = path.join(root, "webui", "build");
-const islandBuild = path.join(root, "webui", "build-island");
 if (!fs.existsSync(path.join(spaBuild, "index.html"))) {
   fail(`real SPA build missing at ${spaBuild}; run: pnpm --dir webui build`);
-}
-if (!fs.existsSync(path.join(islandBuild, "dsh-island.js"))) {
-  fail(
-    `island bundle missing at ${islandBuild}; run: pnpm --dir webui exec vite build --config vite.island.config.ts`,
-  );
 }
 const webuiDir = path.join(sandbox, "webui");
 fs.mkdirSync(webuiDir, { recursive: true });
 fs.cpSync(spaBuild, webuiDir, { recursive: true });
-for (const asset of fs.readdirSync(islandBuild)) {
-  if (asset.startsWith("dsh-island.")) {
-    fs.copyFileSync(path.join(islandBuild, asset), path.join(webuiDir, asset));
-  }
-}
 
 // —— DSH 依赖版本事实（版本漂移降级的声明基础）——
 const packageVersions: Record<string, string> = {};
@@ -518,17 +507,6 @@ if (degradedHold) {
 
     await degradationCase("unusable-home", "degrade", (home) => {
       fs.writeFileSync(home, "x", "utf8");
-    });
-    await degradationCase("plugin-linkage-failure", "degrade", (home) => {
-      // 插件行链接失败（断链占位使 boot 的确定性链接步骤 EEXIST → typed 降级）。
-      fs.mkdirSync(path.join(home, "profiles", "node_modules", "@skill-creator"), {
-        recursive: true,
-      });
-      fs.symlinkSync(
-        path.join(home, "nonexistent-plugin-target"),
-        path.join(home, "profiles", "node_modules", "@skill-creator", "dsh-client"),
-        "dir",
-      );
     });
     await degradationCase("core-module-heal-repair", "healed", (home) => {
       // profile node_modules 内的核心包断链：heal 闭包镜像按设计修复并正常挂载。

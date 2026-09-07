@@ -118,10 +118,7 @@ export function createCapabilityRegistry(
       } catch (error) {
         // handler 契约是返回闭合结果；异常兜底保证 registry 永不把裸异常漏给
         // 通用调用面（MCP stdio 一旦悬挂会拖死 client）。
-        return failed(
-          "UNAVAILABLE",
-          error instanceof Error ? error.message : String(error),
-        );
+        return failed("UNAVAILABLE", error instanceof Error ? error.message : String(error));
       }
     },
     definitionOf: (name) => byName.get(name) ?? null,

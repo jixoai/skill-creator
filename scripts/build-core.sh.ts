@@ -7,7 +7,6 @@
  * 1. 将 CLI 与 daemon 分别打成 Node ESM bundle；`dependencies` 里的 registry 包保持 external
  *    由安装器提供，其余（ccski 及其 debug 依赖）打入产物。
  * 2. 写入经校验的 package identity，供 CLI/daemon 做版本握手。
- * 3. 把 Manager DSH client plugin 以真实包形态 vendor 进 `dist/dsh-client`，供 daemon 在
  *    安装态（无 workspace 链接）把它接入 DSH profile。
  */
 import { build } from "esbuild";
@@ -60,14 +59,12 @@ async function main(): Promise<void> {
     },
   });
 
-  vendorDshClientPlugin();
-
   fs.writeFileSync(
     path.join(outDir, "package.json"),
     `${JSON.stringify({ name: rootPackage.name, version: rootPackage.version, type: "module" }, null, 2)}\n`,
   );
 
-  console.log("✓ core built → dist/cli.js, dist/daemon.js, dist/dsh-client/");
+  console.log("✓ core built → dist/cli.js, dist/daemon.js");
 }
 
 /**
@@ -79,15 +76,6 @@ function runtimeExternals(rootPackage: RootPackageIdentity): string[] {
   return Object.keys(dependencies)
     .filter((name) => !BUNDLED_PACKAGES.has(name))
     .flatMap((name) => [name, `${name}/*`]);
-}
-
-/** 把 packages/skill-creator-dsh-client 以真实包目录复制进 dist/dsh-client（发布形态）。 */
-function vendorDshClientPlugin(): void {
-  const source = path.join(root, "packages", "skill-creator-dsh-client");
-  const dest = path.join(outDir, "dsh-client");
-  copyDir(path.join(source, "lib"), path.join(dest, "lib"));
-  fs.copyFileSync(path.join(source, "package.json"), path.join(dest, "package.json"));
-  fs.copyFileSync(path.join(root, "LICENSE"), path.join(dest, "LICENSE"));
 }
 
 function copyDir(from: string, to: string): void {

@@ -178,7 +178,8 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         })),
         reject: rpc.agent.proposals.reject.handler(({ input }) => {
           const rejected = domain.mcpProposals.reject(input.proposalId);
-          if (!rejected) throw new DomainError("NOT_FOUND", `proposal not found: ${input.proposalId}`);
+          if (!rejected)
+            throw new DomainError("NOT_FOUND", `proposal not found: ${input.proposalId}`);
           return { proposal: rejected.view };
         }),
       },
@@ -203,11 +204,7 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           return { canceled: true as const };
         }),
         answer: rpc.agent.session.answer.handler(({ input }) => ({
-          answered: domain.agentSessions.answer(
-            input.sessionId,
-            input.requestSeq,
-            input.answers,
-          ),
+          answered: domain.agentSessions.answer(input.sessionId, input.requestSeq, input.answers),
         })),
         stream: rpc.agent.session.stream.handler(({ input }) =>
           domain.agentSessions.stream(input.sessionId, input.afterSeq, input.limit),

@@ -69,7 +69,8 @@
     Proposal — {currentStatus}
   </div>
   <div class="font-mono text-[11px]">{capability}</div>
-  <pre class="mt-1 max-h-32 overflow-auto rounded bg-muted/40 p-1.5 font-mono text-[10px] whitespace-pre-wrap">{inputText}</pre>
+  <pre
+    class="mt-1 max-h-32 overflow-auto rounded bg-muted/40 p-1.5 font-mono text-[10px] whitespace-pre-wrap">{inputText}</pre>
   {#if currentStatus === "pending"}
     <div class="mt-2 flex justify-end gap-1.5">
       <Button size="sm" variant="outline" disabled={deciding} onclick={() => void decide("reject")}>

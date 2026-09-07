@@ -40,9 +40,7 @@
   });
 
   function onMessage(event: MessageEvent): void {
-    const data = event.data as
-      | { source?: string; type?: string; intent?: string }
-      | undefined;
+    const data = event.data as { source?: string; type?: string; intent?: string } | undefined;
     if (
       typeof data === "object" &&
       data !== null &&
@@ -61,7 +59,7 @@
 <div class="my-1 overflow-hidden rounded-lg border border-border" data-card-uri={resourceUri}>
   {#if html !== null}
     <iframe
-      title={title}
+      {title}
       srcdoc={html}
       sandbox=""
       class="h-44 w-full border-0 bg-transparent"

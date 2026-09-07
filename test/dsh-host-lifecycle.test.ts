@@ -16,7 +16,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
-import { mountDshKernelHost, type ProductionDshKernelHost } from "../src/daemon/dsh-host-lifecycle.js";
+import {
+  mountDshKernelHost,
+  type ProductionDshKernelHost,
+} from "../src/daemon/dsh-host-lifecycle.js";
 import { WebServer } from "../src/daemon/web-server.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 import { randomBytes } from "node:crypto";

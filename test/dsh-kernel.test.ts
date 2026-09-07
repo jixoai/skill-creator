@@ -84,9 +84,8 @@ describe("dsh-mcp-client bridge over the kernel (task 4.1b)", () => {
         }),
       });
       const port = await web.start(0);
-      const { createSkillCreatorMcpServer } = await import(
-        "../src/daemon/mcp/skill-creator-mcp.js"
-      );
+      const { createSkillCreatorMcpServer } =
+        await import("../src/daemon/mcp/skill-creator-mcp.js");
       web.mountMcp(() =>
         createSkillCreatorMcpServer({
           capabilities: domain.managerCapabilities,
@@ -103,7 +102,9 @@ describe("dsh-mcp-client bridge over the kernel (task 4.1b)", () => {
         let mcpTools: string[] = [];
         for (let attempt = 0; attempt < 30 && mcpTools.length === 0; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 1000));
-          mcpTools = kernel.globalToolNames().filter((name) => name.startsWith("mcp__skill-creator__"));
+          mcpTools = kernel
+            .globalToolNames()
+            .filter((name) => name.startsWith("mcp__skill-creator__"));
         }
         expect(mcpTools.length).toBeGreaterThan(3);
         expect(mcpTools).toContain("mcp__skill-creator__workspace_list");

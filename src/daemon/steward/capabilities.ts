@@ -14,9 +14,7 @@
  */
 import type { CapabilityCallResult, CapabilityDefinition } from "../capability/core.js";
 import { z } from "zod";
-import {
-  SkillIdSchema,
-} from "../../shared/contracts/skills.js";
+import { SkillIdSchema } from "../../shared/contracts/skills.js";
 import {
   SkillProposalSchema,
   StewardProposalIdSchema,
@@ -188,7 +186,8 @@ export function createStewardCapabilities(deps: StewardCapabilityDeps): Capabili
       input: proposalIdInputSchema,
       handler: (input) => {
         const proposalId = parseProposalIdInput(input);
-        if (!proposalId) return failed("INVALID_OPERATION", "validate input must be { proposalId }.");
+        if (!proposalId)
+          return failed("INVALID_OPERATION", "validate input must be { proposalId }.");
         if (!proposals.get(proposalId)) {
           return failed("NOT_FOUND", `Proposal not found: ${proposalId}`);
         }

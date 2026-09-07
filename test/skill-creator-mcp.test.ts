@@ -19,10 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
-import {
-  createSkillCreatorMcpServer,
-  mcpToolName,
-} from "../src/daemon/mcp/skill-creator-mcp.js";
+import { createSkillCreatorMcpServer, mcpToolName } from "../src/daemon/mcp/skill-creator-mcp.js";
 import { WebServer } from "../src/daemon/web-server.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 import { randomBytes } from "node:crypto";
@@ -103,7 +100,11 @@ describe("skill-creator mcp server (task 4.1)", () => {
     try {
       const result = await client.callTool({
         name: "skills_info",
-        arguments: { workspaceId: "ws_missing", providerId: "cc", skillId: "sk_deadbeefdeadbeefdeadbeef" },
+        arguments: {
+          workspaceId: "ws_missing",
+          providerId: "cc",
+          skillId: "sk_deadbeefdeadbeefdeadbeef",
+        },
       });
       expect(result.isError).toBe(true);
     } finally {

@@ -31,15 +31,9 @@ import {
   type SkillStewardPipelineService,
 } from "./steward/pipeline-service.js";
 import { createDshSettingsService, type DshSettingsService } from "./steward/dsh-settings.js";
-import {
-  createAgentSessionsService,
-  type AgentSessionsService,
-} from "./kernel/agent-sessions.js";
+import { createAgentSessionsService, type AgentSessionsService } from "./kernel/agent-sessions.js";
 import type { DshKernelHandle } from "./kernel/dsh-kernel.js";
-import {
-  createCapabilityRegistry,
-  type CapabilityRegistry,
-} from "./capability/core.js";
+import { createCapabilityRegistry, type CapabilityRegistry } from "./capability/core.js";
 import { createDomainCapabilities } from "./capability/domain-capabilities.js";
 import { UiCardRegistry } from "./mcp/cards.js";
 import { createMcpProposalStore, type McpProposalStore } from "./mcp/proposals.js";

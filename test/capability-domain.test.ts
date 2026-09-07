@@ -170,7 +170,12 @@ describe("manager domain capability registration (tasks 1.2)", () => {
   it("still denies approved-mutation capabilities for the agent principal", async () => {
     const result = await registry.call(
       "skills.toggle",
-      { workspaceId: "ws_x", providerId: "cc", skillIds: ["sk_deadbeefdeadbeefdeadbeef"], mode: "disable" },
+      {
+        workspaceId: "ws_x",
+        providerId: "cc",
+        skillIds: ["sk_deadbeefdeadbeefdeadbeef"],
+        mode: "disable",
+      },
       "agent",
     );
     expect(result).toEqual({

@@ -106,10 +106,7 @@ export class UiCardRegistry {
 }
 
 /** capability 结果 → 卡片投影（未知形状返回 null；字段文本均为不可信输入）。 */
-export function uiCardForCapability(
-  capabilityName: string,
-  result: unknown,
-): UiCardData | null {
+export function uiCardForCapability(capabilityName: string, result: unknown): UiCardData | null {
   if (typeof result !== "object" || result === null) return null;
   const payload = result as { kind?: string; value?: unknown };
   if (payload.kind !== "ok") return null;

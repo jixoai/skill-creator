@@ -37,9 +37,9 @@
 
 ## 5. 退役 hosted 形态
 
-- [ ] 5.1 daemon：移除 DSH web 鉴权代理、入口握手桥、`/manager/*` 通道；web-server 回归 SPA 单一服务面。
-- [ ] 5.2 依赖与打包：dsh-web-app/web-frontend/host-webserver/host-frontend-static/client-* 移出 dependencies；`dist/dsh-client` vendor 与消费者链接下线；heal/闭包镜像目标随缩。
-- [ ] 5.3 webui：`dsh-island/` 与 `@skill-creator/dsh-client` plugin 包、island 构建通道退役；shell 恢复直连布局。
+- [x] 5.1 daemon：移除 DSH web 鉴权代理、入口握手桥、`/manager/*` 通道；web-server 回归 SPA 单一服务面。
+- [x] 5.2 依赖与打包：dsh-web-app/web-frontend/host-webserver/host-frontend-static/client-* 移出 dependencies；`dist/dsh-client` vendor 与消费者链接下线；heal/闭包镜像目标随缩。
+- [x] 5.3 webui：`dsh-island/` 与 `@skill-creator/dsh-client` plugin 包、island 构建通道退役；shell 恢复直连布局。
   - Acceptance（5.x）：产物无 web-composition 残留（grep dist/依赖清单）；全量门禁绿。
 
 ## 6. 产品验收与发布证据

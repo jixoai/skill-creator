@@ -107,7 +107,9 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
       authority: "approved-mutation",
       input: WorkspaceRemoveInputSchema,
       handler: (input) =>
-        invoke(() => ({ activeId: domain.workspaces.forget(WorkspaceRemoveInputSchema.parse(input).id) })),
+        invoke(() => ({
+          activeId: domain.workspaces.forget(WorkspaceRemoveInputSchema.parse(input).id),
+        })),
     },
     {
       name: "workspace.setActive",
@@ -221,7 +223,8 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
       description: "Read revision history entries for one skill.",
       authority: "readonly",
       input: CreatorRevisionsInputSchema,
-      handler: (input) => invoke(() => domain.creator.revisions(CreatorRevisionsInputSchema.parse(input))),
+      handler: (input) =>
+        invoke(() => domain.creator.revisions(CreatorRevisionsInputSchema.parse(input))),
     },
     {
       name: "repository.scan",
@@ -250,7 +253,8 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
       description: "Preview or install selected remote skills into workspace providers.",
       authority: "approved-mutation",
       input: RepositoryInstallInputSchema,
-      handler: (input) => invoke(() => domain.repository.install(RepositoryInstallInputSchema.parse(input))),
+      handler: (input) =>
+        invoke(() => domain.repository.install(RepositoryInstallInputSchema.parse(input))),
     },
     {
       name: "repository.sources.list",
@@ -265,7 +269,9 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
       authority: "approved-mutation",
       input: AddUserSourceInputSchema,
       handler: (input) =>
-        invoke(() => ({ source: domain.sourceRegistry.add(AddUserSourceInputSchema.parse(input)) })),
+        invoke(() => ({
+          source: domain.sourceRegistry.add(AddUserSourceInputSchema.parse(input)),
+        })),
     },
     {
       name: "repository.sources.remove",

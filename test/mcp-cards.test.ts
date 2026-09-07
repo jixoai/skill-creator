@@ -37,7 +37,7 @@ describe("card templating (task 4.2)", () => {
         { label: "Description", value: hostile },
         { label: "Dir", value: `"><svg onload=alert(3)>` },
       ],
-      nav: { label: "Go", path: "/workspaces\" onmouseover=\"alert(4)" },
+      nav: { label: "Go", path: '/workspaces" onmouseover="alert(4)' },
     });
     expect(html).not.toContain("<img");
     expect(html).not.toContain("<script>alert");
@@ -134,7 +134,11 @@ describe("cards over the mcp protocol (task 4.2)", () => {
     try {
       const result = await client.callTool({
         name: "skills_info",
-        arguments: { workspaceId: "ws_x", providerId: "cc", skillId: "sk_deadbeefdeadbeefdeadbeef" },
+        arguments: {
+          workspaceId: "ws_x",
+          providerId: "cc",
+          skillId: "sk_deadbeefdeadbeefdeadbeef",
+        },
       });
       // SEP-1865 标准位置 + text 内嵌引用（dsh-mcp-client 透传面）。
       const resourceUri = (result as { _meta?: { ui?: { resourceUri?: string } } })._meta?.ui

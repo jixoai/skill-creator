@@ -19,19 +19,15 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AGENT_ALLOWED_TOOLS, type SkillToolCall } from "../src/shared/contracts/skill-steward.js";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
-import {
-  bootOfficialWebProfile,
-  type OfficialWebProfileOptions,
-} from "../src/daemon/steward/dsh-official-profile.js";
+import { bootDshKernel, type DshKernelHandle } from "../src/daemon/kernel/dsh-kernel.js";
 import { createDshSessionBinder } from "../src/daemon/steward/dsh-session-binder.js";
 import { createSkillStewardPipelineService } from "../src/daemon/steward/pipeline-service.js";
-import type { MinimalDshWebHost } from "../src/daemon/steward/dsh-web-host.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 import { ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
 import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 
 let sandbox = "";
-let host: MinimalDshWebHost | undefined;
+let host: DshKernelHandle | undefined;
 let domain: DaemonDomain | undefined;
 const providerId = ProviderIdSchema.parse("openclaw");
 
@@ -56,7 +52,7 @@ interface SessionEventView {
   data?: { callId?: string };
 }
 
-function hostSessionLog(current: MinimalDshWebHost, sessionId: string): SessionEventView[] {
+function hostSessionLog(current: DshKernelHandle, sessionId: string): SessionEventView[] {
   const ctx = current.ctx as unknown as Record<string, unknown>;
   const sessions = ctx.sessions as {
     get(id: string): { log: unknown[] } | undefined;
@@ -69,8 +65,7 @@ describe("manager tools into official transcript (task 2.2)", () => {
     "correlates tool round call ids between the DSH transcript and the Manager run audit",
     { timeout: 240_000 },
     async () => {
-      const options: OfficialWebProfileOptions = { home: path.join(sandbox, "dsh-home") };
-      host = await bootOfficialWebProfile(options);
+      host = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
       const binder = createDshSessionBinder({ host: () => host });
 
       process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");
@@ -152,8 +147,7 @@ describe("manager tools into official transcript (task 2.2)", () => {
     "re-projecting the same tool calls is idempotent (no second event pair)",
     { timeout: 240_000 },
     async () => {
-      const options: OfficialWebProfileOptions = { home: path.join(sandbox, "dsh-home") };
-      host = await bootOfficialWebProfile(options);
+      host = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
       const binder = createDshSessionBinder({ host: () => host });
       const workspaceDir = path.join(sandbox, "ws");
       fs.mkdirSync(workspaceDir, { recursive: true });

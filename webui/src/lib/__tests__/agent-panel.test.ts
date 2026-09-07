@@ -84,10 +84,7 @@ describe("agent panel store (task 3.x)", () => {
           stream: vi
             .fn()
             .mockResolvedValueOnce({
-              frames: [
-                frame(0, "turn-start"),
-                frame(1, "assistant-text", { text: "hello" }),
-              ],
+              frames: [frame(0, "turn-start"), frame(1, "assistant-text", { text: "hello" })],
               status: "idle",
             })
             .mockResolvedValue({ frames: [], status: "idle" }),
@@ -105,7 +102,10 @@ describe("agent panel store (task 3.x)", () => {
 
     // prompt 乐观追加 + accepted。
     await sendAgentPrompt("second");
-    expect(rpc.agent.session.prompt).toHaveBeenCalledWith({ sessionId: "agent-s1", text: "second" });
+    expect(rpc.agent.session.prompt).toHaveBeenCalledWith({
+      sessionId: "agent-s1",
+      text: "second",
+    });
     expect(agentSession.items.some((item) => item.kind === "user" && item.text === "second")).toBe(
       true,
     );
@@ -141,7 +141,9 @@ describe("agent panel store (task 3.x)", () => {
     expect(agentSession.items.find((item) => item.kind === "approval")).toMatchObject({
       resolved: true,
     });
-    expect((connection.rpc as { agent: { session: { answer: unknown[] } } }).agent.session.answer).toHaveBeenCalledWith({
+    expect(
+      (connection.rpc as { agent: { session: { answer: unknown[] } } }).agent.session.answer,
+    ).toHaveBeenCalledWith({
       sessionId: "agent-s1",
       requestSeq: 0,
       answers: [{ id: "q1", selected: ["Yes"] }],
@@ -166,9 +168,9 @@ describe("agent panel store (task 3.x)", () => {
     connection.rpc = {
       agent: {
         session: {
-          create: vi.fn().mockImplementation(
-            () => new Promise((resolve) => (resolveCreate = resolve)),
-          ),
+          create: vi
+            .fn()
+            .mockImplementation(() => new Promise((resolve) => (resolveCreate = resolve))),
         },
       },
     };

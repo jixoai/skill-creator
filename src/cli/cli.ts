@@ -480,13 +480,9 @@ async function main(): Promise<number> {
  * mutation 仅经形态 A 的 daemon 审批链。
  */
 async function runMcpStdio(): Promise<void> {
-  const { StdioServerTransport } = await import(
-    "@modelcontextprotocol/sdk/server/stdio.js"
-  );
+  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createDaemonDomain } = await import("../daemon/domain.js");
-  const { createSkillCreatorMcpServer } = await import(
-    "../daemon/mcp/skill-creator-mcp.js"
-  );
+  const { createSkillCreatorMcpServer } = await import("../daemon/mcp/skill-creator-mcp.js");
   const domain = createDaemonDomain();
   const server = createSkillCreatorMcpServer({
     capabilities: domain.managerCapabilities,

@@ -217,9 +217,7 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
       entries: dshHost.record!.entries,
       activationOrder: dshHost.record!.activationOrder,
     };
-    log(
-      `dsh kernel mounted: ${dshHost.record!.entries.length} entries activated (headless)`,
-    );
+    log(`dsh kernel mounted: ${dshHost.record!.entries.length} entries activated (headless)`);
   } else {
     status.dsh = { mounted: false, reason: dshHost.reason };
     log(`dsh kernel unavailable (manager face keeps serving): ${dshHost.reason}`);

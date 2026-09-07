@@ -45,8 +45,7 @@ interface Evidence {
     startExit: number;
     dshMounted: boolean;
     dshEntries: number;
-    dshHasManagerPlugin: boolean;
-    dshActivationHasPlugin: boolean;
+    dshHasAgentPresetsRow: boolean;
     tray: string;
     http: {
       healthOk: boolean;
@@ -116,8 +115,7 @@ const evidence: Evidence = {
     startExit: -1,
     dshMounted: false,
     dshEntries: 0,
-    dshHasManagerPlugin: false,
-    dshActivationHasPlugin: false,
+    dshHasAgentPresetsRow: false,
     tray: "",
     http: {
       healthOk: false,
@@ -181,13 +179,7 @@ try {
     { cwd: installDir, env: process.env },
   );
   evidence.install.dshBaseResolvable = resolveProbe.stdout.trim() === "ok";
-  for (const asset of [
-    "dist/cli.js",
-    "dist/webui/index.html",
-    "dist/webui/dsh-island.js",
-    "dist/dsh-client/lib/client.js",
-    "dist/dsh-client/package.json",
-  ]) {
+  for (const asset of ["dist/cli.js", "dist/webui/index.html"]) {
     evidence.install.bundledAssets[asset] = fs.existsSync(path.join(installedRoot, asset));
   }
   if (!evidence.install.ccskiAbsentFromInstall) fail("ccski leaked into the install tree");
@@ -273,16 +265,13 @@ try {
   const dsh = status.dsh;
   evidence.lifecycle.dshMounted = dsh?.mounted === true;
   evidence.lifecycle.dshEntries = dsh?.entries?.length ?? 0;
-  evidence.lifecycle.dshHasManagerPlugin = (dsh?.entries ?? []).includes(
-    "@skill-creator/dsh-client",
-  );
-  evidence.lifecycle.dshActivationHasPlugin = (dsh?.activationOrder ?? []).includes(
-    "@skill-creator/dsh-client",
+  evidence.lifecycle.dshHasAgentPresetsRow = (dsh?.entries ?? []).includes(
+    "@deepseek-ai/dsh-agent-presets",
   );
   evidence.lifecycle.tray = status.tray;
-  if (!evidence.lifecycle.dshMounted) fail("DSH host never reached mounted in clean install");
-  if (!evidence.lifecycle.dshHasManagerPlugin) {
-    fail("vendored @skill-creator/dsh-client missing from DSH entries");
+  if (!evidence.lifecycle.dshMounted) fail("DSH kernel never reached mounted in clean install");
+  if (!evidence.lifecycle.dshHasAgentPresetsRow) {
+    fail("kernel entries missing the agent-presets roster row");
   }
 
   // —— 6. HTTP 探针：health / DSH 代理分区 / island 资产 / DSH 端口活性 ——
@@ -296,23 +285,12 @@ try {
   const spaHtml = fs.readFileSync(path.join(installedRoot, "dist", "webui", "index.html"), "utf8");
   // DSH 挂载时 / 由代理转发官方 host（登录/握手响应）；SPA 恢复面只允许出现在降级态。
   evidence.lifecycle.http.spaFallbackNotServedAtRoot = rootBody !== spaHtml;
-  const island = await fetch(`${base}/manager/dsh-island.js`);
-  evidence.lifecycle.http.islandAssetOk =
-    island.status === 200 && (island.headers.get("content-type") ?? "").includes("javascript");
-  if (dsh?.port) {
-    try {
-      const dshProbe = await fetch(`http://127.0.0.1:${dsh.port}/`, { redirect: "manual" });
-      evidence.lifecycle.http.dshPortAlive = dshProbe.status > 0;
-    } catch {
-      evidence.lifecycle.http.dshPortAlive = false;
-    }
-  }
   if (!evidence.lifecycle.http.healthOk) fail("/api/health not ok in clean install");
-  if (!evidence.lifecycle.http.spaFallbackNotServedAtRoot) {
-    fail("root served the SPA recovery page while DSH host is mounted (proxy not engaged)");
+  // 内核形态：SPA 是唯一根面（无同源代理分区）。
+  if (evidence.lifecycle.http.spaFallbackNotServedAtRoot) {
+    fail("root did not serve the SPA in kernel form");
   }
-  if (!evidence.lifecycle.http.islandAssetOk)
-    fail("/manager/dsh-island.js not served from install");
+  void dsh;
 
   // —— 7. stop → endpoint 释放 → restart → final stop ——
   const stop = run(nodeBin, [cli, "stop"], { cwd: installDir, env: childEnv });
@@ -351,11 +329,9 @@ try {
     `${JSON.stringify(evidence, null, 2)}\n`,
   );
   console.log(
-    `[clean-install] PASS: install=${evidence.install.exitCode} dsh entries=${evidence.lifecycle.dshEntries} plugin=${
-      evidence.lifecycle.dshHasManagerPlugin
-    } health=${evidence.lifecycle.http.healthOk} island=${evidence.lifecycle.http.islandAssetOk} restart=${
-      evidence.lifecycle.restartDshMounted
-    }`,
+    `[clean-install] PASS: install=${evidence.install.exitCode} kernel entries=${evidence.lifecycle.dshEntries} agentPresetsRow=${
+      evidence.lifecycle.dshHasAgentPresetsRow
+    } health=${evidence.lifecycle.http.healthOk} restart=${evidence.lifecycle.restartDshMounted}`,
   );
   console.log(`[clean-install] sandbox retained at ${sandbox}`);
   process.exit(0);

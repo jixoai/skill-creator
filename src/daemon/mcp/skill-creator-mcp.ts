@@ -120,11 +120,7 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
           ? input.shape
           : null;
       const proposeName = `${mcpToolName(descriptor.name)}_propose`;
-      const proposeResult = (view: {
-        proposalId: string;
-        capability: string;
-        status: string;
-      }) => ({
+      const proposeResult = (view: { proposalId: string; capability: string; status: string }) => ({
         content: [
           {
             type: "text" as const,
@@ -156,9 +152,10 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
     }
     const definition = deps.capabilities.definitionOf(descriptor.name);
     const input = definition?.input as z.ZodObject | undefined;
-    const shape = input && typeof (input as unknown as { shape?: object }).shape === "object"
-      ? input.shape
-      : null;
+    const shape =
+      input && typeof (input as unknown as { shape?: object }).shape === "object"
+        ? input.shape
+        : null;
     const toolName = mcpToolName(descriptor.name);
     if (shape) {
       server.tool(toolName, descriptor.description, shape, async (args) =>
@@ -205,8 +202,7 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
         document?: { content?: string };
         content?: string;
       };
-      const content =
-        info.metadata?.document?.content ?? info.document?.content ?? info.content;
+      const content = info.metadata?.document?.content ?? info.document?.content ?? info.content;
       return {
         contents: [
           {

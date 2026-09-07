@@ -18,22 +18,17 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import {
-  bootOfficialWebProfile,
-  type OfficialWebProfileOptions,
-} from "../src/daemon/steward/dsh-official-profile.js";
-import {
   createDshSessionBinder,
   type DshSessionBinder,
 } from "../src/daemon/steward/dsh-session-binder.js";
 import { bootDshKernel, type DshKernelHandle } from "../src/daemon/kernel/dsh-kernel.js";
 import { createSkillStewardPipelineService } from "../src/daemon/steward/pipeline-service.js";
-import type { MinimalDshWebHost } from "../src/daemon/steward/dsh-web-host.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 import { ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
 import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 
 let sandbox = "";
-let host: MinimalDshWebHost | undefined;
+let host: DshKernelHandle | undefined;
 let kernel: DshKernelHandle | undefined;
 let domain: DaemonDomain | undefined;
 const providerId = ProviderIdSchema.parse("openclaw");
@@ -59,7 +54,7 @@ afterEach(async () => {
 });
 
 /** 测试内读取 host ctx sessions 的最小收窄（与实现同源的结构面）。 */
-function hostSessions(current: MinimalDshWebHost): {
+function hostSessions(current: DshKernelHandle): {
   get(id: string): { log: Array<{ type: string }> } | undefined;
 } {
   const ctx = current.ctx as unknown as Record<string, unknown>;
@@ -84,8 +79,7 @@ describe("dsh session binder (task 2.1 step 3)", () => {
     "binds a run to a workspace-owned session with official event grammar",
     { timeout: 240_000 },
     async () => {
-      const options: OfficialWebProfileOptions = { home: path.join(sandbox, "dsh-home") };
-      host = await bootOfficialWebProfile(options);
+      host = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
       const binder = createDshSessionBinder({ host: () => host });
 
       const workspaceDir = path.join(sandbox, "ws");
@@ -103,7 +97,7 @@ describe("dsh session binder (task 2.1 step 3)", () => {
 
       // workspace 持久记录收录该 session（sidebar 列表事实源；registry 写入是
       // 队列化持久，轮询等待落盘）。
-      const storagePath = path.join(options.home, "storages", "workspace.json");
+      const storagePath = path.join(sandbox, "dsh-home", "storages", "workspace.json");
       let workspaceStorage:
         | {
             global: { workspaceIds: string[] };
@@ -155,8 +149,7 @@ describe("dsh session binder (task 2.1 step 3)", () => {
     "pipeline startRun carries the binding into result and persisted run record",
     { timeout: 240_000 },
     async () => {
-      const options: OfficialWebProfileOptions = { home: path.join(sandbox, "dsh-home") };
-      host = await bootOfficialWebProfile(options);
+      host = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
       const binder: DshSessionBinder = createDshSessionBinder({ host: () => host });
 
       process.env.SKILL_CREATOR_HOME = path.join(sandbox, "home");

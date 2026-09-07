@@ -88,7 +88,9 @@
 </svelte:head>
 
 <TooltipProvider>
-  <div class="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+  <div
+    class="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground"
+  >
     <!-- 顶部栏（原生拖拽区域 + 工具栏） -->
     <WindowDragRegion variant="main">
       {#snippet left()}

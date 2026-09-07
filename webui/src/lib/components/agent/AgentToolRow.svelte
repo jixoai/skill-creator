@@ -75,9 +75,7 @@
       if (typeof candidate !== "string") continue;
       try {
         const parsed = JSON.parse(candidate) as { uiCard?: unknown };
-        const card = parsed.uiCard as
-          | { resourceUri?: unknown; title?: unknown }
-          | undefined;
+        const card = parsed.uiCard as { resourceUri?: unknown; title?: unknown } | undefined;
         if (typeof card?.resourceUri === "string") {
           return {
             resourceUri: card.resourceUri,
@@ -119,6 +117,7 @@
     </span>
   </button>
   {#if expanded && payloadText}
-    <pre class="max-h-48 overflow-auto border-t border-border px-2 py-1 font-mono text-[10px] whitespace-pre-wrap">{payloadText}</pre>
+    <pre
+      class="max-h-48 overflow-auto border-t border-border px-2 py-1 font-mono text-[10px] whitespace-pre-wrap">{payloadText}</pre>
   {/if}
 </div>

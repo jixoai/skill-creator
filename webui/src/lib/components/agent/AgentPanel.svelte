@@ -140,7 +140,9 @@
     {:else}
       {#each agentSession.items as item (item.seq)}
         {#if item.kind === "turn"}
-          <div class="flex items-center gap-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <div
+            class="flex items-center gap-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground"
+          >
             <span class="h-px flex-1 bg-border"></span>
             {item.label}
             <span class="h-px flex-1 bg-border"></span>
@@ -148,11 +150,15 @@
         {:else if item.kind === "status"}
           <div class="px-1 text-[11px] text-muted-foreground">{item.text}</div>
         {:else if item.kind === "user"}
-          <div class="ml-auto max-w-[85%] rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs whitespace-pre-wrap">
+          <div
+            class="ml-auto max-w-[85%] rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs whitespace-pre-wrap"
+          >
             {item.text}
           </div>
         {:else if item.kind === "assistant"}
-          <div class="max-w-[92%] rounded-lg border border-border px-2.5 py-1.5 text-xs whitespace-pre-wrap">
+          <div
+            class="max-w-[92%] rounded-lg border border-border px-2.5 py-1.5 text-xs whitespace-pre-wrap"
+          >
             {item.text}
           </div>
         {:else if item.kind === "tool"}
@@ -168,7 +174,10 @@
   </div>
 
   {#if agentSession.error}
-    <div class="border-t border-destructive/30 bg-destructive/8 px-3 py-1.5 text-xs text-destructive" role="alert">
+    <div
+      class="border-t border-destructive/30 bg-destructive/8 px-3 py-1.5 text-xs text-destructive"
+      role="alert"
+    >
       {agentSession.error}
     </div>
   {/if}
@@ -189,7 +198,9 @@
           class="h-7 w-7"
           aria-label="Send message"
           title="Send (Enter)"
-          disabled={!agentSession.sessionId || composerText.trim().length === 0 || agentSession.sending}
+          disabled={!agentSession.sessionId ||
+            composerText.trim().length === 0 ||
+            agentSession.sending}
           onclick={submit}
         >
           <IconSend class="h-3.5 w-3.5" />

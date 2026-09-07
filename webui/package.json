@@ -17,13 +17,6 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/cordis-plugin-loader": "1.0.3",
-    "@deepseek-ai/dsh-client-connection": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-store": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-chat": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-session": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-web": "0.1.2-rc.1",
     "@fontsource-variable/inter": "^5.2.8",
     "@lucide/svelte": "^1.24.0",
     "@orpc/client": "1.14.6",
