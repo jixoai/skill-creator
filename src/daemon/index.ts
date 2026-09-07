@@ -242,6 +242,7 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
   web.mountMcp(() =>
     createSkillCreatorMcpServer({
       capabilities: domain.managerCapabilities,
+      cards: domain.uiCards,
       face: "in-process",
     }),
   );

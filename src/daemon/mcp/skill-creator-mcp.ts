@@ -18,6 +18,7 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { z } from "zod";
 import type { CapabilityRegistry } from "../capability/core.js";
+import { uiCardForCapability, type UiCardRegistry } from "./cards.js";
 
 /** 双形态的 authority 面选择。 */
 export type McpFace = "in-process" | "stdio";
@@ -25,6 +26,8 @@ export type McpFace = "in-process" | "stdio";
 export interface SkillCreatorMcpDeps {
   capabilities: CapabilityRegistry;
   face: McpFace;
+  /** ui:// 卡片注册表（daemon 级；ok 结果按能力面附卡）。 */
+  cards: UiCardRegistry;
 }
 
 /** MCP 工具名：capability 名 `.` → `_`（MCP 名字字符集 [a-zA-Z0-9_-]）。 */
@@ -50,6 +53,35 @@ function toToolResult(result: unknown): {
     return { content: [{ type: "text", text: serialized }], isError: true };
   }
   return { content: [{ type: "text", text: serialized }] };
+}
+
+/**
+ * ok 结果附卡（task 4.2）：匹配能力面生成卡片 → 注册 ui:// 资源 → 结果值内嵌
+ * `uiCard.resourceUri`（text JSON 随 dsh-mcp-client 必然透传）+ SEP-1865 的
+ * `_meta.ui.resourceUri` 标准位置（标准 MCP Apps host 消费）。
+ */
+function withCard(
+  capabilityName: string,
+  result: unknown,
+  cards: UiCardRegistry,
+): {
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+  _meta?: { ui: { resourceUri: string } };
+} {
+  const base = toToolResult(result);
+  const card = uiCardForCapability(capabilityName, result);
+  if (!card) return base;
+  const resourceUri = cards.register(card);
+  // 值内嵌引用（面板流经 tool-result text 解析）。
+  const enriched = safeJson({
+    ...(typeof result === "object" && result !== null ? result : {}),
+    uiCard: { resourceUri, type: card.type, title: card.title },
+  });
+  return {
+    content: [{ type: "text", text: enriched }],
+    _meta: { ui: { resourceUri } },
+  };
 }
 
 function safeJson(value: unknown): string {
@@ -82,11 +114,19 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
     const toolName = mcpToolName(descriptor.name);
     if (shape) {
       server.tool(toolName, descriptor.description, shape, async (args) =>
-        toToolResult(await deps.capabilities.call(descriptor.name, args, MCP_PRINCIPAL)),
+        withCard(
+          descriptor.name,
+          await deps.capabilities.call(descriptor.name, args, MCP_PRINCIPAL),
+          deps.cards,
+        ),
       );
     } else {
       server.tool(toolName, descriptor.description, async () =>
-        toToolResult(await deps.capabilities.call(descriptor.name, undefined, MCP_PRINCIPAL)),
+        withCard(
+          descriptor.name,
+          await deps.capabilities.call(descriptor.name, undefined, MCP_PRINCIPAL),
+          deps.cards,
+        ),
       );
     }
   }

@@ -164,6 +164,11 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       ),
     },
     agent: {
+      card: {
+        get: rpc.agent.card.get.handler(({ input }) => ({
+          html: domain.uiCards.get(input.uri),
+        })),
+      },
       sessions: {
         list: rpc.agent.sessions.list.handler(async () => ({
           sessions: domain.agentSessions.list(),

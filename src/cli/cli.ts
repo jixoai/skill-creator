@@ -490,6 +490,7 @@ async function runMcpStdio(): Promise<void> {
   const domain = createDaemonDomain();
   const server = createSkillCreatorMcpServer({
     capabilities: domain.managerCapabilities,
+    cards: domain.uiCards,
     face: "stdio",
   });
   const transport = new StdioServerTransport();

@@ -27,6 +27,7 @@ import type {
 import { DomainError } from "../domain-error.js";
 import type { DshKernelHandle } from "./dsh-kernel.js";
 import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
+import { registerProductPromptSections } from "./product-prompt.js";
 
 /** 内核句柄访问器（daemon boot 后注入；未挂载返回 null）。 */
 export type KernelAccessor = () => DshKernelHandle | null;
@@ -327,6 +328,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         },
         setup: (agentCtx) => {
           applyProductToolSurface(agentCtx);
+          registerProductPromptSections(
+            agentCtx as unknown as Parameters<typeof registerProductPromptSections>[0],
+          );
         },
       });
       const entry: LivePanelSession = {

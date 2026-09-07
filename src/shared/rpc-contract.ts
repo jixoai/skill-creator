@@ -25,6 +25,8 @@ import {
   AgentSessionCancelResultSchema,
   AgentSessionAnswerInputSchema,
   AgentSessionAnswerResultSchema,
+  AgentCardGetInputSchema,
+  AgentCardGetResultSchema,
   AgentSessionPromptInputSchema,
   AgentSessionPromptResultSchema,
   AgentSessionStreamInputSchema,
@@ -288,6 +290,10 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     applyRollback: oc.input(SkillStewardRollbackInputSchema).output(SkillStewardApplyResultSchema),
   },
   agent: {
+    /** ui:// 卡片资源代理（task 4.2；面板按 tool-result 的 resourceUri 拉取）。 */
+    card: {
+      get: oc.input(AgentCardGetInputSchema).output(AgentCardGetResultSchema),
+    },
     /** 面板会话：内核 agent 会话的生命周期投影（task 2.2；旧 dsh.* 收敛并入）。 */
     sessions: {
       /** 列出内核 live 会话（含非面板会话的 disposed 投影）。 */

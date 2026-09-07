@@ -134,6 +134,18 @@ export type AgentSessionAnswerInput = z.infer<typeof AgentSessionAnswerInputSche
 /** 回答结果。 */
 export const AgentSessionAnswerResultSchema = z.object({ answered: z.boolean() });
 
+/** ui:// 卡片资源代理（task 4.2：面板不是 MCP client，经 daemon 读取）。 */
+export const AgentCardGetInputSchema = z.object({
+  uri: z.string().regex(/^ui:\/\/card\/[a-z-]+\/[a-z0-9-]+$/),
+});
+/** 卡片获取输入。 */
+export type AgentCardGetInput = z.infer<typeof AgentCardGetInputSchema>;
+
+/** 卡片获取结果（html 为渲染就绪的沙箱文档；未知/淘汰 uri 返回 null）。 */
+export const AgentCardGetResultSchema = z.object({
+  html: z.string().nullable(),
+});
+
 export {
   DshStewardSettingsViewSchema as AgentSettingsViewSchema,
   DshSettingsUpdateSchema as AgentSettingsUpdateSchema,

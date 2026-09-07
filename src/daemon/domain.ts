@@ -41,6 +41,7 @@ import {
   type CapabilityRegistry,
 } from "./capability/core.js";
 import { createDomainCapabilities } from "./capability/domain-capabilities.js";
+import { UiCardRegistry } from "./mcp/cards.js";
 import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
 import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
 import type { HarnessAdapter } from "./steward/harness-adapter.js";
@@ -88,6 +89,8 @@ export interface DaemonDomain {
   setKernelHost: (handle: DshKernelHandle) => void;
   /** Manager 能力面（MCP server 与提示词投影消费；task 4.1）。 */
   managerCapabilities: CapabilityRegistry;
+  /** ui:// 卡片资源注册表（task 4.2；agent.card.get 代理读取）。 */
+  uiCards: UiCardRegistry;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
@@ -130,6 +133,7 @@ export function createDaemonDomain(
       kernelHostRef.handle = handle;
       agentSessions.attach(handle);
     },
+    uiCards: new UiCardRegistry(),
   } as DaemonDomain;
   // manager 能力面：结构化子集依赖（不含自身），构造后冻结为普通属性。
   const managerCapabilities = createCapabilityRegistry(createDomainCapabilities(domain));

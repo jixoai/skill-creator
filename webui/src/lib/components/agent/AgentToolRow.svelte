@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import IconChevronRight from "@lucide/svelte/icons/chevron-right";
+  import AgentCard from "./AgentCard.svelte";
 
   let {
     toolName,
@@ -28,9 +29,49 @@
       return String(payload);
     }
   });
+
+  /**
+   * tool-result 的 uiCard 引用（task 4.2）：dsh-mcp-client 的结果投影可能包一层
+   * content blocks；两处都尝试解析（payload 直书或 content[].text 内嵌 JSON）。
+   */
+  const uiCard = $derived.by(() => {
+    if (phase !== "result") return null;
+    const candidates: unknown[] = [payload];
+    if (typeof payload === "object" && payload !== null) {
+      const content = (payload as { content?: unknown }).content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (typeof (block as { text?: unknown })?.text === "string") {
+            candidates.push((block as { text: string }).text);
+          }
+        }
+      }
+    }
+    for (const candidate of candidates) {
+      if (typeof candidate !== "string") continue;
+      try {
+        const parsed = JSON.parse(candidate) as { uiCard?: unknown };
+        const card = parsed.uiCard as
+          | { resourceUri?: unknown; title?: unknown }
+          | undefined;
+        if (typeof card?.resourceUri === "string") {
+          return {
+            resourceUri: card.resourceUri,
+            title: typeof card.title === "string" ? card.title : "Card",
+          };
+        }
+      } catch {
+        // 非 JSON 文本：跳过。
+      }
+    }
+    return null;
+  });
 </script>
 
 <div class="rounded-md border border-border bg-muted/30 text-[11px]">
+  {#if uiCard}
+    <AgentCard resourceUri={uiCard.resourceUri} title={uiCard.title} />
+  {/if}
   <button
     class="flex w-full items-center gap-1.5 px-2 py-1 text-left"
     aria-expanded={expanded}
