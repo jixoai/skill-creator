@@ -1,5 +1,6 @@
 <!--
 用户原始需求（2026-09-06）：通过 OpenSpec changes 与 ZCode 交接；AgentLoop 持续迭代；以 DSH 为 Agent 开发基础，合并 Agent 配置/交互面板，提供技能分析、禁用、优化、拆分、合并；产品级应用而非 DEMO。
+用户原始需求（2026-09-08，方向修正）：「在现有 skill creator 的基础上实现一个 Agent 的产品……我需要的是 DSH 的内核」，「把整个 skill creator 的各种能力内置成 MCP 和 MCP-apps，给到聊天对话框」；不采用 DSH 完整 WebUI 作产品宿主。锚定既有原文（2026-09-05）：「管理器首先得是管理器，然后接入 Agent 能力」。
 意图：1. 固定目标和任务归属；2. 固定开发复核循环；3. 固定完成证据。
 -->
 
@@ -11,13 +12,22 @@
 
 ```text
 Skill Creator = Manager authority + Skill Intelligence + Skill Steward
-DSH          = Agent/session/model/tool/prompt + Web client plugins
-Product UI   = one shell, Manager views + DSH Agent settings/interactions
+DSH          = headless agent kernel (dsh-base rows: agent/session/llm/
+                settings/sandbox/approval/permission/tools)
+Product UI   = Skill Creator shell (ChromeTabs 三 App + OpenTray 窗口)
+               + in-shell Agent panel（对话流/工具行/审批/配置）
+Capabilities = capability-core（单一声明层）
+               -> kernel tools（内置面板会话） + MCP tools/resources（外部）
 Agent action = snapshot -> evidence -> proposal -> validation
               -> human approval -> Manager apply -> audit -> rollback
 ```
 
-Manager 的 WorkspaceRegistry、路径、revision、启停、安装和写入权不交给 DSH。DSH 是实际依赖和插件组合，不是 dsh-acp 命令别名。复用 DSH session/chat/settings/model/permission 插件，复用现有 Svelte Manager views；具体 root/slot/island/鉴权装配见 `openspec/changes/dsh-webui-composition/integration-contract.md`。Manager-only 恢复可用不代表 Agent 集成完成。
+Manager 的 WorkspaceRegistry、路径、revision、启停、安装和写入权不交给 DSH。DSH 只以
+内核形态组合（不挂 dsh-web-app/WebUI，不复制其 store），版本锁定矩阵与 heal 镜像保留。
+Agent 面板是 Skill Creator shell 内的自研组件；能力以 capability-core 双投影（kernel
+tools + MCP server）供给，MCP 面 mutation 一律产 proposal 走审批。具体决策见
+`openspec/changes/dsh-kernel-rebase/design.md`（D1 内核范围 / D2 面板形态 / D3 供给）。
+Manager-only 恢复可用不代表 Agent 集成完成。
 
 在当前仓库继续开发。保留已有 Manager 服务、CLI、OpenTray、Creator、Repository 和测试；无需另建 skill-creator-next。Codex 后端暂不列入本次完成条件，不为了保留旧 adapter 维护双套产品协议。分享和社交另行规划。
 
@@ -31,15 +41,19 @@ Manager 的 WorkspaceRegistry、路径、revision、启停、安装和写入权�
 
 ## One Execution Order
 
-| Stage | Change                   | 唯一归属及退出证据                                                                                                          |
-| ----- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| 1     | skill-steward-contracts  | domain schema、snapshot/evidence、四类 patch、版本化 prompts/templates；完整正反 fixtures                                   |
-| 2     | skill-steward-runtime    | typed tools、fixture runtime、human grant、journal/apply/rollback、持久审计、生命周期；真实临时 Provider 树验证             |
-| 3     | dsh-runtime-integration  | 锁定官方 packages，真实 Cordis Agent composition、配置 service、tool round、cancel/replay；确定性 LLM 可用于 transport 测试 |
-| 4     | dsh-webui-composition    | DSH root/client plugin、原有 Manager views 挂载、官方 Agent settings/session/interaction 复用；实际浏览器 boot/lifecycle    |
-| 5     | steward-product-workflow | 完整用户流程、质量对比、真实模型、pack clean install、CLI/native/browser/recovery release evidence                          |
+| Stage | Section（`openspec/changes/dsh-kernel-rebase/tasks.md`） | 退出证据                                       |
+| ----- | -------------------------------------------------------- | ---------------------------------------------- |
+| 1     | capability-core 抽取                                     | 行为不变重构，全量回归绿，能力清单差异表       |
+| 2     | headless 内核组合                                        | 内核 rows 激活证据、agent.* RPC、binder 回归   |
+| 3     | Agent 面板                                               | 1100/680 浏览器证据、组件交互测试、0 JS 错误   |
+| 4     | MCP 供给                                                 | MCP 合规冒烟、authority 链、clean-install 可用 |
+| 5     | 退役 hosted 形态                                         | 产物无 web-composition 残留、门禁绿            |
+| 6     | 产品验收与发布证据                                       | 端到端磁盘验证、clean-install drill、文档同步  |
 
-`steward-runtime-remediation` 已移除，相关任务归入阶段 2 的 transaction-contract 和阶段 5 的产品验收；不得重新建立重复 authority。当前五个 change 按 `openspec list --json` 共 43 个 implementation tasks；每次只推进一个 change；后续阶段可以读源码，不提前实现另一套契约。OpenSpec status 的 isComplete 表示规划产物存在，不等于 tasks 已完成。
+前五个 change（skill-steward-contracts/runtime、dsh-runtime-integration、
+dsh-webui-composition、steward-product-workflow）已归档；其 Manager authority、steward
+协议、安全不变量与测试资产继续有效。宿主化路径（入口桥/island/DSH web 宿主）按
+dsh-kernel-rebase 阶段 5 退役。每次只推进一个阶段；不提前实现另一阶段的面。
 
 ## Decide And Act
 
