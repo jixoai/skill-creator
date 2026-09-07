@@ -302,24 +302,24 @@ describe("steward audit-store redaction", () => {
 describe("dsh RPC surface", () => {
   it("exposes settings/credentials/sessions through the public router", async () => {
     const client = createClient();
-    const initial = await client.dsh.settings.get({});
+    const initial = await client.agent.settings.get({});
     expect(initial.settings.preset).toBe("deterministic");
-    const rejected = await client.dsh.settings.update({ preset: "live" });
+    const rejected = await client.agent.settings.update({ preset: "live" });
     expect(rejected).toMatchObject({ outcome: "rejected", code: "PRESET_REQUIRES_CREDENTIAL" });
-    await client.dsh.credentials.set({ provider: "deepseek", apiKey: "sk-rpc-1" });
-    const updated = await client.dsh.settings.update({
+    await client.agent.credentials.set({ provider: "deepseek", apiKey: "sk-rpc-1" });
+    const updated = await client.agent.settings.update({
       model: { provider: "deepseek", model: "deepseek-chat" },
       preset: "live",
     });
     expect(updated.outcome).toBe("updated");
-    const view = await client.dsh.settings.get({});
+    const view = await client.agent.settings.get({});
     expect(view.settings.preset).toBe("live");
     expect(view.providers).toEqual([{ provider: "deepseek", configured: true }]);
     expect(JSON.stringify(view)).not.toContain("sk-rpc-1");
-    const { frames } = await client.dsh.sessions.streams({});
+    const { frames } = await client.agent.sessions.streams({});
     expect(Array.isArray(frames)).toBe(true);
-    await client.dsh.credentials.clear({ provider: "deepseek" });
-    const cleared = await client.dsh.settings.get({});
+    await client.agent.credentials.clear({ provider: "deepseek" });
+    const cleared = await client.agent.settings.get({});
     expect(cleared.providers).toEqual([]);
   });
 });

@@ -222,6 +222,10 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     status.dsh = { mounted: false, reason: dshHost.reason };
     log(`dsh kernel unavailable (manager face keeps serving): ${dshHost.reason}`);
   }
+  // 2.2：内核句柄注入 domain——agent.* RPC 面即时刻可用（降级时 typed UNAVAILABLE）。
+  if (dshHost.mounted && dshHost.kernel) {
+    domain.setKernelHost(dshHost.kernel);
+  }
   // 2.3（待接入）：内核 session binder——steward run 绑定内核 session 并把
   // turn/tool 事件喂进脱敏 stream 环形缓冲。host 降级时 binder 保持缺席。
 
@@ -230,7 +234,8 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     try {
       const tasks = [
         settleTeardown("tray host", async () => handlesRef.trayHost?.destroy()),
-        settleTeardown("dsh composition host", () => dshHost.dispose()),
+        settleTeardown("agent sessions", () => domain.agentSessions.dispose()),
+        settleTeardown("dsh kernel host", () => dshHost.dispose()),
         settleTeardown("web server", () => web.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("IPC server", () => ipc.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("repository sessions", () => domain.repository.dispose()),

@@ -111,7 +111,7 @@ export async function loadStewardRuntimeConfig(): Promise<void> {
   const request = settingsGate.issue();
   runtimeConfigState.loading = true;
   try {
-    const result = await requireRpc().dsh.settings.get({});
+    const result = await requireRpc().agent.settings.get({});
     if (!request.isCurrent()) return;
     runtimeConfigState.view = result;
     runtimeConfigState.error = null;
@@ -130,7 +130,7 @@ export async function applyStewardRuntimeConfigPatch(
 ): Promise<DshSettingsUpdateResult | null> {
   const request = settingsGate.issue();
   try {
-    const result = await requireRpc().dsh.settings.update(patch);
+    const result = await requireRpc().agent.settings.update(patch);
     if (!request.isCurrent()) return null;
     if (result.outcome === "updated") {
       runtimeConfigState.view = result.view;
@@ -266,7 +266,7 @@ export async function loadStewardStreamFrames(limit = 50): Promise<void> {
   const request = streamGate.issue();
   streamFramesState.loading = true;
   try {
-    const result = await requireRpc().dsh.sessions.streams({ limit });
+    const result = await requireRpc().agent.sessions.streams({ limit });
     if (!request.isCurrent()) return;
     streamFramesState.frames = result.frames;
     streamFramesState.error = null;

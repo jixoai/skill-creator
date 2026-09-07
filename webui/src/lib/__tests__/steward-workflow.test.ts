@@ -203,7 +203,7 @@ describe("latest-request-wins run projection", () => {
 describe("runtime config projection", () => {
   it("commits updated views, returns typed rejections untouched, and drops stale patches", async () => {
     connection.rpc = {
-      dsh: {
+      agent: {
         settings: {
           get: () => Promise.resolve(settingsView),
           update: () =>
@@ -235,7 +235,7 @@ describe("runtime config projection", () => {
     const fresh = deferred<unknown>();
     let call = 0;
     connection.rpc = {
-      dsh: {
+      agent: {
         settings: {
           get: () => Promise.resolve(settingsView),
           update: () => {
@@ -424,7 +424,7 @@ describe("proposal workflow states (task 4.2)", () => {
         toolName: "skills.relations",
       },
     ];
-    connection.rpc = { dsh: { sessions: { streams: () => Promise.resolve({ frames }) } } };
+    connection.rpc = { agent: { sessions: { streams: () => Promise.resolve({ frames }) } } };
     await loadStewardStreamFrames();
     expect(streamFramesState.frames).toHaveLength(3);
 

@@ -1,0 +1,109 @@
+/**
+ * Agent 面板契约（dsh-kernel-rebase task 2.2）。
+ *
+ * 用户原始需求 [2026-09-08]：「你可以简单理解成，我们在 skill creator 的右侧嵌入
+ * 了一个聊天对话框。」——`agent.*` 是面板消费内核会话的唯一 RPC namespace；
+ * 旧 `dsh.*`（settings/credentials/sessions）收敛并入此处，不保留双投影。
+ *
+ * 正交意图：
+ *   [1] 会话生命周期投影：list/create/prompt/cancel/stream（内核 ctx.agents +
+ *       ctx.sessions 的脱敏投影；durable 真相归 session event log）。
+ *   [2] settings/credentials 平移：model/preset/permission/approval 与凭据状态
+ *       （schema 复用 dsh-runtime 契约源，无第二份手写镜像）。
+ * 妥协声明：stream 帧复用 DshSessionStreamFrame（面板场景 runId 恒等于
+ *   sessionId）——面板不是 MCP client，内核会话经 daemon 进程内消费。
+ */
+import { z } from "zod";
+import {
+  DshCredentialClearInputSchema,
+  DshCredentialSetInputSchema,
+  DshCredentialSetResultSchema,
+  DshSessionStreamFrameSchema,
+  DshSettingsUpdateResultSchema,
+  DshSettingsUpdateSchema,
+  DshStewardSettingsViewSchema,
+} from "./dsh-runtime.js";
+
+/** 面板可见的 agent 生命周期状态（AgentStatus 两态 + 服务层 disposed 投影）。 */
+export const AgentSessionStatusSchema = z.enum(["idle", "running", "disposed"]);
+/** agent 会话状态。 */
+export type AgentSessionStatus = z.infer<typeof AgentSessionStatusSchema>;
+
+/** 会话摘要（list/create 返回）。 */
+export const AgentSessionSummarySchema = z.object({
+  sessionId: z.string().min(1),
+  /** 自动标题（内核 session-title；首 prompt 前为空串）。 */
+  title: z.string(),
+  status: AgentSessionStatusSchema,
+  cwd: z.string(),
+  createdAt: z.string().min(1),
+});
+/** 会话摘要。 */
+export type AgentSessionSummary = z.infer<typeof AgentSessionSummarySchema>;
+
+/** 会话创建输入。 */
+export const AgentSessionCreateInputSchema = z.object({
+  /** 会话工作目录（缺省 daemon cwd；产品面通常传 Workspace 目录）。 */
+  cwd: z.string().min(1).optional(),
+  /** 首条消息（可选；提供则创建后立即驱动一轮）。 */
+  prompt: z.string().min(1).max(20_000).optional(),
+});
+/** 会话创建输入。 */
+export type AgentSessionCreateInput = z.infer<typeof AgentSessionCreateInputSchema>;
+
+/** 会话创建结果。 */
+export const AgentSessionCreateResultSchema = z.object({
+  session: AgentSessionSummarySchema,
+});
+/** 会话创建结果。 */
+export type AgentSessionCreateResult = z.infer<typeof AgentSessionCreateResultSchema>;
+
+/** prompt 输入。 */
+export const AgentSessionPromptInputSchema = z.object({
+  sessionId: z.string().min(1),
+  text: z.string().min(1).max(20_000),
+});
+/** prompt 输入。 */
+export type AgentSessionPromptInput = z.infer<typeof AgentSessionPromptInputSchema>;
+
+/** prompt 结果（accepted = 已入队驱动；终态经 stream 轮询观察）。 */
+export const AgentSessionPromptResultSchema = z.object({ accepted: z.literal(true) });
+
+/** cancel 输入/结果。 */
+export const AgentSessionCancelInputSchema = z.object({ sessionId: z.string().min(1) });
+export const AgentSessionCancelResultSchema = z.object({ canceled: z.literal(true) });
+
+/** stream 查询输入（afterSeq 游标 + 有界 limit；终态停轮询由 WebUI 代次门持有）。 */
+export const AgentSessionStreamInputSchema = z.object({
+  sessionId: z.string().min(1),
+  afterSeq: z.number().int().nonnegative().default(0),
+  limit: z.number().int().positive().max(200).default(50),
+});
+/** stream 查询输入。 */
+export type AgentSessionStreamInput = z.infer<typeof AgentSessionStreamInputSchema>;
+
+/** stream 查询结果。 */
+export const AgentSessionStreamResultSchema = z.object({
+  frames: z.array(DshSessionStreamFrameSchema),
+  status: AgentSessionStatusSchema,
+});
+/** stream 查询结果。 */
+export type AgentSessionStreamResult = z.infer<typeof AgentSessionStreamResultSchema>;
+
+/** 跨会话帧查询输入（原 dsh.sessions.streams 语义平移；steward run 投影消费）。 */
+export const AgentSessionsStreamsInputSchema = z.object({
+  runId: z.string().min(1).optional(),
+  /** 返回最新 N 帧（默认 50，上限 500）。 */
+  limit: z.number().int().positive().max(500).optional(),
+});
+/** 跨会话帧查询输入。 */
+export type AgentSessionsStreamsInput = z.infer<typeof AgentSessionsStreamsInputSchema>;
+
+export {
+  DshStewardSettingsViewSchema as AgentSettingsViewSchema,
+  DshSettingsUpdateSchema as AgentSettingsUpdateSchema,
+  DshSettingsUpdateResultSchema as AgentSettingsUpdateResultSchema,
+  DshCredentialSetInputSchema as AgentCredentialSetInputSchema,
+  DshCredentialSetResultSchema as AgentCredentialSetResultSchema,
+  DshCredentialClearInputSchema as AgentCredentialClearInputSchema,
+};

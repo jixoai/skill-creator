@@ -14,16 +14,25 @@ import {
   AcpSessionOpenInputSchema,
   AcpSessionOpenResultSchema,
 } from "./contracts/acp.js";
+import { DshSessionStreamFrameSchema } from "./contracts/dsh-runtime.js";
 import {
-  DshCredentialClearInputSchema,
-  DshCredentialSetInputSchema,
-  DshCredentialSetResultSchema,
-  DshSessionStreamFrameSchema,
-  DshSessionStreamsInputSchema,
-  DshSettingsUpdateResultSchema,
-  DshSettingsUpdateSchema,
-  DshStewardSettingsViewSchema,
-} from "./contracts/dsh-runtime.js";
+  AgentCredentialClearInputSchema,
+  AgentCredentialSetInputSchema,
+  AgentCredentialSetResultSchema,
+  AgentSessionCreateInputSchema,
+  AgentSessionCreateResultSchema,
+  AgentSessionCancelInputSchema,
+  AgentSessionCancelResultSchema,
+  AgentSessionPromptInputSchema,
+  AgentSessionPromptResultSchema,
+  AgentSessionStreamInputSchema,
+  AgentSessionStreamResultSchema,
+  AgentSessionsStreamsInputSchema,
+  AgentSessionSummarySchema,
+  AgentSettingsUpdateResultSchema,
+  AgentSettingsUpdateSchema,
+  AgentSettingsViewSchema,
+} from "./contracts/agent.js";
 import {
   StewardApproveResultSchema,
   StewardBackendsResultSchema,
@@ -276,24 +285,39 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     /** Consume a rollback grant and replay the journal in reverse. */
     applyRollback: oc.input(SkillStewardRollbackInputSchema).output(SkillStewardApplyResultSchema),
   },
-  dsh: {
-    /** Steward DSH runtime settings（task 3.3）：model/preset/permission/session controls。 */
+  agent: {
+    /** 面板会话：内核 agent 会话的生命周期投影（task 2.2；旧 dsh.* 收敛并入）。 */
+    sessions: {
+      /** 列出内核 live 会话（含非面板会话的 disposed 投影）。 */
+      list: oc
+        .input(z.object({}))
+        .output(z.object({ sessions: z.array(AgentSessionSummarySchema) })),
+      /** 脱敏 run/session 帧查询（原 dsh.sessions.streams 平移；steward 投影消费）。 */
+      streams: oc
+        .input(AgentSessionsStreamsInputSchema)
+        .output(z.object({ frames: z.array(DshSessionStreamFrameSchema) })),
+    },
+    session: {
+      /** 创建产品会话（产品 preset + 工具面收窄；可选首 prompt）。 */
+      create: oc.input(AgentSessionCreateInputSchema).output(AgentSessionCreateResultSchema),
+      /** 驱动一轮用户输入（终态经 stream 轮询观察）。 */
+      prompt: oc.input(AgentSessionPromptInputSchema).output(AgentSessionPromptResultSchema),
+      /** 取消当前活动（幂等）。 */
+      cancel: oc.input(AgentSessionCancelInputSchema).output(AgentSessionCancelResultSchema),
+      /** 增量帧读取（afterSeq 游标 + status 快照）。 */
+      stream: oc.input(AgentSessionStreamInputSchema).output(AgentSessionStreamResultSchema),
+    },
+    /** model/preset/permission/approval 投影（原 dsh.settings 平移）。 */
     settings: {
       /** 当前 settings 投影 + provider 凭据状态（永不包含凭据值）。 */
-      get: oc.input(z.object({})).output(DshStewardSettingsViewSchema),
+      get: oc.input(z.object({})).output(AgentSettingsViewSchema),
       /** 应用补丁；revision 只在真实变更时 +1；类型化 rejected 见契约 union。 */
-      update: oc.input(DshSettingsUpdateSchema).output(DshSettingsUpdateResultSchema),
+      update: oc.input(AgentSettingsUpdateSchema).output(AgentSettingsUpdateResultSchema),
     },
     /** provider 凭据写入/清除（0600 私有文件；视图只回显 configured 状态）。 */
     credentials: {
-      set: oc.input(DshCredentialSetInputSchema).output(DshCredentialSetResultSchema),
-      clear: oc.input(DshCredentialClearInputSchema).output(DshStewardSettingsViewSchema),
-    },
-    sessions: {
-      /** 脱敏 session stream 帧（后续 DSH client plugin 的实时投影入口）。 */
-      streams: oc
-        .input(DshSessionStreamsInputSchema)
-        .output(z.object({ frames: z.array(DshSessionStreamFrameSchema) })),
+      set: oc.input(AgentCredentialSetInputSchema).output(AgentCredentialSetResultSchema),
+      clear: oc.input(AgentCredentialClearInputSchema).output(AgentSettingsViewSchema),
     },
   },
   /**

@@ -42,7 +42,9 @@ const repoRoot = sourceMode
 /**
  * 内核工具面收窄：这些 dsh-base rows 注册模型可见的通用 fs/shell/web 工具，产品
  * 会话一律不可见（design D1）。disable 的是「通用能力行」，不是 sandbox/permission
- * 等执行策略服务。
+ * 等执行策略服务。skill-filesystem/tool-skill 同步收窄：宿主机个人 skills 目录的
+ * 自动发现注入（system-reminder catalog）越出 Manager 的技能真相边界——技能目录
+ * 由 skill-creator-mcp + 提示词最佳实践供给（task 4.x）。
  */
 const KERNEL_DISABLED_TOOL_ROWS = [
   "tool-bash",
@@ -51,6 +53,8 @@ const KERNEL_DISABLED_TOOL_ROWS = [
   "tool-fs-search",
   "tool-jobs",
   "tool-web",
+  "skill-filesystem",
+  "tool-skill",
 ] as const;
 
 /**

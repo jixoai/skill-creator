@@ -31,6 +31,11 @@ import {
   type SkillStewardPipelineService,
 } from "./steward/pipeline-service.js";
 import { createDshSettingsService, type DshSettingsService } from "./steward/dsh-settings.js";
+import {
+  createAgentSessionsService,
+  type AgentSessionsService,
+} from "./kernel/agent-sessions.js";
+import type { DshKernelHandle } from "./kernel/dsh-kernel.js";
 import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
 import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
 import type { HarnessAdapter } from "./steward/harness-adapter.js";
@@ -70,8 +75,12 @@ export interface DaemonDomain {
   steward: StewardService;
   /** Skill Steward 契约管线：snapshot→tool registry→proposal→grant→journal→audit。 */
   skillSteward: SkillStewardPipelineService;
-  /** Steward DSH settings/credentials/session-stream（task 3.3）。 */
+  /** Steward DSH settings/credentials/session-stream（task 3.3；agent.* 消费同一服务）。 */
   dshSettings: DshSettingsService;
+  /** 内核 agent 会话服务（task 2.2；kernel 句柄由 daemon index boot 后注入）。 */
+  agentSessions: AgentSessionsService;
+  /** 内核句柄注入（index 在 boot 成功后调用；降级时保持缺席 → typed UNAVAILABLE）。 */
+  setKernelHost: (handle: DshKernelHandle) => void;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
@@ -83,12 +92,18 @@ export function createDaemonDomain(
     skillsCliProbe?: SkillsCliProbe;
   } = {},
 ): DaemonDomain {
+  const kernelHostRef: { handle: DshKernelHandle | null } = { handle: null };
+  const dshSettings = createDshSettingsService();
+  const agentSessions = createAgentSessionsService({
+    kernel: () => kernelHostRef.handle,
+    modelSelection: async () => (await dshSettings.getView()).settings.model,
+  });
   const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();
   const skills = createSkillService(workspaces, { skillsCliProbe });
   const repository = createRepositoryService(workspaces, skills);
   const creator = createCreatorService(workspaces, skills);
   const skillIntelligence = createSkillIntelligenceService(skills, creator);
-  return {
+  const domain: DaemonDomain = {
     workspaces,
     skills,
     creator,
@@ -102,6 +117,12 @@ export function createDaemonDomain(
       adapters: options.stewardAdapters ?? defaultStewardAdapters(),
     }),
     skillSteward: createSkillStewardPipelineService({ workspaces, skills, creator }),
-    dshSettings: createDshSettingsService(),
+    dshSettings,
+    agentSessions,
+    setKernelHost: (handle: DshKernelHandle): void => {
+      kernelHostRef.handle = handle;
+      agentSessions.attach(handle);
+    },
   };
+  return domain;
 }

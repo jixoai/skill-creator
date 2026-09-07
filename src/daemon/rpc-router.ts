@@ -163,25 +163,44 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         domain.skillSteward.applyRollback(input.auditId),
       ),
     },
-    dsh: {
+    agent: {
+      sessions: {
+        list: rpc.agent.sessions.list.handler(async () => ({
+          sessions: domain.agentSessions.list(),
+        })),
+        streams: rpc.agent.sessions.streams.handler(async ({ input }) => ({
+          frames: await domain.dshSettings.listStreamFrames(input),
+        })),
+      },
+      session: {
+        create: rpc.agent.session.create.handler(async ({ input }) => ({
+          session: await domain.agentSessions.create(input),
+        })),
+        prompt: rpc.agent.session.prompt.handler(async ({ input }) => {
+          domain.agentSessions.prompt(input.sessionId, input.text);
+          return { accepted: true as const };
+        }),
+        cancel: rpc.agent.session.cancel.handler(({ input }) => {
+          domain.agentSessions.cancel(input.sessionId);
+          return { canceled: true as const };
+        }),
+        stream: rpc.agent.session.stream.handler(({ input }) =>
+          domain.agentSessions.stream(input.sessionId, input.afterSeq, input.limit),
+        ),
+      },
       settings: {
-        get: rpc.dsh.settings.get.handler(async () => domain.dshSettings.getView()),
-        update: rpc.dsh.settings.update.handler(async ({ input }) =>
+        get: rpc.agent.settings.get.handler(async () => domain.dshSettings.getView()),
+        update: rpc.agent.settings.update.handler(async ({ input }) =>
           domain.dshSettings.update(input),
         ),
       },
       credentials: {
-        set: rpc.dsh.credentials.set.handler(async ({ input }) =>
+        set: rpc.agent.credentials.set.handler(async ({ input }) =>
           domain.dshSettings.setCredential(input),
         ),
-        clear: rpc.dsh.credentials.clear.handler(async ({ input }) =>
+        clear: rpc.agent.credentials.clear.handler(async ({ input }) =>
           domain.dshSettings.clearCredential(input),
         ),
-      },
-      sessions: {
-        streams: rpc.dsh.sessions.streams.handler(async ({ input }) => ({
-          frames: await domain.dshSettings.listStreamFrames(input),
-        })),
       },
     },
     acp: {
