@@ -2,8 +2,9 @@
 
 依赖：`dsh-runtime-integration`。顺序和唯一任务归属见根级 `GOAL.md`。先阅读 `docs/research/2026-09-06-dsh-integration.md` 和本 change 的 `integration-contract.md`。
 
-- [ ] 0.1 固定 DSH Web composition 事实和版本。
+- [x] 0.1 固定 DSH Web composition 事实和版本。
   - Files: `package.json`, `pnpm-lock.yaml`, `src/shared/contracts/dsh-runtime.ts`, `docs/research/2026-09-06-dsh-integration.md`。
+  - Evidence: 事实表落盘于 `docs/research/2026-09-06-dsh-integration.md:108`（dsh-client-web/connection/ui-session/ui-chat/approval 等五包 0.1.2-rc.1 的 npm 实测：entry、peer graph、`__ModuleLoader__` 工厂形态、React 浏览器构建与 Node ESM 加载边界）；版本矩阵钉在 `src/shared/contracts/dsh-runtime.ts`（DSH_PACKAGE_VERSIONS + 隐藏 peer 注记）并体现在 `package.json` dependencies；同一依赖图的 clean install 解析与启动由 steward-product-workflow 4.8 drill 实证（仓库外空目录 npm install → DSH 149 entries mounted，`artifacts/clean-install.md`）；版本漂移的 typed unavailable + SPA 恢复面由 4.4 smoke 的 DSH unavailable 场景实证。
   - Steps: 逐个读取锁定 commit 中候选 package 的 `package.json`、`exports`、`types`、`peerDependencies`、构建脚本和最小实例测试；核对 `@deepseek-ai/dsh-web-app`、`@deepseek-ai/dsh-client-web`、client modules、ui session/chat/approval 的真实 package name；再用已发布包或可复现 commit tarball/workspace pack 做 clean install，记录 browser entry 与实际可加载的 `AppWebEntry`。
   - Acceptance: 事实表包含 package name、版本/commit、entry、peer graph、安装来源和加载结果；clean install 能解析同一依赖图。任何版本/缺包/exports/peer/build/安装失败都变成 typed unavailable 和恢复命令；不得猜测 `dsh-acp` 或高层嵌入 API。
 
