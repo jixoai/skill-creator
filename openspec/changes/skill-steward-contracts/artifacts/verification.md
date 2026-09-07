@@ -1,6 +1,6 @@
 # skill-steward-contracts verification
 
-记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `c92cc31（R11 整改）→ R12 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
+记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `0e9ed1e（R12 整改）→ R13 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
 
 ## 责任矩阵
 
@@ -127,6 +127,11 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - P1-5 unlink 身份闭环：assertRealRoot 返回的 root 身份不再丢弃——rename 前/后复验（换体后的「外部源被隔离」不再是 accepted）。
   - Deferred（诚实声明）：跨调用/boot-time store inode anchor（pre-call 换体检测）仍归 recovery gate；Node 无 fd-relative rename 的残余窗口=外部文件被移入可审计隔离区并转 recovery。
   - 门禁（R12 整改后）：contracts 42/42、runtime 65/65（新增 mixed no-op/坏 journal/mapping 篡改负例）、probes 14/14、全量 429/429（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R12（5.0/10，不通过，报告 /tmp/stage1-contracts-review-round12.md；独立 worktree 0e9ed1e）→ R13 整改（R11 P1-1/3/4/5 判定关闭，两个剩余 P1 关闭）：
+  - P1-1 双射接入真实回放：`assertCommittedJournal` 的 `snapshot` 升级为必填，内部统一 `expectedJournalStepsOf(proposal, snapshot)`；`applyRollback` 与 `undoJournalSteps` 两个真实入口都传入 snapshot——mapping 双射（from|to|strategy 多重集合）在真实回放路径生效。负例：真实 merge-copy apply → 篡改 resource `from` 为另一合法路径 → 真实 `applyRollback` → recovery-required（非 rolled-back），且篡改对象源文件零触碰；既有 merge copy/move 回滚正例随真实流持续通过。
+  - P1-2 目标删除绑定 root 身份：`removeCreatedDirectory` 保存 `assertRealRoot` 返回身份，在 lstat/内容 walk 后、rename 前、rename 后逐点复验——同路径换体后的「替换树被隔离」是 recovery，不是成功。
+  - 门禁（R13 整改后）：contracts 42/42、runtime 66/66（新增真实 apply→tamper→applyRollback 负例）、probes 14/14、全量 430/430（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R13 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R12 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R11 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R10 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。

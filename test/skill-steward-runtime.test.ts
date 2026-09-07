@@ -2665,6 +2665,49 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     );
   });
 
+  it("R13 P1-1: tampering a resource mapping after a real apply blocks the real rollback", async () => {
+    const { directory, snapshot, sourceB, proposal } = await seedMergePair();
+    // copy 策略：无备份依赖，篡改 from 后回放必须被 mapping 双射拦截。
+    proposal.patch.target.resources[0]!.strategy = "copy";
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(proposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    const journalPath = path.join(
+      sandbox,
+      "home",
+      "steward-store",
+      "journal",
+      `${proposalId}.jsonl`,
+    );
+    // 篡改 resource from 为另一条合法路径（集合不变）。
+    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    const tampered = lines.map((line) => {
+      const parsed = JSON.parse(line) as { step?: string; detail?: { from?: string } };
+      if (parsed.step === "resource" && parsed.detail?.from) {
+        parsed.detail.from = "merge-left/shared/notes.md";
+      }
+      return JSON.stringify(parsed);
+    });
+    fs.writeFileSync(journalPath, `${tampered.join("\n")}\n`, "utf8");
+    await service.prepareRollback(audit.id, "human-ui");
+    const rolled = await service.applyRollback(audit.id, "human-ui");
+    // 真实回放入口拒绝假 rolled-back。
+    expect(rolled.audit.status).toBe("recovery-required");
+    // 篡改对象（merge-left）的源文件未被触碰。
+    expect(
+      fs.readFileSync(path.join(directory, "skills", "merge-left", "shared", "notes.md"), "utf8"),
+    ).toBe("left-origin\n");
+    void sourceB;
+  });
+
   it("R12 P1-2: swapping resource mapping details is rejected by the terminal gate", async () => {
     const ctx = await applyMove("mapswap");
     const { readJournal, assertCommittedJournal } =

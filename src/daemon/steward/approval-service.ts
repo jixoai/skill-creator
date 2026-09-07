@@ -520,7 +520,11 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
       // typed 错；空 journal 与无 commit 终态行（崩溃/截断/删除行）由回放闸拒绝——
       // 没有完整且已提交的事实就不能宣称 rolled-back。
       const entries = await readJournal(journalPath);
-      assertCommittedJournal(entries, { proposalId: audit.proposalId, proposal: entry.proposal });
+      assertCommittedJournal(entries, {
+        proposalId: audit.proposalId,
+        proposal: entry.proposal,
+        snapshot: entry.snapshot,
+      });
       await undoJournalSteps(entries, {
         proposal: entry.proposal,
         snapshot: entry.snapshot,

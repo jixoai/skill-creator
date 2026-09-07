@@ -288,7 +288,7 @@ export function expectedJournalStepsOf(
  */
 export function assertCommittedJournal(
   entries: JournalEntry[],
-  expected: { proposalId: string; proposal: SkillProposal; snapshot?: SkillStewardContextSnapshot },
+  expected: { proposalId: string; proposal: SkillProposal; snapshot: SkillStewardContextSnapshot },
 ): void {
   const commits = entries.filter((entry) => entry.step === "commit");
   const last = entries.at(-1);
@@ -322,7 +322,7 @@ export function assertCommittedJournal(
   }
   // Codex R9 P1-3：与 proposal 展开的期望步骤双射——journal 是自报事实，proposal
   // 才是独立不可变锚（grant fingerprint 在 rollback 前已复核）。
-  const expectedSteps = expectedJournalStepsOf(expected.proposal);
+  const expectedSteps = expectedJournalStepsOf(expected.proposal, expected.snapshot);
   const observedKinds = new Map<string, number>();
   const observedDirs = new Set<string>();
   const observedSkillIds = new Set<string>();
@@ -369,9 +369,9 @@ export function assertCommittedJournal(
       `Journal mutation skillIds do not match the proposal affected set; recovery required.`,
     );
   }
-  // Codex R11 P1-2：每条 resource mapping 的 from/to/strategy 与 proposal+snapshot
+  // Codex R11/R12 P1-1：每条 resource mapping 的 from/to/strategy 与 proposal+snapshot
   // 展开结果精确双射（多重集合）——同集合内的路径交换/策略替换在此拒绝。
-  if (expected.snapshot !== undefined) {
+  {
     const observedMappings = entries
       .filter((entry) => entry.step === "resource")
       .map((entry) =>

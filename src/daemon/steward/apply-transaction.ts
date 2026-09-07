@@ -582,6 +582,7 @@ export async function undoJournalSteps(
   assertCommittedJournal(checked, {
     proposalId: path.basename(context.backupJournalPath ?? context.deps.journalPath, ".jsonl"),
     proposal: context.proposal,
+    snapshot: context.snapshot,
   });
   // 第三道：journal ↔ 备份 manifest 双射（部分/重编号 journal 暴露）。
   const manifest = await readBackupManifest(context.backupJournalPath ?? context.deps.journalPath);
@@ -653,7 +654,7 @@ async function removeCreatedDirectory(
   tree: TargetTree | undefined,
   quarantineJournalPath: string,
 ): Promise<void> {
-  await assertRealRoot(root);
+  const rootIdentity = await assertRealRoot(root);
   assertPathInside(root, dir);
   let stat: import("node:fs").Stats;
   try {
@@ -661,6 +662,7 @@ async function removeCreatedDirectory(
   } catch {
     return; // 已不存在：幂等完成。
   }
+  await verifyDirIdentity(root, rootIdentity);
   if (!stat.isDirectory()) {
     throw new DomainError(
       "INVALID_OPERATION",
@@ -698,7 +700,9 @@ async function removeCreatedDirectory(
       }
     }
   }
-  // 隔离改名（与源删除同一 authority）。
+  // 隔离改名（与源删除同一 authority）。Codex R12 P1-2：内容 walk 之后、rename
+  // 之前与之后都复验 Provider root 身份——同路径换体后的「替换树被隔离」是
+  // recovery，不是 rolled-back。
   const identity = { dev: stat.dev, ino: stat.ino };
   const quarantineRoot = await prepareBackupRoot(quarantineJournalPath);
   const quarantineIdentity = await assertCanonicalDirectory(quarantineRoot);
@@ -707,6 +711,7 @@ async function removeCreatedDirectory(
     `removed-dir-${randomBytes(8).toString("hex")}-${path.basename(dir)}`,
   );
   try {
+    await verifyDirIdentity(root, rootIdentity);
     await fs.rename(dir, tombstone);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EXDEV") {
@@ -741,6 +746,7 @@ async function removeCreatedDirectory(
   }
   await syncDir(quarantineRoot);
   await verifyDirIdentity(quarantineRoot, quarantineIdentity);
+  await verifyDirIdentity(root, rootIdentity);
 }
 
 /** 递归收集目录内全部 regular 文件的相对路径（子目录名保留）。 */
