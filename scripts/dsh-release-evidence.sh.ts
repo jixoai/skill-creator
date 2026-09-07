@@ -192,25 +192,17 @@ async function stopDaemon(handles: DaemonHandles): Promise<void> {
 }
 
 // 同源探针：health / island 资产 / DSH token 握手（经组合 origin 代理）。
-async function probeComposedOrigin(port: number, dshToken: string) {
+/** 内核形态 Manager 面探针：loopback 健康检查 + SPA 恢复夹具（无 DSH 同源挂载）。 */
+async function probeManagerFace(port: number) {
   const health = await fetch(`http://127.0.0.1:${port}/api/health`);
   const healthBody = (await health.json()) as { ok?: boolean };
-  const islandAsset = await fetch(`http://127.0.0.1:${port}/manager/dsh-island.js`);
-  const handshake = await fetch(`http://127.0.0.1:${port}/?token=${dshToken}`, {
-    redirect: "manual",
-  });
-  const cookie = handshake.headers.get("set-cookie")?.split(";")[0] ?? "";
-  const session = await fetch(`http://127.0.0.1:${port}/`, {
-    headers: cookie ? { cookie } : {},
-  });
-  const body = await session.text();
+  const spa = await fetch(`http://127.0.0.1:${port}/`);
+  const body = await spa.text();
   return {
     healthStatus: health.status,
     healthOk: healthBody.ok === true,
-    islandAssetStatus: islandAsset.status,
-    handshakeStatus: handshake.status,
-    sessionStatus: session.status,
-    dshBootInjected: body.includes("__DSH_BOOT__"),
+    spaStatus: spa.status,
+    dshBootAbsent: !body.includes("__DSH_BOOT__"),
   };
 }
 
@@ -252,32 +244,38 @@ if (degradedHold) {
     webToken: "evidence-main",
   });
   if (!boot.status.dsh?.mounted)
-    fail(`first boot did not mount DSH host: ${boot.status.dsh?.reason}`);
-  if (!boot.dshHost.record) fail("mounted host carries no boot record");
-  if (!boot.dshHost.record.entries.some((entry) => entry.name === "@skill-creator/dsh-client")) {
-    fail("boot graph does not contain the Manager client plugin row");
+    fail(`first boot did not mount the DSH kernel: ${boot.status.dsh?.reason}`);
+  if (!boot.dshHost.record) fail("mounted kernel carries no boot record");
+  const kernelRows = boot.dshHost.record.entries;
+  for (const kernelRow of [
+    "@deepseek-ai/dsh-agent",
+    "@deepseek-ai/dsh-session",
+    "@deepseek-ai/dsh-llm",
+    "@deepseek-ai/dsh-user-approval",
+    "@deepseek-ai/dsh-permission-presets",
+  ]) {
+    if (!kernelRows.includes(kernelRow)) fail(`kernel graph missing row: ${kernelRow}`);
   }
-  const dshToken = new URL(boot.dshHost.record.authenticatedUrl).searchParams.get("token") ?? "";
-
-  const probes = await probeComposedOrigin(boot.port, dshToken);
+  for (const webRow of kernelRows.filter((name) => name.includes("web"))) {
+    fail(`kernel graph must not contain web rows: ${webRow}`);
+  }
+  const probes = await probeManagerFace(boot.port);
   if (probes.healthStatus !== 200 || !probes.healthOk)
-    fail("Manager /api/health missing on composed origin");
-  if (probes.islandAssetStatus !== 200) fail("island asset not served on composed origin");
-  if (probes.handshakeStatus !== 303 || probes.sessionStatus !== 200 || !probes.dshBootInjected) {
-    fail(`DSH token handshake failed on composed origin: ${JSON.stringify(probes)}`);
+    fail("Manager /api/health missing with kernel mounted");
+  if (probes.spaStatus !== 200 || !probes.dshBootAbsent) {
+    fail(`Manager SPA face broken with kernel mounted: ${JSON.stringify(probes)}`);
   }
   evidence.boot = {
     mounted: true,
-    port: boot.dshHost.record.port,
-    entryCount: boot.dshHost.record.entries.length,
+    managerPort: boot.port,
+    entryCount: kernelRows.length,
     activationCount: boot.dshHost.record.activationOrder.length,
-    managerPluginRow: true,
-    graph: boot.dshHost.record.entries.map((entry) => entry.name),
+    kernelRows,
     activationOrder: boot.dshHost.record.activationOrder,
     probes,
   };
   console.log(
-    `boot: composed host mounted on 127.0.0.1:${boot.port} (DSH internal :${boot.dshHost.record.port}, ${boot.dshHost.record.entries.length} entries)`,
+    `boot: headless kernel mounted (${kernelRows.length} entries) behind manager :${boot.port}`,
   );
 
   // —— Manager 原有操作 filesystem diff（同一 daemon domain = RPC 路由的真相源）——
@@ -339,37 +337,27 @@ if (degradedHold) {
     `manager ops: create+disable+enable fs diffs verified (${createdSkillFile}, sha256=${afterCreate.get(createdSkillFile!)?.slice(0, 12)}…)`,
   );
 
-  // —— 真实 DSH packages 的 tool round（绑定 daemon 内官方 host 的 steward run）——
-  const { createDshSessionBinder } = await import("../src/daemon/steward/dsh-session-binder.ts");
-  const { createSkillStewardPipelineService } =
-    await import("../src/daemon/steward/pipeline-service.ts");
-  const binder = createDshSessionBinder({ host: () => boot.dshHost.profile! });
-  const pipeline = createSkillStewardPipelineService({
-    workspaces: boot.domain.workspaces,
-    skills: boot.domain.skills,
-    creator: boot.domain.creator,
-    dshSessionBinder: binder,
-  });
-  const run = await pipeline.startRun({
-    target: { workspaceId: workspace.id, providerId },
-    taskKind: "check",
-  });
-  if (!run.dshSessionId || run.toolCalls === 0) {
-    fail(`tool round did not bind or produced no tool calls: ${JSON.stringify(run)}`);
+  // —— 内核工具面 facts（design D1 负面场景证据；steward binder 的内核对接在
+  // task 2.3 恢复为 tool round 断言）——
+  const kernelHandle = boot.dshHost.kernel;
+  if (!kernelHandle) fail("mounted kernel carries no handle");
+  const globalTools = kernelHandle.globalToolNames();
+  const generalPurposeTools = ["bash", "pwsh", "read", "write", "edit", "glob", "grep"];
+  const leaked = globalTools.filter((name) => generalPurposeTools.includes(name));
+  if (leaked.length > 0) {
+    fail(`kernel global tool table leaked general-purpose tools: ${leaked.join(", ")}`);
   }
-  evidence.toolRound = {
-    dshSessionId: run.dshSessionId,
-    toolCalls: run.toolCalls,
-    terminal: run.terminal,
-    proposals: run.proposals,
+  evidence.kernelToolSurface = {
+    globalTools,
+    generalPurposeAbsent: leaked.length === 0,
   };
-  console.log(`tool round: dshSession=${run.dshSessionId} toolCalls=${run.toolCalls}`);
+  console.log(`kernel tool surface: ${globalTools.length} global tools, fs/shell absent`);
 
   if (hold) {
     // —— 常驻组合宿主（浏览器截图用）：同一生产入口 + 已绑定 transcript ——
-    const entry = `http://127.0.0.1:${boot.port}/?token=${dshToken}#token=${encodeURIComponent(boot.webToken)}`;
+    const entry = `http://127.0.0.1:${boot.port}/#token=${encodeURIComponent(boot.webToken)}`;
     fs.writeFileSync(path.join(root, "dsh-release-evidence.url"), `${entry}\n`, "utf8");
-    evidence.hold = { entry, sandbox, dshSessionId: run.dshSessionId };
+    evidence.hold = { entry, sandbox };
     flush();
     console.log(`composed host held for browser evidence: ${entry}`);
     console.log(`workspace: ${workspaceDir}`);
@@ -387,20 +375,18 @@ if (degradedHold) {
     process.on("SIGTERM", () => void stopDaemon(boot).catch(() => undefined));
     setInterval(() => undefined, 60_000);
   } else {
-    // —— 阶段 2：仅卸载宿主 → SPA 恢复（daemon 不死）——
+    // —— 阶段 2：内核 dispose → Manager 面不受影响（daemon 不死）——
     await boot.dshHost.dispose();
     const recoverySpa = await fetch(`http://127.0.0.1:${boot.port}/`);
-    const recoveryBody = await recoverySpa.text();
     const healthAfter = await fetch(`http://127.0.0.1:${boot.port}/api/health`);
     evidence.unmountRecovery = {
       spaStatus: recoverySpa.status,
-      dshBootAbsent: !recoveryBody.includes("__DSH_BOOT__"),
       daemonAlive: healthAfter.status === 200,
     };
-    if (recoverySpa.status !== 200 || recoveryBody.includes("__DSH_BOOT__")) {
-      fail("unmount recovery did not restore the SPA fixture");
+    if (recoverySpa.status !== 200 || healthAfter.status !== 200) {
+      fail("kernel dispose broke the manager face");
     }
-    console.log("unmount recovery: SPA restored, daemon alive");
+    console.log("kernel dispose: manager face intact, daemon alive");
 
     // —— 阶段 3：全量 stop → endpoint 释放 ——
     await stopDaemon(boot);
@@ -424,11 +410,8 @@ if (degradedHold) {
       webToken: "evidence-restart",
     });
     if (!reboot.status.dsh?.mounted)
-      fail(`restart did not remount DSH host: ${reboot.status.dsh?.reason}`);
-    const rebootProbes = await probeComposedOrigin(
-      reboot.port,
-      new URL(reboot.dshHost.record!.authenticatedUrl).searchParams.get("token") ?? "",
-    );
+      fail(`restart did not remount the DSH kernel: ${reboot.status.dsh?.reason}`);
+    const rebootProbes = await probeManagerFace(reboot.port);
     evidence.restart = {
       mounted: true,
       port: reboot.port,
@@ -436,11 +419,11 @@ if (degradedHold) {
       entryCount: reboot.dshHost.record!.entries.length,
       probes: rebootProbes,
     };
-    if (rebootProbes.handshakeStatus !== 303 || !rebootProbes.dshBootInjected) {
-      fail(`restart handshake failed: ${JSON.stringify(rebootProbes)}`);
+    if (rebootProbes.healthStatus !== 200 || rebootProbes.spaStatus !== 200) {
+      fail(`restart manager face failed: ${JSON.stringify(rebootProbes)}`);
     }
     await stopDaemon(reboot);
-    console.log(`restart: remounted on 127.0.0.1:${reboot.port} and stopped cleanly`);
+    console.log(`restart: kernel remounted behind manager :${reboot.port} and stopped cleanly`);
 
     // —— 阶段 5：降级矩阵（每例独立 home + 独立 state）——
     const degradation: Array<Record<string, unknown>> = [];
@@ -471,14 +454,10 @@ if (degradedHold) {
         withDshHost: true,
         webToken: `evidence-${name}`,
       });
-      let handshake = -1;
+      let healedMounted = false;
       if (handles.status.dsh?.mounted && handles.dshHost.record) {
-        // healed 形态：DSH token 握手在同源仍生效（挂载面完整）。
-        const token =
-          new URL(handles.dshHost.record.authenticatedUrl).searchParams.get("token") ?? "";
-        handshake = (
-          await fetch(`http://127.0.0.1:${handles.port}/?token=${token}`, { redirect: "manual" })
-        ).status;
+        // healed 形态：内核重新挂载（entries 非空即激活断言已过）。
+        healedMounted = handles.dshHost.record.entries.length > 0;
       }
       const spa = await fetch(`http://127.0.0.1:${handles.port}/`);
       const body = await spa.text();
@@ -490,7 +469,7 @@ if (degradedHold) {
         spaStatus: spa.status,
         dshBootAbsent: !body.includes("__DSH_BOOT__"),
         daemonAlive: true,
-        ...(handshake >= 0 ? { handshakeStatus: handshake } : {}),
+        ...(healedMounted ? { healedMounted } : {}),
       };
       await stopDaemon(handles);
       // 还原全局 env 到主 sandbox。
@@ -507,7 +486,7 @@ if (degradedHold) {
         if (record.mounted || record.spaStatus !== 200 || !record.dshBootAbsent) {
           fail(`degradation case ${name} did not fail closed: ${JSON.stringify(record)}`);
         }
-      } else if (!record.mounted || handshake !== 303) {
+      } else if (!record.mounted || !healedMounted) {
         fail(`heal case ${name} did not remount: ${JSON.stringify(record)}`);
       }
     }

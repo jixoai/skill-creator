@@ -20,8 +20,7 @@ import type { DaemonStatus } from "../shared/contracts/daemon.js";
 import { createDaemonDomain, type DaemonDomain } from "./domain.js";
 import { IpcServer } from "./ipc-server.js";
 import { WebServer } from "./web-server.js";
-import { mountProductionDshHost, type ProductionDshHost } from "./dsh-host-lifecycle.js";
-import { createDshSessionBinder } from "./steward/dsh-session-binder.js";
+import { mountDshKernelHost, type ProductionDshKernelHost } from "./dsh-host-lifecycle.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
 import { log } from "./log.js";
 import type { OpenTrayAppLaunchOptions } from "opentray";
@@ -61,7 +60,7 @@ export interface DaemonHandles {
   /** 同进程 domain（进程内组合/取证用；跨进程消费者走 RPC/IPC，不共享此句柄）。 */
   domain: DaemonDomain;
   /** 4.1 DSH 组合宿主句柄（boot graph + 有界 dispose）。 */
-  dshHost: ProductionDshHost;
+  dshHost: ProductionDshKernelHost;
   stop: (opts?: { exit?: boolean }) => Promise<void>;
 }
 
@@ -207,35 +206,24 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
   status.port = port;
   log(`web server listening on 127.0.0.1:${port}`);
 
-  // 4.1 生产入口：DSH 组合宿主（boot 失败降级 SPA 恢复夹具，daemon 不阻塞）。
-  const dshHost = await mountProductionDshHost(web, { disabled: opts.withDshHost === false });
+  // 2.1 内核形态：boot headless DSH 内核（boot 失败降级，daemon 不阻塞；无 HTTP
+  // 挂载——Agent 会话由 shell 面板经 agent.* RPC 消费内核 ctx）。
+  const dshHost = await mountDshKernelHost({ disabled: opts.withDshHost === false });
   if (dshHost.mounted) {
     status.dsh = {
       mounted: true,
-      port: dshHost.record!.port,
-      entries: dshHost.record!.entries.map((entry) => entry.name),
-      activationOrder: [...dshHost.record!.activationOrder],
+      entries: dshHost.record!.entries,
+      activationOrder: dshHost.record!.activationOrder,
     };
     log(
-      `dsh composition host mounted: 127.0.0.1:${dshHost.record!.port} (${dshHost.record!.entries.length} entries activated)`,
+      `dsh kernel mounted: ${dshHost.record!.entries.length} entries activated (headless)`,
     );
   } else {
     status.dsh = { mounted: false, reason: dshHost.reason };
-    log(`dsh composition host unavailable (SPA recovery active): ${dshHost.reason}`);
+    log(`dsh kernel unavailable (manager face keeps serving): ${dshHost.reason}`);
   }
-  // 4.2：DSH host 挂载后把 session binder 接入 steward pipeline——生产 run 绑定
-  // 官方 session 并把 turn/tool 事件喂进脱敏 stream 环形缓冲（dsh.sessions.streams
-  // 的生产数据源）。host 降级时 binder 保持缺席（run 不绑定，stream 空）。
-  if (dshHost.mounted && dshHost.profile) {
-    const profile = dshHost.profile;
-    domain.skillSteward.setDshSessionBinder(
-      createDshSessionBinder({
-        host: () => (dshHost.mounted ? profile : null),
-        createCollector: (runId, sessionId) =>
-          domain.dshSettings.createStreamCollector(runId, sessionId),
-      }),
-    );
-  }
+  // 2.3（待接入）：内核 session binder——steward run 绑定内核 session 并把
+  // turn/tool 事件喂进脱敏 stream 环形缓冲。host 降级时 binder 保持缺席。
 
   const performStop = async (): Promise<void> => {
     log("daemon stop requested");

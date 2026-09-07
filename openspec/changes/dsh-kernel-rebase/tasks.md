@@ -10,7 +10,7 @@
 
 ## 2. headless 内核组合
 
-- [ ] 2.1 dsh-host-lifecycle 改造：`initProfile(["dsh-base"])` 单 bundle，无 HTTP server 挂载；boot graph/版本 handshake 断言改内核等价（dsh-manager-mount/dsh-official-profile 测试改写）。
+- [x] 2.1 dsh-host-lifecycle 改造：`initProfile(["dsh-base"])` 单 bundle，无 HTTP server 挂载；boot graph/版本 handshake 断言改内核等价（dsh-manager-mount/dsh-official-profile 测试改写）。
   - Files: `src/daemon/dsh-host-lifecycle.ts`, `src/daemon/steward/dsh-official-profile.ts`, `test/`。
   - Acceptance: 内核 rows 激活（agent/session/settings/approval/permission facts 入证据）；无 web rows；降级 typed reason 不变；**负面场景钉死**——产品会话调用 bash/fs 类通用能力 → typed 拒绝并留审计，全局工具表只含受控注册（design D1 承诺落入验收）。
 - [ ] 2.2 `agent.*` RPC namespace：session list/create/prompt/cancel/stream 投影 + settings patch（model/preset/approval policy），代次门与终态停轮询语义平移；现有 `dsh.*` namespace（settings/credentials/sessions）收敛并入 `agent.*`，不保留双投影。
