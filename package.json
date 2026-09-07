@@ -78,6 +78,7 @@
     "@deepseek-ai/dsh-system-prompt": "0.1.2-rc.1",
     "@deepseek-ai/dsh-tool-ask-user": "0.1.2-rc.1",
     "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-workspace": "0.1.2-rc.1",
     "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
     "@deepseek-ai/dsh-web-frontend": "0.1.2-rc.1",
     "@opentray/ext-webview": "0.18.0",

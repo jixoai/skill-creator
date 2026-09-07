@@ -337,8 +337,8 @@ if (degradedHold) {
     `manager ops: create+disable+enable fs diffs verified (${createdSkillFile}, sha256=${afterCreate.get(createdSkillFile!)?.slice(0, 12)}…)`,
   );
 
-  // —— 内核工具面 facts（design D1 负面场景证据；steward binder 的内核对接在
-  // task 2.3 恢复为 tool round 断言）——
+  // —— 内核工具面 facts（design D1 负面场景证据）+ steward tool round（2.3 内核
+  // 绑定路径：真实 transcript 投影）——
   const kernelHandle = boot.dshHost.kernel;
   if (!kernelHandle) fail("mounted kernel carries no handle");
   const globalTools = kernelHandle.globalToolNames();
@@ -352,6 +352,31 @@ if (degradedHold) {
     generalPurposeAbsent: leaked.length === 0,
   };
   console.log(`kernel tool surface: ${globalTools.length} global tools, fs/shell absent`);
+
+  const { createDshSessionBinder } = await import("../src/daemon/steward/dsh-session-binder.ts");
+  const { createSkillStewardPipelineService } =
+    await import("../src/daemon/steward/pipeline-service.ts");
+  const binder = createDshSessionBinder({ host: () => kernelHandle });
+  const pipeline = createSkillStewardPipelineService({
+    workspaces: boot.domain.workspaces,
+    skills: boot.domain.skills,
+    creator: boot.domain.creator,
+    dshSessionBinder: binder,
+  });
+  const run = await pipeline.startRun({
+    target: { workspaceId: workspace.id, providerId },
+    taskKind: "check",
+  });
+  if (!run.dshSessionId || run.toolCalls === 0) {
+    fail(`tool round did not bind or produced no tool calls: ${JSON.stringify(run)}`);
+  }
+  evidence.toolRound = {
+    dshSessionId: run.dshSessionId,
+    toolCalls: run.toolCalls,
+    terminal: run.terminal,
+    proposals: run.proposals,
+  };
+  console.log(`tool round: kernel session=${run.dshSessionId} toolCalls=${run.toolCalls}`);
 
   if (hold) {
     // —— 常驻组合宿主（浏览器截图用）：同一生产入口 + 已绑定 transcript ——

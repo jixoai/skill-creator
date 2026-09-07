@@ -16,7 +16,7 @@
 - [x] 2.2 `agent.*` RPC namespace：session list/create/prompt/cancel/stream 投影 + settings patch（model/preset/approval policy），代次门与终态停轮询语义平移；现有 `dsh.*` namespace（settings/credentials/sessions）收敛并入 `agent.*`，不保留双投影。
   - Files: `src/shared/contracts/`, `src/daemon/rpc-router.ts`, `webui/src/lib/stores/agent.svelte.ts`。
   - Acceptance: 延迟/失败/断线组件交互测试；steward run ↔ 内核 session 绑定回归绿。
-- [ ] 2.3 session-binder 对接内核会话（无 DSH web host 的绑定路径），transcript/tool-round 投影保持。
+- [x] 2.3 session-binder 对接内核会话（无 DSH web host 的绑定路径），transcript/tool-round 投影保持。
 
 ## 3. Agent 面板（webui）
 

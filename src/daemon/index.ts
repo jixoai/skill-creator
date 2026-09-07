@@ -21,6 +21,7 @@ import { createDaemonDomain, type DaemonDomain } from "./domain.js";
 import { IpcServer } from "./ipc-server.js";
 import { WebServer } from "./web-server.js";
 import { mountDshKernelHost, type ProductionDshKernelHost } from "./dsh-host-lifecycle.js";
+import { createDshSessionBinder } from "./steward/dsh-session-binder.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
 import { log } from "./log.js";
 import type { OpenTrayAppLaunchOptions } from "opentray";
@@ -223,11 +224,19 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     log(`dsh kernel unavailable (manager face keeps serving): ${dshHost.reason}`);
   }
   // 2.2：内核句柄注入 domain——agent.* RPC 面即时刻可用（降级时 typed UNAVAILABLE）。
+  // 2.3：steward run 绑定内核 session（binder 只消费 ctx；turn/tool 事件喂进
+  // 脱敏 stream 环形缓冲）。内核降级时 binder 保持缺席（run 不绑定，stream 空）。
   if (dshHost.mounted && dshHost.kernel) {
-    domain.setKernelHost(dshHost.kernel);
+    const kernel = dshHost.kernel;
+    domain.setKernelHost(kernel);
+    domain.skillSteward.setDshSessionBinder(
+      createDshSessionBinder({
+        host: () => (dshHost.mounted ? kernel : null),
+        createCollector: (runId, sessionId) =>
+          domain.dshSettings.createStreamCollector(runId, sessionId),
+      }),
+    );
   }
-  // 2.3（待接入）：内核 session binder——steward run 绑定内核 session 并把
-  // turn/tool 事件喂进脱敏 stream 环形缓冲。host 降级时 binder 保持缺席。
 
   const performStop = async (): Promise<void> => {
     log("daemon stop requested");

@@ -149,9 +149,10 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
     "utf8",
   );
 
-  // entry rows：agent-presets roster（default 指向产品 preset）。preset 行引用的
-  // persona/ask-user 包不在 dsh-base 闭包内，由本仓 dependencies 经 heal 镜像供给
-  // （dsh-official-profile 头注教训，2026-09-06 实测）。
+  // entry rows：agent-presets roster（default 指向产品 preset）+ workspace
+  // （session 归属的 workspaceRegistry 服务；dsh-base 不含此行，binder 绑定
+  // 依赖它）。preset 行引用的 persona/ask-user 包不在 dsh-base 闭包内，由本仓
+  // dependencies 经 heal 镜像供给（dsh-official-profile 头注教训，2026-09-06 实测）。
   const configPath = path.join(profileDir, "cordis.yml");
   fs.writeFileSync(
     configPath,
@@ -161,6 +162,8 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
       "  config:\n",
       "    default: skill-creator\n",
       "    includeShippedRoot: false\n",
+      "- id: workspace\n",
+      "  name: '@deepseek-ai/dsh-workspace'\n",
     ].join(""),
     "utf8",
   );

@@ -25,6 +25,7 @@ import {
   createDshSessionBinder,
   type DshSessionBinder,
 } from "../src/daemon/steward/dsh-session-binder.js";
+import { bootDshKernel, type DshKernelHandle } from "../src/daemon/kernel/dsh-kernel.js";
 import { createSkillStewardPipelineService } from "../src/daemon/steward/pipeline-service.js";
 import type { MinimalDshWebHost } from "../src/daemon/steward/dsh-web-host.js";
 import { setHomeOverride } from "../src/shared/paths.js";
@@ -33,6 +34,7 @@ import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 
 let sandbox = "";
 let host: MinimalDshWebHost | undefined;
+let kernel: DshKernelHandle | undefined;
 let domain: DaemonDomain | undefined;
 const providerId = ProviderIdSchema.parse("openclaw");
 
@@ -48,6 +50,10 @@ afterEach(async () => {
   if (host) {
     await host.dispose().catch(() => undefined);
     host = undefined;
+  }
+  if (kernel) {
+    await kernel.dispose().catch(() => undefined);
+    kernel = undefined;
   }
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
@@ -196,6 +202,55 @@ describe("dsh session binder (task 2.1 step 3)", () => {
       const types = session?.log.map((event) => event.type);
       expect(types).toContain("assistant/message");
       expect(types).toContain("turn/end");
+    },
+  );
+
+  it(
+    "binds a run against the headless kernel (task 2.3): same event grammar, no web host",
+    { timeout: 240_000 },
+    async () => {
+      kernel = await bootDshKernel({ home: path.join(sandbox, "kernel-home") });
+      const binder = createDshSessionBinder({ host: () => kernel });
+
+      const workspaceDir = path.join(sandbox, "ws-kernel");
+      fs.mkdirSync(workspaceDir, { recursive: true });
+      const bound = await binder.openBoundSession({
+        runId: "sr_kernel01",
+        workspaceDir,
+        workspaceTitle: "kernel-ws",
+        taskText: "Skill Steward kernel binding run（Manager run id sr_kernel01）",
+      });
+      expect(bound.ok).toBe(true);
+      if (!bound.ok) return;
+      expect(bound.dshSessionId.length).toBeGreaterThan(0);
+
+      // 内核 store 内事件语法保持（title + turn/step + user turn）。
+      const sessions = (
+        kernel.ctx as unknown as {
+          sessions: { get(id: string): { log: Array<{ type: string }> } | undefined };
+        }
+      ).sessions;
+      const session = sessions.get(bound.dshSessionId);
+      expect(session).toBeDefined();
+      const types = session!.log.map((event) => event.type);
+      expect(types).toContain("session/title");
+      expect(types).toContain("turn/start");
+      expect(types).toContain("user/message");
+
+      const completed = binder.completeBoundSession({
+        dshSessionId: bound.dshSessionId,
+        summary: {
+          terminal: "completed",
+          acceptedResponses: 1,
+          droppedLateResponses: 0,
+          toolCalls: 2,
+          proposals: 0,
+        },
+      });
+      expect(completed).toEqual({ ok: true });
+      const finalTypes = sessions.get(bound.dshSessionId)!.log.map((e) => e.type);
+      expect(finalTypes).toContain("assistant/message");
+      expect(finalTypes).toContain("turn/end");
     },
   );
 });

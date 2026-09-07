@@ -178,6 +178,9 @@ importers:
       '@deepseek-ai/dsh-web-frontend':
         specifier: 0.1.2-rc.1
         version: 0.1.2-rc.1
+      '@deepseek-ai/dsh-workspace':
+        specifier: 0.1.2-rc.1
+        version: 0.1.2-rc.1
       '@opentray/ext-webview':
         specifier: 0.18.0
         version: 0.18.0(opentray@0.18.0(@gaubee/util@0.35.2))

@@ -29,7 +29,7 @@ import {
   type SkillStewardRunResult,
   type SkillToolCall,
 } from "../../shared/contracts/skill-steward.js";
-import type { MinimalDshWebHost } from "./dsh-web-host.js";
+import type { Context } from "@deepseek-ai/cordis";
 import type { DshStreamCollector } from "./dsh-settings.js";
 
 /** 绑定失败（闭合 union；缺宿主不是错误路径）。 */
@@ -120,7 +120,11 @@ function narrowHostSurface(ctx: unknown): DshHostSessionSurface | StewardSession
 
 export interface DshSessionBinderOptions {
   /** 宿主提供者（懒求值：daemon 未拥有 host 时返回 null）。 */
-  host: () => MinimalDshWebHost | null;
+  /**
+   * 宿主访问器（2.3 起为 headless 内核形态；只消费 ctx——web host 与 kernel
+   * 句柄结构兼容）。未挂载返回 null → typed HOST_UNAVAILABLE。
+   */
+  host: () => { ctx: Context } | null;
   /**
    * 4.2：帧收集器工厂（dsh.settings 环形缓冲）。提供时，绑定会话的 turn/tool
    * 事件同步进入脱敏 stream 投影（dsh.sessions.streams 的生产数据源）；
