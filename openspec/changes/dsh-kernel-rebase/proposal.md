@@ -30,12 +30,15 @@ sandbox）作为这块能力面的驱动底座。
 - **Agent 面板（新能力面）**：在 Skill Creator shell 内提供 Agent 会话的交互面板
   （对话流、工具行、审批请求、模型/preset 配置投影）——自研 Svelte 组件，消费 DSH
   内核事件投影；具体形态（全局侧栏 / per-tab 面板 / 两者兼有）在 design 定稿。
-- **能力供给**：把 Skill Creator 的领域能力（skills/workspaces/creator/repository/
-  steward 的确定面）以 **MCP server + MCP-apps** 形式供给 Agent 会话——Manager 仍
-  拥有全部 mutation authority（用户原始需求 [2026-09-05]：「Manager 永远拥有路径、
-  文件、revision、启停、安装、更新、draft、approval 和 audit authority。」），Agent
-  经 MCP 调用只获得受作用域限制的只读 + 提案能力；具体协议切面（MCP transport、
-  app 形态、与既有 skillSteward 工具面的关系）在 design 定稿。
+- **能力供给（MCP + MCP Apps）**：领域能力（skills/workspaces/creator/repository/
+  steward）收敛到 capability-core，以 **skill-creator-mcp**（MCP server）暴露——
+  内核经官方 `@deepseek-ai/dsh-mcp-client` 插件消费（一切皆插件，真 MCP 路径），
+  外部 client 同路接入；server 进程内优先（`/mcp` loopback HTTP）并支持独立启用
+  （`skill-creator mcp` stdio）。能力可携带 `ui://` HTML 卡片（MCP Apps，SEP-1865），
+  由面板 host 渲染端显示并支持应用内跳转；**提示词最佳实践**引导 AI 在合适时机用
+  卡片代替纯文本。Manager 仍拥有全部 mutation authority（「Manager 永远拥有路径、
+  文件、revision、启停、安装、更新、draft、approval 和 audit authority。」），MCP
+  面的 mutation 一律产 proposal 走审批。
 - **复用与退役清单**：保留 DSH 版本锁定矩阵、heal/闭包镜像、headless boot 生命周期、
   session-binder、确定性 steward runtime 与全部产品测试；退役 dsh-web-app 宿主路径、
   入口桥、island bundle 通道（`/manager/*`）与 DSH web 鉴权代理面。
@@ -48,15 +51,21 @@ sandbox）作为这块能力面的驱动底座。
   （面板组件、MCP server、MCP-apps 注册面）。
 - 修改：`dsh-webui-composition` —— 宿主化 requirements 标记退役（入口桥、island、
   DSH Web 宿主）；其内核侧事实（版本锁定、seam 审计）并入 `agent-kernel`。
-- 不变：Manager authority（`manager-core`）、技能管家协议（`skill-steward-contracts`）、
-  确定性 runtime（`skill-steward-runtime`）、产品工作流语义（`steward-product-workflow`
-  的 store/代次门/终态停轮询等修复全部保留，仅换宿主）。
+- 修改：`skill-steward-contracts` —— finite 工具面 MUST 收敛为「steward 协议的
+  agent 面」；capability-core/MCP 超集按 authority class 另行治理（mutation 必产
+  proposal），不得旁路 finite 面。
+- 修改：`steward-product-workflow` —— 工作流宿主绑定从「DSH client composition +
+  Svelte island」改为「Skill Creator shell 内的 Manager surface + 同 shell 的 Agent
+  面板」；store 语义不变。
+- 不变：Manager authority（`manager-core`）、steward 协议语义、确定性 runtime
+  （`skill-steward-runtime`）、工作流 store 语义（代次门/终态停轮询等全部平移）。
 
 ## Impact
 
-- `src/daemon/`：dsh-host-lifecycle 从「web profile 宿主」改为「headless 内核组合」；
-  web-server 退役 DSH 代理/握手桥/`/manager/*` 分区；新增 agent-kernel 域模块与 MCP
-  server 模块。
+- `src/daemon/`：dsh-host-lifecycle 从「web profile 宿主」改为「headless 内核组合」
+  （组合 dsh-mcp-client 插件行）；web-server 退役 DSH 代理/握手桥/`/manager/*` 分区、
+  新增 `/mcp` 端点；新增 agent-kernel 域模块与 skill-creator-mcp server 模块；CLI
+  新增 `mcp` 子命令。
 - `webui/`：三 App 回归自有 shell 布局；新增 Agent 面板组件族（对话流/工具行/审批/
   配置）；dsh-island 通道退役。
 - 契约：`dsh-runtime.ts` 重组为 agent-kernel 投影；新增 `agent-surface` 契约（面板

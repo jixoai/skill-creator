@@ -37,6 +37,16 @@ The kernel composition MUST pin the DSH package matrix and verify capability ava
 - **WHEN** an installed DSH package no longer satisfies the locked matrix
 - **THEN** boot reports the offending package/version and the daemon continues Manager-only.
 
+### Requirement: kernel tool surface is capability-scoped
+
+The composed kernel MUST disable general-purpose tool rows (bash, fs, and equivalents) for the product composition. Product agent sessions MUST NOT be exposed to general-purpose tools; the global tool table is limited to capability-layer registrations plus an explicit allowlist of kernel interaction tools (for example the ask-user approval tool that feeds panel approval cards). A session request for a general shell/filesystem capability MUST be rejected with an audit record.
+
+#### Scenario: general tool request rejected
+
+- **WHEN** an agent session attempts to invoke a bash or filesystem-equivalent capability
+- **THEN** the request is rejected with a typed error and audited
+- **AND** the global tool table contains only capability-layer registrations.
+
 ### Requirement: steward runs bind kernel sessions
 
 Skill Steward runs MUST keep binding kernel sessions for transcript and tool-round evidence via the existing session binder; the Agent surface is a projection of the same kernel session identity, not a second one.

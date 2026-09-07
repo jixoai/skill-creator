@@ -27,20 +27,36 @@ The Agent panel MUST provide session list/switching, conversation stream with ex
 - **WHEN** the window is 680px wide
 - **THEN** the panel switches to a single-screen overlay mode without horizontal overflow.
 
-### Requirement: capabilities are defined once and projected twice
+### Requirement: capabilities are served over MCP via the official bridge
 
-Skill Creator domain capabilities MUST be declared in one capability layer (name, Zod input/output, handler, authority class). The same declarations MUST be projected both as kernel tools for in-shell agent sessions and as MCP tools/resources for external MCP-capable clients.
+Skill Creator domain capabilities MUST be declared in one capability layer (name, Zod input/output, handler, authority class) and exposed by the skill-creator-mcp MCP server. In-shell agent sessions MUST consume them through the official `@deepseek-ai/dsh-mcp-client` plugin composed into the kernel; external MCP clients use the same server. No bespoke tool-projection bridge may be interposed.
 
-#### Scenario: in-shell tool projection
+#### Scenario: in-shell consumption through the official bridge
 
 - **WHEN** an agent session calls a Skill Creator capability
-- **THEN** it executes through the capability layer with the declared authority class enforced.
+- **THEN** the call travels the MCP path via dsh-mcp-client and executes through the capability layer with the declared authority class enforced.
 
-#### Scenario: MCP projection
+#### Scenario: external MCP client via the daemon endpoint
 
-- **WHEN** an external MCP client lists tools or reads resources from the Skill Creator MCP server
-- **THEN** it receives the same capability set with schema-faithful descriptors
+- **WHEN** an external MCP client connects to the daemon `/mcp` endpoint
+- **THEN** it receives the full capability set with schema-faithful descriptors
 - **AND** mutating capabilities produce proposals for Manager approval instead of direct writes.
+
+#### Scenario: external MCP client via standalone stdio
+
+- **WHEN** an external MCP client spawns `skill-creator mcp` (stdio)
+- **THEN** it receives the first-phase standalone subset: readonly plus propose capabilities
+- **AND** proposals created in this form are returned to the client for its own handling rather than persisted to Manager storage; the full set awaits a cross-process single-writer protocol in a later change.
+
+### Requirement: agent output uses MCP Apps cards when guided
+
+The system prompt MUST include versioned best-practice guidance telling the agent when to answer with MCP Apps cards (`ui://` HTML resources) instead of plain text. The panel MUST render such cards per the MCP Apps specification (sandboxed iframe, postMessage JSON-RPC) and translate in-card navigation intents into shell routes.
+
+#### Scenario: card-worthy answer
+
+- **WHEN** the agent presents a skill, finding, proposal, or install/update result in a session
+- **THEN** guided output carries the `ui://` card resource and the panel renders it with in-app navigation
+- **AND** the same resource remains protocol-valid for any MCP Apps capable host.
 
 ### Requirement: MCP exposure keeps Manager authority
 
