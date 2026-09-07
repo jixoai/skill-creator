@@ -99,6 +99,41 @@ export const AgentSessionsStreamsInputSchema = z.object({
 /** 跨会话帧查询输入。 */
 export type AgentSessionsStreamsInput = z.infer<typeof AgentSessionsStreamsInputSchema>;
 
+/** ask_user_question 的单个问题（dsh-user-questions 结构的浏览器安全投影）。 */
+export const AgentApprovalQuestionSchema = z.object({
+  id: z.string().min(1),
+  question: z.string().min(1),
+  detail: z.string().optional(),
+  header: z.string().optional(),
+  multiSelect: z.boolean().optional(),
+  options: z
+    .array(z.object({ label: z.string().min(1), description: z.string().optional() }))
+    .optional(),
+});
+/** 单个问题。 */
+export type AgentApprovalQuestion = z.infer<typeof AgentApprovalQuestionSchema>;
+
+/** 回答输入（agent.session.answer）。 */
+export const AgentSessionAnswerInputSchema = z.object({
+  sessionId: z.string().min(1),
+  /** 待答请求的帧 seq（幂等键：已解决的请求返回 resolved:false）。 */
+  requestSeq: z.number().int().nonnegative(),
+  answers: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        selected: z.array(z.string().min(1)),
+        custom: z.string().optional(),
+      }),
+    )
+    .min(1),
+});
+/** 回答输入。 */
+export type AgentSessionAnswerInput = z.infer<typeof AgentSessionAnswerInputSchema>;
+
+/** 回答结果。 */
+export const AgentSessionAnswerResultSchema = z.object({ answered: z.boolean() });
+
 export {
   DshStewardSettingsViewSchema as AgentSettingsViewSchema,
   DshSettingsUpdateSchema as AgentSettingsUpdateSchema,

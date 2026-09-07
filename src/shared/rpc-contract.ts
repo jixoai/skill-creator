@@ -23,6 +23,8 @@ import {
   AgentSessionCreateResultSchema,
   AgentSessionCancelInputSchema,
   AgentSessionCancelResultSchema,
+  AgentSessionAnswerInputSchema,
+  AgentSessionAnswerResultSchema,
   AgentSessionPromptInputSchema,
   AgentSessionPromptResultSchema,
   AgentSessionStreamInputSchema,
@@ -304,6 +306,10 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       prompt: oc.input(AgentSessionPromptInputSchema).output(AgentSessionPromptResultSchema),
       /** 取消当前活动（幂等）。 */
       cancel: oc.input(AgentSessionCancelInputSchema).output(AgentSessionCancelResultSchema),
+      /** 回答一个待答审批/提问请求（approval-request 帧的应答通道）。 */
+      answer: oc
+        .input(AgentSessionAnswerInputSchema)
+        .output(AgentSessionAnswerResultSchema),
       /** 增量帧读取（afterSeq 游标 + status 快照）。 */
       stream: oc.input(AgentSessionStreamInputSchema).output(AgentSessionStreamResultSchema),
     },

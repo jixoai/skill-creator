@@ -184,6 +184,13 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           domain.agentSessions.cancel(input.sessionId);
           return { canceled: true as const };
         }),
+        answer: rpc.agent.session.answer.handler(({ input }) => ({
+          answered: domain.agentSessions.answer(
+            input.sessionId,
+            input.requestSeq,
+            input.answers,
+          ),
+        })),
         stream: rpc.agent.session.stream.handler(({ input }) =>
           domain.agentSessions.stream(input.sessionId, input.afterSeq, input.limit),
         ),

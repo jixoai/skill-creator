@@ -20,9 +20,9 @@
 
 ## 3. Agent 面板（webui）
 
-- [ ] 3.1 面板骨架：shell 级右栏 drawer（收起/展开、跨 tab 存活、<720px 单屏覆盖），会话列表/切换/新建。
-- [ ] 3.2 对话流组件族：消息行、工具行（展开输入/结果）、审批请求卡（决定经 Manager approval 链）、终态叙述；断线可见与恢复。
-- [ ] 3.3 配置投影：model/preset/permission/approval policy 面板（ask/never 语义沿用）。
+- [x] 3.1 面板骨架：shell 级右栏 drawer（收起/展开、跨 tab 存活、<720px 单屏覆盖），会话列表/切换/新建。
+- [x] 3.2 对话流组件族：消息行、工具行（展开输入/结果）、审批请求卡（决定经 Manager approval 链）、终态叙述；断线可见与恢复。
+- [x] 3.3 配置投影：model/preset/permission/approval policy 面板（ask/never 语义沿用）。
   - Acceptance（3.x）：真实浏览器 1100px/680px 无溢出；键盘走查；组件交互测试（延迟/失败 RPC）；0 JS 错误。
 
 ## 4. MCP 供给与 MCP Apps

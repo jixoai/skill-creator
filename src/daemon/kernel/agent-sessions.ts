@@ -76,6 +76,14 @@ interface SessionEventLike {
   data: unknown;
 }
 
+/** 待答问题的 live 记录（answerer Promise 由 agent.session.answer resolve）。 */
+interface PendingApproval {
+  requestSeq: number;
+  resolve: (answer: {
+    answers: Array<{ id: string; selected: string[]; custom?: string }>;
+  }) => void;
+}
+
 /** 会话的 live 面板记录（frames ring + live agent 引用）。 */
 interface LivePanelSession {
   agent: AgentLike;
@@ -84,6 +92,8 @@ interface LivePanelSession {
   /** 进程内单调帧序（区别于 session event seq——投影视角排序）。 */
   frameSeq: number;
   title: string;
+  /** 按 requestSeq 索引的待答问题（ask_user_question waterfall）。 */
+  pending: Map<number, PendingApproval>;
 }
 
 const DEFAULT_RETENTION = 200;
@@ -161,13 +171,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       case "agent/status":
         return { ...base, seq: entry.frameSeq++, kind: "status", payload: redactDshPayload(data) };
       case "user/message":
-        return {
-          ...base,
-          seq: entry.frameSeq++,
-          kind: "assistant-text",
-          text: textOf(data),
-          payload: redactDshPayload({ source: data.source }),
-        };
+        // 面板已乐观追加用户输入；inject/context 注入（system-reminder、runtime
+        // context）不是模型输出，不进对话流。
+        return null;
       case "assistant/message": {
         const text = textOf(data);
         return {
@@ -197,6 +203,41 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       default:
         return null;
     }
+  }
+
+  /**
+   * 面板 answerer：claim 本会话的 user-questions/request（不 next 委派——面板是
+   * 唯一人类面），问题以 approval-request 帧下发，Promise 由 answer() resolve。
+   */
+  function registerPanelAnswerer(entry: LivePanelSession): void {
+    (
+      entry.agent as unknown as {
+        ctx: {
+          on: (
+            event: "user-questions/request",
+            listener: (
+              request: { questions?: unknown },
+              next: () => Promise<unknown>,
+            ) => Promise<{ answers: Array<{ id: string; selected: string[]; custom?: string }> }>,
+          ) => () => void;
+        };
+      }
+    ).ctx.on("user-questions/request", async (request) => {
+      const requestSeq = entry.frameSeq;
+      entry.frames.push({
+        at: new Date().toISOString(),
+        runId: entry.agent.session.id,
+        sessionId: entry.agent.session.id,
+        seq: requestSeq,
+        kind: "approval-request",
+        payload: redactDshPayload({ questions: request.questions ?? [] }),
+      });
+      return await new Promise<{ answers: Array<{ id: string; selected: string[]; custom?: string }> }>(
+        (resolve) => {
+          entry.pending.set(requestSeq, { requestSeq, resolve });
+        },
+      );
+    });
   }
 
   /** 消息 content blocks 的 text 拼接（unknown 收窄）。 */
@@ -294,7 +335,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         frames: [],
         frameSeq: 0,
         title: "",
+        pending: new Map(),
       };
+      registerPanelAnswerer(entry);
       live.set(sessionId, entry);
       if (input.prompt) {
         handle.agent.followup(
@@ -336,8 +379,36 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       const frames = entry.frames.filter((frame) => frame.seq > afterSeq).slice(0, limit);
       return { frames, status: statusOf(entry) };
     },
-    /** 有界销毁（daemon stop 时逐个回收 agent）。 */
+    /** 回答一个待答请求（幂等：未知/已解决的 requestSeq 返回 false）。 */
+    answer(
+      sessionId: string,
+      requestSeq: number,
+      answers: Array<{ id: string; selected: string[]; custom?: string }>,
+    ): boolean {
+      const entry = live.get(sessionId);
+      if (!entry) throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
+      const pending = entry.pending.get(requestSeq);
+      if (!pending) return false;
+      entry.pending.delete(requestSeq);
+      entry.frames.push({
+        at: new Date().toISOString(),
+        runId: sessionId,
+        sessionId,
+        seq: entry.frameSeq++,
+        kind: "approval-resolved",
+        payload: redactDshPayload({ answers }),
+      });
+      pending.resolve({ answers });
+      return true;
+    },
+    /** 有界销毁（daemon stop 时逐个回收 agent；待答请求以空答案释放）。 */
     async dispose(): Promise<void> {
+      for (const entry of live.values()) {
+        for (const pending of entry.pending.values()) {
+          pending.resolve({ answers: [] });
+        }
+        entry.pending.clear();
+      }
       await Promise.allSettled([...live.values()].map((entry) => entry.dispose()));
       live.clear();
     },

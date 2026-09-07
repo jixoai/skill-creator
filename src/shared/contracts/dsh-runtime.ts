@@ -375,6 +375,8 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   "tool-result",
   "assistant-text",
   "turn-end",
+  "approval-request",
+  "approval-resolved",
 ]);
 /** session stream 帧类别。 */
 export type DshSessionStreamFrameKind = z.infer<typeof DshSessionStreamFrameKindSchema>;

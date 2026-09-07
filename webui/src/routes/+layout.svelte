@@ -30,6 +30,9 @@
   import IconCommand from "@lucide/svelte/icons/command";
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
   import IconPlus from "@lucide/svelte/icons/folder-plus";
+  import IconAgent from "@lucide/svelte/icons/message-square";
+  import AgentPanel from "$lib/components/agent/AgentPanel.svelte";
+  import { agentPanel, setAgentPanelOpen } from "$lib/stores/agent.svelte";
 
   // 顶层注册（在任何 $derived 之前执行，确保 appRegistry 在首次渲染时已填充）。
   registerApps();
@@ -85,7 +88,7 @@
 </svelte:head>
 
 <TooltipProvider>
-  <div class="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+  <div class="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
     <!-- 顶部栏（原生拖拽区域 + 工具栏） -->
     <WindowDragRegion variant="main">
       {#snippet left()}
@@ -111,6 +114,18 @@
           onclick={() => globalThis.location.reload()}
         >
           <IconRefresh class="h-3.5 w-3.5" />
+        </button>
+        <button
+          class="no-drag flex h-6 w-6 items-center justify-center rounded transition-colors {agentPanel.open
+            ? 'bg-primary/10 text-primary'
+            : 'text-muted-foreground hover:text-foreground'} max-[720px]:h-11 max-[720px]:w-11"
+          onpointerdown={(e) => e.stopPropagation()}
+          aria-label="Toggle agent panel"
+          title="Agent panel"
+          aria-pressed={agentPanel.open}
+          onclick={() => setAgentPanelOpen(!agentPanel.open)}
+        >
+          <IconAgent class="h-3.5 w-3.5" />
         </button>
       {/snippet}
     </WindowDragRegion>
@@ -157,11 +172,16 @@
         </button>
       </nav>
 
-      <!-- 右侧：Shell 内容区 -->
+      <!-- 右侧：Shell 内容区 + Agent 面板 drawer（shell 级、跨 tab 存活） -->
       <main class="min-w-0 flex-1 overflow-hidden">
         <TabOutlet />
         {@render children?.()}
       </main>
+      {#if agentPanel.open}
+        <div class="agent-panel-layer max-[720px]:absolute max-[720px]:inset-0 max-[720px]:z-40">
+          <AgentPanel />
+        </div>
+      {/if}
     </div>
   </div>
 </TooltipProvider>
