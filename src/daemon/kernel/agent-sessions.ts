@@ -428,7 +428,7 @@ function applyProductToolSurface(agentCtx: Context): void {
     agentCtx as Context & {
       tools?: {
         schemas?: () => Array<{ name?: string }>;
-        restrict?: (filter: { allow: string[] }) => () => void;
+        restrict?: (filter: { deny: string[] }) => () => void;
         guard?: (guard: (exec: { name?: string }) => string | undefined) => () => void;
       };
     }
@@ -437,7 +437,12 @@ function applyProductToolSurface(agentCtx: Context): void {
   const globalNames = (tools.schemas?.() ?? [])
     .map((schema) => schema?.name)
     .filter((name): name is string => typeof name === "string");
-  const allow = KERNEL_AGENT_TOOL_ALLOWLIST.filter((name) => globalNames.includes(name));
-  if (allow.length === 0) return;
-  tools.restrict({ allow });
+  // deny 式收窄（allow 式要求名单全部已注册，与 mcp 工具的异步注册竞争）：
+  // 显式 allowlist 与 mcp capability 工具（mcp__skill-creator__*）保留，其余
+  // global 工具全部 deny；晚注册的 mcp 工具不在此刻的 deny 集，继承可见。
+  const deny = globalNames.filter(
+    (name) =>
+      !KERNEL_AGENT_TOOL_ALLOWLIST.includes(name) && !name.startsWith("mcp__skill-creator__"),
+  );
+  if (deny.length > 0) tools.restrict({ deny });
 }

@@ -87,6 +87,11 @@ export interface DshKernelHandle {
 export interface DshKernelOptions {
   /** DSH_HOME（调用方负责隔离；profile 与 module fallback 都写在这里）。 */
   home: string;
+  /**
+   * skill-creator-mcp 连接（task 4.1b）：形态 A 的 /mcp 端点。提供时内核组合
+   * dsh-mcp-client 插件行（token 经 env 模板注入，不落盘明文）。
+   */
+  mcp?: { url: string; token: string };
 }
 
 /**
@@ -101,6 +106,14 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
   process.env.DSH_HOME = options.home;
   const profileDir = resolveProfileDir("kernel", options.home);
   initProfile(profileDir, ["@deepseek-ai/dsh-base"], "startup");
+  // mcp 连接配置走 env + 模板引用（README 实测形态）：Authorization 的 Bearer
+  // 值不写入 profile YAML（落盘面隔离；env 生命周期与内核一致）。
+  const previousMcpUrl = process.env.SKILL_CREATOR_MCP_URL;
+  const previousMcpToken = process.env.SKILL_CREATOR_MCP_TOKEN;
+  if (options.mcp) {
+    process.env.SKILL_CREATOR_MCP_URL = options.mcp.url;
+    process.env.SKILL_CREATOR_MCP_TOKEN = options.mcp.token;
+  }
 
   // user patch 层：内核工具面收窄（disable 整行；行 id 来自 dsh-base bundle patch）。
   const disableYaml = KERNEL_DISABLED_TOOL_ROWS.map((id) => `- id: ${id}\n  disabled: true\n`).join(
@@ -154,6 +167,18 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
   // 依赖它）。preset 行引用的 persona/ask-user 包不在 dsh-base 闭包内，由本仓
   // dependencies 经 heal 镜像供给（dsh-official-profile 头注教训，2026-09-06 实测）。
   const configPath = path.join(profileDir, "cordis.yml");
+  const mcpRow = options.mcp
+    ? [
+        "- id: mcp-skill-creator\n",
+        "  name: '@deepseek-ai/dsh-mcp-client'\n",
+        "  config:\n",
+        "    serverName: skill-creator\n",
+        "    transport: streamable-http\n",
+        "    url: !!js process.env.SKILL_CREATOR_MCP_URL\n",
+        "    headers:\n",
+        "      Authorization: !!js '`Bearer ${process.env.SKILL_CREATOR_MCP_TOKEN}`'\n",
+      ].join("")
+    : "";
   fs.writeFileSync(
     configPath,
     [
@@ -164,6 +189,7 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
       "    includeShippedRoot: false\n",
       "- id: workspace\n",
       "  name: '@deepseek-ai/dsh-workspace'\n",
+      mcpRow,
     ].join(""),
     "utf8",
   );
@@ -229,6 +255,14 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
       await (ctx as unknown as { fiber?: { dispose: () => Promise<void> } }).fiber?.dispose();
       if (previousDshHome === undefined) delete process.env.DSH_HOME;
       else process.env.DSH_HOME = previousDshHome;
+      restoreEnv("SKILL_CREATOR_MCP_URL", previousMcpUrl);
+      restoreEnv("SKILL_CREATOR_MCP_TOKEN", previousMcpToken);
     },
   };
+}
+
+/** env 还原（undefined = 原本不存在，删除）。 */
+function restoreEnv(key: string, previous: string | undefined): void {
+  if (previous === undefined) delete process.env[key];
+  else process.env[key] = previous;
 }

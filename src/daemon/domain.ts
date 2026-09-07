@@ -36,6 +36,11 @@ import {
   type AgentSessionsService,
 } from "./kernel/agent-sessions.js";
 import type { DshKernelHandle } from "./kernel/dsh-kernel.js";
+import {
+  createCapabilityRegistry,
+  type CapabilityRegistry,
+} from "./capability/core.js";
+import { createDomainCapabilities } from "./capability/domain-capabilities.js";
 import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
 import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
 import type { HarnessAdapter } from "./steward/harness-adapter.js";
@@ -81,6 +86,8 @@ export interface DaemonDomain {
   agentSessions: AgentSessionsService;
   /** 内核句柄注入（index 在 boot 成功后调用；降级时保持缺席 → typed UNAVAILABLE）。 */
   setKernelHost: (handle: DshKernelHandle) => void;
+  /** Manager 能力面（MCP server 与提示词投影消费；task 4.1）。 */
+  managerCapabilities: CapabilityRegistry;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
@@ -123,6 +130,13 @@ export function createDaemonDomain(
       kernelHostRef.handle = handle;
       agentSessions.attach(handle);
     },
-  };
+  } as DaemonDomain;
+  // manager 能力面：结构化子集依赖（不含自身），构造后冻结为普通属性。
+  const managerCapabilities = createCapabilityRegistry(createDomainCapabilities(domain));
+  Object.defineProperty(domain, "managerCapabilities", {
+    value: managerCapabilities,
+    enumerable: true,
+    writable: false,
+  });
   return domain;
 }

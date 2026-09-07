@@ -52,6 +52,77 @@ const KERNEL_SERVICE_ROWS = [
   "@deepseek-ai/dsh-permission-presets",
 ];
 
+describe("dsh-mcp-client bridge over the kernel (task 4.1b)", () => {
+  it(
+    "registers skill-creator capability tools on the kernel global tool table",
+    { timeout: 240_000 },
+    async () => {
+      // 形态 A /mcp 端点（真实 WebServer + capability registry）。
+      const { createDaemonDomain } = await import("../src/daemon/domain.js");
+      const { WebServer } = await import("../src/daemon/web-server.js");
+      const { setHomeOverride } = await import("../src/shared/paths.js");
+      const { randomBytes } = await import("node:crypto");
+      const isolatedHome = path.join(sandbox, "state");
+      process.env.SKILL_CREATOR_HOME = isolatedHome;
+      setHomeOverride(isolatedHome);
+      const domain = createDaemonDomain();
+      const webuiDir = path.join(sandbox, "webui");
+      fs.mkdirSync(webuiDir, { recursive: true });
+      fs.writeFileSync(path.join(webuiDir, "index.html"), "<!doctype html><title>M</title>");
+      const token = randomBytes(24).toString("base64url");
+      const web = new WebServer({
+        webToken: token,
+        webuiDir,
+        domain,
+        status: () => ({
+          active: true,
+          pid: process.pid,
+          version: "test",
+          port: 0,
+          startedAt: Date.now(),
+          tray: "headless",
+        }),
+      });
+      const port = await web.start(0);
+      const { createSkillCreatorMcpServer } = await import(
+        "../src/daemon/mcp/skill-creator-mcp.js"
+      );
+      web.mountMcp(() =>
+        createSkillCreatorMcpServer({
+          capabilities: domain.managerCapabilities,
+          face: "in-process",
+        }),
+      );
+      try {
+        const kernel = await bootDshKernel({
+          home: path.join(sandbox, "dsh-home"),
+          mcp: { url: `http://127.0.0.1:${port}/mcp`, token },
+        });
+        booted.push(kernel);
+        // dsh-mcp-client 异步连接 + 工具同步：轮询等待 mcp__skill-creator__* 出现。
+        let mcpTools: string[] = [];
+        for (let attempt = 0; attempt < 30 && mcpTools.length === 0; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          mcpTools = kernel.globalToolNames().filter((name) => name.startsWith("mcp__skill-creator__"));
+        }
+        expect(mcpTools.length).toBeGreaterThan(3);
+        expect(mcpTools).toContain("mcp__skill-creator__workspace_list");
+        expect(mcpTools).toContain("mcp__skill-creator__skills_list");
+        // 收窄不变量保持：通用 fs/shell 工具仍缺席。
+        const leaked = kernel
+          .globalToolNames()
+          .filter((name) => ["bash", "read", "write", "edit", "glob", "grep"].includes(name));
+        expect(leaked).toEqual([]);
+      } finally {
+        await web.stop({ graceMs: 0 });
+        await domain.repository.dispose();
+        await domain.steward.dispose();
+        setHomeOverride(null);
+      }
+    },
+  );
+});
+
 describe("headless dsh kernel (task 2.1)", () => {
   it(
     "boots the single dsh-base bundle with kernel service rows and no web rows",

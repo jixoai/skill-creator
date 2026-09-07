@@ -28,6 +28,20 @@ export type DshLockedPackageName = keyof typeof DSH_LOCKED_PACKAGES;
 /** 源码审计锚定的官方仓库 commit（证据：docs/research/2026-09-06-dsh-integration.md）。 */
 export const DSH_AUDITED_COMMIT = "d347e703908d0406b7a7ef80e3a0e594d86b2215";
 
+/**
+ * MCP 桥锁定包（dsh-kernel-rebase task 4.1b）：内核组合的官方 MCP client 及其
+ * peer 闭包四包（README 依赖事实，2026-09-08 实测）。漂移 → typed unavailable。
+ */
+export const DSH_MCP_BRIDGE_PACKAGES = {
+  "@deepseek-ai/dsh-mcp-client": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-scope": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-timeout": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-attachment": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-subprocess": "0.1.2-rc.1",
+} as const;
+/** MCP 桥锁定包名集合。 */
+export type DshMcpBridgePackageName = keyof typeof DSH_MCP_BRIDGE_PACKAGES;
+
 /** 每个 package 在 Skill Steward 组合中必须存在的 seam（composition row）。 */
 export const DSH_COMPOSITION_ROWS: Record<DshLockedPackageName, string> = {
   "@deepseek-ai/dsh-agent": "AgentRegistry service (ctx.agents create/resume + AgentSetup scope)",

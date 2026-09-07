@@ -37,6 +37,8 @@ export interface DshMountHandle {
 }
 
 /** WebUI 静态服务和 RPC 通道的启动配置。 */
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
 export interface WebServerOptions {
   webToken: string;
   webuiDir: string;
@@ -84,6 +86,55 @@ export class WebServer {
   mountDsh(handle: DshMountHandle | null): void {
     this.dshMount = handle;
     log(handle ? `dsh web host mounted: 127.0.0.1:${handle.port}` : "dsh web host unmounted");
+  }
+
+  /**
+   * 挂载 skill-creator MCP 面（task 4.1 形态 A）。传 null 卸载（降级语义：
+   * MCP 面缺席 → 404）。stateless streamable HTTP：每请求从 factory 新建
+   * server + transport（SDK stateless 模式；capability 面无状态）。
+   */
+  mountMcp(factory: (() => McpServer) | null): void {
+    this.mcpFactory = factory;
+    log(factory ? "skill-creator mcp endpoint mounted: /mcp" : "skill-creator mcp endpoint unmounted");
+  }
+
+  private mcpFactory: (() => McpServer) | null = null;
+
+  /** /mcp 请求处理：Bearer 鉴权 → stateless transport → 每请求新 server。 */
+  private async handleMcp(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+  ): Promise<void> {
+    if (!this.mcpFactory) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "mcp endpoint not mounted" }));
+      return;
+    }
+    const auth = request.headers.authorization ?? "";
+    const expected = `Bearer ${this.options.webToken}`;
+    if (auth !== expected) {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    const [{ StreamableHTTPServerTransport }, server] = await Promise.all([
+      import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
+      Promise.resolve(this.mcpFactory()),
+    ]);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    transport.onerror = (error) => {
+      log(`mcp transport error: ${error instanceof Error ? error.message : String(error)}`);
+    };
+    await server.connect(transport);
+    // 清理挂在响应完成（request 流在 body 消费后即 close，挂 request 会在响应前
+    // 关掉 transport，竞争出 "Session not found"）。
+    response.on("close", () => {
+      void transport.close().catch(() => undefined);
+    });
+    await transport.handleRequest(request, response);
   }
 
   constructor(private readonly options: WebServerOptions) {
@@ -232,6 +283,12 @@ export class WebServer {
       if (url.pathname === "/api/health") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ ok: true }));
+        return;
+      }
+      // MCP 端点（task 4.1 形态 A）：loopback + Bearer web token（鉴权先行，
+      // 未带/错 token 一律 401，不进入 transport）。
+      if (url.pathname === "/mcp") {
+        await this.handleMcp(request, response);
         return;
       }
       // Manager 保留资产前缀（task 3.1a）：DSH host 挂载时，Manager island 资产

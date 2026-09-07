@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DSH_LOCKED_PACKAGES,
+  DSH_MCP_BRIDGE_PACKAGES,
   DshRuntimeStatusSchema,
 } from "../src/shared/contracts/dsh-runtime.js";
 import {
@@ -34,6 +35,15 @@ const realLoader: DshPackageLoader = (packageName) => {
 };
 
 describe("dsh runtime handshake (task 3.1)", () => {
+  it("resolves the mcp bridge packages at the locked versions (task 4.1b)", async () => {
+    for (const [packageName, lockedVersion] of Object.entries(DSH_MCP_BRIDGE_PACKAGES)) {
+      const resolved = await import(`${packageName}/package.json`, { with: { type: "json" } })
+        .then((mod) => (mod.default as { version: string }).version)
+        .catch(() => null);
+      expect(resolved, packageName).toBe(lockedVersion);
+    }
+  });
+
   it("resolves the real locked composition with full capability matrix", () => {
     const adapter = createDshRuntimeAdapter({ loader: realLoader });
     const status = adapter.handshake();

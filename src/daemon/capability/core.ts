@@ -70,6 +70,8 @@ export interface CapabilityDescriptor {
 export interface CapabilityRegistry {
   /** 执行一次调用（权威检查 + handler 兜底）；不吞审计——审计由调用方包装。 */
   call(name: string, input: unknown, principal: CapabilityPrincipal): Promise<CapabilityCallResult>;
+  /** 按名取定义（MCP descriptors / 提示词投影读 input schema 用）；未知返回 null。 */
+  definitionOf(name: string): CapabilityDefinition | null;
   /** 全量能力清单（注册序）。 */
   describe(): CapabilityDescriptor[];
   /** 已注册能力名集合。 */
@@ -122,6 +124,7 @@ export function createCapabilityRegistry(
         );
       }
     },
+    definitionOf: (name) => byName.get(name) ?? null,
     describe: () =>
       [...byName.values()].map(({ name, description, authority }) => ({
         name,

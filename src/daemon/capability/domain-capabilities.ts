@@ -71,11 +71,17 @@ async function invoke(action: () => Promise<unknown> | unknown): Promise<Capabil
 
 const none = z.object({});
 
+/** 能力面消费的域模块子集（结构化依赖：解 domain ↔ capability 自引用环）。 */
+export type DomainCapabilityDeps = Pick<
+  DaemonDomain,
+  "workspaces" | "skills" | "creator" | "repository" | "sourceRegistry" | "skillsUpdate"
+>;
+
 /**
  * daemon 级领域能力（与 manager-contract-map 的 procedure 一一对应）。
  * 注册序：workspace → skills（含 update）→ creator → repository（含 sources）。
  */
-export function createDomainCapabilities(domain: DaemonDomain): CapabilityDefinition[] {
+export function createDomainCapabilities(domain: DomainCapabilityDeps): CapabilityDefinition[] {
   return [
     {
       name: "workspace.list",

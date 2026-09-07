@@ -422,6 +422,13 @@ const COMMANDS = {
   },
   status: { description: "Check the running daemon", run: runStatus },
   stop: { description: "Gracefully stop the daemon", run: runStop },
+  mcp: {
+    description: "Run the skill-creator MCP server over stdio (readonly face)",
+    run: () => {
+      void runMcpStdio();
+      return 0;
+    },
+  },
   version: {
     description: "Print the version",
     run: () => {
@@ -465,6 +472,32 @@ async function main(): Promise<number> {
   }
 
   return COMMANDS[command].run();
+}
+
+/**
+ * `skill-creator mcp`（task 4.1 形态 B）：stdio transport，不依赖 daemon 常驻——
+ * 进程内自建 domain（无 IPC/HTTP/tray）。面收窄为 readonly + propose-only：
+ * mutation 仅经形态 A 的 daemon 审批链。
+ */
+async function runMcpStdio(): Promise<void> {
+  const { StdioServerTransport } = await import(
+    "@modelcontextprotocol/sdk/server/stdio.js"
+  );
+  const { createDaemonDomain } = await import("../daemon/domain.js");
+  const { createSkillCreatorMcpServer } = await import(
+    "../daemon/mcp/skill-creator-mcp.js"
+  );
+  const domain = createDaemonDomain();
+  const server = createSkillCreatorMcpServer({
+    capabilities: domain.managerCapabilities,
+    face: "stdio",
+  });
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error("skill-creator mcp: stdio server ready (readonly face)");
+  process.on("SIGINT", () => {
+    void server.close().finally(() => process.exit(0));
+  });
 }
 
 void main()

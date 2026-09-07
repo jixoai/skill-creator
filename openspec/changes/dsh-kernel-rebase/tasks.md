@@ -27,8 +27,8 @@
 
 ## 4. MCP 供给与 MCP Apps
 
-- [ ] 4.1 skill-creator-mcp server（`@modelcontextprotocol/sdk`，同一实现双形态）：capability-core → tools（schema-faithful descriptors）+ resources（技能文档/快照只读面）；形态 A 进程内 `/mcp`（loopback HTTP + Bearer web token 鉴权）、形态 B `skill-creator mcp` CLI（stdio，不依赖 daemon 常驻，**收窄为 readonly + propose-only**——mutation 仅经形态 A 走 daemon 审批链；stdio 的 propose 结果返回 client 自持、不入 Manager 存储，见 design D3）。
-- [ ] 4.1b 组合 `@deepseek-ai/dsh-mcp-client` 插件行：peer 闭包（`dsh-scope`/`dsh-timeout`/`dsh-attachment`/`dsh-subprocess`，0.1.2-rc.1）入 dependencies 与锁定矩阵；连接配置指向 `/mcp`（token 注入）。
+- [x] 4.1 skill-creator-mcp server（`@modelcontextprotocol/sdk`，同一实现双形态）：capability-core → tools（schema-faithful descriptors）+ resources（技能文档/快照只读面）；形态 A 进程内 `/mcp`（loopback HTTP + Bearer web token 鉴权）、形态 B `skill-creator mcp` CLI（stdio，不依赖 daemon 常驻，**收窄为 readonly + propose-only**——mutation 仅经形态 A 走 daemon 审批链；stdio 的 propose 结果返回 client 自持、不入 Manager 存储，见 design D3）。
+- [x] 4.1b 组合 `@deepseek-ai/dsh-mcp-client` 插件行：peer 闭包（`dsh-scope`/`dsh-timeout`/`dsh-attachment`/`dsh-subprocess`，0.1.2-rc.1）入 dependencies 与锁定矩阵；连接配置指向 `/mcp`（token 注入）。
   - Acceptance: 内核会话经官方桥完成一次真实能力调用（tools 注册 + tool round 全链证据入 artifacts）；包漂移 → typed unavailable。
 - [ ] 4.2 `ui://` MCP Apps 卡片（第一期四类：skill 信息卡 / finding 卡 / proposal 卡 / 安装更新结果卡；均含应用内跳转意图）：tool result `_meta.ui.resourceUri` + raw HTML 资源；面板 host 渲染（沙箱 iframe + CSP + postMessage JSON-RPC，`ui/initialize` 握手对齐 spec MUST 项）；`ui://` 资源经 `agent.*` 代理 RPC 获取（面板不是 MCP client）。卡片模板对内嵌的不可信文本（SKILL.md frontmatter/finding 内容）强制 HTML escape——沙箱防逃逸不防内容注入。
 - [ ] 4.3 提示词最佳实践（版本化 system prompt section）：可用能力面、何时用卡片代替纯文本、卡片使用约定；引导效果以真实会话取证。

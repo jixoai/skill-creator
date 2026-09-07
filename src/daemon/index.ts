@@ -22,6 +22,7 @@ import { IpcServer } from "./ipc-server.js";
 import { WebServer } from "./web-server.js";
 import { mountDshKernelHost, type ProductionDshKernelHost } from "./dsh-host-lifecycle.js";
 import { createDshSessionBinder } from "./steward/dsh-session-binder.js";
+import { createSkillCreatorMcpServer } from "./mcp/skill-creator-mcp.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
 import { log } from "./log.js";
 import type { OpenTrayAppLaunchOptions } from "opentray";
@@ -237,6 +238,13 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
       }),
     );
   }
+  // 4.1 形态 A：skill-creator MCP 面（/mcp，loopback + Bearer web token）。
+  web.mountMcp(() =>
+    createSkillCreatorMcpServer({
+      capabilities: domain.managerCapabilities,
+      face: "in-process",
+    }),
+  );
 
   const performStop = async (): Promise<void> => {
     log("daemon stop requested");
