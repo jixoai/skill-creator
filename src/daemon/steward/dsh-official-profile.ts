@@ -128,10 +128,24 @@ export async function bootOfficialWebProfile(
   // launcher seam：等价 dsh-cmdline 的 provideCmdline——在 tree mount 前提供
   // cmdlineArgs/appExit，让官方 web-startup 真实解析 flags 并 provide webStartup
   // （--port 0 → OS-assigned）。appExit 不能 process.exit（宿主进程内嵌），转为异常。
+  // boot graph：entry-init 在 Entry 构造器即触发（options/parent 尚未赋值，读取
+  // getter 会抛错），事件期只收集对象引用；boot settle 后再读取 options.name 与
+  // loader tree，得到真实构造序 + 组合 entry 清单。
+  const constructed: Array<{ options: { id: string; name: string } }> = [];
   const prepare = (ctx: Context): void => {
     ctx.provide("cmdlineArgs", { get: () => ["--no-open", "--port", "0"] as string[] });
     ctx.provide("appExit", (code?: number) => {
       throw new Error(`official profile requested app exit (${code ?? 0})`);
+    });
+    (
+      ctx as unknown as {
+        on: (
+          event: "loader/entry-init",
+          listener: (entry: { options: { id: string; name: string } }) => void,
+        ) => () => void;
+      }
+    ).on("loader/entry-init", (entry) => {
+      constructed.push(entry);
     });
   };
   const ctx = await boot(
@@ -154,9 +168,17 @@ export async function bootOfficialWebProfile(
   if (!connection) throw new Error("official profile booted without a connection service");
 
   const baseUrl = `http://${webServer.host}:${webServer.port}`;
+  const treeEntries: Array<{ id: string; name: string }> = [];
+  for (const entry of (
+    ctx as Context & {
+      loader?: { entries: () => Iterable<{ id: string; options: { name: string } }> };
+    }
+  ).loader?.entries() ?? []) {
+    treeEntries.push({ id: entry.id, name: entry.options.name });
+  }
   const record: DshWebHostBootRecord = {
-    entries: [],
-    activationOrder: [],
+    entries: treeEntries,
+    activationOrder: constructed.map((entry) => entry.options.name),
     host: webServer.host,
     port: webServer.port,
     authenticatedUrl: connection.authenticatedUrl(baseUrl),

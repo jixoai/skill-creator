@@ -20,6 +20,19 @@ export const DaemonStatusSchema = z.object({
   trayError: z.string().optional(),
   /** 浏览器可达的 WebUI 入口（web/headless/任何平台 dashboard 模式共用）。 */
   webUrl: z.string().optional(),
+  /**
+   * 4.1：DSH 组合宿主状态（未挂载时携带降级原因）。boot graph 只暴露 entry
+   * 名称序（诊断面）；authenticatedUrl/token 绝不进入 status。
+   */
+  dsh: z
+    .object({
+      mounted: z.boolean(),
+      reason: z.string().optional(),
+      port: z.number().int().nonnegative().optional(),
+      entries: z.array(z.string()).optional(),
+      activationOrder: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 /** CLI 与 WebUI 共享的 daemon 状态快照。 */
 export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;

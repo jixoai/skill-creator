@@ -20,6 +20,7 @@ import type { DaemonStatus } from "../shared/contracts/daemon.js";
 import { createDaemonDomain, type DaemonDomain } from "./domain.js";
 import { IpcServer } from "./ipc-server.js";
 import { WebServer } from "./web-server.js";
+import { mountProductionDshHost, type ProductionDshHost } from "./dsh-host-lifecycle.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
 import { log } from "./log.js";
 import type { OpenTrayAppLaunchOptions } from "opentray";
@@ -31,6 +32,8 @@ export interface DaemonOptions {
   port?: number;
   /** Skip tray mount (tests / headless). */
   withTray?: boolean;
+  /** 4.1：DSH 组合宿主（缺省尝试挂载；false 走 SPA 恢复夹具）。 */
+  withDshHost?: boolean;
   /** web 模式：只挂纯 tray（菜单+图标），主项打开浏览器，不创建原生窗口。 */
   web?: boolean;
   /** Open the WebView inspector (dev only). */
@@ -54,6 +57,10 @@ export interface DaemonHandles {
   webToken: string;
   status: DaemonStatus;
   trayHost: TrayHost | null;
+  /** 同进程 domain（进程内组合/取证用；跨进程消费者走 RPC/IPC，不共享此句柄）。 */
+  domain: DaemonDomain;
+  /** 4.1 DSH 组合宿主句柄（boot graph + 有界 dispose）。 */
+  dshHost: ProductionDshHost;
   stop: (opts?: { exit?: boolean }) => Promise<void>;
 }
 
@@ -199,11 +206,29 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
   status.port = port;
   log(`web server listening on 127.0.0.1:${port}`);
 
+  // 4.1 生产入口：DSH 组合宿主（boot 失败降级 SPA 恢复夹具，daemon 不阻塞）。
+  const dshHost = await mountProductionDshHost(web, { disabled: opts.withDshHost === false });
+  if (dshHost.mounted) {
+    status.dsh = {
+      mounted: true,
+      port: dshHost.record!.port,
+      entries: dshHost.record!.entries.map((entry) => entry.name),
+      activationOrder: [...dshHost.record!.activationOrder],
+    };
+    log(
+      `dsh composition host mounted: 127.0.0.1:${dshHost.record!.port} (${dshHost.record!.entries.length} entries activated)`,
+    );
+  } else {
+    status.dsh = { mounted: false, reason: dshHost.reason };
+    log(`dsh composition host unavailable (SPA recovery active): ${dshHost.reason}`);
+  }
+
   const performStop = async (): Promise<void> => {
     log("daemon stop requested");
     try {
       const tasks = [
         settleTeardown("tray host", async () => handlesRef.trayHost?.destroy()),
+        settleTeardown("dsh composition host", () => dshHost.dispose()),
         settleTeardown("web server", () => web.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("IPC server", () => ipc.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("repository sessions", () => domain.repository.dispose()),
@@ -297,6 +322,8 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     webToken,
     status,
     trayHost: handlesRef.trayHost,
+    domain,
+    dshHost,
     stop,
   };
 }
