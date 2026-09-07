@@ -1,6 +1,6 @@
-# dsh-runtime-integration verification（进行中）
+# dsh-runtime-integration verification（阶段完成：3.1–3.5 全部勾选）
 
-记录日期：2026-09-06。
+记录日期：2026-09-06；3.5 终态验收 2026-09-07。
 
 ## 已完成任务
 
@@ -19,9 +19,10 @@
 
 ## 门禁状态
 
-- `pnpm exec vitest run test/dsh-runtime-integration.test.ts` → 10 passed。
-- 全量 `pnpm test` 318/318（42 files）；`pnpm typecheck` 0 错误；`pnpm exec vp fmt --check` 全绿。
-- 3.4/3.5 未完成（transcript artifact / 完整 focused gates）。
+- `pnpm exec vitest run test/dsh-runtime-integration.test.ts` → 10 passed（3.2 时点）。
+- 全量 `pnpm test` 318/318（42 files）；`pnpm typecheck` 0 错误；`pnpm exec vp fmt --check` 全绿（3.2 时点）。
+- 3.4 首轮门禁（3.4 后）：stage-3 focused 13+16、contracts 34、runtime 34；全量 348/348（43 files）；typecheck/webui check/build/fmt/diff/openspec 9/9；`npm pack --dry-run` 83 files（@deepseek-ai/* 八包在 dependencies——build 的 packages:"external" 设计要求安装器提供；`ccski: link:` 协议属发布决策项）。
+- 3.5 终态验收（2026-09-07，dsh-webui-composition 4.1 f55b02a 完成后的同一棵树）：stage-3 focused `pnpm exec vitest run test/dsh-runtime-integration.test.ts test/dsh-settings.test.ts` 29/29；composition focused（dsh-web-host/dsh-client-plugin/dsh-manager-mount/dsh-host-lifecycle/dsh-tool-composition）16/16；同树全量 `pnpm test` 440/440（53 files）、`pnpm typecheck` 0 错、`pnpm --dir webui check` 0/0、`pnpm build` 成功、`vp fmt --check` 468 clean、`git diff --check` clean、`openspec validate --all --strict` 9/9。3.5 勾选。
 
 ## 3.3 实测注记
 
