@@ -57,6 +57,7 @@ import {
   writeBackupWithManifest,
   writeFileExclusiveVerified,
 } from "./fs-authority.js";
+import { anchorManagerDirectory } from "./store-anchor.js";
 
 export type { JournalEntry };
 export { readJournal, assertCommittedJournal };
@@ -106,7 +107,8 @@ export async function applyProposalTransaction(
       // 不存在，恢复闸门（2.3e）拥有残留文件的唯一处置权。
       // Codex R11 P1-1：open 前捕获 journal 目录身份，open 后复验——fd 锚定 leaf
       // inode，复验通过即证明后续记账只落进捕获时验证过的目录。
-      const journalDirIdentity = await assertCanonicalDirectory(path.dirname(deps.journalPath));
+      // Codex R13 P2-1：首见锚定 journal 目录（跨调用换体检测）+ open 后复验。
+      const journalDirIdentity = await anchorManagerDirectory(path.dirname(deps.journalPath));
       journalWriter = await fs.open(
         deps.journalPath,
         fs.constants.O_WRONLY |

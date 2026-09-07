@@ -24,7 +24,8 @@ import {
 import { SkillIdSchema } from "../../shared/contracts/skills.js";
 import { SkillDirectoryNameSchema } from "../../shared/contracts/creator.js";
 import { DomainError } from "../domain-error.js";
-import { assertCanonicalDirectory, verifyDirIdentity } from "./dir-identity.js";
+import { verifyDirIdentity } from "./dir-identity.js";
+import { anchorManagerDirectory } from "./store-anchor.js";
 
 /** Manager 生成的 move 备份文件名（`<seq>-<sha12>.bin`；manifest 与 journal 共用）。 */
 export const BackupRefSchema = z.string().regex(/^\d+-[0-9a-f]{12}\.bin$/, {
@@ -32,6 +33,19 @@ export const BackupRefSchema = z.string().regex(/^\d+-[0-9a-f]{12}\.bin$/, {
 });
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
+
+/** Codex R13 P2-3：备份 manifest 行的闭合 schema（未知字段/穿越路径/坏 hash 拒绝）。 */
+export const BackupManifestLineSchema = z.strictObject({
+  ref: BackupRefSchema,
+  seq: z.number().int().positive(),
+  from: RelPathSchema,
+  sha256: Sha256HexSchema,
+  byteSize: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(64 * 1024 * 1024, "backup byteSize exceeds the manager ceiling"),
+});
 
 /** move 步骤必须携带 Manager 生成的备份事实；非 move 步骤禁止携带。 */
 const ResourceDetailSchema = z
@@ -143,7 +157,7 @@ export type JournalEntry = z.infer<typeof JournalEntrySchema>;
 export async function readJournal(journalPath: string): Promise<JournalEntry[]> {
   // Codex R9 P1-4 / R10 P1-4：事实源读取先校验 journal 所在目录 canonical（parent
   // symlink 下的外部 JSONL 不是 Manager 事实），leaf 走 O_NOFOLLOW fd。
-  const parentIdentity = await assertCanonicalDirectory(path.dirname(journalPath));
+  const parentIdentity = await anchorManagerDirectory(path.dirname(journalPath));
   let raw: string;
   let leafIdentity: { dev: number; ino: number };
   try {

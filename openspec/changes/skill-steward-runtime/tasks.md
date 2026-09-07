@@ -48,3 +48,4 @@
   - Evidence: artifacts/verification.md 门禁记录（303/303、tsc 0、svelte 0/0、build、fmt、diff、openspec 9/9）。
 
 <!-- 进度注（2026-09-06）：2.3e 部分完成（scanUnfinishedJournals + 测试，20ec083；恢复闸门未接入 apply 入口）；2.4a 部分完成（新 runtime 的 cancel/并发锁/迟到事件已测；adapter 强制 deadline 属 DSH 阶段）。详见 artifacts/verification.md 未验证项。 -->
+<!-- 进度注（2026-09-07）：2.3e 增量（R13 保留 P2 的 owner 落地，本提交）：新 `src/daemon/steward/store-anchor.ts` 进程生命周期 inode 锚——journal 目录/backup root 首见锚定 + 跨调用复验（同路径目录换体 → UNAVAILABLE/recovery，替换目录不能成为新事实源；`resetStoreAnchors()` 建模重启语义）；`prepareBackupRoot` 先 mkdir 再锚定；`readBackupManifest` 手工 parser 替换为 strict Zod `BackupManifestLineSchema`（未知字段/穿越 from/坏 sha/坏 byteSize 拒绝）。负例 ×4（跨调用 backup root 换体、journal 目录换体事实源拒绝、重启等价重锚、manifest 四类坏行）。apply 入口的目标封锁闸仍开放。 -->

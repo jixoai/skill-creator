@@ -40,3 +40,11 @@ openspec validate --all --strict -> 9 passed, 0 failed
 ## 责任矩阵
 
 实现与测试：ZCode（GLM-5.3）。fixture transcript 生成脚本化（`bun -e` 一次性脚本，产物已入库）。阶段 2 独立 Codex 复核按 GOAL Review Loop 排程。
+
+## 2.3e 增量（2026-09-07，R13 P2 owner 落地）
+
+- 新 `src/daemon/steward/store-anchor.ts`：Manager 事实目录（journal 目录 / backup root）的进程生命周期 inode 锚——首见锚定（canonical 通过后记录 {dev,ino}）、跨调用复验（换体 → `UNAVAILABLE: replaced during this daemon lifetime`）；`resetStoreAnchors()` 建模 daemon 重启（重启前换体成为新真相，属人工恢复决策面——已在模块头声明）。接线点：`prepareBackupRoot`（先 mkdir 再锚定 journal 目录与 backup root）、journal writer（open 前锚定）、`readJournal`（读取前锚定）。
+- `readBackupManifest` 手工字段 parser 替换为 strict Zod `BackupManifestLineSchema`（journal-schema 导出）：未知字段、`..` 穿越 from、坏 sha256、负 byteSize 全部拒绝（附 64MB 上限）。
+- 负例（`test/r8-independent-probes.test.ts` [2.3e] ×4）：跨调用 backup root 换体 → 读写均拒绝且替换目录零字节；journal 目录换体 → 不再是事实源；resetStoreAnchors → 重启等价重锚；manifest 未知字段/穿越/坏 hash/坏 size 四类拒绝。
+- 门禁：contracts 42/42、runtime 66/66、probes 18/18、全量 434/434（52 files）、typecheck 0、webui 0/0、fmt 全树、openspec 9/9。
+- 未验证项更新：2.3e 的「不完整恢复封锁目标写入」（apply 入口闸）仍开放；boot 显式接线目前由首见锚定承载（store 初始化路径未显式调用——首见即 daemon 生命周期内第一次使用，语义等价）。

@@ -413,6 +413,156 @@ describe("Codex R8 independent probes (regression-ized)", () => {
     expect(fsSync.readFileSync(leaf, "utf8")).toBe("payload\n");
   });
 
+  it("[2.3e] a backup root replaced between calls is rejected by the process-lifetime anchor", async () => {
+    const root = tmp();
+    const journalPath = path.join(root, "journal", "op.jsonl");
+    const bytes = Buffer.from("manager-secret\n", "utf8");
+    // 首次调用：首见锚定 journal 目录与 backup root，正常成功。
+    await writeBackupWithManifest({
+      journalPath,
+      ref: "1-aaaaaaaaaaaa.bin",
+      seq: 1,
+      from: "source/notes.md",
+      bytes,
+    });
+    // 跨调用换体：backup root 整目录被移走、外部真实目录顶替。
+    const backupRoot = `${journalPath}.backups`;
+    const replacement = path.join(root, "replacement");
+    fsSync.mkdirSync(replacement, { recursive: true });
+    fsSync.renameSync(backupRoot, path.join(root, "original-backups"));
+    fsSync.renameSync(replacement, backupRoot);
+    const { readBackupManifest } = await import("../src/daemon/steward/fs-authority.js");
+    await expect(readBackupManifest(journalPath)).rejects.toThrow(
+      /replaced during this daemon lifetime|not a canonical/i,
+    );
+    await expect(
+      writeBackupWithManifest({
+        journalPath,
+        ref: "2-bbbbbbbbbbbb.bin",
+        seq: 2,
+        from: "source/more.md",
+        bytes,
+      }),
+    ).rejects.toThrow(/replaced during this daemon lifetime|not a canonical/i);
+    // 替换目录未收到任何 manager 字节。
+    expect(fsSync.readdirSync(backupRoot).length).toBe(0);
+  });
+
+  it("[2.3e] a replaced journal directory is rejected as a truth source (anchor drift)", async () => {
+    const root = tmp();
+    const journalDir = path.join(root, "journal");
+    fsSync.mkdirSync(journalDir, { recursive: true });
+    const journalPath = path.join(journalDir, "op.jsonl");
+    fsSync.writeFileSync(
+      journalPath,
+      JSON.stringify({
+        seq: 1,
+        step: "commit",
+        detail: {
+          kind: "commit",
+          proposalId: "spp_0123456789abcdef",
+          status: "applied",
+          mutationCount: 0,
+        },
+      }) + "\n",
+      "utf8",
+    );
+    const { readJournal } = await import("../src/daemon/steward/journal-schema.js");
+    await expect(readJournal(journalPath)).resolves.toHaveLength(1);
+    // 换体后：进程内锚失配 → 拒绝（替换目录不能成为事实源）。
+    const replacement = path.join(root, "replacement");
+    fsSync.mkdirSync(path.join(replacement, "op.jsonl").replace(/\/op\.jsonl$/, ""), {
+      recursive: true,
+    });
+    fsSync.renameSync(journalDir, path.join(root, "original-journal"));
+    fsSync.renameSync(replacement, journalDir);
+    fsSync.copyFileSync(path.join(root, "original-journal", "op.jsonl"), journalPath);
+    await expect(readJournal(journalPath)).rejects.toThrow(
+      /replaced during this daemon lifetime|not a real directory|not canonical/i,
+    );
+  });
+
+  it("[2.3e] resetting anchors models a daemon restart (first-seen re-anchors)", async () => {
+    const root = tmp();
+    const journalPath = path.join(root, "journal", "op.jsonl");
+    await writeBackupWithManifest({
+      journalPath,
+      ref: "1-aaaaaaaaaaaa.bin",
+      seq: 1,
+      from: "source/notes.md",
+      bytes: Buffer.from("manager-secret\n", "utf8"),
+    });
+    const backupRoot = `${journalPath}.backups`;
+    const replacement = path.join(root, "replacement");
+    fsSync.mkdirSync(replacement, { recursive: true });
+    fsSync.renameSync(backupRoot, path.join(root, "original-backups"));
+    fsSync.renameSync(replacement, backupRoot);
+    const { resetStoreAnchors, anchorManagerDirectory } =
+      await import("../src/daemon/steward/store-anchor.js");
+    // 重启等价：清空锚表后重新首见锚定（换体成为新真相——人工恢复决策面）。
+    resetStoreAnchors();
+    await expect(anchorManagerDirectory(backupRoot)).resolves.toBeTruthy();
+  });
+
+  it("[2.3e] manifest lines with unknown fields, traversal paths, or bad hashes are rejected", async () => {
+    const root = tmp();
+    const journalPath = path.join(root, "journal", "op.jsonl");
+    await writeBackupWithManifest({
+      journalPath,
+      ref: "1-aaaaaaaaaaaa.bin",
+      seq: 1,
+      from: "source/notes.md",
+      bytes: Buffer.from("manager-secret\n", "utf8"),
+    });
+    const manifestPath = path.join(`${journalPath}.backups`, "manifest.jsonl");
+    const good = fsSync.readFileSync(manifestPath, "utf8");
+    const { readBackupManifest } = await import("../src/daemon/steward/fs-authority.js");
+    const { resetStoreAnchors } = await import("../src/daemon/steward/store-anchor.js");
+
+    const cases: Array<[string, string]> = [
+      ["unknown-field", `${good.trimEnd().slice(0, -1)}, "evil": true}\n`],
+      [
+        "traversal-from",
+        `${JSON.stringify({
+          ref: "2-bbbbbbbbbbbb.bin",
+          seq: 2,
+          from: "../../outside/notes.md",
+          sha256: "a".repeat(64),
+          byteSize: 8,
+        })}\n`,
+      ],
+      [
+        "bad-sha",
+        `${JSON.stringify({
+          ref: "3-cccccccccccc.bin",
+          seq: 3,
+          from: "source/x.md",
+          sha256: "NOT-A-HASH",
+          byteSize: 8,
+        })}\n`,
+      ],
+      [
+        "bad-byteSize",
+        `${JSON.stringify({
+          ref: "4-dddddddddddd.bin",
+          seq: 4,
+          from: "source/y.md",
+          sha256: "b".repeat(64),
+          byteSize: -1,
+        })}\n`,
+      ],
+    ];
+    for (const [name, content] of cases) {
+      fsSync.writeFileSync(manifestPath, content, "utf8");
+      // 每例独立：换体会被锚拒绝，这里保持同一目录，仅内容不同。
+      resetStoreAnchors();
+      await expect(readBackupManifest(journalPath)).rejects.toThrow(
+        /failed validation|recovery required/i,
+      );
+      void name;
+    }
+  });
+
   it("[5] duplicate commit records are rejected by the replay gate", () => {
     const commit = {
       kind: "commit" as const,

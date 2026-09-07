@@ -23,8 +23,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { DomainError } from "../domain-error.js";
-import { BackupRefSchema, type JournalEntry } from "./journal-schema.js";
+import { BackupManifestLineSchema, BackupRefSchema, type JournalEntry } from "./journal-schema.js";
 import { assertCanonicalDirectory, verifyDirIdentity, type DirIdentity } from "./dir-identity.js";
+import { anchorManagerDirectory } from "./store-anchor.js";
 import { assertPathInside } from "../path-safety.js";
 
 export { assertCanonicalDirectory, verifyDirIdentity };
@@ -419,17 +420,22 @@ export interface BackupManifestEntry {
  */
 export async function prepareBackupRoot(journalPath: string): Promise<string> {
   const backupDir = `${journalPath}.backups`;
-  // Codex R9 P1-1：父目录（journal 所在目录）必须先通过 canonical 校验——预置
-  // symlink 父目录（journal-link -> outside）在创建任何字节之前拒绝。
-  await assertCanonicalDirectory(path.dirname(journalPath));
-  await fs.mkdir(backupDir, 0o700).catch(() => undefined);
-  const identity = await assertCanonicalDirectory(backupDir).catch(() => null);
-  if (identity === null) {
+  // Codex R9 P1-1 / R13 P2-1：父目录（journal 所在目录）先 canonical + 首见锚定——
+  // 预置 symlink 父目录拒绝；跨调用换体（进程内锚失配）同样 recovery。
+  await fs.mkdir(path.dirname(journalPath), 0o700).catch(() => undefined);
+  await anchorManagerDirectory(path.dirname(journalPath)).catch(() => {
     throw new DomainError(
       "UNAVAILABLE",
-      `move backup root is not a canonical manager directory; recovery required: ${backupDir}`,
+      `journal directory is not canonical (or was replaced during this daemon lifetime); recovery required: ${path.dirname(journalPath)}`,
     );
-  }
+  });
+  await fs.mkdir(backupDir, 0o700).catch(() => undefined);
+  await anchorManagerDirectory(backupDir).catch(() => {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `move backup root is not a canonical manager directory (or was replaced); recovery required: ${backupDir}`,
+    );
+  });
   return backupDir;
 }
 
@@ -538,28 +544,18 @@ export async function readBackupManifest(journalPath: string): Promise<BackupMan
     } catch {
       throw new Error(`backup manifest line ${index + 1} is corrupt`);
     }
-    const ref =
-      typeof (parsed as { ref?: unknown }).ref === "string" ? (parsed as { ref: string }).ref : "";
-    const seq = (parsed as { seq?: unknown }).seq;
-    const from = (parsed as { from?: unknown }).from;
-    const sha256 = (parsed as { sha256?: unknown }).sha256;
-    const byteSize = (parsed as { byteSize?: unknown }).byteSize;
-    const refOk = BackupRefSchema.safeParse(ref).success;
-    if (
-      !refOk ||
-      typeof seq !== "number" ||
-      !Number.isInteger(seq) ||
-      seq <= 0 ||
-      typeof from !== "string" ||
-      from.length === 0 ||
-      typeof sha256 !== "string" ||
-      !/^[a-f0-9]{64}$/.test(sha256) ||
-      typeof byteSize !== "number" ||
-      !Number.isInteger(byteSize) ||
-      byteSize < 0
-    ) {
-      throw new Error(`backup manifest line ${index + 1} failed validation`);
+    // Codex R13 P2-3：strict Zod 解析——未知字段、穿越 from、坏 hash/byteSize 拒绝。
+    const checked = BackupManifestLineSchema.safeParse(parsed);
+    if (!checked.success) {
+      const reason = checked.error.issues
+        .slice(0, 3)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; ");
+      throw new Error(
+        `backup manifest line ${index + 1} failed validation (${reason}); recovery required`,
+      );
     }
+    const { ref, seq, from, sha256, byteSize } = checked.data;
     if (seenRefs.has(ref)) {
       throw new Error(`backup manifest contains duplicate ref: ${ref}`);
     }
