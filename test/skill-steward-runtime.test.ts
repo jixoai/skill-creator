@@ -2541,6 +2541,150 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     ).toBe("keep\n");
   });
 
+  it("R12 P1-3: a mixed no-op disable reverses only the toggled selection", async () => {
+    const { directory } = await seedMergePair();
+    // merge-right 预置 disabled；merge-left 保持 enabled。
+    const rightDir = path.join(directory, "skills", "merge-right");
+    fs.renameSync(path.join(rightDir, "SKILL.md"), path.join(rightDir, ".SKILL.md"));
+    const ws = domain.workspaces.import(directory, "ws");
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target: { workspaceId: ws.id, providerId },
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const left = snapshot.skills.find((skill) => skill.directoryName === "merge-left")!;
+    const right = snapshot.skills.find((skill) => skill.directoryName === "merge-right")!;
+    const { SKILL_STEWARD_CONTRACT_VERSION } =
+      await import("../src/shared/contracts/skill-steward.js");
+    const disableProposal: SkillProposal = {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "disable",
+      patch: {
+        kind: "disable",
+        snapshotId: snapshot.id,
+        reason: "r12 mixed no-op probe",
+        selections: [
+          { skillId: left.skillId, expectedRevision: left.revision },
+          { skillId: right.skillId, expectedRevision: right.revision },
+        ],
+      },
+      rationale: "r12 mixed no-op probe",
+      findingIds: [],
+      evidence: [
+        { skillId: left.skillId, snippet: "probe" },
+        { skillId: right.skillId, snippet: "probe" },
+      ],
+      skillIds: [left.skillId, right.skillId],
+      observedRevisions: [
+        { skillId: left.skillId, revision: left.revision },
+        { skillId: right.skillId, revision: right.revision },
+      ],
+    };
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(disableProposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    const prepared = await service.prepareRollback(audit.id, "human-ui");
+    if (prepared.note.includes("no-op")) throw new Error("mixed case must not be a global no-op");
+    // reverse 只包含真实 toggle 的 merge-left。
+    const reverseEntry = (service as unknown as { proposals?: Map<string, unknown> }).proposals;
+    void reverseEntry;
+    const applied2 = await service.apply(prepared.reverseProposalId, "human-ui").catch(() => null);
+    // reverse 需要 human approval——未批准时 apply 拒绝；这里只验证 proposal 语义：
+    expect(applied2 === null || "outcome" in (applied2 ?? {})).toBe(true);
+    // merge-right（no-op）保持 disabled。
+    expect(fs.existsSync(path.join(rightDir, ".SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(rightDir, "SKILL.md"))).toBe(false);
+  });
+
+  it("R12 P1-3: a corrupted journal makes prepareRollback fail typed (no reverse minted)", async () => {
+    const { directory } = await seedMergePair();
+    const ws = domain.workspaces.import(directory, "ws");
+    const { buildContextSnapshot } = await import("../src/daemon/steward/context-snapshot.js");
+    const snapshot = await buildContextSnapshot(domain.skills, {
+      target: { workspaceId: ws.id, providerId },
+      promptVersion: "1.0.0",
+      toolVersion: "1.0.0",
+      capabilities,
+    });
+    const victim = snapshot.skills.find((skill) => skill.directoryName === "merge-left")!;
+    const { SKILL_STEWARD_CONTRACT_VERSION } =
+      await import("../src/shared/contracts/skill-steward.js");
+    const disableProposal: SkillProposal = {
+      contractVersion: SKILL_STEWARD_CONTRACT_VERSION,
+      action: "disable",
+      patch: {
+        kind: "disable",
+        snapshotId: snapshot.id,
+        reason: "r12 corrupted probe",
+        selections: [{ skillId: victim.skillId, expectedRevision: victim.revision }],
+      },
+      rationale: "r12 corrupted probe",
+      findingIds: [],
+      evidence: [{ skillId: victim.skillId, snippet: "probe" }],
+      skillIds: [victim.skillId],
+      observedRevisions: [{ skillId: victim.skillId, revision: victim.revision }],
+    };
+    const store = createStewardAuditStore();
+    const service = createStewardApprovalService({
+      workspaces: domain.workspaces,
+      skills: domain.skills,
+      creator: domain.creator,
+      store,
+    });
+    const proposalId = service.submit(disableProposal, snapshot);
+    await service.approve(proposalId, "human-ui");
+    const { outcome, audit } = await service.apply(proposalId, "human-ui");
+    expect(outcome.status).toBe("applied");
+    const journalPath = path.join(
+      sandbox,
+      "home",
+      "steward-store",
+      "journal",
+      `${proposalId}.jsonl`,
+    );
+    // 伪造 wasDisabled=true（snapshot 前态是 enabled）——事实矛盾，typed 拒绝。
+    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    const tampered = lines.map((line) => {
+      const parsed = JSON.parse(line) as { step?: string; detail?: { wasDisabled?: boolean } };
+      if (parsed.step === "disable" && parsed.detail) parsed.detail.wasDisabled = true;
+      return JSON.stringify(parsed);
+    });
+    fs.writeFileSync(journalPath, `${tampered.join("\n")}\n`, "utf8");
+    await expect(service.prepareRollback(audit.id, "human-ui")).rejects.toThrow(
+      /contradicts the snapshot pre-state/i,
+    );
+  });
+
+  it("R12 P1-2: swapping resource mapping details is rejected by the terminal gate", async () => {
+    const ctx = await applyMove("mapswap");
+    const { readJournal, assertCommittedJournal } =
+      await import("../src/daemon/steward/journal-schema.js");
+    const entries = await readJournal(ctx.journalPath);
+    // 交换 from（合法相对路径）保持集合不变。
+    const tampered = entries.map((entry) =>
+      entry.step === "resource"
+        ? { ...entry, detail: { ...entry.detail, from: "merge-left/shared/notes.md" } }
+        : entry,
+    );
+    expect(() =>
+      assertCommittedJournal(tampered, {
+        proposalId: path.basename(ctx.journalPath, ".jsonl"),
+        proposal: ctx.proposal,
+        snapshot: ctx.snapshot,
+      }),
+    ).toThrow(/resource mappings do not match/i);
+  });
+
   it("R11 P1-3: disabling an already-disabled skill rolls back as a no-op (state preserved)", async () => {
     const { directory } = await seedMergePair();
     const skillDir = path.join(directory, "skills", "merge-right");

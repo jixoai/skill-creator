@@ -104,6 +104,9 @@ export async function applyProposalTransaction(
       // Codex R8 P1-1：journal 只允许独占创建——已有文件（崩溃残留 / 重复 apply）
       // 与预置 symlink（EEXIST/ELOOP）一律 fail-closed：新事务新文件，追加语义
       // 不存在，恢复闸门（2.3e）拥有残留文件的唯一处置权。
+      // Codex R11 P1-1：open 前捕获 journal 目录身份，open 后复验——fd 锚定 leaf
+      // inode，复验通过即证明后续记账只落进捕获时验证过的目录。
+      const journalDirIdentity = await assertCanonicalDirectory(path.dirname(deps.journalPath));
       journalWriter = await fs.open(
         deps.journalPath,
         fs.constants.O_WRONLY |
@@ -112,6 +115,7 @@ export async function applyProposalTransaction(
           (fs.constants as { O_NOFOLLOW?: number }).O_NOFOLLOW!,
         0o600,
       );
+      await verifyDirIdentity(path.dirname(deps.journalPath), journalDirIdentity);
     }
     seq += 1;
     const entry = { seq, step, detail } as JournalEntry;
@@ -801,7 +805,14 @@ async function undoStep(
         );
       }
       // Codex R10 P1-3：undo 只恢复捕获前态——apply 前已 disabled 的技能是 no-op，
-      // 不得把原状态改回 enabled。
+      // 不得把原状态改回 enabled。Codex R12：前态与 snapshot 交叉核对（伪造拒绝）。
+      const beforeDisable = snapshot.skills.find((skill) => skill.skillId === entry.detail.skillId);
+      if (beforeDisable && beforeDisable.disabled !== entry.detail.wasDisabled) {
+        throw new DomainError(
+          "CONFLICT",
+          `Journal wasDisabled for ${entry.detail.skillId} contradicts the snapshot pre-state; recovery required.`,
+        );
+      }
       if (entry.detail.wasDisabled) return;
       await toggleWithPostcondition(deps, snapshot.target, entry.detail.skillId, "enable");
       return;
@@ -813,7 +824,14 @@ async function undoStep(
           `Journal enable mutation references skill outside the proposal's affected set: ${entry.detail.skillId}`,
         );
       }
-      // Codex R10 P1-3：同上——恢复捕获前态，不盲目反向。
+      // Codex R10 P1-3：同上——恢复捕获前态，不盲目反向。Codex R12：snapshot 核对。
+      const beforeEnable = snapshot.skills.find((skill) => skill.skillId === entry.detail.skillId);
+      if (beforeEnable && beforeEnable.disabled === entry.detail.wasEnabled) {
+        throw new DomainError(
+          "CONFLICT",
+          `Journal wasEnabled for ${entry.detail.skillId} contradicts the snapshot pre-state; recovery required.`,
+        );
+      }
       if (entry.detail.wasEnabled) return;
       await toggleWithPostcondition(deps, snapshot.target, entry.detail.skillId, "disable");
       return;

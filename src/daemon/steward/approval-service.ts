@@ -37,6 +37,7 @@ import {
   type StewardMutationRecord,
   type StewardProposalId,
 } from "../../shared/contracts/skill-steward.js";
+import type { SkillId } from "../../shared/contracts/skills.js";
 import type { CreatorService } from "../creator-service.js";
 import type { SkillService } from "../skill-service.js";
 import type { WorkspaceRegistry } from "../workspace-registry/index.js";
@@ -309,44 +310,65 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
     const entry = requireProposal(audit.proposalId);
     const patch = entry.proposal.patch;
     if (patch.kind === "disable") {
-      // Codex R10 P1-3：no-op disable（apply 前已是 disabled，journal 记录 wasDisabled）
-      // 没有可回滚的 mutation——派生 reverse enable 只会把原状态改坏。
+      // Codex R11 P1-3：rollback 事实必须来自经过终态闸校验的 journal——缺失/坏行/
+      // 伪造只进入 recovery，绝不允许 catch 后继续派生 proposal。
       const journalPathForProbe = path.join(
         stewardStoreDir(),
         "journal",
         `${audit.proposalId}.jsonl`,
       );
-      const entries = await readJournal(journalPathForProbe).catch(() => null);
-      const enablementSteps =
-        entries?.filter((step) => step.step === "disable" || step.step === "enable") ?? [];
-      const allNoOps =
-        enablementSteps.length > 0 &&
-        enablementSteps.every(
-          (step) =>
-            (step.step === "disable" && step.detail.wasDisabled) ||
-            (step.step === "enable" && step.detail.wasEnabled),
-        );
-      if (
-        allNoOps &&
-        (entries?.some((step) => step.step !== "commit") ?? false) &&
-        entries?.every(
-          (step) => step.step === "commit" || step.step === "disable" || step.step === "enable",
-        )
-      ) {
+      const entries = await readJournal(journalPathForProbe);
+      assertCommittedJournal(entries, {
+        proposalId: audit.proposalId,
+        proposal: entry.proposal,
+        snapshot: entry.snapshot,
+      });
+      const toggledSkillIds: SkillId[] = [];
+      let noopCount = 0;
+      for (const step of entries) {
+        if (step.step !== "disable") continue;
+        if (step.detail.wasDisabled) {
+          noopCount += 1; // apply 前已是 disabled：inverse 是 no-op，不进入 reverse。
+        } else {
+          toggledSkillIds.push(step.detail.skillId as SkillId);
+        }
+      }
+      if (toggledSkillIds.length === 0) {
+        // Codex R11 探针 8：journal 自报 no-op 必须与 snapshot 前态（指纹保护的不可
+        // 变事实）交叉核对——伪造 wasDisabled 只能 recovery，不能发 no-op note。
+        for (const step of entries) {
+          if (step.step !== "disable") continue;
+          const before = entry.snapshot.skills.find(
+            (skill) => skill.skillId === step.detail.skillId,
+          );
+          if (before && before.disabled !== step.detail.wasDisabled) {
+            throw new DomainError(
+              "CONFLICT",
+              `Journal wasDisabled for ${step.detail.skillId} contradicts the snapshot pre-state (forged journal); recovery required.`,
+            );
+          }
+        }
         return {
           reverseProposalId: StewardProposalIdSchema.parse(`spp_${"0".repeat(16)}`),
-          note: "Disable was a no-op (skills were already disabled); original state preserved, nothing to roll back.",
+          note: `Disable was a no-op (${noopCount} skills were already disabled); original state preserved, nothing to roll back.`,
         };
       }
+      // selection 级 reverse：只反转真实发生 toggle 的技能。
       const reverse = structuredClone(entry.proposal);
       reverse.action = "enable";
       reverse.patch = {
         kind: "enable",
         snapshotId: patch.snapshotId,
-        selections: patch.selections,
+        selections: patch.selections.filter((selection) =>
+          toggledSkillIds.includes(selection.skillId),
+        ),
         reason: `Manager-derived rollback of ${auditId}.`,
       };
-      reverse.rationale = `Rollback of audit ${auditId}: restore prior enablement.`;
+      reverse.rationale = `Rollback of audit ${auditId}: restore prior enablement (${toggledSkillIds.length} toggled, ${noopCount} no-op).`;
+      reverse.skillIds = [...toggledSkillIds];
+      reverse.observedRevisions = reverse.observedRevisions.filter((observation) =>
+        toggledSkillIds.includes(observation.skillId),
+      );
       // Codex R2 P1-3：enable 反向只允许 Manager 派生入口；prepare 时 fail-fast 复核。
       const reverseBound = bindManagerDerivedProposalToSnapshot(reverse, entry.snapshot);
       if (!reverseBound.ok) {
@@ -366,6 +388,33 @@ export function createStewardApprovalService(deps: ApprovalServiceDeps) {
         reverseProposalId,
         note: "Reverse enable proposal prepared; applying requires separate human approval.",
       };
+    }
+    if (patch.kind === "edit") {
+      // Codex R11 P1-4：reverse 的 expectedRevision 必须来自 apply 时事实（audit
+      // mutations 的 afterRevision），且当前 live revision 必须与之精确一致——外部
+      // 编辑不得被 reverse 覆盖，只能 recovery。
+      const afterRevisions = new Map<string, string>();
+      for (const mutation of audit.mutations) {
+        if (mutation.skillId && mutation.afterRevision) {
+          afterRevisions.set(mutation.skillId, mutation.afterRevision);
+        }
+      }
+      for (const edit of patch.edits) {
+        const after = afterRevisions.get(edit.skillId);
+        if (!after) {
+          throw new DomainError(
+            "INVALID_OPERATION",
+            `Apply-time afterRevision missing for ${edit.skillId}; recovery required.`,
+          );
+        }
+        const live = await deps.skills.info(entry.snapshot.target, edit.skillId);
+        if (live.revision !== after) {
+          throw new DomainError(
+            "CONFLICT",
+            `Skill ${edit.skillId} changed after the apply (live ${live.revision} != apply-time ${after}); recovery required, external edits preserved.`,
+          );
+        }
+      }
     }
     if (patch.kind === "edit") {
       // 反向 edit 是针对「apply 后现状」的普通 proposal：重建新快照绑定当前 revision，

@@ -1,6 +1,6 @@
 # skill-steward-contracts verification
 
-记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `140628e（R10 整改）→ R11 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
+记录日期：2026-09-06 起草，2026-09-07 持续更新。当前实现边界 `c92cc31（R11 整改）→ R12 整改提交（本提交）`，契约版本 **1.5.0**（历史轮次边界见各节时标）。运行环境：本仓 dev 主分支，macOS arm64。
 
 ## 责任矩阵
 
@@ -119,6 +119,15 @@ pnpm test -> 310/310 passed（41 files）；contracts 25/25；runtime 32/32；ty
   - P1-7 resource 语义绑定：journal resource 行新增必填 `sha256`；终态闸 + 回滚删除共用该事实（与 proposal 双射 + manifest 双射叠加）。
   - 模块：`dir-identity.ts` 拆出 canonical/身份原语（journal-schema 与 fs-authority 共用，破循环依赖）。
   - 门禁（R11 整改后）：contracts 42/42、runtime 62/62（新增 no-op disable 回滚 + 外部编辑阻断删除负例）、probes 14/14（新增 journal 父目录读取 symlink + 原语越 root ×4）、全量 426/426（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R11（4.5/10，不通过，报告 /tmp/stage1-contracts-review-round11.md；独立 worktree c92cc31）→ R12 整改：
+  - P1-1 open→复验→写 模式：fd 锚定 inode——open 前捕获身份、open 后复验、通过才写字节（writeFileExclusiveVerified 对 root+nested parent 双重复验；manifest fd 打开后追加前复验 backup root；journal writer open 后复验 journal 目录身份）。open 后的目录换体不再影响 fd 写入目标；open 边界换体在字节落盘前拦截。
+  - P1-2 resource mapping 双射：`expectedJournalStepsOf(proposal, snapshot)` 展开每条 mapping 的 `from|to|strategy` 多重集合，终态闸精确比对——同集合内的路径交换/策略替换拒绝。
+  - P1-3 selection 级 inverse + journal 事实闸：prepareRollback（disable）先 readJournal + assertCommittedJournal（含 snapshot 双射），坏 journal 直接 typed 失败（不再 catch-null 派生）；reverse 只包含真实 toggle 的 selection（no-op 技能不进 reverse、不改原状态）；journal 自报 no-op 与 snapshot 前态交叉核对（伪造 wasDisabled → CONFLICT）；undoStep 的 wasDisabled/wasEnabled 同样与 snapshot 前态核对。
+  - P1-4 edit rollback 事实锚：reverse 前置闸——audit mutations 的 apply-time afterRevision 必须存在且与当前 live revision 精确一致；外部编辑 → CONFLICT（现状保全，不被 reverse 覆盖）。
+  - P1-5 unlink 身份闭环：assertRealRoot 返回的 root 身份不再丢弃——rename 前/后复验（换体后的「外部源被隔离」不再是 accepted）。
+  - Deferred（诚实声明）：跨调用/boot-time store inode anchor（pre-call 换体检测）仍归 recovery gate；Node 无 fd-relative rename 的残余窗口=外部文件被移入可审计隔离区并转 recovery。
+  - 门禁（R12 整改后）：contracts 42/42、runtime 65/65（新增 mixed no-op/坏 journal/mapping 篡改负例）、probes 14/14、全量 429/429（52 files）、typecheck 0、webui check 0/0、fmt 全树绿、openspec 9/9。
+- R12 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R11 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R10 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。
 - R9 复审已随本整改提交（复核回调为后台 codex-callback.sh 模式）。

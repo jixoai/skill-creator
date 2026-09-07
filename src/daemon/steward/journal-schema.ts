@@ -19,6 +19,7 @@ import {
   ContentRevisionSchema,
   RelPathSchema,
   type SkillProposal,
+  type SkillStewardContextSnapshot,
 } from "../../shared/contracts/skill-steward.js";
 import { SkillIdSchema } from "../../shared/contracts/skills.js";
 import { SkillDirectoryNameSchema } from "../../shared/contracts/creator.js";
@@ -230,14 +231,19 @@ export async function readJournal(journalPath: string): Promise<JournalEntry[]> 
  * 展开期望的 journal mutation 步骤集合——journal 内部自报的 mutationCount 不是
  * 完整性证明；删行后同步伪造计数会被「与 proposal 双射」拒绝。
  */
-export function expectedJournalStepsOf(proposal: SkillProposal): {
+export function expectedJournalStepsOf(
+  proposal: SkillProposal,
+  snapshot?: SkillStewardContextSnapshot,
+): {
   kinds: Map<string, number>;
   directoryNames: Set<string>;
   skillIds: Set<string>;
+  resourceMappings: string[];
 } {
   const kinds = new Map<string, number>();
   const directoryNames = new Set<string>();
   const skillIds = new Set<string>();
+  const resourceMappings: string[] = [];
   const bump = (kind: string, n = 1) => kinds.set(kind, (kinds.get(kind) ?? 0) + n);
   const patch = proposal.patch;
   if (patch.kind === "edit") {
@@ -250,15 +256,26 @@ export function expectedJournalStepsOf(proposal: SkillProposal): {
     bump("precheck");
     const targets = patch.kind === "split" ? patch.targets : [patch.target];
     bump("create-target", targets.length);
+    const directoryOf = new Map<string, string>();
+    if (snapshot) {
+      for (const skill of snapshot.skills) directoryOf.set(skill.skillId, skill.directoryName);
+    }
     for (const target of targets) {
       directoryNames.add(target.directoryName);
       bump("resource", target.resources.length);
+      for (const mapping of target.resources) {
+        const fromDir = directoryOf.get(mapping.sourceSkillId) ?? "?";
+        resourceMappings.push(
+          `${fromDir}/${mapping.sourcePath}|${target.directoryName}/${mapping.targetPath}|${mapping.strategy}`,
+        );
+      }
     }
     const sources = patch.kind === "split" ? [patch.source] : patch.sources;
     bump("disable", sources.length);
     for (const source of sources) skillIds.add(source.skillId);
   }
-  return { kinds, directoryNames, skillIds };
+  resourceMappings.sort();
+  return { kinds, directoryNames, skillIds, resourceMappings };
 }
 
 /**
@@ -271,7 +288,7 @@ export function expectedJournalStepsOf(proposal: SkillProposal): {
  */
 export function assertCommittedJournal(
   entries: JournalEntry[],
-  expected: { proposalId: string; proposal: SkillProposal },
+  expected: { proposalId: string; proposal: SkillProposal; snapshot?: SkillStewardContextSnapshot },
 ): void {
   const commits = entries.filter((entry) => entry.step === "commit");
   const last = entries.at(-1);
@@ -351,5 +368,27 @@ export function assertCommittedJournal(
       "INVALID_OPERATION",
       `Journal mutation skillIds do not match the proposal affected set; recovery required.`,
     );
+  }
+  // Codex R11 P1-2：每条 resource mapping 的 from/to/strategy 与 proposal+snapshot
+  // 展开结果精确双射（多重集合）——同集合内的路径交换/策略替换在此拒绝。
+  if (expected.snapshot !== undefined) {
+    const observedMappings = entries
+      .filter((entry) => entry.step === "resource")
+      .map((entry) =>
+        entry.step === "resource"
+          ? `${entry.detail.from}|${entry.detail.to}|${entry.detail.strategy}`
+          : "",
+      )
+      .sort();
+    const wanted = expectedSteps.resourceMappings;
+    const same =
+      observedMappings.length === wanted.length &&
+      observedMappings.every((value, index) => value === wanted[index]);
+    if (!same) {
+      throw new DomainError(
+        "INVALID_OPERATION",
+        `Journal resource mappings do not match the proposal expansion (from/to/strategy tampering); recovery required.`,
+      );
+    }
   }
 }

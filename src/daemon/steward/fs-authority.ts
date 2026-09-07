@@ -190,6 +190,9 @@ export async function writeFileExclusiveVerified(
   const realRoot = await fs.realpath(root);
   const lexicalPosition = path.join(realRoot, path.relative(root, to));
   await assertNoSymlinkAncestors(to, root);
+  // Codex R11 P1-1：nested parent 身份捕获（open 边界的真实目录换体防护——fd 锚定
+  // inode，open 后复验身份通过即证明 fd 指向捕获时的目录树）。
+  const parentIdentity = await assertCanonicalDirectory(path.dirname(to));
   let handle: import("node:fs/promises").FileHandle;
   try {
     handle = await fs.open(to, "wx");
@@ -221,8 +224,10 @@ export async function writeFileExclusiveVerified(
         `Resource target identity drifted before write (path race); recovery required: ${label}`,
       );
     }
-    // Codex R10 P1-1：写前复验 root 身份——同路径目录换体在 payload 落盘前拦截。
+    // Codex R10/R11 P1-1：写前复验 root + nested parent 身份——fd 锚定 inode，
+    // open→复验通过即证明后续 fd 写入只会落进捕获时验证过的目录树。
     await verifyDirIdentity(root, rootIdentity);
+    await verifyDirIdentity(path.dirname(to), parentIdentity);
     await handle.writeFile(bytes);
     await handle.sync();
   } finally {
@@ -320,7 +325,7 @@ export async function unlinkFileVerified(
   quarantineJournalPath: string,
 ): Promise<void> {
   assertPathInside(root, leaf);
-  await assertRealRoot(root);
+  const rootIdentity = await assertRealRoot(root);
   await assertNoSymlinkAncestors(leaf, root);
   const identity = await captureLeafIdentity(leaf, label);
   if (identity.nlink !== 1) {
@@ -348,6 +353,9 @@ export async function unlinkFileVerified(
       `removed-${randomBytes(8).toString("hex")}-${path.basename(leaf)}`,
     );
     try {
+      // Codex R11 P1-5：rename 前复验 provider root 身份——换体后的「外部源被成功
+      // 隔离」不是 accepted，是 recovery。
+      await verifyDirIdentity(root, rootIdentity);
       await fs.rename(leaf, tombstone);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EXDEV") {
@@ -386,6 +394,7 @@ export async function unlinkFileVerified(
     // 未持久化的 rename 不得推进 journal/commit。
     await syncDir(quarantineRoot);
     await verifyDirIdentity(quarantineRoot, quarantineIdentity);
+    await verifyDirIdentity(root, rootIdentity);
   } finally {
     await handle.close().catch(() => undefined);
   }
@@ -445,13 +454,14 @@ export async function writeBackupWithManifest(options: {
   await verifyDirIdentity(root, rootIdentity);
   // Codex R8 独立探针整改：manifest leaf 用 O_NOFOLLOW 追加——预置 symlink 直连
   // 外部文件时 open 失败（ELOOP），manager 字节不越界落地。
-  // Codex R10 P1-1：manifest 追加前复验 backup root 身份（跨写事务持有）。
-  await verifyDirIdentity(root, rootIdentity);
+  // Codex R10/R11 P1-1：manifest fd 打开（fd 锚定 inode），打开后、追加前复验
+  // backup root 身份——open 边界的目录换体在字节落盘前拦截。
   const manifestHandle = await fs.open(
     path.join(root, "manifest.jsonl"),
     fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | O_NOFOLLOW,
     0o600,
   );
+  await verifyDirIdentity(root, rootIdentity);
   // Codex R8 P1-2：打开后立即确认 leaf 是 regular file（预置 FIFO/socket 等
   // 非常规 leaf 一律拒绝，append 字节只落 Manager-owned regular 文件）。
   const manifestStat = await manifestHandle.stat();
