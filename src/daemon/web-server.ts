@@ -27,6 +27,13 @@ export interface DshMountHandle {
   host: string;
   port: number;
   server: http.Server;
+  /**
+   * DSH 进程级 launch token 的同源握手入口（`/?token=…`，仅 path+search）。
+   * DSH 收到带 token 的 GET / 会签发会话 cookie 并 303 回干净的 /。
+   */
+  entryLocation: string;
+  /** DSH 会话 cookie 名（`dsh-auth-<base64url(sha256(authority))>`）；存在则不再重定向。 */
+  authCookieName: string;
 }
 
 /** WebUI 静态服务和 RPC 通道的启动配置。 */
@@ -231,12 +238,24 @@ export class WebServer {
       // （/manager/dsh-island.js 等）仍从本 server 静态目录服务，保证单 origin 内
       // island bundle 与 DSH 页面同源可达。
       if (url.pathname.startsWith("/manager/")) {
-        await this.serveStatic(response, `/${url.pathname.slice("/manager/".length)}`);
+        await this.serveManagerAsset(response, url.pathname.slice("/manager/".length));
         return;
       }
       // DSH host 挂载时：其官方 route（/api/*、/plugins/*、index 等）优先，
-      // Manager SPA 静态回退退居 DSH 不可用时的恢复入口。
+      // Manager SPA 静态回退退居 DSH 不可用时的恢复入口。裸 `/`（无 DSH
+      // cookie、无 token 查询）先经同源握手桥——浏览器 303 到 `/?token=…`
+      // 换 DSH 会话 cookie 后回到 `/`（fragment 由浏览器保留，island 的
+      // hash-capture 仍能取到 daemon web token）。
       if (this.dshMount) {
+        if (this.needsDshEntryHandshake(url, request)) {
+          response.writeHead(303, {
+            location: this.dshMount.entryLocation,
+            "cache-control": "no-store",
+            "referrer-policy": "no-referrer",
+          });
+          response.end();
+          return;
+        }
         this.proxyToDsh(request, response);
         return;
       }
@@ -246,6 +265,19 @@ export class WebServer {
       if (!response.headersSent) response.writeHead(500, { "content-type": "text/plain" });
       response.end("internal error");
     }
+  }
+
+  /**
+   * 入口握手桥判定：仅裸 `/`（非 token 握手请求、无 DSH 会话 cookie）需要
+   * 重定向。带 token 的请求交由 DSH 的 authorizeIndex 处理（设 cookie/303/401），
+   * 已持有 cookie 的请求直接代理——两条件共同保证不产生重定向环。
+   */
+  private needsDshEntryHandshake(url: URL, request: http.IncomingMessage): boolean {
+    const mount = this.dshMount;
+    if (!mount) return false;
+    if (url.pathname !== "/") return false;
+    if (url.searchParams.has("token")) return false;
+    return !(request.headers.cookie ?? "").includes(mount.authCookieName);
   }
 
   /** 把请求原样转发给已挂载的 DSH host（流式 pipe；连接错误映射 502）。 */
@@ -274,6 +306,20 @@ export class WebServer {
     const proxy = http.request(
       { host: mount.host, port: mount.port, method: request.method, path: request.url, headers },
       (upstream) => {
+        // 入口自愈（桥接闭环）：裸 / 带 cookie 仍被 DSH 判 401（cookie 过期/签名
+        // 轮换）时，转 303 重新握手——浏览器用当前 launch token 换新 cookie。
+        // 带 token 的请求不在此列（token 无效属终态错误，如实呈现 401）。
+        const url = new URL(request.url ?? "/", "http://dsh.invalid");
+        if (upstream.statusCode === 401 && url.pathname === "/" && !url.searchParams.has("token")) {
+          upstream.resume();
+          response.writeHead(303, {
+            location: mount.entryLocation,
+            "cache-control": "no-store",
+            "referrer-policy": "no-referrer",
+          });
+          response.end();
+          return;
+        }
         response.writeHead(upstream.statusCode ?? 502, upstream.headers);
         upstream.pipe(response);
       },
@@ -390,6 +436,45 @@ export class WebServer {
     this.acpWsServer.handleUpgrade(request, socket, head, (websocket) => {
       this.options.domain.acpBridge.attachWebSocket(sessionId, websocket as WsWebSocket);
     });
+  }
+
+  /**
+   * Manager island 资产（/manager/*）：优先 webuiDir（生产 staging 已把 island
+   * 产物并入 dist/webui），回退 `<webuiDir>/../build-island`（源码/dev 态 vite
+   * island 构建输出——dev daemon 的 webuiDir 解析到 webui/static 或 build，
+   * 两者上一级都能命中 build-island）。与 SPA 回退语义不同：island 资产缺失
+   * 必须 404，不得回退 index.html（脚本/样式以 HTML MIME 返回会被中止）。
+   */
+  private async serveManagerAsset(response: http.ServerResponse, asset: string): Promise<void> {
+    const relative = decodeURIComponent(asset);
+    if (!relative || relative.endsWith("/")) {
+      response.writeHead(404).end("not found");
+      return;
+    }
+    const root = path.resolve(this.options.webuiDir);
+    let file = path.resolve(root, relative);
+    if (path.relative(root, file).startsWith("..")) {
+      response.writeHead(403).end();
+      return;
+    }
+    if (!existsSync(file)) {
+      const islandRoot = path.resolve(root, "..", "build-island");
+      const candidate = path.resolve(islandRoot, relative);
+      if (!path.relative(islandRoot, candidate).startsWith("..") && existsSync(candidate)) {
+        file = candidate;
+      }
+    }
+    if (!existsSync(file)) {
+      response.writeHead(404).end("not found");
+      return;
+    }
+    const extension = path.extname(file);
+    const data = await fs.readFile(file);
+    response.writeHead(200, {
+      "content-type": MIME[extension] ?? "application/octet-stream",
+      "cache-control": "public, max-age=3600",
+    });
+    response.end(data);
   }
 
   private async serveStatic(response: http.ServerResponse, pathname: string): Promise<void> {

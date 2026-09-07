@@ -133,3 +133,11 @@
 - 4.1 轮真实缺陷修复：DSH 官方 transcript 渲染器把 `tool/call` 的 `arguments` 直接当 `argsRaw`（JSON 字符串）消费；binder 此前发 `{}` 对象使官方 `GenericToolCard/deriveSummary` 崩溃（console `text.indexOf is not a function`）。修复为 `JSON.stringify(call.input ?? {})`；test/dsh-tool-composition.test.ts 增加官方契约断言（arguments 必须是可 parse 的字符串）。
 - 工程注记：IPC Unix socket 受 macOS sun_path ~104 字符限制——evidence sandbox 用 `/tmp` 短前缀（系统 TMPDIR 长路径 `listen EINVAL`）；hold 清理挂同步 exit hook（daemon 自身 SIGINT stop+exit 会先于脚本异步收尾退出）；`webui/build-island/`（island 构建产物）加入 .gitignore。
 - 门禁：全量 440/440（53 files）；typecheck 0；webui check 0/0；`pnpm build` 通过；`vp fmt --check` 468 files clean；`git diff --check` clean；`openspec validate --all --strict` 9/9。
+
+## 4.2 实测注记（入口握手桥）
+
+- 桥接：裸 `/`（无 cookie、无 token）→ 303 `/?token=…`（DSH 进程级 launch token 的 path+search）→ DSH authorizeIndex 设 `dsh-auth-<hash(host:port)>` cookie + 303 回干净 `/`；fragment 由浏览器保留（island hash-capture 取 daemon token 实测 sessionStorage 命中）。代理对裸 `/` 的 401（cookie 失效）转 303 自愈；带 token 的 401 如实呈现（防环）。cookie 名由 daemon 侧确定性计算（base64url(sha256(authority))，与 dsh-client-connection 实现逐字节一致）。
+- 真人链（IAB）：tokenized daemon URL → DSH shell → Manager 入口 → island（global 544 skills）→ provider 2 技能 → Workflow Run optimize → validate/approve/apply → 磁盘落盘（steward-optimized）。截图 5 张入 artifacts。
+- 两个实测新缺陷及修复：dev 态 island 资产 404（serveManagerAsset：webuiDir 优先 + build-island 回退 + 缺失 404）；pnpm 布局 dist 态 heal 镜像不完整（completeTransitiveMirror 不动点补链 22→174 包；源码态借 ~/.dsh 成熟镜像故未暴露，tray 实测暴露「waiting for service: slots」）。
+- 生产 tray：dist + 全新隔离 home，tray mounted + DSH 149 entries + 用户屏幕窗口确认；dist 态 IAB 复验 Manager 入口渲染。
+- 门禁：474/474（57）、typecheck 0、webui 0/0、build、fmt clean、diff clean、openspec 9/9。环境注记：全量测试与常驻 daemon 并跑时 timing 敏感测试（cli-lifecycle/dsh-official-profile）间歇超时，停后全绿、单跑复绿。

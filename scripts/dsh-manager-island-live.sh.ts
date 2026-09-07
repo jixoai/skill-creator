@@ -8,6 +8,7 @@
  * 证据：同一页面内 sidebar 的 Manager footer 入口挂载 Svelte island（原有
  * ProviderView），与官方 session transcript 同屏。
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -102,7 +103,14 @@ fs.writeFileSync(
 const dsh = await bootOfficialWebProfile({ home: process.env.DSH_HOME! });
 const dshServer = dsh.server();
 if (!dshServer) throw new Error("official profile booted without an HTTP server");
-web.mountDsh({ host: dsh.record.host, port: dsh.record.port, server: dshServer });
+const authenticated = new URL(dsh.record.authenticatedUrl);
+web.mountDsh({
+  host: dsh.record.host,
+  port: dsh.record.port,
+  server: dshServer,
+  entryLocation: `${authenticated.pathname}${authenticated.search}`,
+  authCookieName: `dsh-auth-${createHash("sha256").update(`${dsh.record.host}:${dsh.record.port}`).digest("base64url")}`,
+});
 
 // 同屏验收素材：跑一次绑定 DSH session 的 steward run（transcript 含 tool rounds）。
 const { createDshSessionBinder } = await import("../src/daemon/steward/dsh-session-binder.ts");

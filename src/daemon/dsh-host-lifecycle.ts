@@ -13,6 +13,7 @@
  * 妥协声明：boot 是 best-effort 前台步骤（官方 profile 启动为有界等待）；降级后
  *   不自动重试——重启 daemon 是唯一恢复入口（与 4.1 的重启验证一致）。
  */
+import { createHash } from "node:crypto";
 import type { WebServer } from "./web-server.js";
 import { bootOfficialWebProfile } from "./steward/dsh-official-profile.js";
 import type { DshWebHostBootRecord, MinimalDshWebHost } from "./steward/dsh-web-host.js";
@@ -22,6 +23,16 @@ function resolveDefaultDshHome(): string {
   const env = process.env.DSH_HOME;
   if (env && env.trim() !== "") return env;
   return `${process.env.HOME ?? ""}/.dsh`;
+}
+
+/**
+ * DSH 会话 cookie 名（dsh-client-connection 的 BrowserAuth 同式）：
+ * `dsh-auth-<base64url(sha256(authority))>`。authority 经本 daemon 代理恒定
+ * 重写为 `host:port`，故可确定性计算；DSH 端口随重启变化时 cookie 名随之
+ * 变化，入口桥会重新握手（自愈）。
+ */
+export function dshAuthCookieName(authority: string): string {
+  return `dsh-auth-${createHash("sha256").update(authority).digest("base64url")}`;
 }
 
 /** 生产 DSH 组合宿主句柄。 */
@@ -62,7 +73,16 @@ export async function mountProductionDshHost(
     });
     const server = profile.server();
     if (!server) throw new Error("official profile booted without an HTTP server");
-    web.mountDsh({ host: profile.record.host, port: profile.record.port, server });
+    // 入口握手桥数据：launch token 的同源入口（path+search）与 authority 绑定的
+    // 会话 cookie 名（见 dshAuthCookieName）。
+    const authenticated = new URL(profile.record.authenticatedUrl);
+    web.mountDsh({
+      host: profile.record.host,
+      port: profile.record.port,
+      server,
+      entryLocation: `${authenticated.pathname}${authenticated.search}`,
+      authCookieName: dshAuthCookieName(`${profile.record.host}:${profile.record.port}`),
+    });
     let disposed = false;
     return {
       mounted: true,

@@ -23,6 +23,7 @@
  * 因此三者必须作为本仓 dependencies 安装（发布包同规则），否则 session/create 以
  * agent-preset/invalid 拒绝（preset mount 时行无法解析）。
  */
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -92,6 +93,12 @@ export async function bootOfficialWebProfile(
   // 把本安装（repo node_modules / 安装包 node_modules）的依赖闭包镜像到
   // $DSH_HOME/profiles/node_modules，使 profile rows 的裸包名经 Node parent-walk 可解析。
   await healProfilesModuleFallback({ installAnchor, profile, home: options.home });
+  // heal 的闭包遍历按 Node parent-walk 解析 dep 目录——pnpm 布局下传递依赖不
+  // hoist 到根 node_modules，bundle 态会得到不完整镜像（实测缺 ~197 包，DSH
+  // web 的 slots 等 client 服务提供者缺失 → 插件 pending）。以已镜像包为锚，
+  // 用 createRequire 就地解析其缺失 deps 并补链接，直到不动点；npm flat
+  // 布局 heal 已完整，此步零操作。
+  completeTransitiveMirror(options.home);
   // Manager client plugin 行（task 3.1a）：dev 态插件是 root devDependency（workspace 链接），
   // 安装态由构建 vendor 到 dist/dsh-client（4.8：产物不得依赖 workspace 链接）。两个位置都
   // 接入：profile node_modules（heal 机制同构）+ bundle 态的 dist/node_modules（cordis
@@ -225,4 +232,69 @@ function ensureDirLink(link: string, target: string): void {
   if (fs.existsSync(link) && fs.realpathSync(link) === target) return;
   fs.rmSync(link, { recursive: true, force: true });
   fs.symlinkSync(target, link, "dir");
+}
+
+/**
+ * 传递闭包补全（pnpm 布局下 heal 镜像不完整的修复）：对 $home/profiles/
+ * node_modules 里每个已镜像包，解析其 package.json 声明的 dependencies/
+ * peerDependencies；目标不在镜像中时，用 createRequire 从该包自身位置
+ * resolve 真实目录（pnpm 的 .pnpm 嵌套链接可解）并补 symlink。循环到
+ * 不动点；解析失败（optional/平台专属 peer）静默跳过——激活期会以 typed
+ * pending 呈现，不阻塞宿主。
+ */
+function completeTransitiveMirror(home: string): void {
+  const mirrorRoot = path.join(home, "profiles", "node_modules");
+  if (!fs.existsSync(mirrorRoot)) return;
+  const manifestOf = (dir: string): { dependencies?: Record<string, string> } | null => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const listPackages = (): string[] => {
+    const names: string[] = [];
+    for (const scope of fs.readdirSync(mirrorRoot)) {
+      if (scope.startsWith(".") || scope === ".bin") continue;
+      const scopeDir = path.join(mirrorRoot, scope);
+      if (scope.startsWith("@")) {
+        for (const name of fs.readdirSync(scopeDir)) names.push(`${scope}/${name}`);
+      } else {
+        names.push(scope);
+      }
+    }
+    return names;
+  };
+  for (let round = 0; round < 8; round += 1) {
+    let linked = 0;
+    for (const name of listPackages()) {
+      const pkgDir = path.join(mirrorRoot, name);
+      const manifest = manifestOf(pkgDir);
+      const deps = { ...manifest?.dependencies };
+      if (!deps) continue;
+      for (const dep of Object.keys(deps)) {
+        const depLink = path.join(mirrorRoot, dep);
+        if (fs.existsSync(depLink)) continue;
+        try {
+          const resolved = createRequire(path.join(realPkgDir(pkgDir), "package.json")).resolve(
+            `${dep}/package.json`,
+          );
+          ensureDirLink(depLink, path.dirname(resolved));
+          linked += 1;
+        } catch {
+          // optional/平台专属依赖解析失败：交给官方激活期处理。
+        }
+      }
+    }
+    if (linked === 0) return;
+  }
+}
+
+/** 镜像目录可能是 symlink（heal/本模块建的）：解析到真实包目录再作 require 锚。 */
+function realPkgDir(pkgDir: string): string {
+  try {
+    return fs.realpathSync(pkgDir);
+  } catch {
+    return pkgDir;
+  }
 }
