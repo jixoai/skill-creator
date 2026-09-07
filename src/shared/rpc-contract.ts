@@ -105,31 +105,59 @@ const WorkspaceProviderReadInputSchema = z.object({
   includeDisabled: z.boolean().optional(),
 });
 
+// dsh-kernel-rebase tasks 1.2：领域 capability 输入与 RPC 输入必须同源（禁止第二份
+// 手写镜像），以下具名导出供 capability-core 的 domain-capabilities 复用。
+/** skills.list / info 输入（info 追加 skillId）。 */
+export const SkillsListInputSchema = WorkspaceProviderReadInputSchema;
+/** skills.info / validate / creator.load 输入（同形状，validate 复用）。 */
+export const SkillsInfoInputSchema = WorkspaceProviderReadInputSchema.extend({
+  skillId: SkillIdSchema,
+});
+/** skills.toggle 输入。 */
+export const SkillsToggleInputSchema = z.object({
+  ...WorkspaceProviderTargetSchema.shape,
+  skillIds: z.array(SkillIdSchema).min(1),
+  mode: z.enum(["enable", "disable"]),
+});
+/** workspace.add 输入。 */
+export const WorkspaceAddInputSchema = z.object({
+  path: z.string().trim().min(1),
+  label: z.string().trim().min(1).optional(),
+});
+/** workspace.remove 输入。 */
+export const WorkspaceRemoveInputSchema = z.object({ id: ImportedWorkspaceIdSchema });
+/** workspace.setActive 输入。 */
+export const WorkspaceSetActiveInputSchema = z.object({ id: WorkspaceIdSchema });
+/** creator.remove 输入。 */
+export const CreatorRemoveInputSchema = z.object({
+  ...WorkspaceProviderTargetSchema.shape,
+  skillId: SkillIdSchema,
+  expectedRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+});
+/** repository.scan 输入。 */
+export const RepositoryScanInputSchema = z.object({
+  source: z.string().trim().min(1),
+  ref: z.string().trim().min(1).optional(),
+});
+/** repository.preview 输入。 */
+export const RepositoryPreviewInputSchema = z.object({
+  sessionId: RepositorySessionIdSchema,
+  skillId: RemoteSkillIdSchema,
+});
+
 /** Complete browser-safe contract shared by the WebUI and daemon. */
 export const rpcContract = oc.errors(RpcErrorDefinitions).router({
   skills: {
     /** Discover skills within one explicit Workspace Provider. */
     list: oc
-      .input(WorkspaceProviderReadInputSchema)
+      .input(SkillsListInputSchema)
       .output(z.object({ skills: z.array(SkillMetadataSchema) })),
     /** Read one Workspace Provider-scoped skill document. */
-    info: oc
-      .input(WorkspaceProviderReadInputSchema.extend({ skillId: SkillIdSchema }))
-      .output(SkillInfoSchema),
+    info: oc.input(SkillsInfoInputSchema).output(SkillInfoSchema),
     /** Enable or disable selected opaque skill IDs. */
-    toggle: oc
-      .input(
-        z.object({
-          ...WorkspaceProviderTargetSchema.shape,
-          skillIds: z.array(SkillIdSchema).min(1),
-          mode: z.enum(["enable", "disable"]),
-        }),
-      )
-      .output(ToggleSummarySchema),
+    toggle: oc.input(SkillsToggleInputSchema).output(ToggleSummarySchema),
     /** Validate one Workspace Provider-scoped skill. */
-    validate: oc
-      .input(z.object({ ...WorkspaceProviderTargetSchema.shape, skillId: SkillIdSchema }))
-      .output(ValidateResultSchema),
+    validate: oc.input(SkillsInfoInputSchema).output(ValidateResultSchema),
     update: {
       /** Compare skills-CLI lock hashes against upstream and report outdated skills. */
       check: oc.input(UpdateCheckInputSchema).output(UpdateCheckResultSchema),
@@ -142,49 +170,35 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     list: oc.input(z.object({})).output(z.object({ workspaces: z.array(WorkspaceSchema) })),
     /** Import a canonical directory workspace. */
     add: oc
-      .input(
-        z.object({ path: z.string().trim().min(1), label: z.string().trim().min(1).optional() }),
-      )
+      .input(WorkspaceAddInputSchema)
       .output(z.object({ workspace: WorkspaceSchema })),
     /** Remove an imported workspace registration. */
     remove: oc
-      .input(z.object({ id: ImportedWorkspaceIdSchema }))
+      .input(WorkspaceRemoveInputSchema)
       .output(z.object({ activeId: WorkspaceIdSchema })),
     /** Select the active workspace. */
     setActive: oc
-      .input(z.object({ id: WorkspaceIdSchema }))
+      .input(WorkspaceSetActiveInputSchema)
       .output(z.object({ activeId: WorkspaceIdSchema })),
   },
   creator: {
     /** Create or revision-check and update a skill. */
     save: oc.input(SaveSkillInputSchema).output(SaveSkillResultSchema),
     /** Load an editable skill document. */
-    load: oc
-      .input(z.object({ ...WorkspaceProviderTargetSchema.shape, skillId: SkillIdSchema }))
-      .output(SkillDocumentSchema),
+    load: oc.input(SkillsInfoInputSchema).output(SkillDocumentSchema),
     /** Revision-check and delete one skill. */
     remove: oc
-      .input(
-        z.object({
-          ...WorkspaceProviderTargetSchema.shape,
-          skillId: SkillIdSchema,
-          expectedRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-        }),
-      )
+      .input(CreatorRemoveInputSchema)
       .output(z.object({ removed: z.literal(true) })),
     /** Read revision history for one skill (change 5: change log sub-view). */
     revisions: oc.input(CreatorRevisionsInputSchema).output(CreatorRevisionsResultSchema),
   },
   repository: {
     /** Clone, pin, and scan a repository source. */
-    scan: oc
-      .input(
-        z.object({ source: z.string().trim().min(1), ref: z.string().trim().min(1).optional() }),
-      )
-      .output(RemoteRepoScanSchema),
+    scan: oc.input(RepositoryScanInputSchema).output(RemoteRepoScanSchema),
     /** Preview one skill from a pinned repository session. */
     preview: oc
-      .input(z.object({ sessionId: RepositorySessionIdSchema, skillId: RemoteSkillIdSchema }))
+      .input(RepositoryPreviewInputSchema)
       .output(RemoteSkillPreviewSchema),
     /** Preview or install selected remote skills. */
     install: oc.input(RepositoryInstallInputSchema).output(InstallResultSchema),
