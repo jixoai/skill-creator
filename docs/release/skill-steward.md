@@ -58,24 +58,26 @@ openspec validate --all --strict
 立即释放 + ENOENT 恢复提示）。流程见
 `openspec/changes/steward-product-workflow/artifacts/verification.md` 4.3 节。
 
-## 4. 已知发布阻塞（clean-install）
+## 4. clean-install（4.8 已解除阻塞）
 
-- **`ccski: link:../ccski`**：干净目录 `npm install <tarball>` 在解析该 spec 时
-  静默 `exit 1`（npm 11.19 复现；node 24.20/26.1、`--legacy-peer-deps`、
-  `--max-old-space-size=16384` 均不缓解；单独安装其它依赖正常）。本地 `../ccski`
-  领先 npm 上的 2.4.0 两个提交（`customDirs`/`customProvider`——本仓 Provider 投影
-  依赖，不能直接降级到 registry 版本）。处置（4.8 验收）：发布 ccski 新版本、或把
-  必要代码依法打入产物（bundle），并完成仓库外空目录安装启动验证
-  （`artifacts/clean-install.md`）。
-- DSH runtime 锁定 `@deepseek-ai/* 0.1.2-rc.1`（commit `d347e703…`，MIT）；版本
-  漂移经模块解析失败 fail-closed（typed reason + SPA 恢复），完整版本矩阵随 4.8
-  clean-install 一并验证。
+- **`ccski: link:../ccski` 已消除**：ccski（及其唯一依赖 `debug@4.4.3`，均 MIT）打入
+  `dist/daemon.js`；`link:` spec 移入 devDependencies 仅作构建期 bundling 源。仓库外
+  空目录 `npm install <tarball>` exit 0，黑盒 start/status/stop/restart 全通过，DSH
+  host mounted（149 entries 含 vendored `@skill-creator/dsh-client`）。复现命令：
+  `bun scripts/clean-install-check.sh.ts`；证据 `artifacts/clean-install.md/.json`。
+- **Node 版本锁定**：`engines.node >= 22.13.0`（DSH `dsh-code-runtime-worker-thread`
+  需要 `node:module` 的 `stripTypeScriptTypes`，Node 22.13.0 引入；验证于 v24.20.0）。
+- DSH runtime 锁定 `@deepseek-ai/* 0.1.2-rc.1`（commit `d347e703…`，MIT，含
+  `dsh-agent-tool-presentation` 对齐至 0.1.2-rc.1——0.1.0-rc.6 会在 npm 布局下分裂
+  `dsh-invariants` 双实例）；版本漂移经模块解析失败 fail-closed（typed reason + SPA
+  恢复），完整安装矩阵见 `artifacts/clean-install.md` 根因记录。
 
 ## 5. 发布证据清单
 
 | 项                     | 路径                                                                     | 任务 |
 | ---------------------- | ------------------------------------------------------------------------ | ---- |
 | 发布 smoke JSON        | `openspec/changes/steward-product-workflow/artifacts/steward-smoke.json` | 4.4  |
+| clean-install JSON     | 同目录 `clean-install.json`                                              | 4.8  |
 | 三任务四 action 端到端 | 同目录 `acceptance.md`                                                   | 4.6  |
 | 优化前后评估           | 同目录 `effectiveness.md`                                                | 4.7  |
 | clean-install          | 同目录 `clean-install.md`                                                | 4.8  |

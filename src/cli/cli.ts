@@ -283,6 +283,11 @@ async function runStart(): Promise<number> {
 async function runStatus(): Promise<number> {
   try {
     const status = await requestStatus();
+    if (hideBin(process.argv).includes("--json")) {
+      // 安装态取证（4.8）：完整 DaemonStatus JSON（含 DSH entries/activationOrder 诊断面）。
+      console.log(JSON.stringify(status, null, 2));
+      return 0;
+    }
     const url = webUrl(status);
     const trayLabel =
       status.tray === "headless"
@@ -296,6 +301,14 @@ async function runStatus(): Promise<number> {
     console.log(`  port:    ${status.port}`);
     console.log(`  tray:    ${trayLabel}`);
     if (status.trayError) console.log(`  tray error: ${status.trayError}`);
+    // DSH 宿主行（4.8）：安装态取证需要 black-box 可见的组合宿主健康面。
+    if (status.dsh) {
+      console.log(
+        status.dsh.mounted
+          ? `  dsh:     mounted (port ${status.dsh.port ?? "?"}, ${status.dsh.entries?.length ?? 0} entries)`
+          : `  dsh:     unavailable (${status.dsh.reason ?? "unknown reason"})`,
+      );
+    }
     console.log(`  url:     ${url}`);
     return 0;
   } catch (err) {

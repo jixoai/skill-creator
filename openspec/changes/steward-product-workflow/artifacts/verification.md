@@ -90,3 +90,11 @@ fmt --check 全绿、smoke 重跑 exit 0、全量 462/462、typecheck 0。教训
 - token：估算（chars/4）与真实消耗（deterministic=0）分列记录；live 真实消耗随 4.6 凭据 blocker 补验。usage 全部 unknown（无遥测源，不默认 0）。完整性：每 case 记录 SKILL.md sha256，评估只读零变更。
 - 回归固化：`test/steward-effectiveness.test.ts` 3/3（含「baseline 误报恰为 09/10」的反向断言——fixture/analyzer 漂移立即显式失败）。
 - 门禁：467/467（56 files）；typecheck 0；webui check 0/0；`vp fmt --check` 509 clean；`git diff --check` clean；openspec 9/9。
+
+## 4.8 实测注记（clean-install）
+
+- `scripts/clean-install-check.sh.ts`：npm pack（prepack 全量 build）→ 仓库外空目录 `npm install <tarball>` → 真实 node 黑盒驱动 start / `status --json` / stop / restart + HTTP 探针，全部断言通过（证据 `clean-install.json`）。旧 `ccski: link:` 静默 exit 1 点被消除：ccski+debug（MIT）inline 进 `dist/daemon.js`，link: 移 devDependencies 作构建期 bundling 源。
+- drill 实测暴露并修复三个真实缺陷：npm 因 `dsh-agent-tool-presentation@0.1.0-rc.6` 独占 `dsh-invariants@0.1.0-rc.8` 产生嵌套副本双实例（对齐 0.1.2-rc.1）；cordis loader 以自身模块位置 parent-walk 解析 row 包名——npm 布局下 vendored plugin 必须出现在消费者 node_modules 路径（安装态链接 `dist/dsh-client`，symlink 失败退化拷贝）；`dsh-official-profile` repoRoot 在 bundle 态上溯三级指向包外（4.1 生产运行被 boot baseUrl 的 parent-walk 遮蔽），改为 bundle 感知。取证工具教训：黑盒驱动必须用真实 node（Bun 的 node:module 缺 stripTypeScriptTypes，曾制造假缺陷）。
+- Node 锁定 `>=22.13.0`（DSH code-runtime 依赖 `node:module` 的 `stripTypeScriptTypes`）；验证于 v24.20.0 / npm 11.19.0 / 96 tarball entries。DSH mounted 149 entries 含 `@skill-creator/dsh-client`；`/api/health` ok、`/` 401（代理应答）、`/manager/dsh-island.js` 200；restart 后 DSH 重挂载。license：skill-creator / ccski / @deepseek-ai 闭包均 MIT。
+- CLI `status` 增 DSH 健康行 + `--json` 完整状态（安装态取证面）；根 tsconfig 覆盖 vendored plugin d.ts；README/docs 发布清单同步为「已解除阻塞」。
+- 门禁（逐条独立执行）：467/467（56 files）；typecheck 0；webui check 0/0；build；`vp fmt --check` 512 clean（修正 2 文件后复验）；`git diff --check` clean；openspec 9/9。

@@ -36,7 +36,12 @@ import {
 import type { Context } from "@deepseek-ai/cordis";
 import type { DshWebHostBootRecord, MinimalDshWebHost } from "./dsh-web-host.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const modulePath = fileURLToPath(import.meta.url);
+const sourceMode = path.basename(modulePath) === "dsh-official-profile.ts";
+/** 源码态 = 仓库根；bundle 态（dist/daemon.js）= 安装包根。 */
+const repoRoot = sourceMode
+  ? path.resolve(path.dirname(modulePath), "../../..")
+  : path.resolve(path.dirname(modulePath), "..");
 
 /**
  * user patch 层：非交互宿主只覆盖 web-runtime 的非 flag 语义（不打印 URL、不注册
@@ -84,33 +89,46 @@ export async function bootOfficialWebProfile(
 
   const installAnchor = path.join(repoRoot, "package.json");
   const profile = loadProfile("skill-creator", "web", installAnchor, options.home);
-  // 把本安装（repo node_modules）的依赖闭包镜像到 $DSH_HOME/profiles/node_modules，
-  // 使 profile rows 的裸包名经 Node parent-walk 可解析。
+  // 把本安装（repo node_modules / 安装包 node_modules）的依赖闭包镜像到
+  // $DSH_HOME/profiles/node_modules，使 profile rows 的裸包名经 Node parent-walk 可解析。
   await healProfilesModuleFallback({ installAnchor, profile, home: options.home });
-  // Manager client plugin 行（task 3.1a）：plugin 是 root devDependency（workspace
-  // 链接，发布包不携带），heal 的闭包遍历只走 dependencies/peerDependencies——
-  // 在此确定性地把它链接进 profile node_modules（dev 组合事实；发布形态由
-  // stage 资产化，属发布决策）。
+  // Manager client plugin 行（task 3.1a）：dev 态插件是 root devDependency（workspace 链接），
+  // 安装态由构建 vendor 到 dist/dsh-client（4.8：产物不得依赖 workspace 链接）。两个位置都
+  // 接入：profile node_modules（heal 机制同构）+ bundle 态的 dist/node_modules（cordis
+  // loader 以 boot baseUrl = dist/ 起步 parent-walk 解析 rows 的实测路径）。
   {
-    const pluginSource = path.join(repoRoot, "node_modules", "@skill-creator", "dsh-client");
-    const pluginLink = path.join(
+    const devPlugin = path.join(repoRoot, "node_modules", "@skill-creator", "dsh-client");
+    const vendoredPlugin = path.join(repoRoot, "dist", "dsh-client");
+    const pluginSource = fs.existsSync(devPlugin) ? devPlugin : vendoredPlugin;
+    if (!fs.existsSync(pluginSource)) {
+      throw new Error(
+        `Manager DSH client plugin not found (looked for ${devPlugin} and ${vendoredPlugin})`,
+      );
+    }
+    const target = fs.realpathSync(pluginSource);
+    const profileLink = path.join(
       options.home,
       "profiles",
       "node_modules",
       "@skill-creator",
       "dsh-client",
     );
-    if (fs.existsSync(pluginSource)) {
-      fs.mkdirSync(path.dirname(pluginLink), { recursive: true });
-      const target = fs.realpathSync(pluginSource);
-      if (fs.existsSync(pluginLink)) {
-        const current = fs.realpathSync(pluginLink);
-        if (current !== target) {
-          fs.rmSync(pluginLink, { recursive: true, force: true });
-          fs.symlinkSync(target, pluginLink, "dir");
+    ensureDirLink(profileLink, target);
+    if (!sourceMode) {
+      // npm 安装布局的 loader 解析路径（4.8 实测）：cordis loader 以自身模块位置
+      // parent-walk 解析 row 包名——pnpm 虚拟 store 位于根 node_modules 内，天然
+      // 命中 workspace 链接；npm 把依赖铺在消费者 app/node_modules，vendored
+      // 插件必须出现在同一路径上才可被 import。链接目标始终是本安装包内的
+      // dist/dsh-client（无本地源码/未发布包依赖）；符号链接不可用时退化为拷贝。
+      const parentOfPackage = path.dirname(repoRoot);
+      if (path.basename(parentOfPackage) === "node_modules") {
+        const consumerLink = path.join(parentOfPackage, "@skill-creator", "dsh-client");
+        try {
+          ensureDirLink(consumerLink, target);
+        } catch {
+          fs.rmSync(consumerLink, { recursive: true, force: true });
+          fs.cpSync(vendoredPlugin, consumerLink, { recursive: true });
         }
-      } else {
-        fs.symlinkSync(target, pluginLink, "dir");
       }
     }
   }
@@ -199,4 +217,12 @@ export async function bootOfficialWebProfile(
       else process.env.DSH_HOME = previousDshHome;
     },
   };
+}
+
+/** 幂等目录符号链接：目标变化时替换，不变时保持（对 heal 已生成的镜像无副作用）。 */
+function ensureDirLink(link: string, target: string): void {
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  if (fs.existsSync(link) && fs.realpathSync(link) === target) return;
+  fs.rmSync(link, { recursive: true, force: true });
+  fs.symlinkSync(target, link, "dir");
 }

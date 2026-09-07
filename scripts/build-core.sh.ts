@@ -2,8 +2,13 @@
  * 正交意图（2026-07-14）
  * 用户原始需求：「接手这个项目……进行大胆的开发」，交付必须是可安装、可运行的 CLI + WebUI。
  * 用户原始需求 [2026-07-21]：「任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等」。
- * 1. 将 CLI 与 daemon 分别打成 Node ESM bundle，第三方包由安装器提供。
+ * 用户原始需求 [2026-09-07]（steward-product-workflow 4.8）：「pack 后在仓库外的空目录安装并启动」，
+ * 产物不得依赖 link:/workspace 等未发布私有包。
+ * 1. 将 CLI 与 daemon 分别打成 Node ESM bundle；`dependencies` 里的 registry 包保持 external
+ *    由安装器提供，其余（ccski 及其 debug 依赖）打入产物。
  * 2. 写入经校验的 package identity，供 CLI/daemon 做版本握手。
+ * 3. 把 Manager DSH client plugin 以真实包形态 vendor 进 `dist/dsh-client`，供 daemon 在
+ *    安装态（无 workspace 链接）把它接入 DSH profile。
  */
 import { build } from "esbuild";
 import fs from "node:fs";
@@ -15,7 +20,20 @@ import { safeParseJson } from "../src/shared/external-input.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const outDir = path.join(root, "dist");
-const PackageIdentitySchema = z.object({ name: z.string().min(1), version: z.string().min(1) });
+const PackageIdentitySchema = z.object({
+  name: z.string().min(1),
+  version: z.string().min(1),
+  dependencies: z.record(z.string(), z.string()).optional(),
+});
+
+interface RootPackageIdentity {
+  name: string;
+  version: string;
+  dependencies?: Record<string, string>;
+}
+
+/** devDependencies 里的本地链接：仅作构建期 bundling 源，不属于 runtime externals。 */
+const BUNDLED_PACKAGES = new Set(["ccski"]);
 
 async function main(): Promise<void> {
   const rootPackage = readPackageIdentity(path.join(root, "package.json"));
@@ -34,18 +52,55 @@ async function main(): Promise<void> {
     outdir: outDir,
     sourcemap: true,
     logLevel: "info",
-    packages: "external",
+    external: runtimeExternals(rootPackage),
+    // 打入产物的 CJS 依赖（ccski→debug）在 ESM 输出里经 require 引用 node 内建
+    // （tty 等）；提供 createRequire 让这些静态 require 走真实 Node 解析。
+    banner: {
+      js: "import { createRequire as __skillCreatorCreateRequire } from 'node:module'; const require = __skillCreatorCreateRequire(import.meta.url);",
+    },
   });
+
+  vendorDshClientPlugin();
 
   fs.writeFileSync(
     path.join(outDir, "package.json"),
-    `${JSON.stringify({ ...rootPackage, type: "module" }, null, 2)}\n`,
+    `${JSON.stringify({ name: rootPackage.name, version: rootPackage.version, type: "module" }, null, 2)}\n`,
   );
 
-  console.log("✓ core built → dist/cli.js, dist/daemon.js");
+  console.log("✓ core built → dist/cli.js, dist/daemon.js, dist/dsh-client/");
 }
 
-function readPackageIdentity(file: string): { name: string; version: string } {
+/**
+ * runtime externals = `dependencies` 里发布到 registry 的包（含子路径 import）。
+ * workspace link 的 ccski 不在其中：esbuild 会把它（及其非 external 依赖）打入 bundle。
+ */
+function runtimeExternals(rootPackage: RootPackageIdentity): string[] {
+  const dependencies = rootPackage.dependencies ?? {};
+  return Object.keys(dependencies)
+    .filter((name) => !BUNDLED_PACKAGES.has(name))
+    .flatMap((name) => [name, `${name}/*`]);
+}
+
+/** 把 packages/skill-creator-dsh-client 以真实包目录复制进 dist/dsh-client（发布形态）。 */
+function vendorDshClientPlugin(): void {
+  const source = path.join(root, "packages", "skill-creator-dsh-client");
+  const dest = path.join(outDir, "dsh-client");
+  copyDir(path.join(source, "lib"), path.join(dest, "lib"));
+  fs.copyFileSync(path.join(source, "package.json"), path.join(dest, "package.json"));
+  fs.copyFileSync(path.join(root, "LICENSE"), path.join(dest, "LICENSE"));
+}
+
+function copyDir(from: string, to: string): void {
+  fs.mkdirSync(to, { recursive: true });
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const source = path.join(from, entry.name);
+    const target = path.join(to, entry.name);
+    if (entry.isDirectory()) copyDir(source, target);
+    else fs.copyFileSync(source, target);
+  }
+}
+
+function readPackageIdentity(file: string): RootPackageIdentity {
   let source: string;
   try {
     source = fs.readFileSync(file, "utf8");

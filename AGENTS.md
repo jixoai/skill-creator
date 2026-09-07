@@ -394,7 +394,7 @@ daemon stop --> terminal gate --> abort pending clone --> reject late retain
 
 ```text
 scripts/
-|-- build-core.sh.ts ---------------- Bun + esbuild Node bundle
+|-- build-core.sh.ts ---------------- Bun + esbuild Node bundle（ccski+debug inline；externals=dependencies；vendor dsh-client→dist/dsh-client）
 |-- stage-webui.sh.ts --------------- Bun static SPA staging
 `-- dev.sh.ts ----------------------- Vite 监督器 + daemon 接管编排（pnpm dev 入口）
 

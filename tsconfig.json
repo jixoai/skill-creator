@@ -24,6 +24,6 @@
       "@skill-creator/shared/*": ["./src/shared/*"]
     }
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts"],
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "packages/skill-creator-dsh-client/lib/**/*.d.ts"],
   "exclude": ["node_modules", "dist", "webui"]
 }
