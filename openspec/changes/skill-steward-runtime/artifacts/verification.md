@@ -26,14 +26,14 @@ openspec validate --all --strict -> 9 passed, 0 failed
 | 2.3d split/merge + 资源映射               | ✓    | 资源 copy 落盘 + 源禁用目录保留；目标名冲突 validate 即拒（零写入）；journal replay rollback 恢复完整树与启停                                                                                                                                                                                                          |
 | 2.3e crash/restart recovery fixtures      | ◐    | `scanUnfinishedJournals` 扫描崩溃残留（不重放写）+ 测试；「封锁目标写入」的恢复闸门尚未接入 apply 入口（见未验证项）                                                                                                                                                                                                   |
 | 2.3f 串联 + RPC                           | ✓    | `skillSteward` RPC 六端点；e2e 测试 check→optimize→validate→approve→apply→byte-rollback 全链；malformed 终态零提案                                                                                                                                                                                                     |
-| 2.4a cancel/start/dispose 并发            | ◐    | 新 runtime：cancel signal 有界、applying 并发锁、迟到事件丢弃已测；「abort-ignoring adapter 强制 deadline 释放」针对后续 DSH adapter，本阶段 fixture 无此形态                                                                                                                                                          |
+| 2.4a cancel/start/dispose 并发            | ✓    | 新 runtime：cancel signal 有界、applying 并发锁、迟到事件丢弃已测。残余收口（DSH 阶段 owner，2026-09-07）：`dsh-agent-runtime.ts` `awaitIdleBounded`（deadline→cancel→grace→强制释放；record.forcedRelease）+ session `dispose()`（清理失败进 record.cleanupErrors，修正原 finally 死代码）；挂起 adapter 负例 15/15                                                                                       |
 | 2.4 安全与生命周期 focused tests          | ✓    | stale/replayed approval/Global target/path traversal/cancel/daemon dispose 均有 typed 终态断言；新管线无临时 execution root（快照即上下文，无孤儿目录风险）                                                                                                                                                            |
 | 2.4b timeout 归因                         | ✓    | 根因 npx probe（见 contracts verification）；`pnpm exec vitest run test/agent-steward.test.ts` 连续两次 16/16（6.58s / 5.26s）；全量 303/303                                                                                                                                                                           |
 
 ## 未验证项（诚实声明）
 
 - 2.3e 的恢复闸门：`scanUnfinishedJournals` 已能发现残留，但 apply 入口尚未在启动时强制「先扫描再开放写入」；真实进程 kill 注入（每个写边界）未执行。下一阶段接线。
-- 2.4a 的 adapter 强制释放 deadline 属于 DSH adapter 阶段的验收形态。
+- 2.4a 的 adapter 强制释放 deadline 属于 DSH adapter 阶段的验收形态。（已收口：见 2.4a 行——awaitIdleBounded + dispose 可见化，test/dsh-runtime-integration.test.ts 挂起 adapter 负例。）
 - 本阶段 backend 锁定 fixture；DSH/Codex runtime、WebUI 未接入（Non-Goal）。
 - 契约演进 1.0.0→1.1.0（enable patch）：阶段 1 的 Codex 复核仍针对 1.0.0 边界，结论出来后需要按 findings 决定是否补一轮契约复核。
 

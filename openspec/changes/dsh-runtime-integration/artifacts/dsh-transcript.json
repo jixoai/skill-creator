@@ -1,6 +1,6 @@
 {
   "artifactVersion": 1,
-  "generatedAt": "2026-09-06T12:52:59.128Z",
+  "generatedAt": "2026-09-07T02:32:40.120Z",
   "generator": "scripts/dsh-transcript.sh.ts",
   "lockedPackages": {
     "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
@@ -52,7 +52,9 @@
     "adapterCalls": 2,
     "statuses": ["running", "idle"],
     "cancelled": false,
-    "toolDenied": false
+    "toolDenied": false,
+    "forcedRelease": false,
+    "cleanupErrors": []
   },
   "primaryRoundManagerCalls": [
     {
@@ -63,7 +65,7 @@
   ],
   "frames": [
     {
-      "at": "2026-09-06T12:52:58.495Z",
+      "at": "2026-09-07T02:32:39.499Z",
       "runId": "sr_d5457da7b9c3f001e2a4b6c8",
       "sessionId": "steward-transcript-primary",
       "kind": "status",
@@ -71,7 +73,7 @@
       "seq": 1
     },
     {
-      "at": "2026-09-06T12:52:58.507Z",
+      "at": "2026-09-07T02:32:39.503Z",
       "runId": "sr_d5457da7b9c3f001e2a4b6c8",
       "sessionId": "steward-transcript-primary",
       "kind": "tool-call",
@@ -82,7 +84,7 @@
       "seq": 2
     },
     {
-      "at": "2026-09-06T12:52:58.507Z",
+      "at": "2026-09-07T02:32:39.503Z",
       "runId": "sr_d5457da7b9c3f001e2a4b6c8",
       "sessionId": "steward-transcript-primary",
       "kind": "tool-result",
@@ -123,14 +125,14 @@
                 "byteSize": 121
               }
             ],
-            "resources": 2
+            "resources": 4
           }
         }
       },
       "seq": 3
     },
     {
-      "at": "2026-09-06T12:52:58.509Z",
+      "at": "2026-09-07T02:32:39.504Z",
       "runId": "sr_d5457da7b9c3f001e2a4b6c8",
       "sessionId": "steward-transcript-primary",
       "kind": "status",
@@ -138,7 +140,7 @@
       "seq": 4
     },
     {
-      "at": "2026-09-06T12:52:58.509Z",
+      "at": "2026-09-07T02:32:39.505Z",
       "runId": "sr_d5457da7b9c3f001e2a4b6c8",
       "sessionId": "steward-transcript-primary",
       "kind": "turn-start",
@@ -146,7 +148,7 @@
       "seq": 5
     },
     {
-      "at": "2026-09-06T12:52:58.509Z",
+      "at": "2026-09-07T02:32:39.505Z",
       "runId": "sr_d5457da7b9c3f001e2a4b6c8",
       "sessionId": "steward-transcript-primary",
       "kind": "turn-end",
@@ -165,7 +167,9 @@
     "adapterCalls": 2,
     "statuses": ["running", "idle"],
     "cancelled": false,
-    "toolDenied": false
+    "toolDenied": false,
+    "forcedRelease": false,
+    "cleanupErrors": []
   },
   "replayIdentical": true,
   "cancelRound": {
@@ -175,6 +179,8 @@
     "adapterCalls": 0,
     "statuses": ["running", "idle"],
     "cancelled": true,
-    "toolDenied": false
+    "toolDenied": false,
+    "forcedRelease": false,
+    "cleanupErrors": []
   }
 }

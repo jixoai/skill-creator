@@ -154,6 +154,8 @@ export async function createStewardAgentSession(
   followup: (text: string) => void;
   whenIdle: () => Promise<void>;
   cancel: () => void;
+  /** 同步清理 agent-scope 效果；返回清理失败描述（可见）。 */
+  dispose: () => string[];
 }> {
   const disposers: Array<() => void> = [];
   const bridge = async (
@@ -252,6 +254,7 @@ export async function createStewardAgentSession(
   });
   disposers.push(off);
 
+  let disposed = false;
   return {
     followup: (text: string) => {
       handle.agent.followup({
@@ -263,7 +266,83 @@ export async function createStewardAgentSession(
     },
     whenIdle: () => handle.agent.whenIdle(),
     cancel: () => handle.agent.cancel({ kind: "user" }),
+    /**
+     * 同步清理 agent-scope 效果（prompt section / 域工具 / status 监听）。
+     * 返回清理失败的可见描述（2.4a「清理失败可见」）；幂等。
+     */
+    dispose: (): string[] => {
+      if (disposed) return [];
+      disposed = true;
+      const errors: string[] = [];
+      for (const dispose of disposers) {
+        try {
+          dispose();
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+      return errors;
+    },
   };
+}
+
+/** whenIdle 的有界等待结果。 */
+export interface BoundedIdleResult {
+  /** agent 在 deadline（含 cancel grace）内到达 idle。 */
+  idleReached: boolean;
+  /** deadline 到期且 cancel grace 后仍未 idle → 强制释放（run 有界，不再等待）。 */
+  forcedRelease: boolean;
+}
+
+/** 显式 deadline（abort-ignoring adapter 防护；2.4a「明确 deadline 后强制释放」）。 */
+export const STEWARD_IDLE_DEADLINE_MS = 30_000;
+/** deadline 到期先 cancel，再等待 grace；仍不 idle 才强制释放。 */
+export const STEWARD_IDLE_GRACE_MS = 5_000;
+
+/**
+ * 有界等待 idle：deadline 到期先 cancel；grace 后仍未 settle 则强制返回
+ * （放弃等待，交由调用方记录 forcedRelease 终态）。whenIdle 的 rejection 视为
+ * 已 settle（adapter 错误路径不触发强制释放）。
+ */
+export async function awaitIdleBounded(
+  session: { whenIdle(): Promise<void>; cancel(): void },
+  deadlineMs: number,
+  graceMs: number,
+): Promise<BoundedIdleResult> {
+  let settled = false;
+  const idle = Promise.resolve(session.whenIdle()).then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  const guard = new Promise<BoundedIdleResult>((resolve) => {
+    const deadline = setTimeout(
+      () => {
+        if (settled) return resolve({ idleReached: true, forcedRelease: false });
+        session.cancel();
+        const grace = setTimeout(
+          () => {
+            resolve(
+              settled
+                ? { idleReached: true, forcedRelease: false }
+                : { idleReached: false, forcedRelease: true },
+            );
+          },
+          Math.max(0, graceMs),
+        );
+        grace.unref();
+      },
+      Math.max(0, deadlineMs),
+    );
+    deadline.unref();
+  });
+  return Promise.race([
+    idle.then((): BoundedIdleResult => ({ idleReached: true, forcedRelease: false })),
+    guard,
+  ]);
 }
 
 /** 一次性 tool round 的 run record（版本化事实写入审计）。 */
@@ -276,6 +355,10 @@ export interface DshToolRoundRecord {
   cancelled: boolean;
   /** 工具被 DSH registry 拒绝（未注册/未知）时的 fail-closed 标记。 */
   toolDenied: boolean;
+  /** deadline 到期后强制释放（abort-ignoring adapter 防护；run 有界）。 */
+  forcedRelease: boolean;
+  /** session 清理失败描述（可见；空数组=全部成功）。 */
+  cleanupErrors: string[];
 }
 
 /** 一次性执行完整的确定性 tool round（boot → session → turn → idle）。 */
@@ -291,17 +374,25 @@ export async function runDshStewardToolRound(input: {
   requestTool?: string;
   /** 在 turn 开始后立即取消（cancel-drain 测试）。 */
   cancelImmediately?: boolean;
+  /** 注入 adapter（默认 ScriptedStewardLlmAdapter；负例挂起 adapter 用）。 */
+  adapter?: ScriptedStewardLlmAdapter;
+  /** idle deadline（默认 STEWARD_IDLE_DEADLINE_MS；测试可缩短）。 */
+  idleDeadlineMs?: number;
+  /** deadline 到期 cancel 后的 grace（默认 STEWARD_IDLE_GRACE_MS）。 */
+  idleGraceMs?: number;
 }): Promise<DshToolRoundRecord> {
   const { ctx, adapter } = await bootDshStewardComposition({
-    adapter: new ScriptedStewardLlmAdapter(
-      input.requestTool ? { requestTool: input.requestTool } : {},
-    ),
+    adapter: input.adapter
+      ? input.adapter
+      : new ScriptedStewardLlmAdapter(input.requestTool ? { requestTool: input.requestTool } : {}),
   });
   const statuses: string[] = [];
-  const disposers: Array<() => void> = [];
+  const cleanupErrors: string[] = [];
   let cancelled = false;
+  let forcedRelease = false;
+  let session: Awaited<ReturnType<typeof createStewardAgentSession>> | null = null;
   try {
-    const session = await createStewardAgentSession(ctx, {
+    session = await createStewardAgentSession(ctx, {
       sessionId: input.sessionId,
       callTool: input.callTool,
       onCall: input.onCall,
@@ -315,7 +406,15 @@ export async function runDshStewardToolRound(input: {
       cancelled = true;
       session.cancel();
     }
-    await session.whenIdle();
+    const idle = await awaitIdleBounded(
+      session,
+      input.idleDeadlineMs ?? STEWARD_IDLE_DEADLINE_MS,
+      input.idleGraceMs ?? STEWARD_IDLE_GRACE_MS,
+    );
+    if (!idle.idleReached) {
+      cancelled = true;
+      forcedRelease = true;
+    }
     return {
       promptVersion: STEWARD_PROMPT_VERSION,
       toolVersion: STEWARD_TOOL_VERSION,
@@ -324,17 +423,14 @@ export async function runDshStewardToolRound(input: {
       statuses,
       cancelled,
       toolDenied: input.requestTool !== undefined,
+      forcedRelease,
+      cleanupErrors,
     };
   } finally {
     // cordis Context 无显式 dispose API（探测结论）；组合随进程退出回收。
-    // disposers 在此同步清理已注册的 agent-scope 效果。
-    for (const dispose of disposers) {
-      try {
-        dispose();
-      } catch {
-        // 会话已结束时的清理失败不改变结果。
-      }
-    }
+    // agent-scope 效果（prompt section / 域工具 / status 监听）由 session.dispose
+    // 同步清理，失败以 message 进入 record.cleanupErrors（可见）。
+    cleanupErrors.push(...(session?.dispose() ?? []));
   }
 }
 

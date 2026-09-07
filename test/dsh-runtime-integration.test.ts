@@ -352,6 +352,88 @@ describe("dsh steward runtime safety (task 3.2 acceptance)", () => {
       expect(result.statuses.at(-1)).toBe("idle");
     },
   );
+
+  it(
+    "force-releases an abort-ignoring adapter after the explicit idle deadline (2.4a)",
+    { timeout: 20_000 },
+    async () => {
+      const mod = await import("../src/daemon/steward/dsh-agent-runtime.js");
+      // 挂起 adapter：进入 stream 后永不 yield、永不返回、不响应任何取消信号。
+      class HangingAdapter extends mod.ScriptedStewardLlmAdapter {
+        override async *stream(
+          _options: Parameters<mod.ScriptedStewardLlmAdapter["stream"]>[0],
+        ): AsyncGenerator<never, void, unknown> {
+          this.calls += 1;
+          await new Promise<never>(() => {});
+        }
+      }
+      const snapshot = (
+        await import("../src/shared/contracts/skill-steward.js")
+      ).SkillStewardContextSnapshotSchema.parse(
+        JSON.parse(
+          (await import("node:fs")).readFileSync(
+            (await import("node:path")).join(
+              __dirname,
+              "fixtures",
+              "steward",
+              "snapshot.imported.json",
+            ),
+            "utf8",
+          ),
+        ),
+      );
+      const startedAt = Date.now();
+      const result = await mod.runDshStewardToolRound({
+        sessionId: `steward-hang-${Date.now()}`,
+        turnText: "Run a steward round that never settles.",
+        snapshotId: snapshot.id,
+        callTool: async () => ({ kind: "ok", value: {} }),
+        onCall: () => undefined,
+        adapter: new HangingAdapter(),
+        idleDeadlineMs: 150,
+        idleGraceMs: 150,
+      });
+      // run 有界：deadline + grace + 余量内返回，且携带 typed 强制释放事实。
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+      expect(result.forcedRelease).toBe(true);
+      expect(result.cancelled).toBe(true);
+      expect(result.adapterCalls).toBeGreaterThanOrEqual(1);
+      // 清理失败可见：record 总是携带 cleanupErrors（此路径允许非空）。
+      expect(Array.isArray(result.cleanupErrors)).toBe(true);
+    },
+  );
+
+  it(
+    "a responsive round reports a clean session dispose (2.4a cleanup visibility)",
+    { timeout: 20_000 },
+    async () => {
+      const { runDshStewardToolRound } = await import("../src/daemon/steward/dsh-agent-runtime.js");
+      const snapshot = (
+        await import("../src/shared/contracts/skill-steward.js")
+      ).SkillStewardContextSnapshotSchema.parse(
+        JSON.parse(
+          (await import("node:fs")).readFileSync(
+            (await import("node:path")).join(
+              __dirname,
+              "fixtures",
+              "steward",
+              "snapshot.imported.json",
+            ),
+            "utf8",
+          ),
+        ),
+      );
+      const result = await runDshStewardToolRound({
+        sessionId: `steward-clean-${Date.now()}`,
+        turnText: "Run the steward check task.",
+        snapshotId: snapshot.id,
+        callTool: async () => ({ kind: "ok", value: {} }),
+        onCall: () => undefined,
+      });
+      expect(result.forcedRelease).toBe(false);
+      expect(result.cleanupErrors).toEqual([]);
+    },
+  );
 });
 
 describe("dsh unavailable/recovery boundaries (task 3.4)", () => {

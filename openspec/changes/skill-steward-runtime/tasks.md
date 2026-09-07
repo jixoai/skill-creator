@@ -31,9 +31,10 @@
   - Evidence: 5781109 skillSteward RPC 六端点 + e2e 全链测试（check→proposal→approve→apply→byte-rollback）。
   - Files: `src/daemon/steward-service.ts`, `src/shared/rpc-contract.ts`, `src/shared/contracts/skill-steward.ts`.
   - Acceptance: edit/disable/split/merge all stop at approval; apply rechecks revision and rediscovery; rollback requires reverse-proposal approval and restores prior bytes.
-- [ ] 2.4a 修复 cancel/start/dispose 并发和异常 adapter 清理。
+- [x] 2.4a 修复 cancel/start/dispose 并发和异常 adapter 清理。
   - Files: `src/daemon/steward/runtime.ts`, fixture adapter。
   - Evidence: handshake 尚未完成时 stop 不能创建新 run；两个 run 不共享 activeClient；abort-ignoring adapter 在明确 deadline 后强制释放；late event 不创建 draft；清理失败可见。
+  - Closure: 2.4 时点已完成 cancel 有界收敛/applying 并发锁/迟到事件丢弃（runtime 测试）。残余「abort-ignoring adapter 强制 deadline + 清理失败可见」在 DSH 阶段 owner 落地：`dsh-agent-runtime.ts` `awaitIdleBounded`（deadline 到期先 cancel、grace 后仍不 settle 则强制释放——`runDshStewardToolRound` 以 `STEWARD_IDLE_DEADLINE_MS/GRACE_MS` 显式 deadline 等待 idle，record 新增 `forcedRelease`）+ `createStewardAgentSession` 返回 `dispose()`（同步清理 prompt section/域工具/status 监听，失败 message 进入 record.`cleanupErrors`——修正原 finally 死代码：disposers 此前从未跨函数边界交付）。负例：挂起 adapter（进 stream 后永不 yield/不响应取消）在 deadline+grace 内返回 `forcedRelease:true`/`cancelled:true`（`pnpm exec vitest run test/dsh-runtime-integration.test.ts` 15 passed）；transcript 脚本复跑通过；全量 442/442（53 files）。
 - [x] 2.4 增加安全与生命周期 focused tests。
   - Evidence: test/skill-steward-runtime.test.ts 32 项覆盖 stale/replay/Global/traversal/cancel/dispose typed 终态；无孤儿临时根（新管线以快照为上下文）。
   - Files: `test/skill-steward-runtime.test.ts`.
