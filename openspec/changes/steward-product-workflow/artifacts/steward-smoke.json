@@ -43,9 +43,7 @@
     "preparedNote": "Reverse edit proposal prepared from snapshot bytes; requires separate human approval.",
     "reverseProposalId": "spp_7048c4aab493fee7",
     "outcome": "applied",
-    "mutations": [
-      "SKILL.md"
-    ],
+    "mutations": ["SKILL.md"],
     "sha256Restored": "8344e3b7eda6e8ffb18d2c1fad944c53361403dd14b7910fce016518e9324bc8",
     "bytesRestored": true
   },
