@@ -15,6 +15,13 @@ import { fileURLToPath } from "node:url";
 import { skillCreatorDaemonDev } from "./config/daemon-dev";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // vitest project 模式不继承 sveltekit 注入的 $lib 别名（dev/build 不受影响，
+      // 显式声明只为单测的模块解析稳定）。
+      $lib: fileURLToPath(new URL("./src/lib/", import.meta.url)),
+    },
+  },
   server: {
     watch: {
       // Build output is produced by `pnpm build` and must not trigger HMR.

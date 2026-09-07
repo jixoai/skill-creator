@@ -45,6 +45,7 @@
   import IconFile from "@lucide/svelte/icons/file-text";
   import IconGraph from "@lucide/svelte/icons/network";
   import IconBot from "@lucide/svelte/icons/bot";
+  import IconWorkflow from "@lucide/svelte/icons/workflow";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPower from "@lucide/svelte/icons/power";
   import IconShield from "@lucide/svelte/icons/shield-check";
@@ -409,6 +410,20 @@
         >
           <IconBot class="h-3.5 w-3.5" />
           Steward
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1.5 px-2 text-xs"
+          title="Steward workflow: task, scope and runtime config (task 4.1)"
+          onclick={() => {
+            if (wsId && providerId) {
+              goById("workspaces.steward-workflow", { wsId, providerId }, {});
+            }
+          }}
+        >
+          <IconWorkflow class="h-3.5 w-3.5" />
+          Workflow
         </Button>
         <Button
           variant="ghost"

@@ -69,5 +69,19 @@ export const workspacesApp = defineApp({
         component: () => import("./StewardView.svelte"),
       }),
     }),
+    // 管家工作流 tab（steward-product-workflow 4.1）：task/target/selected-skills/
+    // runtime-config 选择 + skillSteward run 投影（审批/apply/rollback 归 4.2）。
+    defineActivity({
+      pattern: "/workspaces",
+      root: defineRoute({
+        id: "workspaces.steward-workflow",
+        pattern: "workflow/:wsId/:providerId",
+        params: z.object({
+          wsId: WorkspaceIdSchema,
+          providerId: ProviderIdSchema,
+        }),
+        component: () => import("./StewardWorkflowView.svelte"),
+      }),
+    }),
   ],
 });

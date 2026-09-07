@@ -2,10 +2,11 @@
 
 依赖：`skill-steward-contracts`、`skill-steward-runtime`、`dsh-runtime-integration`、`dsh-webui-composition` 完成并通过门禁。此 change 不再设计第二套独立 Agent shell。
 
-- [ ] 4.1 在已注册的 DSH client plugin 内实现任务与范围选择。
+- [x] 4.1 在已注册的 DSH client plugin 内实现任务与范围选择。
   - Files: `packages/skill-creator-dsh-client/`, `src/shared/rpc-contract.ts`, `webui/src/lib/stores/`.
   - Steps: 只实现 task/target/selected-skills/runtime-config stores 和对应 workflow view；复用阶段 4 已注册的 plugin/root/connection/RPC owner，不注册第二个 plugin、root、route owner 或 Agent shell。
   - Acceptance: scope/task/runtime config and run projection survive reconnect with latest-request-wins semantics inside the DSH host；plugin registration 仍只由 `dsh-webui-composition` 负责。
+  - Evidence: 新 store `webui/src/lib/stores/steward-workflow.svelte.ts`（per-target 键控选择 `{taskKind, selectedSkillIds, instructions≤2000}` 模块级 $state——跨 island 卸载/重连存活、无 localStorage；`loadStewardRuntimeConfig`/`applyStewardRuntimeConfigPatch` 走 `dsh.settings.*`，typed rejected 原样返回；`startStewardWorkflowRun` 走 `skillSteward.startRun`，run 投影绑定 targetKey——提交要求 isCurrent、loading 清理只需 isLatest 的代次协议）+ 新视图 `StewardWorkflowView.svelte`（manifest 新 activity `workspaces.steward-workflow`，ProviderView 增 Workflow tab；无第二个 plugin/root/Agent shell）。单测 `webui/src/lib/__tests__/steward-workflow.test.ts` 6/6（键控/toggle 去重/instructions 钳制/慢请求不覆盖新 run/断线后回落响应零提交+新连接可提交/unavailable typed 错误/rejected 不动视图+迟到补丁丢弃）+ `route-match.test.ts` 6/6（全部 activity 路径匹配含 workflow 3 段路由、未知前缀不吞）。测试基建：root vitest 改 projects（webui 项目经 webui 安装的 vite-plugin-svelte 编译 runes；node 项目不变——root 管线无 svelte 插件，`.svelte.ts` 的 `$state` 会变裸引用）。轮内真实缺陷修复：视图曾在 `$derived.by` 内调用 `selectionFor` 初始化 $state 选择表 → Svelte `state_unsafe_mutation` 击穿叶子渲染（SPA 表现为路由 fallback）——改为 `$effect.pre` 初始化。浏览器取证（`scripts/dsh-release-evidence.sh.ts --hold` 真实生产组合宿主，artifacts/steward-workflow-4.1-island-*.png 4 张，0 JS 错误）：island 内 Workflow tab 真实技能多选（1 selected）+ Organize 切换 + `Run organize` 经 RPC 产出 run 投影（1 tool call、4 accepted/0 dropped、1 proposal split `spp_*`、completed）+ runtime config 补丁 approval ask→never 生效（rev 0 视图刷新）+ island 关闭重开后选择与 run 投影完整存活。门禁：454/454（54 files）、typecheck 0、webui check 0/0、build、fmt 482 clean、diff-check clean、openspec 9/9。
 - [ ] 4.2 实现 DSH-hosted 产品级 workflow UI。
   - Files: `packages/skill-creator-dsh-client/`, components and styles.
   - Acceptance: timeline, tool calls, evidence graph, diff, validation, approval, rollback and recovery states work at 1100px and 680px without overflow; no iframe or parallel shell.

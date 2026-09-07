@@ -11,6 +11,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { defineConfig, type Plugin } from "vite-plus";
 
 function resolveTypeScriptSources(): Plugin {
@@ -37,11 +38,45 @@ export default defineConfig({
     },
   },
   test: {
-    plugins: [resolveTypeScriptSources()],
-    environment: "node",
-    include: ["test/**/*.test.ts", "webui/config/**/*.test.ts", "webui/src/**/*.test.ts"],
-    globals: false,
-    fileParallelism: false,
-    testTimeout: 20_000,
+    // Vitest projects：webui/src 下的 store 单测含 `.svelte.ts` runes 模块，必须经
+    // webui 的 sveltekit 管线编译（root 管线无 svelte 插件，$state 会变成裸引用）；
+    // daemon/build-tool 测试仍在 root Node 管线。两条 include 互斥。
+    projects: [
+      {
+        test: {
+          name: "node",
+          plugins: [resolveTypeScriptSources()],
+          environment: "node",
+          include: ["test/**/*.test.ts", "webui/config/**/*.test.ts"],
+          exclude: ["webui/src/**"],
+          globals: false,
+          fileParallelism: false,
+          testTimeout: 20_000,
+        },
+      },
+      {
+        plugins: [
+          // webui 单测需要 svelte 编译（.svelte 组件与 .svelte.ts runes）；插件从
+          // webui 安装解析（root 无 svelte 依赖，不新增 hoisting 假设）。
+          createRequire(path.join(projectRoot, "webui", "package.json"))(
+            "@sveltejs/vite-plugin-svelte",
+          ).svelte(),
+        ],
+        resolve: {
+          alias: {
+            $shared: path.join(projectRoot, "src/shared"),
+            $lib: path.join(projectRoot, "webui/src/lib"),
+          },
+        },
+        test: {
+          name: "webui",
+          environment: "node",
+          include: ["webui/src/**/*.test.ts"],
+          globals: false,
+          fileParallelism: false,
+          testTimeout: 20_000,
+        },
+      },
+    ],
   },
 });

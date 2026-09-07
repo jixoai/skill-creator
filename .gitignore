@@ -16,3 +16,6 @@ tmp/
 .claude/
 .codex/
 webui/build-island
+.cache/
+.svelte-kit/
+/static/
