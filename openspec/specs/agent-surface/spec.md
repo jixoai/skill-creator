@@ -1,6 +1,7 @@
 # agent-surface Specification
 
 ## Purpose
+
 Skill Creator shell 内的 Agent 面板与能力供给面：shell 级 drawer、MCP 能力工具、
 ui:// 视觉卡与 Manager authority 红线（mutation 产 proposal 待人工审批）。
 

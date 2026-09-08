@@ -29,16 +29,16 @@ agent-presets row 在场）→ health → stop → endpoint 释放 → restart �
 
 ## 6.3 全量门禁（逐条独立，2026-09-08）
 
-| 门禁 | 结果 |
-| --- | --- |
-| `pnpm test` | 501 passed / 501 |
-| `pnpm typecheck` | ✓ |
-| `pnpm --dir webui check` | 0 errors / 0 warnings |
-| `pnpm build` | ✓（dist 干净） |
-| `pnpm exec vp fmt --check` | ✓ |
-| `git diff --check` | ✓ |
-| `npm pack --dry-run` | 91 files，无 web-composition 残留 |
-| `openspec validate --all --strict` | 10 passed / 10 |
+| 门禁                               | 结果                              |
+| ---------------------------------- | --------------------------------- |
+| `pnpm test`                        | 501 passed / 501                  |
+| `pnpm typecheck`                   | ✓                                 |
+| `pnpm --dir webui check`           | 0 errors / 0 warnings             |
+| `pnpm build`                       | ✓（dist 干净）                    |
+| `pnpm exec vp fmt --check`         | ✓                                 |
+| `git diff --check`                 | ✓                                 |
+| `npm pack --dry-run`               | 91 files，无 web-composition 残留 |
+| `openspec validate --all --strict` | 10 passed / 10                    |
 
 产物 grep：`dist/` 无 `dsh-web-app` / `dsh-host-webserver` / `dsh-client-*` /
 `@skill-creator/dsh-client` 引用；staged package.json 依赖清单无 web-composition 包。

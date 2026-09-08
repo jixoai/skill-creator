@@ -1,6 +1,7 @@
 # agent-kernel Specification
 
 ## Purpose
+
 DSH 作为 headless 内核驱动 Skill Creator 的 Agent 会话：单 dsh-base bundle 组合、
 产品 preset、工具面收窄与 MCP 桥接——shell 是唯一宿主，DSH webui 永不作为产品面。
 
