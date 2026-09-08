@@ -40,14 +40,15 @@ const repoRoot = sourceMode
   : path.resolve(path.dirname(modulePath), "..");
 
 /**
- * 内核工具面收窄：这些 dsh-base rows 注册模型可见的通用 fs/shell/web 工具，产品
- * 会话一律不可见（design D1）。disable 的是「通用能力行」，不是 sandbox/permission
- * 等执行策略服务。skill-filesystem/tool-skill 同步收窄：宿主机个人 skills 目录的
- * 自动发现注入（system-reminder catalog）越出 Manager 的技能真相边界——技能目录
- * 由 skill-creator-mcp + 提示词最佳实践供给（task 4.x）。
+ * 内核工具面收窄：这些 dsh-base rows 注册模型可见的通用 fs/shell/web 工具。
+ * product 会话默认不可见（design D1）；唯一例外：tool-bash 行保留激活，作为
+ * 开放模式（free，显示名 Open）的原生能力——专注模式经 agent restrict 拒绝
+ * （applyProductToolSurface 按模式计算 deny 名单）。disable 的是「通用能力行」，
+ * 不是 sandbox/permission 等执行策略服务。skill-filesystem/tool-skill 同步收窄：
+ * 宿主机个人 skills 目录的自动发现注入（system-reminder catalog）越出 Manager
+ * 的技能真相边界——技能目录由 skill-creator-mcp + 提示词最佳实践供给（task 4.x）。
  */
 const KERNEL_DISABLED_TOOL_ROWS = [
-  "tool-bash",
   "tool-pwsh",
   "tool-fs",
   "tool-fs-search",

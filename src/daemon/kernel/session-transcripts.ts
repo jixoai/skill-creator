@@ -42,6 +42,8 @@ export interface SessionTranscripts {
   append(sessionId: string, frame: DshSessionStreamFrame): void;
   /** 原子更新会话模式（meta.json 重写；未知 sessionId 返回 false）。 */
   updateMode(sessionId: string, mode: DshAgentMode): boolean;
+  /** 原子更新会话标题（内核 session/title 事件；未知/空标题返回 false）。 */
+  updateTitle(sessionId: string, title: string): boolean;
   /** 全部持久会话元数据（扫描 + 逐项 safeParse，损坏目录跳过）。 */
   listAll(): SessionTranscriptMeta[];
   /** 单会话帧回放（seq 升序；损坏行丢弃）。 */
@@ -163,6 +165,25 @@ export function createSessionTranscripts(rootDir: string): SessionTranscripts {
         return true;
       } catch (error) {
         console.error(`[session-transcripts] updateMode failed for ${sessionId}:`, error);
+        return false;
+      }
+    },
+    updateTitle(sessionId, title) {
+      const trimmed = title.trim();
+      if (trimmed.length === 0) return false;
+      const dir = dirs.get(sessionId);
+      if (dir === undefined) return false;
+      try {
+        const meta = parseMeta(JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8")));
+        if (meta === null || meta.title === trimmed) return meta !== null;
+        const next = { ...meta, title: trimmed };
+        const target = path.join(dir, "meta.json");
+        const tmp = `${target}.tmp`;
+        fs.writeFileSync(tmp, `${JSON.stringify(next)}\n`, { mode: 0o600 });
+        fs.renameSync(tmp, target);
+        return true;
+      } catch (error) {
+        console.error(`[session-transcripts] updateTitle failed for ${sessionId}:`, error);
         return false;
       }
     },

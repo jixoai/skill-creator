@@ -152,7 +152,9 @@ export type DshStewardModelSelection = z.infer<typeof DshStewardModelSelectionSc
 
 /**
  * Agent 会话模式（openspec add-agent-settings-modes）。专有模式 = 版本化
- * system-prompt section + MCP 工具名单；free 无专有收窄（基础最佳实践即全部）。
+ * system-prompt section + MCP 工具名单；free（显示名 Open，2026-09-09 用户
+ * 改名「开放模式」）无专有收窄——基础最佳实践即全部，且是唯一放行内核原生
+ * bash 工具的模式。
  */
 export const DshAgentModeSchema = z.enum(["create", "manage", "explore", "free"]);
 /** Agent 会话模式。 */
@@ -192,8 +194,8 @@ export const DSH_AGENT_MODES: readonly DshAgentModeCatalogEntry[] = [
   },
   {
     id: "free",
-    label: "Free",
-    description: "All capabilities in one session, no focused narrowing.",
+    label: "Open",
+    description: "All capabilities in one session, no focused narrowing (bash included).",
     tokenHeavy: true,
   },
 ];
@@ -363,11 +365,17 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   "assistant-text",
   /** 流式文本增量（assistant/chunk text-delta 的合并投影；终帧 assistant-text 整段替换）。 */
   "assistant-delta",
+  /** 思考内容终帧（assistant/message 的 reasoning 块整段；面板折叠展示）。 */
+  "assistant-reasoning",
+  /** 流式思考增量（assistant/chunk reasoning-delta 的合并投影）。 */
+  "assistant-reasoning-delta",
   "user-text",
   "turn-end",
   "approval-request",
   "approval-resolved",
   "mode-changed",
+  /** 会话自动命名（session/title 事件投影；text = 新标题）。 */
+  "session-title",
 ]);
 /** session stream 帧类别。 */
 export type DshSessionStreamFrameKind = z.infer<typeof DshSessionStreamFrameKindSchema>;

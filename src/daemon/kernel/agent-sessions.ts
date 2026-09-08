@@ -120,6 +120,8 @@ interface LivePanelSession {
   toolNames: Map<string, string>;
   /** assistant/chunk text-delta 的合并缓冲（120ms 窗口一帧，避免逐 token 落盘）。 */
   deltaBuffer: string[];
+  /** assistant/chunk reasoning-delta 的合并缓冲（thinking 流，同窗口）。 */
+  reasoningBuffer: string[];
   /** 上次 delta 帧冲刷时刻（ms）。 */
   deltaAt: number;
 }
@@ -170,17 +172,18 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     ).on("session/event", (session, event) => {
       const entry = live.get(session.id);
       if (!entry) return;
-      // 流式增量：assistant/chunk（text-delta）进合并缓冲，按时间窗成帧；
-      // 其余事件先冲刷缓冲，保证增量帧先于收尾帧（assistant-message/工具帧）落序。
+      // 流式增量：assistant/chunk（text-delta / reasoning-delta）各进合并缓冲，
+      // 按时间窗成帧；其余事件先冲刷缓冲，保证增量帧先于收尾帧落序。
       if (event.type === "assistant/chunk") {
         const chunk = (event.data as { chunk?: { type?: string; text?: string } } | undefined)
           ?.chunk;
         if (
-          chunk?.type === "text-delta" &&
-          typeof chunk.text === "string" &&
-          chunk.text.length > 0
+          typeof chunk?.text === "string" &&
+          chunk.text.length > 0 &&
+          (chunk.type === "text-delta" || chunk.type === "reasoning-delta")
         ) {
-          entry.deltaBuffer.push(chunk.text);
+          const buffer = chunk.type === "text-delta" ? entry.deltaBuffer : entry.reasoningBuffer;
+          buffer.push(chunk.text);
           if (Date.now() - entry.deltaAt >= DELTA_FLUSH_MS) flushDeltas(entry);
         }
         return;
@@ -197,25 +200,36 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     });
   }
 
-  /** 冲刷 delta 缓冲为一帧（live 环 + 转录同序落盘）。 */
+  /**
+   * 冲刷增量缓冲为帧（reasoning 先于 text——同一步内思考在前）；live 环 +
+   * 转录同序落盘。
+   */
   function flushDeltas(entry: LivePanelSession): void {
-    if (entry.deltaBuffer.length === 0) return;
-    const text = entry.deltaBuffer.join("");
-    entry.deltaBuffer = [];
+    if (entry.deltaBuffer.length === 0 && entry.reasoningBuffer.length === 0) return;
     entry.deltaAt = Date.now();
-    const frame: DshSessionStreamFrame = {
-      at: new Date().toISOString(),
-      runId: entry.agent.session.id,
-      sessionId: entry.agent.session.id,
-      seq: entry.frameSeq++,
-      kind: "assistant-delta",
-      text,
+    const emit = (kind: "assistant-delta" | "assistant-reasoning-delta", text: string): void => {
+      const frame: DshSessionStreamFrame = {
+        at: new Date().toISOString(),
+        runId: entry.agent.session.id,
+        sessionId: entry.agent.session.id,
+        seq: entry.frameSeq++,
+        kind,
+        text,
+      };
+      entry.frames.push(frame);
+      if (entry.frames.length > retention) {
+        entry.frames.splice(0, entry.frames.length - retention);
+      }
+      deps.transcripts.append(entry.agent.session.id, frame);
     };
-    entry.frames.push(frame);
-    if (entry.frames.length > retention) {
-      entry.frames.splice(0, entry.frames.length - retention);
+    if (entry.reasoningBuffer.length > 0) {
+      emit("assistant-reasoning-delta", entry.reasoningBuffer.join(""));
+      entry.reasoningBuffer = [];
     }
-    deps.transcripts.append(entry.agent.session.id, frame);
+    if (entry.deltaBuffer.length > 0) {
+      emit("assistant-delta", entry.deltaBuffer.join(""));
+      entry.deltaBuffer = [];
+    }
   }
 
   /** 单事件 → 帧投影（未知事件类型返回 null 丢弃；payload 脱敏）。 */
@@ -242,6 +256,19 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           payload: redactDshPayload(data),
         };
       }
+      case "session/title": {
+        // 内核 session-title 行（dsh-base 自带，首 prompt 后经辅助 LLM 生成、失败
+        // 回退首词截断）投出的标题：更新 live title + 转录 meta，并以帧驱动面板
+        // 会话列表即时改名（重启后的标题回放走转录 meta）。
+        const title =
+          typeof (data as { title?: unknown }).title === "string"
+            ? (data as { title: string }).title.trim()
+            : "";
+        if (title.length === 0) return null;
+        entry.title = title;
+        deps.transcripts.updateTitle(entry.agent.session.id, title);
+        return { ...base, seq: entry.frameSeq++, kind: "session-title", text: title };
+      }
       case "agent/status":
         return { ...base, seq: entry.frameSeq++, kind: "status", payload: redactDshPayload(data) };
       case "user/message": {
@@ -263,7 +290,17 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       }
       case "assistant/message": {
         // 事件形状实测（2026-09-08 真实会话）：{turn, step, message:{content:[...]}}。
+        // reasoning 块（thinking）先投影为折叠终帧，再投正文——一步内思考在前。
         const message = (data as { message?: unknown }).message ?? data;
+        const reasoning = reasoningOf(message);
+        if (reasoning !== undefined) {
+          entry.frames.push({
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "assistant-reasoning",
+            text: reasoning,
+          });
+        }
         const text = textOf(message);
         return {
           ...base,
@@ -425,6 +462,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       pending: new Map(),
       toolNames: new Map(),
       deltaBuffer: [],
+      reasoningBuffer: [],
       deltaAt: Date.now(),
     };
     registerPanelAnswerer(entry);
@@ -459,6 +497,24 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     return parts.length > 0 ? parts.join("\n") : undefined;
   }
 
+  /** 消息 content blocks 的 reasoning（thinking）拼接；无 reasoning 块返回 undefined。 */
+  function reasoningOf(message: unknown): string | undefined {
+    const content = (message as { content?: unknown } | null | undefined)?.content;
+    if (!Array.isArray(content)) return undefined;
+    const parts: string[] = [];
+    for (const block of content) {
+      if (
+        typeof block === "object" &&
+        block !== null &&
+        (block as { type?: unknown }).type === "reasoning" &&
+        typeof (block as { text?: unknown }).text === "string"
+      ) {
+        parts.push((block as { text: string }).text);
+      }
+    }
+    return parts.length > 0 ? parts.join("\n") : undefined;
+  }
+
   function statusOf(entry: LivePanelSession | undefined): AgentSessionStatus {
     if (!entry) return "disposed";
     return entry.agent.status === "running" ? "running" : "idle";
@@ -467,7 +523,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
   /** 会话模式 → agent setup（全局工具收窄 + 模式 section/guard + 基础最佳实践）。 */
   function setupFor(mode: DshAgentMode): (agentCtx: Context) => void {
     return (agentCtx) => {
-      applyProductToolSurface(agentCtx);
+      applyProductToolSurface(agentCtx, mode);
       applyAgentMode(agentCtx, mode);
       registerProductPromptSections(
         agentCtx as unknown as Parameters<typeof registerProductPromptSections>[0],
@@ -570,6 +626,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         pending: new Map(),
         toolNames: new Map(),
         deltaBuffer: [],
+        reasoningBuffer: [],
         deltaAt: Date.now(),
       };
       registerPanelAnswerer(entry);
@@ -738,7 +795,7 @@ export type AgentSessionsService = ReturnType<typeof createAgentSessionsService>
  * 工具在 task 4.1b 后同为可见注册）。restrict 的 allow 必须全部是已注册全局名，
  * 未知名会 fail——因此按内核全局表动态过滤。
  */
-function applyProductToolSurface(agentCtx: Context): void {
+function applyProductToolSurface(agentCtx: Context, mode: DshAgentMode): void {
   const tools = (
     agentCtx as Context & {
       tools?: {
@@ -752,12 +809,19 @@ function applyProductToolSurface(agentCtx: Context): void {
   const globalNames = (tools.schemas?.() ?? [])
     .map((schema) => schema?.name)
     .filter((name): name is string => typeof name === "string");
-  // deny 式收窄（allow 式要求名单全部已注册，与 mcp 工具的异步注册竞争）：
-  // 显式 allowlist 与 mcp capability 工具（mcp__skill-creator__*）保留，其余
-  // global 工具全部 deny；晚注册的 mcp 工具不在此刻的 deny 集，继承可见。
-  const deny = globalNames.filter(
-    (name) =>
-      !KERNEL_AGENT_TOOL_ALLOWLIST.includes(name) && !name.startsWith("mcp__skill-creator__"),
-  );
+  const deny = productToolDenyList(globalNames, mode);
   if (deny.length > 0) tools.restrict({ deny });
+}
+
+/**
+ * 模式感知的全局工具 deny 名单（导出供单测）：显式 allowlist 与 mcp capability
+ * 工具（mcp__skill-creator__*）永远保留；原生 bash 只在开放模式（free/Open）
+ * 放行，专注模式拒绝。
+ */
+export function productToolDenyList(globalNames: readonly string[], mode: DshAgentMode): string[] {
+  const nativeAllowed =
+    mode === "free" ? [...KERNEL_AGENT_TOOL_ALLOWLIST, "bash"] : KERNEL_AGENT_TOOL_ALLOWLIST;
+  return globalNames.filter(
+    (name) => !nativeAllowed.includes(name) && !name.startsWith("mcp__skill-creator__"),
+  );
 }

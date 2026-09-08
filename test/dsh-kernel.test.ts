@@ -109,11 +109,13 @@ describe("dsh-mcp-client bridge over the kernel (task 4.1b)", () => {
         expect(mcpTools.length).toBeGreaterThan(3);
         expect(mcpTools).toContain("mcp__skill-creator__workspace_list");
         expect(mcpTools).toContain("mcp__skill-creator__skills_list");
-        // 收窄不变量保持：通用 fs/shell 工具仍缺席。
+        // 收窄不变量保持：通用 fs 工具缺席；bash 是开放模式的例外（行激活，
+        // 专注模式经 agent restrict 拒绝——productToolDenyList 单测钉死）。
         const leaked = kernel
           .globalToolNames()
-          .filter((name) => ["bash", "read", "write", "edit", "glob", "grep"].includes(name));
+          .filter((name) => ["read", "write", "edit", "glob", "grep"].includes(name));
         expect(leaked).toEqual([]);
+        expect(kernel.globalToolNames()).toContain("bash");
       } finally {
         await web.stop({ graceMs: 0 });
         await domain.repository.dispose();
@@ -147,14 +149,14 @@ describe("headless dsh kernel (task 2.1)", () => {
   );
 
   it(
-    "keeps the global tool table free of general-purpose fs/shell/web tools (design D1)",
+    "keeps the global tool table free of general-purpose fs/shell/web tools except open-mode bash",
     { timeout: 180_000 },
     async () => {
       const kernel = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
       booted.push(kernel);
       const globalTools = kernel.globalToolNames();
+      // bash 例外（开放模式原生能力，2026-09-09）；其余通用工具仍禁用。
       const forbidden = [
-        "bash",
         "pwsh",
         "read",
         "write",

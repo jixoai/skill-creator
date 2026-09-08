@@ -18,6 +18,7 @@ import {
   applyAgentMode,
   mcpToolAllowedInMode,
 } from "../src/daemon/kernel/agent-modes.js";
+import { productToolDenyList } from "../src/daemon/kernel/agent-sessions.js";
 import { DSH_AGENT_MODES, type DshAgentMode } from "../src/shared/contracts/dsh-runtime.js";
 
 describe("agent mode catalog consistency", () => {
@@ -25,12 +26,38 @@ describe("agent mode catalog consistency", () => {
     expect(DSH_AGENT_MODES.map((entry) => entry.id)).toEqual(Object.keys(AGENT_MODES));
   });
 
-  it("free mode is the only un-narrowed definition", () => {
+  it("free mode is the only un-narrowed definition and shows as Open", () => {
     expect(AGENT_MODES.free).toEqual({ sectionText: null, tools: null });
+    expect(DSH_AGENT_MODES.find((entry) => entry.id === "free")).toMatchObject({
+      label: "Open",
+      tokenHeavy: true,
+    });
     for (const mode of ["create", "manage", "explore"] as const) {
       expect(AGENT_MODES[mode].sectionText).toBeTruthy();
       expect(AGENT_MODES[mode].tools!.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("productToolDenyList native tool policy", () => {
+  const globalNames = ["ask_user_question", "bash", "read_file", "list_directory", "web_search"];
+
+  it("focused modes deny the native bash tool", () => {
+    for (const mode of ["create", "manage", "explore"] as const) {
+      const deny = productToolDenyList(globalNames, mode);
+      expect(deny).toContain("bash");
+      expect(deny).not.toContain("ask_user_question");
+      expect(deny).toContain("read_file");
+      expect(deny).toContain("web_search");
+    }
+  });
+
+  it("open (free) mode allows bash and still denies other native tools", () => {
+    const deny = productToolDenyList(globalNames, "free");
+    expect(deny).not.toContain("bash");
+    expect(deny).not.toContain("ask_user_question");
+    expect(deny).toContain("read_file");
+    expect(deny).toContain("web_search");
   });
 });
 

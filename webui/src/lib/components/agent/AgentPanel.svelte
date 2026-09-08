@@ -18,6 +18,7 @@
   import IconPlus from "@lucide/svelte/icons/plus";
   import IconSend from "@lucide/svelte/icons/send";
   import IconStop from "@lucide/svelte/icons/square";
+  import IconChevron from "@lucide/svelte/icons/chevron-right";
   import { Button } from "$lib/components/ui/button";
   import { Textarea } from "$lib/components/ui/textarea";
   import {
@@ -196,6 +197,22 @@
           >
             {item.text}
           </div>
+        {:else if item.kind === "reasoning"}
+          <!-- thinking 折叠面：默认收起；流式时摘要带进行指示，终帧后可展开回看。 -->
+          <details class="group rounded-md border border-border/70 bg-muted/20">
+            <summary
+              class="flex cursor-pointer list-none items-center gap-1 px-2 py-1 text-[11px] text-muted-foreground select-none [&::-webkit-details-marker]:hidden"
+            >
+              <IconChevron class="h-3 w-3 transition-transform group-open:rotate-90" />
+              Thinking
+              {#if item.streaming}<span class="animate-pulse">…</span>{/if}
+            </summary>
+            <div
+              class="max-h-48 overflow-y-auto whitespace-pre-wrap px-2 pb-1.5 text-[11px] leading-relaxed text-muted-foreground"
+            >
+              {item.text}
+            </div>
+          </details>
         {:else if item.kind === "assistant"}
           <!-- markstream 增量渲染：内容增长只重解析尾部、不完整 fence/强调容错、
                离屏节点延迟；htmlPolicy=escape 锁死模型输出的 HTML 直通（与既有

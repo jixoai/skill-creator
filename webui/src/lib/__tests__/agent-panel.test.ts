@@ -223,6 +223,73 @@ describe("agent panel store (task 3.x)", () => {
     expect(after[0]).toMatchObject({ text: "Hello world", streaming: false });
   });
 
+  it("accumulates reasoning deltas into a collapsed-thinking item and applies the final frame", async () => {
+    let polls = 0;
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockImplementation(async () => {
+            polls += 1;
+            if (polls === 1) {
+              return {
+                frames: [
+                  frame(1, "turn-start"),
+                  frame(2, "assistant-reasoning-delta", { text: "think " }),
+                  frame(3, "assistant-reasoning-delta", { text: "hard" }),
+                ],
+                status: "running",
+              };
+            }
+            return {
+              frames: [
+                frame(4, "assistant-reasoning", { text: "think hard then answer" }),
+                frame(5, "assistant-text", { text: "42" }),
+                frame(6, "turn-end", { text: "completed" }),
+              ],
+              status: "idle",
+            };
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    const during = agentSession.items.filter((item) => item.kind === "reasoning");
+    expect(during).toHaveLength(1);
+    expect(during[0]).toMatchObject({ text: "think hard", streaming: true });
+    await pollAgentStream();
+    const after = agentSession.items.filter((item) => item.kind === "reasoning");
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ text: "think hard then answer", streaming: false });
+  });
+
+  it("applies kernel session titles to the session list without entering the transcript", async () => {
+    agentSessionsList.sessions = [
+      {
+        sessionId: "agent-s1",
+        title: "",
+        status: "idle",
+        cwd: "/tmp",
+        createdAt: "2026-09-08T00:00:00.000Z",
+        mode: "create",
+      },
+    ];
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockResolvedValue({
+            frames: [frame(9, "session-title", { text: "Counting probe" })],
+            status: "idle",
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    expect(agentSessionsList.sessions[0]?.title).toBe("Counting probe");
+    expect(agentSession.items.some((item) => item.kind === "status")).toBe(false);
+  });
+
   it("keeps polling while an approval is pending and stops after it resolves (terminal semantics)", async () => {
     connection.rpc = {
       agent: {

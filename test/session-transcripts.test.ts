@@ -102,7 +102,7 @@ describe("session transcripts store", () => {
     expect(second.readFrames("agent-a")).toHaveLength(1);
   });
 
-  it("updates mode atomically and reads missing/invalid mode as free", () => {
+  it("updates mode and title atomically and reads missing/invalid mode as free", () => {
     const store = createSessionTranscripts(root);
     store.recordStart({
       sessionId: "agent-m",
@@ -117,6 +117,15 @@ describe("session transcripts store", () => {
     expect(store.updateMode("agent-unknown", "free")).toBe(false);
     expect(store.updateMode("agent-m", "explore")).toBe(true);
     expect(store.listAll().find((meta) => meta.sessionId === "agent-m")?.mode).toBe("explore");
+
+    // 标题：内核 session/title 事件的持久面；空标题与同值 no-op。
+    expect(store.updateTitle("agent-m", "Counting probe")).toBe(true);
+    expect(store.updateTitle("agent-m", "  Counting probe  ")).toBe(true);
+    expect(store.updateTitle("agent-m", "  ")).toBe(false);
+    expect(store.updateTitle("agent-unknown", "x")).toBe(false);
+    expect(store.listAll().find((meta) => meta.sessionId === "agent-m")?.title).toBe(
+      "Counting probe",
+    );
 
     // 旧会话无 mode 字段 → free（其创建时即全工具面的事实投影）；非法值同理。
     store.recordStart({

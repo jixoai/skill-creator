@@ -53,3 +53,16 @@
       list-detail 结构（General/Model/Agent 分区）；Agent 面板移除内嵌设置节。
 - [x] 5.3 Esc 归属修复：模态打开时 Escape 不再连带收起 Agent 面板。
 - [x] 5.4 会话下拉短化（原生 select 无省略号，长 id 硬裁）+ title 完整提示。
+
+## 6. 迭代二（2026-09-09 用户反馈）
+
+- [x] 6.1 自由模式显示名改为开放模式（label Free→Open；id `free` 保持稳定——
+      持久化契约不变）。
+- [x] 6.2 thinking 展开面：assistant/chunk reasoning-delta 双缓冲合并帧 +
+      assistant/message reasoning 终帧；面板折叠 <details> 展示，流式态带指示。
+- [x] 6.3 session 自动命名接入：内核 session/title 行本就激活（dsh-base 自带
+      first-prompt-llm），补消费——事件投影 session-title 帧 + live title +
+      转录 updateTitle + 会话列表即时改名。
+- [x] 6.4 bash 接入开放模式：tool-bash 行从 boot 禁用表移除（内核原生 bash 工具
+      激活）；productToolDenyList 按模式计算 deny——专注模式拒 bash，开放模式
+      放行；AGENTS.md 安全边界 #14 同步。

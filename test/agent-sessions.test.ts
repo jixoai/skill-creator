@@ -88,6 +88,20 @@ describe("agent sessions over the headless kernel (task 2.2)", () => {
       expect(first.status).toMatch(/idle|running/);
       expect(first.frames.length).toBeGreaterThan(0);
 
+      // session/title（dsh-base 自带 first-prompt-llm，LLM 失败回退首词截断）：
+      // 事件到达后 live title 更新 + session-title 帧落流（有界等待防时序抖动）。
+      let title: string | undefined;
+      for (let i = 0; i < 20 && title === undefined; i++) {
+        const frames = service.stream(session.sessionId, 0, 200).frames;
+        const titleFrame = frames.find((frame) => frame.kind === "session-title");
+        if (titleFrame?.text) title = titleFrame.text;
+        else await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      expect(title).toBeDefined();
+      expect(service.list().find((item) => item.sessionId === session.sessionId)?.title).toBe(
+        title,
+      );
+
       // user/message 投影：真实人类输入产出 user-text 帧（切换会话后重建消息列表
       // 的唯一用户消息来源）；内核 system-reminder/runtime 注入无 user source，不进对话流。
       const userFrames = first.frames.filter((frame) => frame.kind === "user-text");

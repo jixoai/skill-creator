@@ -39,6 +39,7 @@ export type PanelItem =
   | { kind: "status"; seq: number; text: string }
   | { kind: "user"; seq: number; text: string }
   | { kind: "assistant"; seq: number; text: string; streaming: boolean }
+  | { kind: "reasoning"; seq: number; text: string; streaming: boolean }
   | { kind: "tool"; seq: number; toolName: string; phase: "call" | "result"; payload?: unknown }
   | {
       kind: "approval";
@@ -368,6 +369,50 @@ function appendFrame(frame: DshSessionStreamFrame): void {
             text: frame.text,
             streaming: true,
           });
+        }
+      }
+      break;
+    }
+    case "assistant-reasoning-delta": {
+      // thinking 流：与正文增量同构，但累进到 reasoning 项（终帧整段替换）。
+      if (typeof frame.text === "string" && frame.text.length > 0) {
+        const last = agentSession.items[agentSession.items.length - 1];
+        if (last?.kind === "reasoning" && last.streaming) {
+          last.text += frame.text;
+        } else {
+          agentSession.items.push({
+            kind: "reasoning",
+            seq: frame.seq,
+            text: frame.text,
+            streaming: true,
+          });
+        }
+      }
+      break;
+    }
+    case "assistant-reasoning": {
+      if (typeof frame.text === "string" && frame.text.length > 0) {
+        const last = agentSession.items[agentSession.items.length - 1];
+        if (last?.kind === "reasoning" && last.streaming) {
+          last.text = frame.text;
+          last.streaming = false;
+        } else {
+          agentSession.items.push({
+            kind: "reasoning",
+            seq: frame.seq,
+            text: frame.text,
+            streaming: false,
+          });
+        }
+      }
+      break;
+    }
+    case "session-title": {
+      // 内核自动命名：即时更新会话列表标题（不进对话流；持久回放走转录 meta）。
+      const title = typeof frame.text === "string" ? frame.text.trim() : "";
+      if (title.length > 0) {
+        for (const session of agentSessionsList.sessions) {
+          if (session.sessionId === frame.sessionId) session.title = title;
         }
       }
       break;

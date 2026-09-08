@@ -89,8 +89,12 @@ Source             = Discover feed 的 curated 或 user Git 源（sources.json�
 Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply）
 Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
 Agent Kernel       = headless DSH 内核：单 dsh-base bundle + 产品 preset（persona/ask-user）
-                      + 工具面收窄（禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
-Agent Panel        = shell 级右栏 drawer：agent.* RPC 消费内核会话（帧流/审批/配置）
+                      + 工具面收窄（专注模式禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
+Agent Mode         = create/manage/explore/free(Open) 四种会话模式：专有模式 = 版本化
+                      prompt section + guard 收窄 MCP 工具面；Open 全工具面 + 原生 bash，
+                      经 setMode（dispose+resume）中途切换，mode 持久于转录 meta
+Agent Panel        = shell 级右栏 drawer：agent.* RPC 消费内核会话（帧流/审批/模式 chip）；
+                      设置面（list-detail Dialog）为全局面，入口在左导航底部
 capability-core    = 领域能力层：name + Zod IO + handler + authority class
                       （readonly/proposal/approved-mutation）；MCP 与 steward 共同投影
 skill-creator-mcp  = MCP server 双形态：daemon 内 /mcp（Bearer）+ skill-creator mcp
@@ -552,7 +556,7 @@ IPC bytes ---------------------> frame size + schema + protocol ------> CLI comm
 11. ACP agent 子进程永不获得原始文件句柄：`fs/read_text_file`、`fs/write_text_file` 请求由 daemon 在 Workspace Provider containment 内代为执行（写入走原子写）；session 由 daemon 持有 opaque ID，close 与 daemon stop 有界回收子进程，不留 orphan。
 12. `repository.sources.*` 只接受 https Git URL；user 源与 curated 内置源 id 命名空间隔离，内置源不可被 remove；sources.json 是 server-owned 持久化，WebUI 不写 localStorage。
 13. `skills.update.apply` 只能重装 check 已确认过时的 selected skills；lock/GitHub API 不可用一律投影为 skipped/unavailable，不得伪装成功或抛基础设施错误。
-14. 内核工具面收窄（design D1）：通用 bash/fs/web/skill 发现行禁用；产品 agent 的 global 工具面 deny 收窄到 allowlist（ask_user_question）+ mcp__skill-creator__*；负面场景有测试钉死。
+14. 内核工具面收窄（design D1）：fs/web/skill 发现行禁用；tool-bash 行激活但仅开放模式（free/Open）的 agent restrict 放行，专注模式 deny；产品 agent 的 global 工具面 deny 收窄到 allowlist（ask_user_question + 开放模式的 bash）+ mcp__skill-creator__*；负面场景有测试钉死（productToolDenyList）。
 15. MCP 面 authority 红线：mutation 一律 `*_propose` 产 proposal（不直接写盘），审批执行经 Manager 进程内 registry 以 human-ui 主体进行；stdio 形态不注册 mutation（含 propose）。
 16. `/mcp` 只在 loopback manager origin 上暴露且必须 Bearer web token；`ui://` 卡片模板对不可信文本强制 escape，面板 iframe 无 same-origin/top-navigation 权限。
 
