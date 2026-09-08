@@ -40,13 +40,15 @@ export interface MountDshKernelHostOptions {
   dshHome?: string;
   /** 显式关闭（测试/逃生口；env SKILL_CREATOR_DSH_HOST=off 等效）。 */
   disabled?: boolean;
+  /** skill-creator-mcp 端点（4.1b：内核组合 dsh-mcp-client 行连接 /mcp）。 */
+  mcp?: { url: string; token: string };
 }
 
 // 延迟导入避免 daemon 主路径硬依赖 dsh-app-boot（bundle 已 externalize；测试
 // 注入 fake 时不需要装包）。boot 失败统一降级，不抛出。
-async function bootForProduction(home: string) {
+async function bootForProduction(home: string, mcp?: { url: string; token: string }) {
   const { bootDshKernel } = await import("./kernel/dsh-kernel.js");
-  return bootDshKernel({ home });
+  return bootDshKernel({ home, mcp });
 }
 
 /**
@@ -61,7 +63,7 @@ export async function mountDshKernelHost(
   }
   let kernel: Awaited<ReturnType<typeof bootForProduction>> | null = null;
   try {
-    kernel = await bootForProduction(options.dshHome ?? resolveDefaultDshHome());
+    kernel = await bootForProduction(options.dshHome ?? resolveDefaultDshHome(), options.mcp);
     let disposed = false;
     return {
       mounted: true,

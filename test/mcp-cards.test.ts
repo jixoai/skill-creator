@@ -57,10 +57,10 @@ describe("card templating (task 4.2)", () => {
       uiCardForCapability("skills.info", {
         kind: "ok",
         value: {
-          skillId: "sk_deadbeefdeadbeefdeadbeef",
+          id: "sk_deadbeefdeadbeefdeadbeef",
           name: "demo",
           directoryName: "demo",
-          revision: "sha256:abcd",
+          path: "/tmp/demo",
           disabled: false,
         },
       })?.type,
@@ -117,10 +117,10 @@ describe("cards over the mcp protocol (task 4.2)", () => {
         handler: () => ({
           kind: "ok",
           value: {
-            skillId: "sk_deadbeefdeadbeefdeadbeef",
+            id: "sk_deadbeefdeadbeefdeadbeef",
             name: hostile,
             directoryName: "demo",
-            revision: "sha256:abcd",
+            path: "/tmp/demo",
             description: hostile,
           },
         }),

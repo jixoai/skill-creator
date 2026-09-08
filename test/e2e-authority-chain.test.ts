@@ -110,51 +110,51 @@ describe("end-to-end authority chain (task 6.1)", () => {
       const approved = await domain.mcpProposals.approve(parsed.proposalId);
       expect(approved.view.status).toBe("executed");
       expect(fs.existsSync(skillFile())).toBe(false);
-      expect(
-        fs.existsSync(
-          path.join(path.dirname(skillFile()), ".SKILL.md"),
-        ),
-      ).toBe(true);
+      expect(fs.existsSync(path.join(path.dirname(skillFile()), ".SKILL.md"))).toBe(true);
 
       // 3. 再提议启用 → 审批 → 文件恢复。
       const reenable = await client!.callTool({
         name: "skills_toggle_propose",
         arguments: { ...target, skillIds: [skill.id], mode: "enable" },
       });
-      const reenableText = (reenable.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+      const reenableText =
+        (reenable.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
       const reenableId = (JSON.parse(reenableText) as { proposalId: string }).proposalId;
       await domain.mcpProposals.approve(reenableId);
       expect(fs.existsSync(skillFile())).toBe(true);
 
       // 4. 审计链：created → approved → executed × 2。
       const events = domain.mcpProposals.audit().map((entry) => entry.event);
-      expect(events).toEqual(["created", "approved", "executed", "created", "approved", "executed"]);
+      expect(events).toEqual([
+        "created",
+        "approved",
+        "executed",
+        "created",
+        "approved",
+        "executed",
+      ]);
     },
   );
 
-  it(
-    "reject leaves the disk untouched",
-    { timeout: 120_000 },
-    async () => {
-      await connect();
-      await beforeEachFixture;
-      const target = { workspaceId, providerId: "openclaw" };
-      const discovered = await domain.skills.list(target, true);
-      const skill = discovered[0]!;
-      const proposed = await client!.callTool({
-        name: "skills_toggle_propose",
-        arguments: { ...target, skillIds: [skill.id], mode: "disable" },
-      });
-      const text = (proposed.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
-      if (proposed.isError) throw new Error(`propose failed: ${text}`);
-      const { proposalId } = JSON.parse(text) as { proposalId: string };
-      const rejected = domain.mcpProposals.reject(proposalId);
-      expect(rejected?.view.status).toBe("rejected");
-      expect(fs.existsSync(skillFile())).toBe(true); // 磁盘不变。
-      // 拒绝后审批幂等返回 rejected，不执行。
-      const late = await domain.mcpProposals.approve(proposalId);
-      expect(late.view.status).toBe("rejected");
-      expect(fs.existsSync(skillFile())).toBe(true);
-    },
-  );
+  it("reject leaves the disk untouched", { timeout: 120_000 }, async () => {
+    await connect();
+    await beforeEachFixture;
+    const target = { workspaceId, providerId: "openclaw" };
+    const discovered = await domain.skills.list(target, true);
+    const skill = discovered[0]!;
+    const proposed = await client!.callTool({
+      name: "skills_toggle_propose",
+      arguments: { ...target, skillIds: [skill.id], mode: "disable" },
+    });
+    const text = (proposed.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+    if (proposed.isError) throw new Error(`propose failed: ${text}`);
+    const { proposalId } = JSON.parse(text) as { proposalId: string };
+    const rejected = domain.mcpProposals.reject(proposalId);
+    expect(rejected?.view.status).toBe("rejected");
+    expect(fs.existsSync(skillFile())).toBe(true); // 磁盘不变。
+    // 拒绝后审批幂等返回 rejected，不执行。
+    const late = await domain.mcpProposals.approve(proposalId);
+    expect(late.view.status).toBe("rejected");
+    expect(fs.existsSync(skillFile())).toBe(true);
+  });
 });

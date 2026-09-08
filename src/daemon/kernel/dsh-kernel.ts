@@ -119,7 +119,11 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
   const disableYaml = KERNEL_DISABLED_TOOL_ROWS.map((id) => `- id: ${id}\n  disabled: true\n`).join(
     "",
   );
-  fs.writeFileSync(path.join(profileDir, "cordis.patch.yml"), disableYaml, "utf8");
+  // LLM 路由 seam（测试/本地供应；同 DSH_HOME 的 env 注入模式）：显式设置
+  // SKILL_CREATOR_LLM_PROVIDER/BASE_URL 时经官方 pi-ai adapter 追加一条 hand-
+  // declared 路由（协议/模型也可覆盖）。缺省完全不影响产品组合。
+  const llmYaml = localLlmRouteYaml();
+  fs.writeFileSync(path.join(profileDir, "cordis.patch.yml"), disableYaml + llmYaml, "utf8");
 
   const installAnchor = path.join(repoRoot, "package.json");
   const profile = loadProfile("skill-creator", "kernel", installAnchor, options.home);
@@ -265,4 +269,34 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
 function restoreEnv(key: string, previous: string | undefined): void {
   if (previous === undefined) delete process.env[key];
   else process.env[key] = previous;
+}
+
+/**
+ * 本地 LLM 路由的 user patch 片段（SKILL_CREATOR_LLM_PROVIDER +
+ * SKILL_CREATOR_LLM_BASE_URL 同时存在才生效；协议默认 anthropic-messages，
+ * 模型默认 glm-5.3-flash，key 经 SKILL_CREATOR_LLM_KEY env 引用——值不落 YAML）。
+ */
+function localLlmRouteYaml(): string {
+  const provider = process.env.SKILL_CREATOR_LLM_PROVIDER;
+  const baseURL = process.env.SKILL_CREATOR_LLM_BASE_URL;
+  if (!provider || !baseURL) return "";
+  const api = process.env.SKILL_CREATOR_LLM_API ?? "anthropic-messages";
+  const model = process.env.SKILL_CREATOR_LLM_MODEL ?? "glm-5.3-flash";
+  const contextWindow = process.env.SKILL_CREATOR_LLM_CONTEXT ?? "131072";
+  const lines = [
+    "- id: llm-pi-ai\n",
+    "  config:\n",
+    "    providers:\n",
+    `      ${provider}:\n`,
+    `        api: ${api}\n`,
+    `        baseURL: ${baseURL}\n`,
+    `        defaultContextWindow: ${contextWindow}\n`,
+    "        models:\n",
+    `          - id: ${model}\n`,
+    `            contextWindow: ${contextWindow}\n`,
+  ];
+  if (process.env.SKILL_CREATOR_LLM_KEY) {
+    lines.push("        apiKeyEnv: SKILL_CREATOR_LLM_KEY\n");
+  }
+  return lines.join("");
 }

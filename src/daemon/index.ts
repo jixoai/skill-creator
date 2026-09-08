@@ -210,7 +210,12 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
 
   // 2.1 内核形态：boot headless DSH 内核（boot 失败降级，daemon 不阻塞；无 HTTP
   // 挂载——Agent 会话由 shell 面板经 agent.* RPC 消费内核 ctx）。
-  const dshHost = await mountDshKernelHost({ disabled: opts.withDshHost === false });
+  // 4.1b：内核组合 mcp-client 行，连接本 daemon 的 /mcp（Bearer web token 经
+  // env 模板注入，不落 profile YAML）。web 已监听（port 可用）。
+  const dshHost = await mountDshKernelHost({
+    disabled: opts.withDshHost === false,
+    mcp: { url: `http://127.0.0.1:${port}/mcp`, token: webToken },
+  });
   if (dshHost.mounted) {
     status.dsh = {
       mounted: true,

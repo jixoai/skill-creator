@@ -7,7 +7,8 @@
  * 正交意图：
  *   [1] 四类卡片模板：skill 信息 / finding（校验发现）/ proposal / 安装更新
  *       结果；均携带应用内跳转意图（postMessage `ui/navigate`，host 翻译为
- *       shell 路由）。
+ *       shell 路由）与内容高度广播（`ui/resize`，host 收敛 iframe 高度，
+ *       消除固定高度下的空白区）。
  *   [2] 不可信文本强制 HTML escape：SKILL.md frontmatter / finding 内容等以
  *       文本插入模板——沙箱防逃逸不防内容注入，转义是内容层的责任。
  *   [3] ui:// 资源注册表：tool result `_meta.ui.resourceUri` 引用；资源本体由
@@ -73,6 +74,25 @@ ${rows}
 ${nav}
 </div>
 <script>
+  (function () {
+    // 内容高度以 body 为准：documentElement.scrollHeight 含 iframe 自身视口高度
+    // （初始 h-44 兜底），会永远回报视口值形成死锁。host 以 event.source 识别
+    // 来源卡片（沙箱不透明源 window.name 恒空，不能作实例标识）。
+    function postHeight() {
+      var body = document.body;
+      if (!body) return;
+      var height = Math.ceil(body.scrollHeight);
+      if (height > 0) {
+        parent.postMessage({ source: "skill-creator-card", type: "ui/resize", height: height }, "*");
+      }
+    }
+    window.addEventListener("load", postHeight);
+    window.addEventListener("DOMContentLoaded", postHeight);
+    if (document.readyState === "complete") postHeight();
+    [60, 200, 500, 1000].forEach(function (ms) { setTimeout(postHeight, ms); });
+    requestAnimationFrame(postHeight);
+    if (window.ResizeObserver) new ResizeObserver(postHeight).observe(document.body);
+  })();
   document.addEventListener("click", (event) => {
     const target = event.target.closest("button[data-nav]");
     if (!target) return;
@@ -115,22 +135,24 @@ export function uiCardForCapability(capabilityName: string, result: unknown): Ui
 
   switch (capabilityName) {
     case "skills.info": {
+      // 实测 value 形状（skills.info capability）：{id, name, description,
+      // directoryName, disabled, provider, path, ...}——无 skillId/revision 字段。
       const info = value as {
-        skillId?: string;
+        id?: string;
         name?: string;
         description?: string;
         directoryName?: string;
         disabled?: boolean;
-        revision?: string;
+        path?: string;
       };
-      if (typeof info.skillId !== "string") return null;
+      if (typeof info.id !== "string") return null;
       return {
         type: "skill-info",
-        title: info.name ?? info.directoryName ?? info.skillId,
+        title: info.name ?? info.directoryName ?? info.id,
         fields: [
           { label: "Directory", value: info.directoryName ?? "-" },
-          { label: "Revision", value: (info.revision ?? "-").slice(0, 16) },
           { label: "State", value: info.disabled ? "disabled" : "enabled" },
+          { label: "Location", value: info.path ?? "-" },
           { label: "Description", value: info.description ?? "-" },
         ],
         nav: { label: "Open in Workspaces", path: "/workspaces" },

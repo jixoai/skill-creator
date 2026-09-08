@@ -95,9 +95,13 @@ interface LivePanelSession {
   title: string;
   /** 按 requestSeq 索引的待答问题（ask_user_question waterfall）。 */
   pending: Map<number, PendingApproval>;
+  /** tool/call 的 callId → 工具名（tool/result 事件不带名，按 callId 回填）。 */
+  toolNames: Map<string, string>;
 }
 
 const DEFAULT_RETENTION = 200;
+/** prompt 长度硬上限（与 RPC 契约 AgentSessionPromptInputSchema 一致）。 */
+const PROMPT_MAX_CHARS = 20_000;
 
 /** 构造 agent 会话服务；内核未挂载时所有面返回 typed UNAVAILABLE。 */
 export function createAgentSessionsService(deps: AgentSessionsDeps) {
@@ -162,13 +166,16 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     switch (event.type) {
       case "turn/start":
         return { ...base, seq: entry.frameSeq++, kind: "turn-start" };
-      case "turn/end":
+      case "turn/end": {
+        const reason = (data as { reason?: { kind?: string } }).reason?.kind;
         return {
           ...base,
           seq: entry.frameSeq++,
           kind: "turn-end",
+          text: typeof reason === "string" ? reason : undefined,
           payload: redactDshPayload(data),
         };
+      }
       case "agent/status":
         return { ...base, seq: entry.frameSeq++, kind: "status", payload: redactDshPayload(data) };
       case "user/message":
@@ -176,31 +183,85 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         // context）不是模型输出，不进对话流。
         return null;
       case "assistant/message": {
-        const text = textOf(data);
+        // 事件形状实测（2026-09-08 真实会话）：{turn, step, message:{content:[...]}}。
+        const message = (data as { message?: unknown }).message ?? data;
+        const text = textOf(message);
         return {
           ...base,
           seq: entry.frameSeq++,
           kind: "assistant-text",
           text,
-          payload: redactDshPayload({ source: data.source, usage: data.usage }),
+          payload: redactDshPayload({
+            source: (message as { source?: unknown }).source,
+            usage: (message as { usage?: unknown }).usage,
+          }),
         };
       }
-      case "tool/call":
+      case "tool/call": {
+        const args =
+          (data as { arguments?: unknown }).arguments ?? (data as { args?: unknown }).args;
+        let parsedArgs: unknown = args;
+        if (typeof args === "string") {
+          try {
+            parsedArgs = JSON.parse(args);
+          } catch {
+            parsedArgs = args;
+          }
+        }
+        const callName = typeof data.name === "string" ? data.name : undefined;
+        const callId = typeof data.callId === "string" ? data.callId : undefined;
+        if (callId && callName) entry.toolNames.set(callId, callName);
         return {
           ...base,
           seq: entry.frameSeq++,
           kind: "tool-call",
-          toolName: typeof data.name === "string" ? data.name : undefined,
-          payload: redactDshPayload(data.args),
+          toolName: callName,
+          payload: redactDshPayload(parsedArgs),
         };
-      case "tool/result":
+      }
+      case "tool/result": {
+        // 实测形状：{turn, step, message:{source:{callId}, content:[{type:'tool-result',
+        // toolCallId, content:[{type:'text', text:'<json>'}]}]}}——callId 两处皆可回填名。
+        const message = (data as { message?: unknown }).message;
+        const blocks = (message as { content?: unknown[] } | undefined)?.content;
+        let text: string | undefined;
+        let resultCallId: string | undefined;
+        if (Array.isArray(blocks)) {
+          for (const block of blocks) {
+            if (
+              resultCallId === undefined &&
+              typeof (block as { toolCallId?: unknown }).toolCallId === "string"
+            ) {
+              resultCallId = (block as { toolCallId: string }).toolCallId;
+            }
+            const inner = (block as { content?: unknown[] }).content;
+            if (Array.isArray(inner)) {
+              for (const part of inner) {
+                if ((part as { type?: string }).type === "text") {
+                  text = (part as { text?: string }).text;
+                  break;
+                }
+              }
+            }
+            if (text !== undefined) break;
+          }
+        }
+        if (resultCallId === undefined) {
+          const sourceCallId = (message as { source?: { callId?: unknown } } | undefined)?.source
+            ?.callId;
+          if (typeof sourceCallId === "string") resultCallId = sourceCallId;
+        }
+        const resolvedName =
+          resultCallId !== undefined ? entry.toolNames.get(resultCallId) : undefined;
         return {
           ...base,
           seq: entry.frameSeq++,
           kind: "tool-result",
-          toolName: typeof data.name === "string" ? data.name : undefined,
-          payload: redactDshPayload(data.result),
+          toolName: resolvedName,
+          text,
+          payload: redactDshPayload(text !== undefined ? safeJsonParse(text) : data),
         };
+      }
       default:
         return null;
     }
@@ -239,6 +300,15 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         entry.pending.set(requestSeq, { requestSeq, resolve });
       });
     });
+  }
+
+  /** JSON 文本安全解析（失败原样返回字符串）。 */
+  function safeJsonParse(text: string): unknown {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   }
 
   /** 消息 content blocks 的 text 拼接（unknown 收窄）。 */
@@ -333,6 +403,12 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           );
         },
       });
+      if (input.prompt && input.prompt.length > PROMPT_MAX_CHARS) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `prompt too long: ${input.prompt.length} chars (max ${PROMPT_MAX_CHARS})`,
+        );
+      }
       const entry: LivePanelSession = {
         agent: handle.agent,
         dispose: handle.dispose,
@@ -340,6 +416,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         frameSeq: 0,
         title: "",
         pending: new Map(),
+        toolNames: new Map(),
       };
       registerPanelAnswerer(entry);
       live.set(sessionId, entry);
@@ -353,10 +430,16 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       }
       return summaryOf(entry);
     },
-    /** 驱动一轮用户输入。 */
+    /** 驱动一轮用户输入（长度硬上限与 RPC 契约一致——外部输入 runtime 收窄）。 */
     prompt(sessionId: string, text: string): void {
       const entry = live.get(sessionId);
       if (!entry) throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
+      if (text.length > PROMPT_MAX_CHARS) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `prompt too long: ${text.length} chars (max ${PROMPT_MAX_CHARS})`,
+        );
+      }
       entry.agent.followup(
         createUserMessage({
           source: { kind: "user" },
