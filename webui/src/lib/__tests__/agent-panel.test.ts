@@ -21,6 +21,7 @@ const connection = vi.hoisted(() => ({
 
 vi.mock("../stores/connection.svelte", () => ({
   getConnectionGeneration: () => connection.generation,
+  getRpc: () => connection.rpc ?? null,
   requireRpc: () => {
     if (!connection.rpc) throw new Error("not connected");
     return connection.rpc;
@@ -302,5 +303,16 @@ describe("agent panel store (task 3.x)", () => {
     expect(agentSessionsList.sessions).toHaveLength(1);
     setAgentPanelOpen(false);
     expect(agentPanel.open).toBe(false);
+  });
+
+  it("retries the session list until the rpc connection is ready", async () => {
+    const list = vi.fn().mockResolvedValue({ sessions: [] });
+    connection.rpc = null; // 面板先开、WS 后连：重试窗口内必须补载。
+    setAgentPanelOpen(true);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(list).not.toHaveBeenCalled();
+    connection.rpc = { agent: { sessions: { list } } };
+    await vi.waitFor(() => expect(agentSessionsList.loaded).toBe(true));
+    expect(list).toHaveBeenCalled();
   });
 });

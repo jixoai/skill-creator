@@ -16,7 +16,7 @@
 import type { AgentSessionSummary } from "$shared/contracts/agent.js";
 import type { DshSettingsUpdate } from "$shared/contracts/dsh-runtime.js";
 import type { DshSessionStreamFrame } from "$shared/contracts/dsh-runtime.js";
-import { getConnectionGeneration, requireRpc } from "./connection.svelte";
+import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 
 /** 待答审批的视图投影（approval-request 帧的 questions 载荷）。 */
@@ -107,8 +107,20 @@ export function setAgentPanelOpen(open: boolean): void {
   }
 }
 
+/** 会话列表在 WS 未就绪时的有界重试计数（打开面板早于连接完成的一次性竞态）。 */
+let sessionListConnectRetries = 0;
+
 /** 加载会话列表；结果交给调用方持有。 */
 export async function loadAgentSessions(): Promise<void> {
+  // 面板可能在 WS 握手完成前打开：requireRpc 会一次性失败且无人重试，表现为
+  // daemon 重启后列表永远为空——未连接时短间隔有界重试。
+  if (getRpc() === null) {
+    if (sessionListConnectRetries >= 25) return;
+    sessionListConnectRetries += 1;
+    setTimeout(() => void loadAgentSessions(), 300);
+    return;
+  }
+  sessionListConnectRetries = 0;
   const request = sessionsGate.issue();
   agentSessionsList.loading = true;
   try {
