@@ -223,7 +223,10 @@ describe("agent panel store (task 3.x)", () => {
     expect(after[0]).toMatchObject({ text: "Hello world", streaming: false });
   });
 
-  it("accumulates reasoning deltas into a collapsed-thinking item and applies the final frame", async () => {
+  it("renders interleaved reasoning/text streams once: finals replace, never duplicate", async () => {
+    // 真实帧序（2026-09-09 双重渲染回归）：reasoning 增量 → 正文增量 →
+    // reasoning 终帧（此时末项已是正文气泡！）→ 正文终帧。终帧只看末项会把
+    // 两个终帧都变成追加，Thinking 与正文各渲染两遍。
     let polls = 0;
     connection.rpc = {
       agent: {
@@ -236,31 +239,43 @@ describe("agent panel store (task 3.x)", () => {
                   frame(1, "turn-start"),
                   frame(2, "assistant-reasoning-delta", { text: "think " }),
                   frame(3, "assistant-reasoning-delta", { text: "hard" }),
+                  frame(4, "assistant-delta", { text: "42" }),
                 ],
                 status: "running",
               };
             }
-            return {
-              frames: [
-                frame(4, "assistant-reasoning", { text: "think hard then answer" }),
-                frame(5, "assistant-text", { text: "42" }),
-                frame(6, "turn-end", { text: "completed" }),
-              ],
-              status: "idle",
-            };
+            if (polls === 2) {
+              return {
+                frames: [
+                  frame(5, "assistant-reasoning", { text: "think hard then answer" }),
+                  frame(6, "assistant-text", { text: "42" }),
+                  // 重复终帧（回放/竞态）：幂等跳过，不得再追加。
+                  frame(7, "assistant-text", { text: "42" }),
+                  frame(8, "turn-end", { text: "completed" }),
+                ],
+                status: "idle",
+              };
+            }
+            return { frames: [], status: "idle" };
           }),
         },
       },
     };
     agentSession.sessionId = "agent-s1";
     await pollAgentStream();
-    const during = agentSession.items.filter((item) => item.kind === "reasoning");
-    expect(during).toHaveLength(1);
-    expect(during[0]).toMatchObject({ text: "think hard", streaming: true });
+    expect(agentSession.items.filter((item) => item.kind === "reasoning")).toHaveLength(1);
+    expect(agentSession.items.filter((item) => item.kind === "assistant")).toHaveLength(1);
     await pollAgentStream();
-    const after = agentSession.items.filter((item) => item.kind === "reasoning");
-    expect(after).toHaveLength(1);
-    expect(after[0]).toMatchObject({ text: "think hard then answer", streaming: false });
+    const reasoning = agentSession.items.filter((item) => item.kind === "reasoning");
+    const assistant = agentSession.items.filter((item) => item.kind === "assistant");
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0]).toMatchObject({ text: "think hard then answer", streaming: false });
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0]).toMatchObject({ text: "42", streaming: false });
+    // 顺序：reasoning 在 assistant 之前（同一步内思考在前）。
+    expect(agentSession.items.findIndex((item) => item.kind === "reasoning")).toBeLessThan(
+      agentSession.items.findIndex((item) => item.kind === "assistant"),
+    );
   });
 
   it("applies kernel session titles to the session list without entering the transcript", async () => {

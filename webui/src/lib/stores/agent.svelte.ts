@@ -329,6 +329,28 @@ function stopPolling(): void {
   pollSession = null;
 }
 
+/**
+ * 终帧（assistant-text / assistant-reasoning）落位：回溯到本轮 turn 边界内的
+ * 同类项做整段替换。不能只看末项——真实帧序是 reasoning 增量 → 正文增量 →
+ * reasoning 终帧 → 正文终帧，reasoning 终帧到达时末项已是正文气泡（只看末项
+ * 曾导致双重渲染，2026-09-09 用户实测抓到）。边界内找不到同类项（无增量的
+ * 回放路径）则追加；找到已终态的同类项（重复终帧）幂等跳过。
+ */
+function finalizeStreamingItem(kind: "assistant" | "reasoning", seq: number, text: string): void {
+  for (let i = agentSession.items.length - 1; i >= 0; i--) {
+    const item = agentSession.items[i];
+    if (item.kind === "turn") break; // 跨轮边界：本轮没有同类项，走追加。
+    if (item.kind === kind) {
+      if (item.streaming) {
+        item.text = text;
+        item.streaming = false;
+      }
+      return; // 已终态（重复终帧）：幂等跳过，不追加。
+    }
+  }
+  agentSession.items.push({ kind, seq, text, streaming: false });
+}
+
 /** 帧到视图项的追加（未知帧丢弃）。user-text 与乐观气泡按文本回声去重。 */
 function appendFrame(frame: DshSessionStreamFrame): void {
   switch (frame.kind) {
@@ -392,18 +414,7 @@ function appendFrame(frame: DshSessionStreamFrame): void {
     }
     case "assistant-reasoning": {
       if (typeof frame.text === "string" && frame.text.length > 0) {
-        const last = agentSession.items[agentSession.items.length - 1];
-        if (last?.kind === "reasoning" && last.streaming) {
-          last.text = frame.text;
-          last.streaming = false;
-        } else {
-          agentSession.items.push({
-            kind: "reasoning",
-            seq: frame.seq,
-            text: frame.text,
-            streaming: false,
-          });
-        }
+        finalizeStreamingItem("reasoning", frame.seq, frame.text);
       }
       break;
     }
@@ -419,20 +430,7 @@ function appendFrame(frame: DshSessionStreamFrame): void {
     }
     case "assistant-text": {
       if (typeof frame.text === "string" && frame.text.length > 0) {
-        // 终帧整段替换流式气泡（含增量未覆盖的 reasoning/tool 结构差异）；
-        // 非流式来源（历史回放）直接追加。
-        const last = agentSession.items[agentSession.items.length - 1];
-        if (last?.kind === "assistant" && last.streaming) {
-          last.text = frame.text;
-          last.streaming = false;
-        } else {
-          agentSession.items.push({
-            kind: "assistant",
-            seq: frame.seq,
-            text: frame.text,
-            streaming: false,
-          });
-        }
+        finalizeStreamingItem("assistant", frame.seq, frame.text);
       }
       break;
     }
