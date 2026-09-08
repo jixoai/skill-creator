@@ -57,6 +57,7 @@ beforeEach(() => {
   agentSession.items = [];
   agentSession.cursor = 0;
   agentSession.error = null;
+  agentSession.promptError = null;
   agentSession.status = "idle";
   agentSessionsList.loaded = false;
   agentSessionsList.sessions = [];
@@ -161,6 +162,27 @@ describe("agent panel store (task 3.x)", () => {
     await createAgentSession();
     expect(agentSession.sessionId).toBeNull();
     expect(agentSession.error).toContain("kernel is not mounted");
+  });
+
+  it("keeps a prompt failure visible even when polling succeeds afterwards", async () => {
+    let pollCount = 0;
+    connection.rpc = {
+      agent: {
+        session: {
+          prompt: vi.fn().mockRejectedValue(new Error("Input validation failed")),
+          stream: vi.fn().mockImplementation(async () => {
+            pollCount += 1;
+            return { frames: [], status: "idle" };
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await sendAgentPrompt("too long payload");
+    expect(agentSession.promptError).toContain("Input validation failed");
+    // The polling triggered after submission succeeds — it must not clear promptError.
+    expect(pollCount).toBeGreaterThan(0);
+    expect(agentSession.promptError).toContain("Input validation failed");
   });
 
   it("drops a late create response after the connection generation moved on", async () => {

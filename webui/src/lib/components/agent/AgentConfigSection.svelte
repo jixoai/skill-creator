@@ -113,11 +113,9 @@
     </div>
 
     <div class="text-[10px] text-muted-foreground">
-      Providers:
+      Available providers:
       {#each view.providers as provider, index (provider.provider)}
-        {index > 0 ? "·" : ""}
-        {provider.provider}
-        {provider.configured ? "✓" : "—"}
+        {index > 0 ? "·" : ""}{provider.provider}{provider.configured ? "" : " (not set)"}
       {/each}
     </div>
   {:else if agentRuntimeConfig.loading}

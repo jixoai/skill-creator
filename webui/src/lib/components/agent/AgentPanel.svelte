@@ -5,8 +5,9 @@
   1. shell 级右栏 drawer：≥720px 常驻侧栏（w-[440px]），<720px 单屏覆盖；
      跨 tab 存活（挂载于 +layout，状态在 module store）。
   2. 对话流：帧视图项分组渲染（turn/status/user/assistant/tool/approval）；
-     断线与错误可见。
-  3. composer：textarea 发送（Enter 提交 / Shift+Enter 换行）+ 取消按钮。
+     断线与错误可见；assistant 文本经 renderSkillBody 以 GFM 呈现（无 HTML 直通）。
+  3. composer：textarea 发送（Enter 提交 / Shift+Enter 换行）；停止按钮仅在
+     turn 运行中出现，图标按钮带 44px 外扩命中区。
   妥协声明：无。
 -->
 <script lang="ts">
@@ -32,6 +33,7 @@
   import AgentApprovalCard from "./AgentApprovalCard.svelte";
   import AgentConfigSection from "./AgentConfigSection.svelte";
   import AgentToolRow from "./AgentToolRow.svelte";
+  import { renderSkillBody } from "$lib/render-skill-md";
 
   let composerText = $state("");
   let showConfig = $state(false);
@@ -79,7 +81,7 @@
   <header class="flex items-center gap-1 border-b border-border px-2 py-1.5">
     <span class="px-1 text-xs font-medium text-muted-foreground">Agent</span>
     <select
-      class="h-7 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-xs"
+      class="h-8 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 py-0 text-xs"
       aria-label="Session"
       value={agentSession.sessionId ?? ""}
       onchange={(event) => selectAgentSession(event.currentTarget.value)}
@@ -94,8 +96,9 @@
         </option>
       {/each}
     </select>
+    <!-- 图标按钮统一 8px 外扩命中区（视觉 32px + after 16px = 44px，窄屏覆盖模式达标）。 -->
     <button
-      class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
       title="New session"
       aria-label="New session"
       onclick={() => void createAgentSession()}
@@ -103,7 +106,9 @@
       <IconPlus class="h-4 w-4" />
     </button>
     <button
-      class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground {showConfig
+        ? 'bg-muted text-foreground'
+        : ''}"
       title="Runtime config"
       aria-label="Runtime config"
       aria-pressed={showConfig}
@@ -115,7 +120,7 @@
       <IconSettings class="h-4 w-4" />
     </button>
     <button
-      class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
       title="Close panel"
       aria-label="Close panel"
       onclick={() => setAgentPanelOpen(false)}
@@ -141,7 +146,7 @@
       {#each agentSession.items as item (item.seq)}
         {#if item.kind === "turn"}
           <div
-            class="flex items-center gap-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground"
+            class="flex items-center gap-2 py-1 text-[11px] uppercase tracking-wide text-muted-foreground"
           >
             <span class="h-px flex-1 bg-border"></span>
             {item.label}
@@ -156,10 +161,12 @@
             {item.text}
           </div>
         {:else if item.kind === "assistant"}
+          <!-- markdown 渲染：模型回复按 GFM 呈现（renderSkillBody 关闭 HTML 直通并
+               兜底剥 script；文本级排版样式在此收敛，避免裸 `**`/反引号）。 -->
           <div
-            class="max-w-[92%] rounded-lg border border-border px-2.5 py-1.5 text-xs whitespace-pre-wrap"
+            class="max-w-[92%] space-y-1 rounded-lg border border-border px-2.5 py-1.5 text-xs [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[11px] [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:text-[13px] [&_h2]:font-semibold [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p]:my-1 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:font-mono [&_pre]:text-[11px] [&_ul]:list-disc [&_ul]:pl-4"
           >
-            {item.text}
+            {@html renderSkillBody(item.text)}
           </div>
         {:else if item.kind === "tool"}
           <AgentToolRow toolName={item.toolName} phase={item.phase} payload={item.payload} />
@@ -173,12 +180,12 @@
     {/if}
   </div>
 
-  {#if agentSession.error}
+  {#if agentSession.promptError ?? agentSession.error}
     <div
       class="border-t border-destructive/30 bg-destructive/8 px-3 py-1.5 text-xs text-destructive"
       role="alert"
     >
-      {agentSession.error}
+      {agentSession.promptError ?? agentSession.error}
     </div>
   {/if}
 
@@ -186,16 +193,17 @@
     <div class="flex items-end gap-1.5">
       <Textarea
         rows={2}
+        maxlength={20000}
         placeholder={agentSession.sessionId ? "Message the agent…" : "Create a session first"}
         disabled={!agentSession.sessionId}
         bind:value={composerText}
         onkeydown={onComposerKeydown}
         class="min-h-0 flex-1 resize-none text-xs"
       />
-      <div class="flex flex-col gap-1">
+      <div class="flex items-end gap-1 pb-0.5">
         <Button
           size="icon"
-          class="h-7 w-7"
+          class="relative h-8 w-8 after:absolute after:-inset-1.5 after:content-['']"
           aria-label="Send message"
           title="Send (Enter)"
           disabled={!agentSession.sessionId ||
@@ -205,17 +213,18 @@
         >
           <IconSend class="h-3.5 w-3.5" />
         </Button>
-        <Button
-          size="icon"
-          variant="outline"
-          class="h-7 w-7"
-          aria-label="Cancel current activity"
-          title="Cancel"
-          disabled={!agentSession.sessionId || agentSession.status !== "running"}
-          onclick={() => void cancelAgentSession()}
-        >
-          <IconStop class="h-3 w-3" />
-        </Button>
+        {#if agentSession.status === "running"}
+          <Button
+            size="icon"
+            variant="outline"
+            class="relative h-8 w-8 after:absolute after:-inset-1.5 after:content-['']"
+            aria-label="Cancel current activity"
+            title="Cancel current activity"
+            onclick={() => void cancelAgentSession()}
+          >
+            <IconStop class="h-3 w-3" />
+          </Button>
+        {/if}
       </div>
     </div>
   </footer>

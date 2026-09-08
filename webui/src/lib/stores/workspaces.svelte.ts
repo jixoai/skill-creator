@@ -69,9 +69,13 @@ export async function addWorkspace(
     if (!request.isCurrent()) return null;
     throw error;
   }
-  if (!request.isCurrent()) return null;
+  if (!request.isCurrent()) {
+    // mutation 已成功落盘：stale 只取消返回值的提交资格，不让 UI 与盘失联。
+    await loadWorkspaces();
+    return null;
+  }
   await loadWorkspaces();
-  return request.isCurrent() ? workspace : null;
+  return workspace;
 }
 
 /** 从 registry 移除一个导入 workspace。 */

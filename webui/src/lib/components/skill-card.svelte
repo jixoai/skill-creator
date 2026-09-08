@@ -35,14 +35,21 @@
   )}
 >
   {#if skill.disabled}
-    <IconPause class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+    <span title="Disabled (paused)" class="shrink-0">
+      <IconPause class="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-400" />
+    </span>
   {:else}
     <IconFile class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
   {/if}
   <span class="min-w-0 flex-1">
     <span class="flex items-center gap-2">
       <span class="truncate text-[13px] font-medium text-foreground">{skill.name}</span>
-      <span class="ml-auto shrink-0 text-[10px] text-muted-foreground">{skill.provider}</span>
+      {#if skill.disabled}
+        <span
+          class="shrink-0 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400"
+          >disabled</span
+        >
+      {/if}
     </span>
     <span class="mt-0.5 line-clamp-2 text-[11px] leading-4"
       >{skill.description || "No description"}</span

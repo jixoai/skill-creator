@@ -372,8 +372,10 @@
     aria-label="Skills"
   >
     <header class="shrink-0 border-b border-border px-4 py-3">
-      <div class="flex items-center gap-2">
-        <h1 class="truncate text-base font-semibold">{providerId ?? "—"}</h1>
+      <!-- 列栏固定 18rem：标题与四个操作按钮必须可换行——nowrap+truncate 会让
+           h1（overflow:hidden → flex min-width 归零）塌陷为 0，按钮越界画到详情栏。 -->
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <h1 class="min-w-0 truncate text-base font-semibold">{providerId ?? "—"}</h1>
         {#if skillsState.refreshing}
           <IconLoader
             class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
@@ -382,64 +384,65 @@
         {:else}
           <Badge variant="secondary">{visibleSkills.length}</Badge>
         {/if}
-        <span class="flex-1"></span>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-7 gap-1.5 px-2 text-xs"
-          title="Read-only analysis: duplicates, conflicts, shared resources"
-          onclick={() => {
-            if (wsId && providerId) {
-              goById("workspaces.intelligence", { wsId, providerId }, {});
-            }
-          }}
-        >
-          <IconGraph class="h-3.5 w-3.5" />
-          Insights
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-7 gap-1.5 px-2 text-xs"
-          title="Agent steward: backend runs with Manager approval"
-          onclick={() => {
-            if (wsId && providerId) {
-              goById("workspaces.steward", { wsId, providerId }, {});
-            }
-          }}
-        >
-          <IconBot class="h-3.5 w-3.5" />
-          Steward
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-7 gap-1.5 px-2 text-xs"
-          title="Steward workflow: task, scope and runtime config (task 4.1)"
-          onclick={() => {
-            if (wsId && providerId) {
-              goById("workspaces.steward-workflow", { wsId, providerId }, {});
-            }
-          }}
-        >
-          <IconWorkflow class="h-3.5 w-3.5" />
-          Workflow
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-7 gap-1.5 px-2 text-xs"
-          title="Compare installed skills against their upstream sources"
-          disabled={skillsUpdateState.checking}
-          onclick={() => void handleCheckUpdates()}
-        >
-          {#if skillsUpdateState.checking}
-            <IconLoader class="h-3.5 w-3.5 animate-spin" />
-          {:else}
-            <IconDownload class="h-3.5 w-3.5" />
-          {/if}
-          Updates
-        </Button>
+        <div class="ml-auto flex flex-wrap items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 gap-1.5 px-2 text-xs"
+            title="Read-only analysis: duplicates, conflicts, shared resources"
+            onclick={() => {
+              if (wsId && providerId) {
+                goById("workspaces.intelligence", { wsId, providerId }, {});
+              }
+            }}
+          >
+            <IconGraph class="h-3.5 w-3.5" />
+            Insights
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 gap-1.5 px-2 text-xs"
+            title="Agent steward: backend runs with Manager approval"
+            onclick={() => {
+              if (wsId && providerId) {
+                goById("workspaces.steward", { wsId, providerId }, {});
+              }
+            }}
+          >
+            <IconBot class="h-3.5 w-3.5" />
+            Steward
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 gap-1.5 px-2 text-xs"
+            title="Steward workflow: task, scope and runtime config (task 4.1)"
+            onclick={() => {
+              if (wsId && providerId) {
+                goById("workspaces.steward-workflow", { wsId, providerId }, {});
+              }
+            }}
+          >
+            <IconWorkflow class="h-3.5 w-3.5" />
+            Workflow
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 gap-1.5 px-2 text-xs"
+            title="Compare installed skills against their upstream sources"
+            disabled={skillsUpdateState.checking}
+            onclick={() => void handleCheckUpdates()}
+          >
+            {#if skillsUpdateState.checking}
+              <IconLoader class="h-3.5 w-3.5 animate-spin" />
+            {:else}
+              <IconDownload class="h-3.5 w-3.5" />
+            {/if}
+            Updates
+          </Button>
+        </div>
       </div>
       <div class="relative mt-2">
         <IconSearch

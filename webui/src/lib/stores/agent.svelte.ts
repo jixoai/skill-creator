@@ -46,6 +46,9 @@ export type PanelItem =
 const sessionsGate = createRequestGenerationGate(getConnectionGeneration);
 const createGate = createRequestGenerationGate(getConnectionGeneration);
 const streamGate = createRequestGenerationGate(getConnectionGeneration);
+// prompt 的失败必须可见：与轮询分门（共享 streamGate 时，紧随的新轮询会取代
+// prompt 的代次资格，catch 分支被跳过——错误静默）。
+const promptGate = createRequestGenerationGate(getConnectionGeneration);
 const answerGate = createRequestGenerationGate(getConnectionGeneration);
 const settingsGate = createRequestGenerationGate(getConnectionGeneration);
 const updateSettingsGate = createRequestGenerationGate(getConnectionGeneration);
@@ -62,6 +65,8 @@ export const agentSession = $state({
   cursor: 0,
   sending: false,
   error: null as string | null,
+  /** prompt 提交失败（独立于轮询错误：轮询成功不得清掉它，由下次成功提交清除）。 */
+  promptError: null as string | null,
 });
 
 /** 会话列表投影。 */
@@ -153,17 +158,17 @@ function resetSessionView(sessionId: string, status: AgentSessionSummary["status
 export async function sendAgentPrompt(text: string): Promise<void> {
   const sessionId = agentSession.sessionId;
   if (!sessionId || text.trim().length === 0) return;
-  const request = streamGate.issue();
+  const request = promptGate.issue();
   agentSession.sending = true;
   // 乐观追加用户消息（失败时由错误状态覆盖）。
   agentSession.items.push({ kind: "user", seq: -Date.now(), text });
   try {
     await requireRpc().agent.session.prompt({ sessionId, text });
     if (!request.isCurrent()) return;
-    agentSession.error = null;
+    agentSession.promptError = null;
   } catch (error) {
     if (!request.isCurrent()) return;
-    agentSession.error = error instanceof Error ? error.message : String(error);
+    agentSession.promptError = error instanceof Error ? error.message : String(error);
   } finally {
     if (request.isCurrent()) agentSession.sending = false;
   }
@@ -290,7 +295,9 @@ function appendFrame(frame: DshSessionStreamFrame): void {
       });
       break;
     case "turn-end": {
-      agentSession.items.push({ kind: "turn", seq: frame.seq, label: "Turn end" });
+      const reason =
+        typeof frame.text === "string" && frame.text.length > 0 ? frame.text : "completed";
+      agentSession.items.push({ kind: "turn", seq: frame.seq, label: `Turn end (${reason})` });
       break;
     }
     case "approval-request": {

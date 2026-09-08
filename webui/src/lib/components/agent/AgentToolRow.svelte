@@ -22,6 +22,9 @@
 
   let expanded = $state(false);
 
+  /** 展示名去掉 MCP 命名空间前缀；完整名保留在 title 供悬停。 */
+  const displayName = $derived(toolName.replace(/^mcp__[^_]+__/, ""));
+
   const payloadText = $derived.by(() => {
     if (payload === undefined || payload === null) return "";
     try {
@@ -71,6 +74,8 @@
         }
       }
     }
+    // 投影修复后 payload 已是解析对象；payloadText 是其 JSON 串——两处都试。
+    candidates.push(payloadText);
     for (const candidate of candidates) {
       if (typeof candidate !== "string") continue;
       try {
@@ -102,12 +107,12 @@
     <AgentCard resourceUri={uiCard.resourceUri} title={uiCard.title} />
   {/if}
   <button
-    class="flex w-full items-center gap-1.5 px-2 py-1 text-left"
+    class="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
     aria-expanded={expanded}
     onclick={() => (expanded = !expanded)}
   >
     <IconChevronRight class="h-3 w-3 shrink-0 transition-transform {expanded ? 'rotate-90' : ''}" />
-    <span class="shrink-0 font-mono">{toolName}</span>
+    <span class="shrink-0 font-mono" title={toolName}>{displayName}</span>
     <span
       class="rounded px-1 text-[10px] uppercase {phase === 'call'
         ? 'bg-primary/10 text-primary'
