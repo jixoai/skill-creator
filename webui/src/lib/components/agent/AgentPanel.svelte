@@ -5,10 +5,12 @@
   1. shell 级右栏 drawer：≥720px 常驻侧栏（w-[440px]），<720px 单屏覆盖；
      跨 tab 存活（挂载于 +layout，状态在 module store）。
   2. 对话流：帧视图项分组渲染（turn/status/user/assistant/tool/approval）；
-     断线与错误可见；assistant 文本经 renderSkillBody 以 GFM 呈现（无 HTML 直通）。
+     断线与错误可见；assistant 文本经 markstream-svelte 增量渲染（流式优化：
+     内容增长只重解析尾部、不完整 markdown 容错、离屏节点延迟），HTML 策略
+     锁定 escape——模型输出零 HTML 直通。
   3. composer：textarea 发送（Enter 提交 / Shift+Enter 换行）；停止按钮仅在
      turn 运行中出现，图标按钮带 44px 外扩命中区。
-  妥协声明：无。
+  妥协声明：katex/mermaid/stream-diffs 为可选 peer，未安装时回退纯文本块。
 -->
 <script lang="ts">
   import IconX from "@lucide/svelte/icons/x";
@@ -33,24 +35,33 @@
   import AgentApprovalCard from "./AgentApprovalCard.svelte";
   import AgentConfigSection from "./AgentConfigSection.svelte";
   import AgentToolRow from "./AgentToolRow.svelte";
-  import { renderSkillBody } from "$lib/render-skill-md";
+  import MarkdownRender from "markstream-svelte";
+  import "markstream-svelte/index.css";
 
   let composerText = $state("");
   let showConfig = $state(false);
   let scrollBody = $state<HTMLElement | null>(null);
 
-  // 新帧到达时滚动到底（用户向上翻阅时不打扰：接近底部才跟随）。
+  // 新帧到达时滚动到底（用户向上翻阅时不打扰）。markstream batch 渲染会在帧
+  // 落地后继续长高气泡，且单个代码块的一次性增高可超过 160px 跟随门，故判定
+  // 改用「增高前是否贴底」：贴底即钉住，手动上滚（ scrollTop 变小）自然脱离。
+  let lastContentHeight = 0;
   $effect(() => {
     void agentSession.items.length;
     void agentSession.status;
     const body = scrollBody;
     if (!body) return;
-    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 160;
-    if (nearBottom) {
-      queueMicrotask(() => {
+    const follow = (): void => {
+      const wasNearBottom = lastContentHeight - body.scrollTop - body.clientHeight < 160;
+      lastContentHeight = body.scrollHeight;
+      if (wasNearBottom || body.scrollHeight - body.scrollTop - body.clientHeight < 160) {
         body.scrollTop = body.scrollHeight;
-      });
-    }
+      }
+    };
+    follow();
+    const observer = new ResizeObserver(follow);
+    for (const child of body.children) observer.observe(child);
+    return () => observer.disconnect();
   });
 
   function submit(): void {
@@ -133,7 +144,7 @@
     <AgentConfigSection />
   {/if}
 
-  <div bind:this={scrollBody} class="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-2">
+  <div bind:this={scrollBody} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
     {#if !agentSession.sessionId}
       <div class="flex h-full flex-col items-center justify-center gap-3 text-center">
         <p class="max-w-[280px] text-xs text-muted-foreground">
@@ -161,12 +172,15 @@
             {item.text}
           </div>
         {:else if item.kind === "assistant"}
-          <!-- markdown 渲染：模型回复按 GFM 呈现（renderSkillBody 关闭 HTML 直通并
-               兜底剥 script；文本级排版样式在此收敛，避免裸 `**`/反引号）。 -->
+          <!-- markstream 增量渲染：内容增长只重解析尾部、不完整 fence/强调容错、
+               离屏节点延迟；htmlPolicy=escape 锁死模型输出的 HTML 直通（与既有
+               XSS 不变量一致）。密度覆写在下方 scoped style：库默认面向文档页
+               （16px/IBM Plex/clamp 巨标题），且 Tailwind preflight 会剥掉列表
+               marker，须收敛回 12px 面板排版；卡片通栏对齐右缘节奏。 -->
           <div
-            class="max-w-[92%] space-y-1 rounded-lg border border-border px-2.5 py-1.5 text-xs [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[11px] [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:text-[13px] [&_h2]:font-semibold [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p]:my-1 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:font-mono [&_pre]:text-[11px] [&_ul]:list-disc [&_ul]:pl-4"
+            class="ms-md rounded-lg border border-border px-2.5 py-1.5 text-xs [&_a]:text-primary"
           >
-            {@html renderSkillBody(item.text)}
+            <MarkdownRender content={item.text} htmlPolicy="escape" final={true} />
           </div>
         {:else if item.kind === "tool"}
           <AgentToolRow toolName={item.toolName} phase={item.phase} payload={item.payload} />
@@ -229,3 +243,69 @@
     </div>
   </footer>
 </aside>
+
+<style>
+  /* markstream 密度收敛：库默认 16px/IBM Plex/clamp 文档级标题，且 Tailwind
+     preflight 将 ul/ol 重置为无 marker；scoped 双类选择器稳定压过库内单类规则。 */
+  .ms-md :global(.markstream-svelte) {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: 1.6;
+  }
+
+  .ms-md :global(.markstream-svelte h1),
+  .ms-md :global(.markstream-svelte h2),
+  .ms-md :global(.markstream-svelte h3),
+  .ms-md :global(.markstream-svelte h4),
+  .ms-md :global(.markstream-svelte h5),
+  .ms-md :global(.markstream-svelte h6) {
+    margin: 0.75em 0 0.35em;
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+
+  .ms-md :global(.markstream-svelte h1) {
+    font-size: 1.25em;
+  }
+
+  .ms-md :global(.markstream-svelte h2) {
+    font-size: 1.15em;
+  }
+
+  .ms-md :global(.markstream-svelte h3) {
+    font-size: 1.05em;
+  }
+
+  .ms-md :global(.markstream-svelte h4),
+  .ms-md :global(.markstream-svelte h5),
+  .ms-md :global(.markstream-svelte h6) {
+    font-size: 1em;
+  }
+
+  .ms-md :global(.markstream-svelte p) {
+    margin: 0.4em 0;
+  }
+
+  .ms-md :global(.markstream-svelte ul) {
+    list-style: disc;
+    padding-inline-start: 1.25em;
+    margin: 0.4em 0;
+  }
+
+  .ms-md :global(.markstream-svelte ol) {
+    list-style: decimal;
+    padding-inline-start: 1.35em;
+    margin: 0.4em 0;
+  }
+
+  .ms-md :global(.markstream-svelte li) {
+    margin: 0.15em 0;
+  }
+
+  /* task list：checkbox 即状态标记，去掉 bullet 避免双重标记。 */
+  .ms-md :global(.markstream-svelte ul:has(input[type="checkbox"])) {
+    list-style: none;
+    padding-inline-start: 0.5em;
+  }
+</style>
