@@ -209,6 +209,9 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         stream: rpc.agent.session.stream.handler(({ input }) =>
           domain.agentSessions.stream(input.sessionId, input.afterSeq, input.limit),
         ),
+        setMode: rpc.agent.session.setMode.handler(async ({ input }) => ({
+          session: await domain.agentSessions.setMode(input.sessionId, input.mode),
+        })),
       },
       settings: {
         get: rpc.agent.settings.get.handler(async () => domain.dshSettings.getView()),

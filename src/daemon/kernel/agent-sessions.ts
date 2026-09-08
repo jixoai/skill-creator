@@ -6,14 +6,17 @@
  * 内核 ctx.agents / ctx.sessions / session-event firehose 投影，不自研 loop。
  *
  * 正交意图：
- *   [1] 会话生命周期：create 走官方 agents.create（产品 preset + 工具面收窄
- *       setup）；prompt 经 followup；cancel 经 agent.cancel；list 从 sessions
+ *   [1] 会话生命周期：create 走官方 agents.create（产品 preset + 按模式的工具面
+ *       收窄 setup）；prompt 经 followup；cancel 经 agent.cancel；list 从 sessions
  *       store 投影摘要。
  *   [2] 脱敏 stream 环形投影：订阅 session/event firehose，把 turn/status/
  *       message 事件映射为 DshSessionStreamFrame（payload 过 redactDshPayload）。
  *   [3] 跨重启持久：帧 write-through 到转录存储（sessions/YYYY/MM/DD/<id>）；
  *       重启后 list/stream 由转录回放，prompt 经内核 agents.resume 续聊。
  *   [4] 可选宿主：内核未挂载时 typed UNAVAILABLE（DomainError），不静默空面。
+ *   [5] 模式生命周期（add-agent-settings-modes）：create/revive 按转录 meta 的
+ *       mode 组合 setup；setMode = meta 原子改写 + live 句柄有界释放 + mode-changed
+ *       帧，下一次 prompt 以新模式复活（历史归内核 session log）。
  * 妥协声明：跨 cordis 服务访问按结构化 unknown 收窄（宿主服务形状无公开 TS 面，
  * 与 dsh-session-binder 同法则）；LLM 历史事实归内核 session log，本层转录只是
  * 面板投影。
@@ -23,12 +26,14 @@ import type { Context } from "@deepseek-ai/cordis";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import {
   redactDshPayload,
+  type DshAgentMode,
   type DshSessionStreamFrame,
 } from "../../shared/contracts/dsh-runtime.js";
 import type { AgentSessionStatus, AgentSessionSummary } from "../../shared/contracts/agent.js";
 import { DomainError } from "../domain-error.js";
 import type { DshKernelHandle } from "./dsh-kernel.js";
 import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
+import { applyAgentMode } from "./agent-modes.js";
 import { registerProductPromptSections } from "./product-prompt.js";
 import { summaryOfMeta, type SessionTranscripts } from "./session-transcripts.js";
 
@@ -40,6 +45,8 @@ export interface AgentSessionsDeps {
   kernel: KernelAccessor;
   /** 读取当前 model 选择（provider/model/reasoningEffort → AgentOptions）。 */
   modelSelection: () => Promise<{ provider: string; model: string; reasoningEffort?: string }>;
+  /** 读取新会话默认模式（settings.defaultMode）。 */
+  defaultMode: () => Promise<DshAgentMode>;
   /** 帧缓冲上限（缺省 200）。 */
   retention?: number;
   /** 面板转录存储（跨重启回放与续聊定位）。 */
@@ -101,9 +108,12 @@ interface LivePanelSession {
   agent: AgentLike;
   dispose(): Promise<void>;
   frames: DshSessionStreamFrame[];
-  /** 进程内单调帧序（区别于 session event seq——投影视角排序）。 */
+  /** 进程内单调帧序（1 起：stream 游词语义 afterSeq = 已消费最大 seq，初始 0
+   *  即从头读全部——0 基首帧会被 `seq > afterSeq` 永久丢弃）。 */
   frameSeq: number;
   title: string;
+  /** 会话模式（setup 固化；切换即释放句柄）。 */
+  mode: DshAgentMode;
   /** 按 requestSeq 索引的待答问题（ask_user_question waterfall）。 */
   pending: Map<number, PendingApproval>;
   /** tool/call 的 callId → 工具名（tool/result 事件不带名，按 callId 回填）。 */
@@ -311,7 +321,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         };
       }
     ).ctx.on("user-questions/request", async (request) => {
-      const requestSeq = entry.frameSeq;
+      // requestSeq 即帧 seq（answer 的幂等键）：必须自增分配，否则后续事件帧复用
+      // 同一 seq，转录回放出现重复序。
+      const requestSeq = entry.frameSeq++;
       entry.frames.push({
         at: new Date().toISOString(),
         runId: entry.agent.session.id,
@@ -331,6 +343,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
   /**
    * 复活持久会话：内核 agents.resume 重建 agent（LLM 历史来自内核 session log），
    * 环以转录末尾 seed（seq 连续），新帧继续追加到同一转录目录。
+   * setup 按转录 meta 的 mode 组合（专有 section + 工具 guard）。
    */
   async function reviveSession(sessionId: string): Promise<LivePanelSession> {
     const kernel = requireKernel();
@@ -349,12 +362,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           model: model.model,
           ...(model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {}),
         },
-        setup: (agentCtx) => {
-          applyProductToolSurface(agentCtx);
-          registerProductPromptSections(
-            agentCtx as unknown as Parameters<typeof registerProductPromptSections>[0],
-          );
-        },
+        setup: setupFor(meta.mode),
       });
     } catch (error) {
       throw new DomainError(
@@ -368,8 +376,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       agent: handle.agent,
       dispose: handle.dispose,
       frames: seeded,
-      frameSeq: (seeded.at(-1)?.seq ?? -1) + 1,
+      frameSeq: (seeded.at(-1)?.seq ?? 0) + 1,
       title: meta.title,
+      mode: meta.mode,
       pending: new Map(),
       toolNames: new Map(),
     };
@@ -410,6 +419,17 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     return entry.agent.status === "running" ? "running" : "idle";
   }
 
+  /** 会话模式 → agent setup（全局工具收窄 + 模式 section/guard + 基础最佳实践）。 */
+  function setupFor(mode: DshAgentMode): (agentCtx: Context) => void {
+    return (agentCtx) => {
+      applyProductToolSurface(agentCtx);
+      applyAgentMode(agentCtx, mode);
+      registerProductPromptSections(
+        agentCtx as unknown as Parameters<typeof registerProductPromptSections>[0],
+      );
+    };
+  }
+
   /** createdAt 统一投影 ISO 字符串（内核 header 携带 epoch 毫秒）。 */
   function isoCreatedAt(header: { createdAt?: number | string }): string {
     const raw = header.createdAt;
@@ -425,6 +445,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       status: statusOf(entry),
       cwd: entry.agent.session.header.cwd ?? process.cwd(),
       createdAt: isoCreatedAt(entry.agent.session.header),
+      mode: entry.mode,
     };
   }
 
@@ -451,22 +472,29 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           summaries.push(summaryOf(entry));
           continue;
         }
-        // 非 agent 驱动的 session（steward 绑定等）以 disposed 形态列出即可见性。
+        // 非 agent 驱动的 session（steward 绑定等）以 disposed 形态列出即可见性；
+        // 无面板转录即无模式事实，投影 free（无收窄）。
         summaries.push({
           sessionId: session.id,
           title: "",
           status: "disposed",
           cwd: session.header.cwd ?? process.cwd(),
           createdAt: isoCreatedAt(session.header),
+          mode: "free",
         });
       }
       return summaries;
     },
-    /** 创建产品会话（产品 preset + 工具面收窄 setup；可选首 prompt）。 */
-    async create(input: { cwd?: string; prompt?: string }): Promise<AgentSessionSummary> {
+    /** 创建产品会话（产品 preset + 按模式的工具面收窄 setup；可选首 prompt）。 */
+    async create(input: {
+      cwd?: string;
+      prompt?: string;
+      mode?: DshAgentMode;
+    }): Promise<AgentSessionSummary> {
       const kernel = requireKernel();
       const agents = agentsService(kernel.ctx);
       const sessionId = `agent-${randomUUID()}`;
+      const mode = input.mode ?? (await deps.defaultMode());
       const model = await deps.modelSelection();
       const handle = await agents.create({
         sessionId,
@@ -479,12 +507,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           model: model.model,
           ...(model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {}),
         },
-        setup: (agentCtx) => {
-          applyProductToolSurface(agentCtx);
-          registerProductPromptSections(
-            agentCtx as unknown as Parameters<typeof registerProductPromptSections>[0],
-          );
-        },
+        setup: setupFor(mode),
       });
       if (input.prompt && input.prompt.length > PROMPT_MAX_CHARS) {
         throw new DomainError(
@@ -496,8 +519,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         agent: handle.agent,
         dispose: handle.dispose,
         frames: [],
-        frameSeq: 0,
+        frameSeq: 1,
         title: "",
+        mode,
         pending: new Map(),
         toolNames: new Map(),
       };
@@ -508,6 +532,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         title: "",
         createdAt: new Date().toISOString(),
         cwd: input.cwd ?? process.cwd(),
+        mode,
       });
       if (input.prompt) {
         handle.agent.followup(
@@ -544,6 +569,60 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       const entry = live.get(sessionId);
       if (!entry) throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
       entry.agent.cancel("user");
+    },
+    /**
+     * 切换会话模式（add-agent-settings-modes）：meta 持久化 + live 句柄有界释放 +
+     * mode-changed 帧落盘；下一次 prompt 经 agents.resume 以新模式 setup 复活
+     * （LLM 历史由内核 session log 保留）。running 会话拒绝切换。
+     */
+    async setMode(sessionId: string, mode: DshAgentMode): Promise<AgentSessionSummary> {
+      const meta = deps.transcripts.listAll().find((item) => item.sessionId === sessionId);
+      const entry = live.get(sessionId);
+      if (meta === undefined && !entry) {
+        throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
+      }
+      if (entry && statusOf(entry) === "running") {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `agent session ${sessionId} is running; switch modes after the current turn ends`,
+        );
+      }
+      const from = entry?.mode ?? meta?.mode ?? "free";
+      const summary: AgentSessionSummary = {
+        sessionId,
+        title: entry?.title ?? meta?.title ?? "",
+        status: "disposed",
+        cwd: entry?.agent.session.header.cwd ?? meta?.cwd ?? process.cwd(),
+        createdAt: entry
+          ? isoCreatedAt(entry.agent.session.header)
+          : (meta?.createdAt ?? new Date().toISOString()),
+        mode,
+      };
+      // 同模式切换是 no-op：不持久化、不产生 mode-changed 帧（live 态保持现状）。
+      if (from === mode) {
+        return entry ? { ...summary, status: statusOf(entry) } : summary;
+      }
+      deps.transcripts.updateMode(sessionId, mode);
+      let seq: number;
+      if (entry) {
+        seq = entry.frameSeq++;
+        for (const pending of entry.pending.values()) pending.resolve({ answers: [] });
+        entry.pending.clear();
+        live.delete(sessionId);
+        await entry.dispose();
+      } else {
+        seq = (deps.transcripts.readFrames(sessionId).at(-1)?.seq ?? 0) + 1;
+      }
+      const frame: DshSessionStreamFrame = {
+        at: new Date().toISOString(),
+        runId: sessionId,
+        sessionId,
+        seq,
+        kind: "mode-changed",
+        payload: redactDshPayload({ from, to: mode }),
+      };
+      deps.transcripts.append(sessionId, frame);
+      return summary;
     },
     /** 增量帧读取（afterSeq 游标 + limit 窗口）；非 live 会话由转录回放。 */
     stream(

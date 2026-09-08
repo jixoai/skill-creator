@@ -4,12 +4,13 @@
   正交意图：
   1. shell 级右栏 drawer：≥720px 常驻侧栏（w-[440px]），<720px 单屏覆盖；
      跨 tab 存活（挂载于 +layout，状态在 module store）。
-  2. 对话流：帧视图项分组渲染（turn/status/user/assistant/tool/approval）；
+  2. 对话流：帧视图项分组渲染（turn/status/user/assistant/tool/approval/mode）；
      断线与错误可见；assistant 文本经 markstream-svelte 增量渲染（流式优化：
      内容增长只重解析尾部、不完整 markdown 容错、离屏节点延迟），HTML 策略
      锁定 escape——模型输出零 HTML 直通。
-  3. composer：textarea 发送（Enter 提交 / Shift+Enter 换行）；停止按钮仅在
-     turn 运行中出现，图标按钮带 44px 外扩命中区。
+  3. composer 与模式：textarea 发送（Enter 提交 / Shift+Enter 换行）；停止按钮
+     仅在 turn 运行中出现，图标按钮带 44px 外扩命中区；header 模式 chip 切换
+     当前会话模式（add-agent-settings-modes；running 拒绝）。
   妥协声明：katex/mermaid/stream-diffs 为可选 peer，未安装时回退纯文本块。
 -->
 <script lang="ts">
@@ -31,7 +32,9 @@
     selectAgentSession,
     sendAgentPrompt,
     setAgentPanelOpen,
+    setAgentSessionMode,
   } from "$lib/stores/agent.svelte";
+  import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import AgentApprovalCard from "./AgentApprovalCard.svelte";
   import AgentConfigSection from "./AgentConfigSection.svelte";
   import AgentToolRow from "./AgentToolRow.svelte";
@@ -77,6 +80,14 @@
       submit();
     }
   }
+
+  /** 当前会话在列表中的完整身份（select 的 title 提示）。 */
+  const selectedSessionTitle = $derived.by(() => {
+    const summary = agentSessionsList.sessions.find(
+      (item) => item.sessionId === agentSession.sessionId,
+    );
+    return summary ? `${summary.title || summary.sessionId} (${summary.status})` : undefined;
+  });
 </script>
 
 <svelte:window
@@ -91,9 +102,12 @@
 >
   <header class="flex items-center gap-1 border-b border-border px-2 py-1.5">
     <span class="px-1 text-xs font-medium text-muted-foreground">Agent</span>
+    <!-- 选项文本刻意短化（原生 select 无省略号，长文本会被硬裁）；完整身份走
+         title 提示。 -->
     <select
       class="h-8 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 py-0 text-xs"
       aria-label="Session"
+      title={selectedSessionTitle}
       value={agentSession.sessionId ?? ""}
       onchange={(event) => selectAgentSession(event.currentTarget.value)}
     >
@@ -102,8 +116,26 @@
       {/if}
       {#each agentSessionsList.sessions as session (session.sessionId)}
         <option value={session.sessionId}>
-          {session.title || session.sessionId.slice(0, 18)}
-          ({session.status})
+          {session.title || session.sessionId.slice(0, 14)}
+          {session.status === "disposed" ? "· ended" : `· ${session.status}`}
+        </option>
+      {/each}
+    </select>
+    <!-- 会话模式 chip（DSH preset chip UX 移植；切换 = setMode RPC：running 拒绝，
+         idle 切换后下一次 prompt 以新模式复活）。 -->
+    <select
+      class="h-8 w-[6.5rem] rounded-md border border-border bg-transparent px-1.5 py-0 text-xs"
+      aria-label="Session mode"
+      title={agentSession.status === "running"
+        ? "Switch modes after the current turn ends"
+        : "Switch this session's mode"}
+      disabled={!agentSession.sessionId || agentSession.status === "running"}
+      value={agentSession.mode ?? ""}
+      onchange={(event) => void setAgentSessionMode(event.currentTarget.value as DshAgentMode)}
+    >
+      {#each DSH_AGENT_MODES as entry (entry.id)}
+        <option value={entry.id}>
+          {entry.label}{entry.tokenHeavy ? " (heavy)" : ""}
         </option>
       {/each}
     </select>
@@ -161,6 +193,17 @@
           >
             <span class="h-px flex-1 bg-border"></span>
             {item.label}
+            <span class="h-px flex-1 bg-border"></span>
+          </div>
+        {:else if item.kind === "mode"}
+          <div
+            class="flex items-center gap-2 py-1 text-[11px] text-muted-foreground"
+            role="separator"
+            aria-label={`Mode switched from ${item.from} to ${item.to}`}
+          >
+            <span class="h-px flex-1 bg-border"></span>
+            <span class="rounded bg-muted px-1 text-[10px] uppercase">mode</span>
+            {item.from} → {item.to}
             <span class="h-px flex-1 bg-border"></span>
           </div>
         {:else if item.kind === "status"}

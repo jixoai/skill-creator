@@ -56,6 +56,7 @@ export function defaultDshStewardSettings(): DshStewardSettings {
     preset: "deterministic",
     permissions: { approvalPolicy: "ask" },
     session: { streamRetention: 100, streamProjection: "enabled" },
+    defaultMode: "create",
   };
 }
 
@@ -197,7 +198,8 @@ function settingsEqual(a: DshStewardSettings, b: DshStewardSettings): boolean {
     a.preset === b.preset &&
     a.permissions.approvalPolicy === b.permissions.approvalPolicy &&
     a.session.streamRetention === b.session.streamRetention &&
-    a.session.streamProjection === b.session.streamProjection
+    a.session.streamProjection === b.session.streamProjection &&
+    a.defaultMode === b.defaultMode
   );
 }
 
@@ -227,6 +229,7 @@ export function createDshSettingsService(): DshSettingsService {
         ...settings,
         ...(patch.model ? { model: patch.model } : {}),
         ...(patch.preset ? { preset: patch.preset } : {}),
+        ...(patch.defaultMode ? { defaultMode: patch.defaultMode } : {}),
         permissions: { ...settings.permissions, ...(patch.permissions ?? {}) },
         session: { ...settings.session, ...(patch.session ?? {}) },
       };

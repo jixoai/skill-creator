@@ -38,6 +38,7 @@ import {
   selectAgentSession,
   sendAgentPrompt,
   setAgentPanelOpen,
+  setAgentSessionMode,
 } from "../stores/agent.svelte";
 
 function frame(seq: number, kind: string, extra: Record<string, unknown> = {}) {
@@ -56,6 +57,7 @@ beforeEach(() => {
   connection.generation = 0;
   agentPanel.open = false;
   agentSession.sessionId = null;
+  agentSession.mode = null;
   agentSession.items = [];
   agentSession.cursor = 0;
   agentSession.error = null;
@@ -81,6 +83,7 @@ describe("agent panel store (task 3.x)", () => {
               status: "idle",
               cwd: "/tmp",
               createdAt: "2026-09-08T00:00:00.000Z",
+              mode: "create",
             },
           }),
           prompt: vi.fn().mockResolvedValue({ accepted: true }),
@@ -113,6 +116,68 @@ describe("agent panel store (task 3.x)", () => {
       true,
     );
     expect(agentSession.error).toBeNull();
+  });
+
+  it("switches the session mode: running rejected locally, success updates the projection", async () => {
+    let polls = 0;
+    const rpc = {
+      agent: {
+        session: {
+          setMode: vi.fn().mockResolvedValue({
+            session: {
+              sessionId: "agent-s1",
+              title: "",
+              status: "disposed",
+              cwd: "/tmp",
+              createdAt: "2026-09-08T00:00:00.000Z",
+              mode: "explore",
+            },
+          }),
+          stream: vi.fn().mockImplementation(async () => {
+            polls += 1;
+            return polls === 1
+              ? {
+                  frames: [
+                    frame(5, "mode-changed", { payload: { from: "create", to: "explore" } }),
+                  ],
+                  status: "disposed",
+                }
+              : { frames: [], status: "disposed" };
+          }),
+        },
+        sessions: { list: vi.fn().mockResolvedValue({ sessions: [] }) },
+      },
+    };
+    connection.rpc = rpc;
+    agentSession.sessionId = "agent-s1";
+    agentSession.mode = "create";
+
+    // running：本地拒绝，不触 RPC。
+    agentSession.status = "running";
+    await expect(setAgentSessionMode("explore")).resolves.toBe(false);
+    expect(rpc.agent.session.setMode).not.toHaveBeenCalled();
+    expect(agentSession.error).toContain("current turn");
+
+    // idle：成功路径更新 mode/status，mode-changed 帧渲染为分隔项。
+    agentSession.status = "idle";
+    agentSession.error = null;
+    await expect(setAgentSessionMode("explore")).resolves.toBe(true);
+    expect(rpc.agent.session.setMode).toHaveBeenCalledWith({
+      sessionId: "agent-s1",
+      mode: "explore",
+    });
+    expect(agentSession.mode).toBe("explore");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      agentSession.items.some(
+        (item) => item.kind === "mode" && item.from === "create" && item.to === "explore",
+      ),
+    ).toBe(true);
+
+    // 同模式切换是本地 no-op。
+    rpc.agent.session.setMode.mockClear();
+    await expect(setAgentSessionMode("explore")).resolves.toBe(false);
+    expect(rpc.agent.session.setMode).not.toHaveBeenCalled();
   });
 
   it("keeps polling while an approval is pending and stops after it resolves (terminal semantics)", async () => {

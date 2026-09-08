@@ -14,8 +14,12 @@
  * 妥协声明：面板不是 MCP client——会话经 agent.* RPC 消费内核（design D2）。
  */
 import type { AgentSessionSummary } from "$shared/contracts/agent.js";
-import type { DshSettingsUpdate } from "$shared/contracts/dsh-runtime.js";
-import type { DshSessionStreamFrame } from "$shared/contracts/dsh-runtime.js";
+import type {
+  DshAgentMode,
+  DshSettingsUpdate,
+  DshSessionStreamFrame,
+  DshStewardSettingsView,
+} from "$shared/contracts/dsh-runtime.js";
 import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 
@@ -41,7 +45,8 @@ export type PanelItem =
       seq: number;
       questions: PanelApprovalQuestion[];
       resolved: boolean;
-    };
+    }
+  | { kind: "mode"; seq: number; from: DshAgentMode; to: DshAgentMode };
 
 const sessionsGate = createRequestGenerationGate(getConnectionGeneration);
 const createGate = createRequestGenerationGate(getConnectionGeneration);
@@ -52,6 +57,8 @@ const promptGate = createRequestGenerationGate(getConnectionGeneration);
 const answerGate = createRequestGenerationGate(getConnectionGeneration);
 const settingsGate = createRequestGenerationGate(getConnectionGeneration);
 const updateSettingsGate = createRequestGenerationGate(getConnectionGeneration);
+const setModeGate = createRequestGenerationGate(getConnectionGeneration);
+const credentialGate = createRequestGenerationGate(getConnectionGeneration);
 
 /** drawer 开合（跨 tab 存活）。 */
 export const agentPanel = $state({ open: false });
@@ -60,6 +67,8 @@ export const agentPanel = $state({ open: false });
 export const agentSession = $state({
   sessionId: null as string | null,
   status: "idle" as AgentSessionSummary["status"],
+  /** 会话模式（setMode 成功或 mode-changed 帧到达时更新；无会话为 null）。 */
+  mode: null as DshAgentMode | null,
   items: [] as PanelItem[],
   /** 最新帧 seq（轮询游标）。 */
   cursor: 0,
@@ -144,7 +153,7 @@ export async function createAgentSession(prompt?: string): Promise<void> {
   try {
     const result = await requireRpc().agent.session.create({ prompt });
     if (!request.isCurrent()) return;
-    resetSessionView(result.session.sessionId, result.session.status);
+    resetSessionView(result.session.sessionId, result.session.status, result.session.mode);
     agentSessionsList.loaded = false;
     void loadAgentSessions();
     void pollAgentStream();
@@ -159,17 +168,53 @@ export async function createAgentSession(prompt?: string): Promise<void> {
 /** 切换会话（重置视图并立即拉一轮）。 */
 export function selectAgentSession(sessionId: string): void {
   if (agentSession.sessionId === sessionId) return;
-  resetSessionView(sessionId, "idle");
+  const summary = agentSessionsList.sessions.find((item) => item.sessionId === sessionId);
+  resetSessionView(sessionId, "idle", summary?.mode ?? "free");
   void pollAgentStream();
 }
 
-function resetSessionView(sessionId: string, status: AgentSessionSummary["status"]): void {
+function resetSessionView(
+  sessionId: string,
+  status: AgentSessionSummary["status"],
+  mode: DshAgentMode,
+): void {
   agentSession.sessionId = sessionId;
   agentSession.status = status;
+  agentSession.mode = mode;
   agentSession.items = [];
   agentSession.cursor = 0;
   agentSession.error = null;
   pendingUserEcho = [];
+}
+
+/**
+ * 切换当前会话模式（add-agent-settings-modes）：成功后本投影更新 + 会话列表
+ * 刷新 + 立即拉帧（mode-changed 分隔行）；running 拒绝以错误面显示。
+ */
+export async function setAgentSessionMode(mode: DshAgentMode): Promise<boolean> {
+  const sessionId = agentSession.sessionId;
+  if (!sessionId || agentSession.mode === mode) return false;
+  if (agentSession.status === "running") {
+    agentSession.error = "Switch modes after the current turn ends.";
+    return false;
+  }
+  const request = setModeGate.issue();
+  try {
+    const result = await requireRpc().agent.session.setMode({ sessionId, mode });
+    if (!request.isCurrent()) return false;
+    if (agentSession.sessionId !== sessionId) return false;
+    agentSession.mode = result.session.mode;
+    agentSession.status = result.session.status;
+    agentSession.error = null;
+    agentSessionsList.loaded = false;
+    void loadAgentSessions();
+    void pollAgentStream();
+    return true;
+  } catch (error) {
+    if (!request.isCurrent()) return false;
+    agentSession.error = error instanceof Error ? error.message : String(error);
+    return false;
+  }
 }
 
 /** 发送一轮用户输入。 */
@@ -350,6 +395,14 @@ function appendFrame(frame: DshSessionStreamFrame): void {
         if (item.kind === "approval") item.resolved = true;
       }
       break;
+    case "mode-changed": {
+      const payload = frame.payload as { from?: unknown; to?: unknown } | undefined;
+      const from = (typeof payload?.from === "string" ? payload.from : "free") as DshAgentMode;
+      const to = (typeof payload?.to === "string" ? payload.to : "free") as DshAgentMode;
+      agentSession.items.push({ kind: "mode", seq: frame.seq, from, to });
+      agentSession.mode = to;
+      break;
+    }
   }
   const cap = 500;
   if (agentSession.items.length > cap) {
@@ -357,9 +410,9 @@ function appendFrame(frame: DshSessionStreamFrame): void {
   }
 }
 
-/** 加载配置投影（model/preset/permission + 凭据状态）。 */
+/** 加载配置投影（model/preset/permission/defaultMode + 凭据状态）。 */
 export async function loadAgentSettings(): Promise<{
-  view: import("$shared/contracts/dsh-runtime.js").DshStewardSettingsView | null;
+  view: DshStewardSettingsView | null;
   error: string | null;
 }> {
   const request = settingsGate.issue();
@@ -407,4 +460,47 @@ export async function updateAgentSettings(
 /** 断线清理（connection 层重连时调用可扩展；当前以代次门自然失效）。 */
 export function resetAgentPanelConnection(): void {
   stopPolling();
+}
+
+/**
+ * 写入 provider 凭据（只写面；结果视图更新 agentRuntimeConfig，值永不回流）。
+ * 类型化 rejected 原样返回给调用方投影。
+ */
+export async function setAgentCredential(
+  provider: string,
+  apiKey: string,
+): Promise<{ outcome: "stored" } | { outcome: "rejected"; code: string; detail: string } | null> {
+  const request = credentialGate.issue();
+  agentRuntimeConfig.updating = true;
+  try {
+    const result = await requireRpc().agent.credentials.set({ provider, apiKey });
+    if (!request.isCurrent()) return null;
+    if (result.outcome === "stored") agentRuntimeConfig.view = result.view;
+    return result;
+  } catch (error) {
+    if (!request.isCurrent()) return null;
+    return {
+      outcome: "rejected",
+      code: "NETWORK",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    if (request.isCurrent()) agentRuntimeConfig.updating = false;
+  }
+}
+
+/** 清除 provider 凭据（结果视图含最新凭据状态）。 */
+export async function clearAgentCredential(provider: string): Promise<void> {
+  const request = credentialGate.issue();
+  agentRuntimeConfig.updating = true;
+  try {
+    const view = await requireRpc().agent.credentials.clear({ provider });
+    if (!request.isCurrent()) return;
+    agentRuntimeConfig.view = view;
+  } catch (error) {
+    if (!request.isCurrent()) return;
+    agentRuntimeConfig.error = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (request.isCurrent()) agentRuntimeConfig.updating = false;
+  }
 }

@@ -15,6 +15,7 @@
  */
 import { z } from "zod";
 import {
+  DshAgentModeSchema,
   DshCredentialClearInputSchema,
   DshCredentialSetInputSchema,
   DshCredentialSetResultSchema,
@@ -29,7 +30,7 @@ export const AgentSessionStatusSchema = z.enum(["idle", "running", "disposed"]);
 /** agent 会话状态。 */
 export type AgentSessionStatus = z.infer<typeof AgentSessionStatusSchema>;
 
-/** 会话摘要（list/create 返回）。 */
+/** 会话摘要（list/create/setMode 返回）。 */
 export const AgentSessionSummarySchema = z.object({
   sessionId: z.string().min(1),
   /** 自动标题（内核 session-title；首 prompt 前为空串）。 */
@@ -37,6 +38,8 @@ export const AgentSessionSummarySchema = z.object({
   status: AgentSessionStatusSchema,
   cwd: z.string(),
   createdAt: z.string().min(1),
+  /** 会话模式（旧转录缺失读 free——其创建时即全工具面的事实投影）。 */
+  mode: DshAgentModeSchema,
 });
 /** 会话摘要。 */
 export type AgentSessionSummary = z.infer<typeof AgentSessionSummarySchema>;
@@ -47,6 +50,8 @@ export const AgentSessionCreateInputSchema = z.object({
   cwd: z.string().min(1).optional(),
   /** 首条消息（可选；提供则创建后立即驱动一轮）。 */
   prompt: z.string().min(1).max(20_000).optional(),
+  /** 会话模式（缺省取 settings.defaultMode）。 */
+  mode: DshAgentModeSchema.optional(),
 });
 /** 会话创建输入。 */
 export type AgentSessionCreateInput = z.infer<typeof AgentSessionCreateInputSchema>;
@@ -68,6 +73,21 @@ export type AgentSessionPromptInput = z.infer<typeof AgentSessionPromptInputSche
 
 /** prompt 结果（accepted = 已入队驱动；终态经 stream 轮询观察）。 */
 export const AgentSessionPromptResultSchema = z.object({ accepted: z.literal(true) });
+
+/** setMode 输入（运行中会话返回 typed INVALID_OPERATION，不改状态）。 */
+export const AgentSessionSetModeInputSchema = z.object({
+  sessionId: z.string().min(1),
+  mode: DshAgentModeSchema,
+});
+/** setMode 输入。 */
+export type AgentSessionSetModeInput = z.infer<typeof AgentSessionSetModeInputSchema>;
+
+/** setMode 结果（返回切换后的摘要；live 句柄已释放，下一次 prompt 以新模式复活）。 */
+export const AgentSessionSetModeResultSchema = z.object({
+  session: AgentSessionSummarySchema,
+});
+/** setMode 结果。 */
+export type AgentSessionSetModeResult = z.infer<typeof AgentSessionSetModeResultSchema>;
 
 /** cancel 输入/结果。 */
 export const AgentSessionCancelInputSchema = z.object({ sessionId: z.string().min(1) });

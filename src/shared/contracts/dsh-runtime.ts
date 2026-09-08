@@ -11,6 +11,8 @@
  *   [1] 锁定声明：五个官方 package 的精确版本 + 审计 commit（运行时只认这套组合）。
  *   [2] composition row：每个 package 在 Skill Steward 组合中的具体 seam。
  *   [3] 类型化可用性：缺失/版本漂移/组合行缺失 → unavailable，绝不静默 fallback。
+ *   [4] agent 面契约源：settings/credentials/stream 帧/模式目录（add-agent-settings-modes；
+ *       WebUI 从此处推导类型，不维护第二份手写镜像）。
  */
 import { z } from "zod";
 
@@ -149,6 +151,54 @@ export const DshStewardModelSelectionSchema = z.object({
 export type DshStewardModelSelection = z.infer<typeof DshStewardModelSelectionSchema>;
 
 /**
+ * Agent 会话模式（openspec add-agent-settings-modes）。专有模式 = 版本化
+ * system-prompt section + MCP 工具名单；free 无专有收窄（基础最佳实践即全部）。
+ */
+export const DshAgentModeSchema = z.enum(["create", "manage", "explore", "free"]);
+/** Agent 会话模式。 */
+export type DshAgentMode = z.infer<typeof DshAgentModeSchema>;
+
+/** 模式目录条目（browser-safe：UI 渲染卡/chip 的单一事实源）。 */
+export interface DshAgentModeCatalogEntry {
+  id: DshAgentMode;
+  label: string;
+  description: string;
+  /** true = 全工具面，token 消耗更高（UI 明示）。 */
+  tokenHeavy: boolean;
+}
+
+/** 模式目录（顺序即 UI 展示序；与 daemon kernel 注册表对齐，单测校验一致性）。 */
+export const DSH_AGENT_MODES: readonly DshAgentModeCatalogEntry[] = [
+  {
+    id: "create",
+    label: "Create",
+    description:
+      "Author new skills: frontmatter law, progressive disclosure, validation-first workflow.",
+    tokenHeavy: false,
+  },
+  {
+    id: "manage",
+    label: "Manage",
+    description:
+      "Curate the local library: dedupe, merge, optimize, toggle, and update installed skills.",
+    tokenHeavy: false,
+  },
+  {
+    id: "explore",
+    label: "Explore",
+    description:
+      "Search skill sources, read candidates, and analyze fit against your requirements.",
+    tokenHeavy: false,
+  },
+  {
+    id: "free",
+    label: "Free",
+    description: "All capabilities in one session, no focused narrowing.",
+    tokenHeavy: true,
+  },
+];
+
+/**
  * LLM preset：deterministic = 脚本化 transport（CI/fixture）；live = 真实 provider。
  * 禁止自动 fallback：live 缺凭据时 resolve 失败，绝不静默回退 deterministic。
  */
@@ -185,6 +235,8 @@ export const DshStewardSettingsSchema = z.object({
   preset: DshStewardPresetSchema,
   permissions: DshStewardPermissionsSchema,
   session: DshStewardSessionControlsSchema,
+  /** 新会话的默认模式（旧文件缺失读 create——additive 字段）。 */
+  defaultMode: DshAgentModeSchema.default("create"),
 });
 /** steward DSH settings。 */
 export type DshStewardSettings = z.infer<typeof DshStewardSettingsSchema>;
@@ -211,6 +263,7 @@ export const DshSettingsUpdateSchema = z.object({
   preset: DshStewardPresetSchema.optional(),
   permissions: DshStewardPermissionsSchema.partial().optional(),
   session: DshStewardSessionControlsSchema.partial().optional(),
+  defaultMode: DshAgentModeSchema.optional(),
 });
 /** settings 更新补丁。 */
 export type DshSettingsUpdate = z.infer<typeof DshSettingsUpdateSchema>;
@@ -312,6 +365,7 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   "turn-end",
   "approval-request",
   "approval-resolved",
+  "mode-changed",
 ]);
 /** session stream 帧类别。 */
 export type DshSessionStreamFrameKind = z.infer<typeof DshSessionStreamFrameKindSchema>;

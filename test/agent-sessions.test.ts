@@ -46,6 +46,7 @@ function makeService(transcriptsRoot?: string): AgentSessionsService {
       provider: "deepseek-official",
       model: "deepseek-v4-flash",
     }),
+    defaultMode: async () => "create",
     retention: 50,
     transcripts: createSessionTranscripts(transcriptsRoot ?? path.join(sandbox, "transcripts")),
   });
@@ -125,6 +126,52 @@ describe("agent sessions over the headless kernel (task 2.2)", () => {
       // 真实 API key 形状（"sk-" 是 "skill-" 的子串，不能作宽断言）。
       expect(serialized).not.toMatch(/sk-[a-zA-Z0-9]{20,}/);
       expect(serialized).not.toContain('"apiKey"');
+    },
+  );
+
+  it(
+    "switches session modes: persist, release, mode-changed frame, revive with new mode",
+    { timeout: 240_000 },
+    async () => {
+      const dshHome = path.join(sandbox, "dsh-home");
+      const transcriptsRoot = path.join(sandbox, "transcripts");
+      kernel = await bootDshKernel({ home: dshHome });
+      service = makeService(transcriptsRoot);
+      service.attach(kernel);
+
+      // 缺省模式取 settings.defaultMode（harness 注入 create）。
+      const session = await service.create({ cwd: sandbox });
+      expect(session.mode).toBe("create");
+
+      // 显式模式的会话摘要携带 mode。
+      const explicit = await service.create({ cwd: sandbox, mode: "manage" });
+      expect(explicit.mode).toBe("manage");
+
+      // 切换：持久化 + live 释放（status → disposed）+ mode-changed 帧落盘。
+      const switched = await service.setMode(explicit.sessionId, "explore");
+      expect(switched).toMatchObject({
+        sessionId: explicit.sessionId,
+        mode: "explore",
+        status: "disposed",
+      });
+      const frames = service.stream(explicit.sessionId, 0, 100).frames;
+      const modeFrame = frames.find((frame) => frame.kind === "mode-changed");
+      expect(modeFrame?.payload).toMatchObject({ from: "manage", to: "explore" });
+
+      // 同模式切换是 no-op：不产生新帧。
+      const before = service.stream(explicit.sessionId, 0, 200).frames.length;
+      const noOp = await service.setMode(explicit.sessionId, "explore");
+      expect(noOp.mode).toBe("explore");
+      expect(service.stream(explicit.sessionId, 0, 200).frames.length).toBe(before);
+
+      // 复活路径以转录 meta 的新模式续聊（模式事实不回退）。
+      await service.prompt(explicit.sessionId, "mode switch persistence probe");
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const listed = service.list();
+      expect(listed.find((item) => item.sessionId === explicit.sessionId)?.mode).toBe("explore");
+
+      // 未知会话 typed NOT_FOUND。
+      await expect(service.setMode("agent-missing", "free")).rejects.toThrowError(/not found/);
     },
   );
 

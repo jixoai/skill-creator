@@ -109,6 +109,7 @@ export function createDaemonDomain(
   const agentSessions = createAgentSessionsService({
     kernel: () => kernelHostRef.handle,
     modelSelection: async () => (await dshSettings.getView()).settings.model,
+    defaultMode: async () => (await dshSettings.getView()).settings.defaultMode,
     transcripts: agentTranscripts,
   });
   const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();

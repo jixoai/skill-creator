@@ -17,7 +17,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  DshAgentModeSchema,
   DshSessionStreamFrameSchema,
+  type DshAgentMode,
   type DshSessionStreamFrame,
 } from "../../shared/contracts/dsh-runtime.js";
 import type { AgentSessionSummary } from "../../shared/contracts/agent.js";
@@ -28,6 +30,8 @@ export interface SessionTranscriptMeta {
   title: string;
   createdAt: string;
   cwd: string;
+  /** 会话模式（add-agent-settings-modes；缺失/非法读 free——旧会话创建时即全工具面）。 */
+  mode: DshAgentMode;
 }
 
 /** 存储接口（agent-sessions 依赖；测试可注入任意根目录）。 */
@@ -36,16 +40,24 @@ export interface SessionTranscripts {
   recordStart(meta: SessionTranscriptMeta): void;
   /** 追加一帧（未知 sessionId 静默跳过——recordStart 未覆盖的帧不属于本存储）。 */
   append(sessionId: string, frame: DshSessionStreamFrame): void;
+  /** 原子更新会话模式（meta.json 重写；未知 sessionId 返回 false）。 */
+  updateMode(sessionId: string, mode: DshAgentMode): boolean;
   /** 全部持久会话元数据（扫描 + 逐项 safeParse，损坏目录跳过）。 */
   listAll(): SessionTranscriptMeta[];
   /** 单会话帧回放（seq 升序；损坏行丢弃）。 */
   readFrames(sessionId: string): DshSessionStreamFrame[];
 }
 
-/** meta.json 的 runtime 收窄（外部输入）。 */
+/** meta.json 的 runtime 收窄（外部输入；mode 缺失/非法 → free 的事实投影）。 */
 function parseMeta(raw: unknown): SessionTranscriptMeta | null {
   if (typeof raw !== "object" || raw === null) return null;
-  const meta = raw as { sessionId?: unknown; title?: unknown; createdAt?: unknown; cwd?: unknown };
+  const meta = raw as {
+    sessionId?: unknown;
+    title?: unknown;
+    createdAt?: unknown;
+    cwd?: unknown;
+    mode?: unknown;
+  };
   if (typeof meta.sessionId !== "string" || meta.sessionId.length === 0) return null;
   if (typeof meta.createdAt !== "string" || meta.createdAt.length === 0) return null;
   return {
@@ -53,6 +65,7 @@ function parseMeta(raw: unknown): SessionTranscriptMeta | null {
     title: typeof meta.title === "string" ? meta.title : "",
     createdAt: meta.createdAt,
     cwd: typeof meta.cwd === "string" ? meta.cwd : "",
+    mode: DshAgentModeSchema.safeParse(meta.mode).success ? (meta.mode as DshAgentMode) : "free",
   };
 }
 
@@ -136,6 +149,23 @@ export function createSessionTranscripts(rootDir: string): SessionTranscripts {
         console.error(`[session-transcripts] append failed for ${sessionId}:`, error);
       }
     },
+    updateMode(sessionId, mode) {
+      const dir = dirs.get(sessionId);
+      if (dir === undefined) return false;
+      try {
+        const meta = parseMeta(JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8")));
+        if (meta === null || meta.mode === mode) return meta !== null;
+        const next = { ...meta, mode };
+        const target = path.join(dir, "meta.json");
+        const tmp = `${target}.tmp`;
+        fs.writeFileSync(tmp, `${JSON.stringify(next)}\n`, { mode: 0o600 });
+        fs.renameSync(tmp, target);
+        return true;
+      } catch (error) {
+        console.error(`[session-transcripts] updateMode failed for ${sessionId}:`, error);
+        return false;
+      }
+    },
     listAll() {
       hydrate();
       const metas: SessionTranscriptMeta[] = [];
@@ -184,5 +214,6 @@ export function summaryOfMeta(meta: SessionTranscriptMeta): AgentSessionSummary 
     status: "disposed",
     cwd: meta.cwd || process.cwd(),
     createdAt: meta.createdAt,
+    mode: meta.mode,
   };
 }

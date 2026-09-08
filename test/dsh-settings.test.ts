@@ -87,7 +87,24 @@ describe("DshSettingsService", () => {
     expect(view.settings.preset).toBe("deterministic");
     expect(view.settings.permissions.approvalPolicy).toBe("ask");
     expect(view.settings.session).toEqual({ streamRetention: 100, streamProjection: "enabled" });
+    expect(view.settings.defaultMode).toBe("create");
     expect(view.providers).toEqual([]);
+  });
+
+  it("applies a defaultMode patch and counts it as a real change", async () => {
+    const service = createDshSettingsService();
+    const result = await service.update({ defaultMode: "explore" });
+    expect(result.outcome).toBe("updated");
+    if (result.outcome === "updated") {
+      expect(result.changed).toBe(true);
+      expect(result.revision).toBe(1);
+    }
+    // 同值补丁是 no-op；旧持久化文件（无 defaultMode）读为 create。
+    const noOp = await service.update({ defaultMode: "explore" });
+    if (noOp.outcome === "updated") expect(noOp.changed).toBe(false);
+    else throw new Error("expected updated");
+    const reloaded = await createDshSettingsService().getView();
+    expect(reloaded.settings.defaultMode).toBe("explore");
   });
 
   it("applies a patch, bumps revision once, and reloads from disk", async () => {

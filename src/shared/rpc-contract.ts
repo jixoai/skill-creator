@@ -31,6 +31,8 @@ import {
   AgentProposalDecisionInputSchema,
   AgentSessionPromptInputSchema,
   AgentSessionPromptResultSchema,
+  AgentSessionSetModeInputSchema,
+  AgentSessionSetModeResultSchema,
   AgentSessionStreamInputSchema,
   AgentSessionStreamResultSchema,
   AgentSessionsStreamsInputSchema,
@@ -322,6 +324,9 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       answer: oc.input(AgentSessionAnswerInputSchema).output(AgentSessionAnswerResultSchema),
       /** 增量帧读取（afterSeq 游标 + status 快照）。 */
       stream: oc.input(AgentSessionStreamInputSchema).output(AgentSessionStreamResultSchema),
+      /** 切换会话模式（add-agent-settings-modes：running 拒绝；live 句柄释放，
+       * 下一次 prompt 以新模式 setup 复活，历史由内核 session log 保留）。 */
+      setMode: oc.input(AgentSessionSetModeInputSchema).output(AgentSessionSetModeResultSchema),
     },
     /** model/preset/permission/approval 投影（原 dsh.settings 平移）。 */
     settings: {

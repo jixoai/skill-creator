@@ -46,6 +46,7 @@ describe("session transcripts store", () => {
       title: "",
       createdAt: "2026-09-08T10:30:00.000Z",
       cwd: "/tmp/ws",
+      mode: "create",
     });
     store.append("agent-t", frame(0, "user-text", "hello"));
     store.append("agent-t", frame(1, "turn-start"));
@@ -58,7 +59,7 @@ describe("session transcripts store", () => {
 
     const metas = store.listAll();
     expect(metas).toHaveLength(1);
-    expect(metas[0]).toMatchObject({ sessionId: "agent-t", cwd: "/tmp/ws" });
+    expect(metas[0]).toMatchObject({ sessionId: "agent-t", cwd: "/tmp/ws", mode: "create" });
 
     const frames = store.readFrames("agent-t");
     expect(frames.map((f) => f.seq)).toEqual([0, 1, 2]);
@@ -72,6 +73,7 @@ describe("session transcripts store", () => {
       title: "",
       createdAt: "2026-09-08T10:30:00.000Z",
       cwd: "/tmp",
+      mode: "free",
     });
     store.append("agent-t", frame(0, "turn-start"));
     store.append("agent-unknown", frame(9, "turn-start")); // no-op：未 recordStart。
@@ -90,11 +92,51 @@ describe("session transcripts store", () => {
       title: "",
       createdAt: "2026-09-07T23:59:00.000Z",
       cwd: "/tmp",
+      mode: "manage",
     });
     first.append("agent-a", frame(0, "user-text", "q"));
 
     const second = createSessionTranscripts(root);
     expect(second.listAll().map((meta) => meta.sessionId)).toEqual(["agent-a"]);
+    expect(second.listAll()[0]?.mode).toBe("manage");
     expect(second.readFrames("agent-a")).toHaveLength(1);
+  });
+
+  it("updates mode atomically and reads missing/invalid mode as free", () => {
+    const store = createSessionTranscripts(root);
+    store.recordStart({
+      sessionId: "agent-m",
+      title: "",
+      createdAt: "2026-09-08T11:00:00.000Z",
+      cwd: "/tmp",
+      mode: "create",
+    });
+    expect(store.updateMode("agent-m", "explore")).toBe(true);
+    expect(store.listAll().find((meta) => meta.sessionId === "agent-m")?.mode).toBe("explore");
+    // 未知会话与同模式 no-op。
+    expect(store.updateMode("agent-unknown", "free")).toBe(false);
+    expect(store.updateMode("agent-m", "explore")).toBe(true);
+    expect(store.listAll().find((meta) => meta.sessionId === "agent-m")?.mode).toBe("explore");
+
+    // 旧会话无 mode 字段 → free（其创建时即全工具面的事实投影）；非法值同理。
+    store.recordStart({
+      sessionId: "agent-legacy",
+      title: "",
+      createdAt: "2026-09-08T12:00:00.000Z",
+      cwd: "/tmp",
+      mode: "free",
+    });
+    const legacyDir = path.join(root, "2026", "09", "08", "agent-legacy");
+    fs.writeFileSync(
+      path.join(legacyDir, "meta.json"),
+      `${JSON.stringify({
+        sessionId: "agent-legacy",
+        title: "",
+        createdAt: "2026-09-08T12:00:00.000Z",
+        cwd: "/tmp",
+      })}\n`,
+    );
+    const reread = createSessionTranscripts(root);
+    expect(reread.listAll().find((meta) => meta.sessionId === "agent-legacy")?.mode).toBe("free");
   });
 });
