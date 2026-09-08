@@ -118,11 +118,17 @@ interface LivePanelSession {
   pending: Map<number, PendingApproval>;
   /** tool/call 的 callId → 工具名（tool/result 事件不带名，按 callId 回填）。 */
   toolNames: Map<string, string>;
+  /** assistant/chunk text-delta 的合并缓冲（120ms 窗口一帧，避免逐 token 落盘）。 */
+  deltaBuffer: string[];
+  /** 上次 delta 帧冲刷时刻（ms）。 */
+  deltaAt: number;
 }
 
 const DEFAULT_RETENTION = 200;
 /** prompt 长度硬上限（与 RPC 契约 AgentSessionPromptInputSchema 一致）。 */
 const PROMPT_MAX_CHARS = 20_000;
+/** 流式增量帧的合并窗口：窗口内的 text-delta 合成一帧。 */
+const DELTA_FLUSH_MS = 120;
 
 /** 构造 agent 会话服务；内核未挂载时所有面返回 typed UNAVAILABLE。 */
 export function createAgentSessionsService(deps: AgentSessionsDeps) {
@@ -164,6 +170,22 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     ).on("session/event", (session, event) => {
       const entry = live.get(session.id);
       if (!entry) return;
+      // 流式增量：assistant/chunk（text-delta）进合并缓冲，按时间窗成帧；
+      // 其余事件先冲刷缓冲，保证增量帧先于收尾帧（assistant-message/工具帧）落序。
+      if (event.type === "assistant/chunk") {
+        const chunk = (event.data as { chunk?: { type?: string; text?: string } } | undefined)
+          ?.chunk;
+        if (
+          chunk?.type === "text-delta" &&
+          typeof chunk.text === "string" &&
+          chunk.text.length > 0
+        ) {
+          entry.deltaBuffer.push(chunk.text);
+          if (Date.now() - entry.deltaAt >= DELTA_FLUSH_MS) flushDeltas(entry);
+        }
+        return;
+      }
+      flushDeltas(entry);
       const frame = projectEvent(entry, event);
       if (!frame) return;
       entry.frames.push(frame);
@@ -173,6 +195,27 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       // write-through：转录落盘 best-effort（失败由存储层记日志，不打断 live）。
       deps.transcripts.append(session.id, frame);
     });
+  }
+
+  /** 冲刷 delta 缓冲为一帧（live 环 + 转录同序落盘）。 */
+  function flushDeltas(entry: LivePanelSession): void {
+    if (entry.deltaBuffer.length === 0) return;
+    const text = entry.deltaBuffer.join("");
+    entry.deltaBuffer = [];
+    entry.deltaAt = Date.now();
+    const frame: DshSessionStreamFrame = {
+      at: new Date().toISOString(),
+      runId: entry.agent.session.id,
+      sessionId: entry.agent.session.id,
+      seq: entry.frameSeq++,
+      kind: "assistant-delta",
+      text,
+    };
+    entry.frames.push(frame);
+    if (entry.frames.length > retention) {
+      entry.frames.splice(0, entry.frames.length - retention);
+    }
+    deps.transcripts.append(entry.agent.session.id, frame);
   }
 
   /** 单事件 → 帧投影（未知事件类型返回 null 丢弃；payload 脱敏）。 */
@@ -381,6 +424,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       mode: meta.mode,
       pending: new Map(),
       toolNames: new Map(),
+      deltaBuffer: [],
+      deltaAt: Date.now(),
     };
     registerPanelAnswerer(entry);
     live.set(sessionId, entry);
@@ -524,6 +569,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         mode,
         pending: new Map(),
         toolNames: new Map(),
+        deltaBuffer: [],
+        deltaAt: Date.now(),
       };
       registerPanelAnswerer(entry);
       live.set(sessionId, entry);

@@ -43,3 +43,13 @@
       重启续聊；越权工具 guard 文案；设置面板模型/凭据/默认模式 round-trip；窄屏。
 - [x] 4.4 门禁：pnpm test / typecheck / webui check / build / vp fmt / git diff
       --check / npm pack --dry-run。
+
+## 5. 迭代（2026-09-09 用户反馈）
+
+- [x] 5.1 流式渲染断裂修复：投影 assistant/chunk text-delta 为 assistant-delta
+      合并帧（120ms 窗口）；store 增量累进 + 终帧整段替换；running 态轮询
+      450ms；markstream 流式态 final=false。
+- [x] 5.2 设置面升格为全局：侧栏底部齿轮入口 + shell 级 Dialog 的
+      list-detail 结构（General/Model/Agent 分区）；Agent 面板移除内嵌设置节。
+- [x] 5.3 Esc 归属修复：模态打开时 Escape 不再连带收起 Agent 面板。
+- [x] 5.4 会话下拉短化（原生 select 无省略号，长 id 硬裁）+ title 完整提示。

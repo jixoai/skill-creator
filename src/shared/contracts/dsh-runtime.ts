@@ -361,6 +361,8 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   "tool-call",
   "tool-result",
   "assistant-text",
+  /** 流式文本增量（assistant/chunk text-delta 的合并投影；终帧 assistant-text 整段替换）。 */
+  "assistant-delta",
   "user-text",
   "turn-end",
   "approval-request",

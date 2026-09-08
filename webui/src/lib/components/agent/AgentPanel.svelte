@@ -16,7 +16,6 @@
 <script lang="ts">
   import IconX from "@lucide/svelte/icons/x";
   import IconPlus from "@lucide/svelte/icons/plus";
-  import IconSettings from "@lucide/svelte/icons/settings";
   import IconSend from "@lucide/svelte/icons/send";
   import IconStop from "@lucide/svelte/icons/square";
   import { Button } from "$lib/components/ui/button";
@@ -36,13 +35,11 @@
   } from "$lib/stores/agent.svelte";
   import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import AgentApprovalCard from "./AgentApprovalCard.svelte";
-  import AgentConfigSection from "./AgentConfigSection.svelte";
   import AgentToolRow from "./AgentToolRow.svelte";
   import MarkdownRender from "markstream-svelte";
   import "markstream-svelte/index.css";
 
   let composerText = $state("");
-  let showConfig = $state(false);
   let scrollBody = $state<HTMLElement | null>(null);
 
   // 新帧到达时滚动到底（用户向上翻阅时不打扰）。markstream batch 渲染会在帧
@@ -92,7 +89,10 @@
 
 <svelte:window
   onkeydown={(event) => {
-    if (event.key === "Escape" && agentPanel.open) setAgentPanelOpen(false);
+    // 有模态（设置面等）打开时 Esc 归模态所有，不连带收起面板。
+    if (event.key === "Escape" && agentPanel.open && !document.querySelector("[role='dialog']")) {
+      setAgentPanelOpen(false);
+    }
   }}
 />
 
@@ -149,20 +149,6 @@
       <IconPlus class="h-4 w-4" />
     </button>
     <button
-      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground {showConfig
-        ? 'bg-muted text-foreground'
-        : ''}"
-      title="Runtime config"
-      aria-label="Runtime config"
-      aria-pressed={showConfig}
-      onclick={() => {
-        showConfig = !showConfig;
-        if (showConfig) void import("$lib/stores/agent.svelte").then((m) => m.loadAgentSettings());
-      }}
-    >
-      <IconSettings class="h-4 w-4" />
-    </button>
-    <button
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
       title="Close panel"
       aria-label="Close panel"
@@ -171,10 +157,6 @@
       <IconX class="h-4 w-4" />
     </button>
   </header>
-
-  {#if showConfig}
-    <AgentConfigSection />
-  {/if}
 
   <div bind:this={scrollBody} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
     {#if !agentSession.sessionId}
@@ -217,13 +199,14 @@
         {:else if item.kind === "assistant"}
           <!-- markstream 增量渲染：内容增长只重解析尾部、不完整 fence/强调容错、
                离屏节点延迟；htmlPolicy=escape 锁死模型输出的 HTML 直通（与既有
-               XSS 不变量一致）。密度覆写在下方 scoped style：库默认面向文档页
-               （16px/IBM Plex/clamp 巨标题），且 Tailwind preflight 会剥掉列表
-               marker，须收敛回 12px 面板排版；卡片通栏对齐右缘节奏。 -->
+               XSS 不变量一致）。流式态 final=false——增量期间不闭合的 markdown
+               结构按流式容错渲染；终帧到达后置 true 收敛。密度覆写在下方 scoped
+               style：库默认面向文档页（16px/IBM Plex/clamp 巨标题），且 Tailwind
+               preflight 会剥掉列表 marker，须收敛回 12px 面板排版。 -->
           <div
             class="ms-md rounded-lg border border-border px-2.5 py-1.5 text-xs [&_a]:text-primary"
           >
-            <MarkdownRender content={item.text} htmlPolicy="escape" final={true} />
+            <MarkdownRender content={item.text} htmlPolicy="escape" final={!item.streaming} />
           </div>
         {:else if item.kind === "tool"}
           <AgentToolRow toolName={item.toolName} phase={item.phase} payload={item.payload} />

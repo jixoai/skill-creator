@@ -180,6 +180,49 @@ describe("agent panel store (task 3.x)", () => {
     expect(rpc.agent.session.setMode).not.toHaveBeenCalled();
   });
 
+  it("accumulates assistant deltas into one streaming bubble and replaces it with the final frame", async () => {
+    let polls = 0;
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockImplementation(async () => {
+            polls += 1;
+            if (polls === 1) {
+              return {
+                frames: [
+                  frame(1, "turn-start"),
+                  frame(2, "assistant-delta", { text: "Hel" }),
+                  frame(3, "assistant-delta", { text: "lo " }),
+                ],
+                status: "running",
+              };
+            }
+            if (polls === 2) {
+              return {
+                frames: [
+                  frame(4, "assistant-delta", { text: "world" }),
+                  frame(5, "assistant-text", { text: "Hello world" }),
+                  frame(6, "turn-end", { text: "completed" }),
+                ],
+                status: "idle",
+              };
+            }
+            return { frames: [], status: "idle" };
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    const during = agentSession.items.filter((item) => item.kind === "assistant");
+    expect(during).toHaveLength(1);
+    expect(during[0]).toMatchObject({ text: "Hello ", streaming: true });
+    await pollAgentStream();
+    const after = agentSession.items.filter((item) => item.kind === "assistant");
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ text: "Hello world", streaming: false });
+  });
+
   it("keeps polling while an approval is pending and stops after it resolves (terminal semantics)", async () => {
     connection.rpc = {
       agent: {

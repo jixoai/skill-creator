@@ -38,7 +38,7 @@ export type PanelItem =
   | { kind: "turn"; seq: number; label: string }
   | { kind: "status"; seq: number; text: string }
   | { kind: "user"; seq: number; text: string }
-  | { kind: "assistant"; seq: number; text: string }
+  | { kind: "assistant"; seq: number; text: string; streaming: boolean }
   | { kind: "tool"; seq: number; toolName: string; phase: "call" | "result"; payload?: unknown }
   | {
       kind: "approval";
@@ -311,9 +311,12 @@ function scheduleNextPoll(): void {
   );
   if (agentSession.status === "running" || hasPendingApproval) {
     pollSession = agentSession.sessionId;
+    // running 态用短间隔承接流式增量（assistant-delta 120ms 合并帧）；纯待答
+    // 审批轮询保持 1.2s。
+    const interval = agentSession.status === "running" ? 450 : 1200;
     pollTimer = setTimeout(() => {
       void pollAgentStream();
-    }, 1200);
+    }, interval);
   }
 }
 
@@ -351,11 +354,43 @@ function appendFrame(frame: DshSessionStreamFrame): void {
       }
       break;
     }
-    case "assistant-text":
+    case "assistant-delta": {
+      // 流式增量：末项是流式 assistant 气泡则累进，否则开新气泡。
+      // 回放路径（重连/切会话）同样成立——终帧 assistant-text 负责整段替换。
       if (typeof frame.text === "string" && frame.text.length > 0) {
-        agentSession.items.push({ kind: "assistant", seq: frame.seq, text: frame.text });
+        const last = agentSession.items[agentSession.items.length - 1];
+        if (last?.kind === "assistant" && last.streaming) {
+          last.text += frame.text;
+        } else {
+          agentSession.items.push({
+            kind: "assistant",
+            seq: frame.seq,
+            text: frame.text,
+            streaming: true,
+          });
+        }
       }
       break;
+    }
+    case "assistant-text": {
+      if (typeof frame.text === "string" && frame.text.length > 0) {
+        // 终帧整段替换流式气泡（含增量未覆盖的 reasoning/tool 结构差异）；
+        // 非流式来源（历史回放）直接追加。
+        const last = agentSession.items[agentSession.items.length - 1];
+        if (last?.kind === "assistant" && last.streaming) {
+          last.text = frame.text;
+          last.streaming = false;
+        } else {
+          agentSession.items.push({
+            kind: "assistant",
+            seq: frame.seq,
+            text: frame.text,
+            streaming: false,
+          });
+        }
+      }
+      break;
+    }
     case "tool-call":
       agentSession.items.push({
         kind: "tool",
