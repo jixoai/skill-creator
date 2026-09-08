@@ -308,6 +308,7 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   "tool-call",
   "tool-result",
   "assistant-text",
+  "user-text",
   "turn-end",
   "approval-request",
   "approval-resolved",

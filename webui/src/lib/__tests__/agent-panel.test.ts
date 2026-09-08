@@ -7,6 +7,7 @@
  *
  * 正交意图：
  *   [1] 生命周期投影：create 成功重置视图；延迟 create 被更新请求取代时不提交。
+ *       user 消息：直播走乐观气泡 + user-text 帧回声去重；切换会话后由帧重建。
  *   [2] 终态停轮询：idle 且无待答 → 不再排程；approval 待答保持轮询。
  *   [3] 失败可见：RPC 错误进入 error 面；断线（owner generation 变化）后回落的
  *       旧响应不得提交。
@@ -226,6 +227,61 @@ describe("agent panel store (task 3.x)", () => {
     expect(agentSession.sessionId).toBe("agent-b");
     expect(agentSession.cursor).toBe(0);
     expect(agentSession.items).toEqual([]);
+  });
+
+  it("dedupes the user-text frame echo against the optimistic bubble", async () => {
+    connection.rpc = {
+      agent: {
+        session: {
+          prompt: vi.fn().mockResolvedValue({ accepted: true }),
+          stream: vi
+            .fn()
+            .mockResolvedValueOnce({
+              frames: [
+                frame(0, "user-text", { text: "hello again" }),
+                frame(1, "turn-start"),
+                frame(2, "assistant-text", { text: "hi" }),
+              ],
+              status: "idle",
+            })
+            .mockResolvedValue({ frames: [], status: "idle" }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await sendAgentPrompt("hello again");
+    // 乐观气泡 + turn + assistant；user-text 帧与乐观气泡同文本，只保留一份。
+    const userBubbles = agentSession.items.filter(
+      (item) => item.kind === "user" && item.text === "hello again",
+    );
+    expect(userBubbles).toHaveLength(1);
+    expect(agentSession.items.map((item) => item.kind)).toEqual(["user", "turn", "assistant"]);
+  });
+
+  it("rebuilds user bubbles from user-text frames after switching sessions", async () => {
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi
+            .fn()
+            .mockResolvedValueOnce({
+              frames: [
+                frame(0, "user-text", { text: "earlier question" }),
+                frame(1, "assistant-text", { text: "earlier answer" }),
+              ],
+              status: "idle",
+            })
+            .mockResolvedValue({ frames: [], status: "idle" }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-other";
+    selectAgentSession("agent-s1");
+    // selectAgentSession 内部已发起首轮轮询；等它落定而不是再发一次（会消费空帧响应）。
+    await vi.waitFor(() =>
+      expect(agentSession.items.map((item) => item.kind)).toEqual(["user", "assistant"]),
+    );
+    expect(agentSession.items[0]).toMatchObject({ kind: "user", text: "earlier question" });
   });
 
   it("opening the panel lazily loads the session list once", async () => {

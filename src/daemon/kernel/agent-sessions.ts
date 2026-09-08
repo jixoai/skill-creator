@@ -178,10 +178,23 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       }
       case "agent/status":
         return { ...base, seq: entry.frameSeq++, kind: "status", payload: redactDshPayload(data) };
-      case "user/message":
-        // 面板已乐观追加用户输入；inject/context 注入（system-reminder、runtime
-        // context）不是模型输出，不进对话流。
-        return null;
+      case "user/message": {
+        // 事件形状实测（2026-09-08 内核日志）：真实人类输入 data 即 message 且
+        // data.source.kind === "user"；内核注入（system-reminder、runtime context）
+        // 无 user source，不进对话流。user 帧是切换会话后从帧缓冲重建消息列表的
+        // 唯一用户消息来源——丢弃会让切换后的转录缺失全部用户输入。
+        const message = (data as { message?: unknown }).message ?? data;
+        const source = (message as { source?: { kind?: unknown } } | undefined)?.source;
+        if (source?.kind !== "user") return null;
+        const text = textOf(message);
+        if (text === undefined || text.length === 0) return null;
+        return {
+          ...base,
+          seq: entry.frameSeq++,
+          kind: "user-text",
+          text,
+        };
+      }
       case "assistant/message": {
         // 事件形状实测（2026-09-08 真实会话）：{turn, step, message:{content:[...]}}。
         const message = (data as { message?: unknown }).message ?? data;

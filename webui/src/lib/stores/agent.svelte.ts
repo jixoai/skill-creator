@@ -87,6 +87,11 @@ export const agentRuntimeConfig = $state({
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollSession: string | null = null;
+/**
+ * 乐观 user 气泡的待回声队列（按会话失效）：发送时入队，同文本的 user-text 帧
+ * 到达时出队并跳过（气泡已在视图）；prompt 失败或切换会话时清空对应项。
+ */
+let pendingUserEcho: string[] = [];
 
 /** 打开/关闭 drawer（打开时惰性加载会话列表）。 */
 export function setAgentPanelOpen(open: boolean): void {
@@ -152,6 +157,7 @@ function resetSessionView(sessionId: string, status: AgentSessionSummary["status
   agentSession.items = [];
   agentSession.cursor = 0;
   agentSession.error = null;
+  pendingUserEcho = [];
 }
 
 /** 发送一轮用户输入。 */
@@ -160,8 +166,9 @@ export async function sendAgentPrompt(text: string): Promise<void> {
   if (!sessionId || text.trim().length === 0) return;
   const request = promptGate.issue();
   agentSession.sending = true;
-  // 乐观追加用户消息（失败时由错误状态覆盖）。
+  // 乐观追加用户消息（失败时由错误状态覆盖）；同文本 user-text 帧到达时出队去重。
   agentSession.items.push({ kind: "user", seq: -Date.now(), text });
+  pendingUserEcho.push(text);
   try {
     await requireRpc().agent.session.prompt({ sessionId, text });
     if (!request.isCurrent()) return;
@@ -169,6 +176,9 @@ export async function sendAgentPrompt(text: string): Promise<void> {
   } catch (error) {
     if (!request.isCurrent()) return;
     agentSession.promptError = error instanceof Error ? error.message : String(error);
+    // 该气泡不会有对应帧到达，出队避免吞掉后续同文本帧。
+    const echoIndex = pendingUserEcho.indexOf(text);
+    if (echoIndex >= 0) pendingUserEcho.splice(echoIndex, 1);
   } finally {
     if (request.isCurrent()) agentSession.sending = false;
   }
@@ -258,7 +268,7 @@ function stopPolling(): void {
   pollSession = null;
 }
 
-/** 帧到视图项的追加（未知帧丢弃；user/message 乐观项去重交给 seq 游标天然边界）。 */
+/** 帧到视图项的追加（未知帧丢弃）。user-text 与乐观气泡按文本回声去重。 */
 function appendFrame(frame: DshSessionStreamFrame): void {
   switch (frame.kind) {
     case "turn-start":
@@ -271,6 +281,19 @@ function appendFrame(frame: DshSessionStreamFrame): void {
         text: JSON.stringify(frame.payload ?? {}),
       });
       break;
+    case "user-text": {
+      // 直播路径：乐观气泡已展示同文本，帧只做出队确认；切换/重连路径（气泡已
+      // 重置）队列必空，帧即唯一来源。
+      if (typeof frame.text === "string" && frame.text.length > 0) {
+        const echoIndex = pendingUserEcho.indexOf(frame.text);
+        if (echoIndex >= 0) {
+          pendingUserEcho.splice(echoIndex, 1);
+          break;
+        }
+        agentSession.items.push({ kind: "user", seq: frame.seq, text: frame.text });
+      }
+      break;
+    }
     case "assistant-text":
       if (typeof frame.text === "string" && frame.text.length > 0) {
         agentSession.items.push({ kind: "assistant", seq: frame.seq, text: frame.text });

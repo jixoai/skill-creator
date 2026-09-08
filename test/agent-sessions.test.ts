@@ -82,6 +82,14 @@ describe("agent sessions over the headless kernel (task 2.2)", () => {
       expect(first.status).toMatch(/idle|running/);
       expect(first.frames.length).toBeGreaterThan(0);
 
+      // user/message 投影：真实人类输入产出 user-text 帧（切换会话后重建消息列表
+      // 的唯一用户消息来源）；内核 system-reminder/runtime 注入无 user source，不进对话流。
+      const userFrames = first.frames.filter((frame) => frame.kind === "user-text");
+      expect(userFrames.map((frame) => frame.text)).toContain("hello from the panel test");
+      for (const frame of userFrames) {
+        expect(frame.text).not.toContain("<system-reminder>");
+      }
+
       // 游标语义：afterSeq = 最新帧 seq 后不再返回旧帧。
       const maxSeq = Math.max(...first.frames.map((frame) => frame.seq));
       const drained = service.stream(session.sessionId, maxSeq, 50);
