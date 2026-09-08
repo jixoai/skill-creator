@@ -18,6 +18,8 @@ import { createCreatorService, type CreatorService } from "./creator-service.js"
 import { createRepositoryService, type RepositoryService } from "./repository-service.js";
 import { createSourceRegistry, type SourceRegistry } from "./source-registry.js";
 import { createSkillsCliProbe, type SkillsCliProbe } from "./skills-cli-probe.js";
+import { join } from "node:path";
+import { appDir } from "../shared/paths.js";
 
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
 import {
@@ -32,6 +34,7 @@ import {
 } from "./steward/pipeline-service.js";
 import { createDshSettingsService, type DshSettingsService } from "./steward/dsh-settings.js";
 import { createAgentSessionsService, type AgentSessionsService } from "./kernel/agent-sessions.js";
+import { createSessionTranscripts } from "./kernel/session-transcripts.js";
 import type { DshKernelHandle } from "./kernel/dsh-kernel.js";
 import { createCapabilityRegistry, type CapabilityRegistry } from "./capability/core.js";
 import { createDomainCapabilities } from "./capability/domain-capabilities.js";
@@ -101,9 +104,12 @@ export function createDaemonDomain(
 ): DaemonDomain {
   const kernelHostRef: { handle: DshKernelHandle | null } = { handle: null };
   const dshSettings = createDshSettingsService();
+  // 面板会话转录存储：appDir()/sessions/YYYY/MM/DD/<sessionId>（产品自有持久层）。
+  const agentTranscripts = createSessionTranscripts(join(appDir(), "sessions"));
   const agentSessions = createAgentSessionsService({
     kernel: () => kernelHostRef.handle,
     modelSelection: async () => (await dshSettings.getView()).settings.model,
+    transcripts: agentTranscripts,
   });
   const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();
   const skills = createSkillService(workspaces, { skillsCliProbe });

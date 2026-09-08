@@ -10,11 +10,13 @@
  *       setup）；prompt 经 followup；cancel 经 agent.cancel；list 从 sessions
  *       store 投影摘要。
  *   [2] 脱敏 stream 环形投影：订阅 session/event firehose，把 turn/status/
- *       message 事件映射为 DshSessionStreamFrame（payload 过 redactDshPayload；
- *       durable 回放归 session log）。
- *   [3] 可选宿主：内核未挂载时 typed UNAVAILABLE（DomainError），不静默空面。
+ *       message 事件映射为 DshSessionStreamFrame（payload 过 redactDshPayload）。
+ *   [3] 跨重启持久：帧 write-through 到转录存储（sessions/YYYY/MM/DD/<id>）；
+ *       重启后 list/stream 由转录回放，prompt 经内核 agents.resume 续聊。
+ *   [4] 可选宿主：内核未挂载时 typed UNAVAILABLE（DomainError），不静默空面。
  * 妥协声明：跨 cordis 服务访问按结构化 unknown 收窄（宿主服务形状无公开 TS 面，
- * 与 dsh-session-binder 同法则）；frames 只驻内存。
+ * 与 dsh-session-binder 同法则）；LLM 历史事实归内核 session log，本层转录只是
+ * 面板投影。
  */
 import { randomUUID } from "node:crypto";
 import type { Context } from "@deepseek-ai/cordis";
@@ -28,6 +30,7 @@ import { DomainError } from "../domain-error.js";
 import type { DshKernelHandle } from "./dsh-kernel.js";
 import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
 import { registerProductPromptSections } from "./product-prompt.js";
+import { summaryOfMeta, type SessionTranscripts } from "./session-transcripts.js";
 
 /** 内核句柄访问器（daemon boot 后注入；未挂载返回 null）。 */
 export type KernelAccessor = () => DshKernelHandle | null;
@@ -39,6 +42,8 @@ export interface AgentSessionsDeps {
   modelSelection: () => Promise<{ provider: string; model: string; reasoningEffort?: string }>;
   /** 帧缓冲上限（缺省 200）。 */
   retention?: number;
+  /** 面板转录存储（跨重启回放与续聊定位）。 */
+  transcripts: SessionTranscripts;
 }
 
 /** 内核 Agent/Session 的最小结构面（unknown 收窄）。 */
@@ -57,6 +62,12 @@ interface AgentsServiceLike {
   create(options: {
     sessionId: string;
     meta?: { cwd?: string; agentPreset?: string };
+    agentOptions?: { provider?: string; model?: string; reasoningEffort?: string };
+    setup?: (agentCtx: Context) => void | Promise<void>;
+  }): Promise<{ agent: AgentLike; dispose(): Promise<void> }>;
+  /** 内核持久会话复活（LLM 历史由内核 session log 重建）。 */
+  resume(options: {
+    resumeSessionId: string;
     agentOptions?: { provider?: string; model?: string; reasoningEffort?: string };
     setup?: (agentCtx: Context) => void | Promise<void>;
   }): Promise<{ agent: AgentLike; dispose(): Promise<void> }>;
@@ -149,6 +160,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       if (entry.frames.length > retention) {
         entry.frames.splice(0, entry.frames.length - retention);
       }
+      // write-through：转录落盘 best-effort（失败由存储层记日志，不打断 live）。
+      deps.transcripts.append(session.id, frame);
     });
   }
 
@@ -315,6 +328,56 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     });
   }
 
+  /**
+   * 复活持久会话：内核 agents.resume 重建 agent（LLM 历史来自内核 session log），
+   * 环以转录末尾 seed（seq 连续），新帧继续追加到同一转录目录。
+   */
+  async function reviveSession(sessionId: string): Promise<LivePanelSession> {
+    const kernel = requireKernel();
+    const meta = deps.transcripts.listAll().find((item) => item.sessionId === sessionId);
+    if (meta === undefined) {
+      throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
+    }
+    const agents = agentsService(kernel.ctx);
+    const model = await deps.modelSelection();
+    let handle: Awaited<ReturnType<AgentsServiceLike["resume"]>>;
+    try {
+      handle = await agents.resume({
+        resumeSessionId: sessionId,
+        agentOptions: {
+          provider: model.provider,
+          model: model.model,
+          ...(model.reasoningEffort ? { reasoningEffort: model.reasoningEffort } : {}),
+        },
+        setup: (agentCtx) => {
+          applyProductToolSurface(agentCtx);
+          registerProductPromptSections(
+            agentCtx as unknown as Parameters<typeof registerProductPromptSections>[0],
+          );
+        },
+      });
+    } catch (error) {
+      throw new DomainError(
+        "NOT_FOUND",
+        `agent session not resumable: ${sessionId} (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+    const diskFrames = deps.transcripts.readFrames(sessionId);
+    const seeded = diskFrames.slice(-retention);
+    const entry: LivePanelSession = {
+      agent: handle.agent,
+      dispose: handle.dispose,
+      frames: seeded,
+      frameSeq: (seeded.at(-1)?.seq ?? -1) + 1,
+      title: meta.title,
+      pending: new Map(),
+      toolNames: new Map(),
+    };
+    registerPanelAnswerer(entry);
+    live.set(sessionId, entry);
+    return entry;
+  }
+
   /** JSON 文本安全解析（失败原样返回字符串）。 */
   function safeJsonParse(text: string): unknown {
     try {
@@ -370,12 +433,19 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     attach(kernel: DshKernelHandle): void {
       bindFirehose(kernel);
     },
-    /** 会话摘要列表（live 优先；内核未挂载 → typed UNAVAILABLE）。 */
+    /** 会话摘要列表（转录存储优先；内核 sessions store 补充非面板会话可见性）。 */
     list(): AgentSessionSummary[] {
       const kernel = requireKernel();
       const sessions = sessionsService(kernel.ctx);
       const summaries: AgentSessionSummary[] = [];
+      const known = new Set<string>();
+      for (const meta of deps.transcripts.listAll()) {
+        known.add(meta.sessionId);
+        const entry = live.get(meta.sessionId);
+        summaries.push(entry ? summaryOf(entry) : summaryOfMeta(meta));
+      }
       for (const session of sessions.list()) {
+        if (known.has(session.id)) continue;
         const entry = live.get(session.id);
         if (entry) {
           summaries.push(summaryOf(entry));
@@ -433,6 +503,12 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       };
       registerPanelAnswerer(entry);
       live.set(sessionId, entry);
+      deps.transcripts.recordStart({
+        sessionId,
+        title: "",
+        createdAt: new Date().toISOString(),
+        cwd: input.cwd ?? process.cwd(),
+      });
       if (input.prompt) {
         handle.agent.followup(
           createUserMessage({
@@ -443,15 +519,18 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       }
       return summaryOf(entry);
     },
-    /** 驱动一轮用户输入（长度硬上限与 RPC 契约一致——外部输入 runtime 收窄）。 */
-    prompt(sessionId: string, text: string): void {
-      const entry = live.get(sessionId);
-      if (!entry) throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
+    /** 驱动一轮用户输入（长度硬上限与 RPC 契约一致——外部输入 runtime 收窄）。
+     * 非live但有转录的会话先经内核 agents.resume 复活（跨 daemon 重启续聊）。 */
+    async prompt(sessionId: string, text: string): Promise<void> {
       if (text.length > PROMPT_MAX_CHARS) {
         throw new DomainError(
           "INVALID_OPERATION",
           `prompt too long: ${text.length} chars (max ${PROMPT_MAX_CHARS})`,
         );
+      }
+      let entry = live.get(sessionId);
+      if (!entry) {
+        entry = await reviveSession(sessionId);
       }
       entry.agent.followup(
         createUserMessage({
@@ -466,18 +545,26 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       if (!entry) throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
       entry.agent.cancel("user");
     },
-    /** 增量帧读取（afterSeq 游标 + limit 窗口）。 */
+    /** 增量帧读取（afterSeq 游标 + limit 窗口）；非 live 会话由转录回放。 */
     stream(
       sessionId: string,
       afterSeq: number,
       limit: number,
     ): { frames: DshSessionStreamFrame[]; status: AgentSessionStatus } {
       const entry = live.get(sessionId);
-      if (!entry) {
+      if (entry) {
+        const frames = entry.frames.filter((frame) => frame.seq > afterSeq).slice(0, limit);
+        return { frames, status: statusOf(entry) };
+      }
+      const meta = deps.transcripts.listAll().find((item) => item.sessionId === sessionId);
+      if (meta === undefined) {
         throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
       }
-      const frames = entry.frames.filter((frame) => frame.seq > afterSeq).slice(0, limit);
-      return { frames, status: statusOf(entry) };
+      const frames = deps.transcripts
+        .readFrames(sessionId)
+        .filter((frame) => frame.seq > afterSeq)
+        .slice(0, limit);
+      return { frames, status: "disposed" };
     },
     /** 回答一个待答请求（幂等：未知/已解决的 requestSeq 返回 false）。 */
     answer(
@@ -490,14 +577,16 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       const pending = entry.pending.get(requestSeq);
       if (!pending) return false;
       entry.pending.delete(requestSeq);
-      entry.frames.push({
+      const resolvedFrame: DshSessionStreamFrame = {
         at: new Date().toISOString(),
         runId: sessionId,
         sessionId,
         seq: entry.frameSeq++,
         kind: "approval-resolved",
         payload: redactDshPayload({ answers }),
-      });
+      };
+      entry.frames.push(resolvedFrame);
+      deps.transcripts.append(sessionId, resolvedFrame);
       pending.resolve({ answers });
       return true;
     },

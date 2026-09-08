@@ -21,6 +21,7 @@ import {
   createAgentSessionsService,
   type AgentSessionsService,
 } from "../src/daemon/kernel/agent-sessions.js";
+import { createSessionTranscripts } from "../src/daemon/kernel/session-transcripts.js";
 
 let sandbox = "";
 let kernel: DshKernelHandle | null = null;
@@ -38,7 +39,7 @@ afterEach(async () => {
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
-function makeService(): AgentSessionsService {
+function makeService(transcriptsRoot?: string): AgentSessionsService {
   return createAgentSessionsService({
     kernel: () => kernel,
     modelSelection: async () => ({
@@ -46,6 +47,7 @@ function makeService(): AgentSessionsService {
       model: "deepseek-v4-flash",
     }),
     retention: 50,
+    transcripts: createSessionTranscripts(transcriptsRoot ?? path.join(sandbox, "transcripts")),
   });
 }
 
@@ -53,7 +55,10 @@ describe("agent sessions over the headless kernel (task 2.2)", () => {
   it("returns typed UNAVAILABLE before the kernel is attached", () => {
     service = makeService();
     expect(() => service!.list()).toThrowError(/kernel is not mounted/);
-    expect(() => service!.prompt("agent-x", "hi")).toThrowError(/not found/);
+    // stream 走 live → 转录回退，不触内核：未知会话仍是 NOT_FOUND。
+    expect(() => service!.stream("agent-x", 0, 5)).toThrowError(/not found/);
+    // prompt 的复活路径先过 requireKernel（异步面）。
+    void expect(service!.prompt("agent-x", "hi")).rejects.toThrowError(/kernel is not mounted/);
   });
 
   it(
@@ -95,13 +100,13 @@ describe("agent sessions over the headless kernel (task 2.2)", () => {
       const drained = service.stream(session.sessionId, maxSeq, 50);
       expect(drained.frames).toEqual([]);
 
-      // prompt 幂等路径 + cancel 不抛。
-      service.prompt(session.sessionId, "second turn");
+      // prompt 幂等路径 + cancel 不抛（prompt 已异步化——复活路径需要 await）。
+      await service.prompt(session.sessionId, "second turn");
       expect(() => service.cancel(session.sessionId)).not.toThrow();
       expect(() => service.cancel(session.sessionId)).not.toThrow();
 
       // 未知会话 typed NOT_FOUND。
-      expect(() => service.prompt("agent-missing", "x")).toThrowError(/not found/);
+      await expect(service.prompt("agent-missing", "x")).rejects.toThrowError(/not found/);
       expect(() => service.stream("agent-missing", 0, 10)).toThrowError(/not found/);
     },
   );
@@ -120,6 +125,67 @@ describe("agent sessions over the headless kernel (task 2.2)", () => {
       // 真实 API key 形状（"sk-" 是 "skill-" 的子串，不能作宽断言）。
       expect(serialized).not.toMatch(/sk-[a-zA-Z0-9]{20,}/);
       expect(serialized).not.toContain('"apiKey"');
+    },
+  );
+
+  it(
+    "survives a daemon restart: transcript replay plus kernel resume continuation",
+    { timeout: 240_000 },
+    async () => {
+      const dshHome = path.join(sandbox, "dsh-home");
+      const transcriptsRoot = path.join(sandbox, "transcripts");
+      // 第一进程：创建 + prompt + 等帧落盘。
+      kernel = await bootDshKernel({ home: dshHome });
+      service = makeService(transcriptsRoot);
+      service.attach(kernel);
+      const session = await service.create({
+        cwd: sandbox,
+        prompt: "restart persistence probe: reply with one word",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // 转录目录按 YYYY/MM/DD/<sessionId> 归类落盘。
+      const metaPath = fs
+        .readdirSync(path.join(transcriptsRoot), { recursive: true })
+        .filter((entry) => typeof entry === "string" && entry.endsWith("meta.json"))
+        .map((entry) => path.join(transcriptsRoot, entry))
+        .find((entry) => entry.includes(session.sessionId));
+      expect(metaPath).toBeDefined();
+
+      // 模拟重启：service + kernel 全部销毁后以同一持久层重建。
+      await service.dispose();
+      service = null;
+      await kernel.dispose();
+      kernel = null;
+      kernel = await bootDshKernel({ home: dshHome });
+      service = makeService(transcriptsRoot);
+      service.attach(kernel);
+
+      // list 包含持久会话（disposed），stream 从转录回放（user 消息在内）。
+      const listed = service.list();
+      expect(listed.find((item) => item.sessionId === session.sessionId)).toMatchObject({
+        status: "disposed",
+      });
+      const replay = service.stream(session.sessionId, 0, 100);
+      expect(replay.status).toBe("disposed");
+      expect(replay.frames.map((frame) => frame.kind)).toContain("user-text");
+      const maxSeq = Math.max(...replay.frames.map((frame) => frame.seq));
+
+      // 续聊：prompt 触发内核 resume 复活，新帧 seq 从转录末尾继续。
+      await service.prompt(session.sessionId, "continue after restart: one word again");
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const after = service.stream(session.sessionId, maxSeq, 100);
+      expect(after.status).toMatch(/idle|running/);
+      expect(after.frames.length).toBeGreaterThan(0);
+      expect(after.frames[0]!.seq).toBe(maxSeq + 1);
+      // 复活后的新 user 帧也写回同一转录。
+      const reread = service.stream(session.sessionId, 0, 500);
+      expect(
+        reread.frames.some(
+          (frame) =>
+            frame.kind === "user-text" && frame.text === "continue after restart: one word again",
+        ),
+      ).toBe(true);
     },
   );
 });
