@@ -93,6 +93,47 @@ describe("Web server shutdown", () => {
     });
     expect(rawClient.destroyed).toBe(true);
   });
+
+  it("survives a malformed oRPC websocket frame without crashing the process", async () => {
+    const webuiDir = path.join(sandbox, "webui");
+    fs.mkdirSync(webuiDir, { recursive: true });
+    fs.writeFileSync(path.join(webuiDir, "index.html"), "<!doctype html><title>Test</title>");
+    const webToken = "malformed-frame-token";
+    web = new WebServer({
+      webToken,
+      webuiDir,
+      domain,
+      status: () => ({
+        active: true,
+        pid: process.pid,
+        version: "test",
+        port: 0,
+        startedAt: 0,
+        tray: "headless",
+      }),
+    });
+    const port = await web.start(0);
+    rawClient = await openRawWebSocket(port, webToken);
+
+    // 非 oRPC peer 形状的文本帧：1.14.6 的 standard-server-peer 反序列化直接抛错
+    // （未捕获 → 进程退出）。守卫层必须吞掉并发起关闭（裸客户端不回 close 握手，
+    // 观察关闭帧字节而非 TCP 断开）。
+    const closeFrameSeen = new Promise<void>((resolve) => {
+      rawClient?.on("data", (chunk: Buffer) => {
+        if (chunk.length > 0 && (chunk[0]! & 0x0f) === 0x08) resolve();
+      });
+    });
+    rawClient.write(
+      encodeClientTextFrame(
+        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "agent.sessions.list" }),
+      ),
+    );
+    expect(await settlesWithin(closeFrameSeen, 2_000)).toBe(true);
+
+    // 进程存活证明：健康检查仍应答（无守卫时此路径以未捕获 rejection 终结进程）。
+    const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+    expect(health.ok).toBe(true);
+  });
 });
 
 function openRawWebSocket(port: number, token: string): Promise<net.Socket> {
@@ -150,4 +191,15 @@ async function settlesWithin(promise: Promise<void>, maxMs: number): Promise<boo
   ]);
   if (timeout) clearTimeout(timeout);
   return result;
+}
+
+/** 构造带掩码的客户端 WebSocket 文本帧（RFC 6455：client→server 必须掩码）。 */
+function encodeClientTextFrame(payload: string): Buffer {
+  const mask = randomBytes(4);
+  const data = Buffer.from(payload, "utf8");
+  const masked = Buffer.from(data);
+  for (let i = 0; i < masked.length; i += 1) {
+    masked[i] = data[i]! ^ mask[i % 4]!;
+  }
+  return Buffer.concat([Buffer.from([0x81, 0x80 | data.length]), mask, masked]);
 }

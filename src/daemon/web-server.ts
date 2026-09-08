@@ -44,15 +44,65 @@ const MIME: Readonly<Record<string, string>> = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg; charset=utf-8",
+  ".jpeg": "image/jpeg; charset=utf-8",
   ".ico": "image/x-icon",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
   ".webmanifest": "application/manifest+json",
-  ".map": "application/json",
+  ".map": "application/json; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
 };
+
+/**
+ * oRPC ws 适配器对畸形帧抛未捕获 rejection（@orpc/server 1.14.6 实测：非 oRPC
+ * 形状的 message 在 standard-server-peer 反序列化抛错，进程直接退出）。以 Proxy
+ * 包一层：message 监听器同步异常吞掉、返回的 Promise rejection 兜底，畸形帧只
+ * 断开该连接，不打穿 daemon。业务过程错误仍由 oRPC 协议面自报。
+ */
+function guardRpcSocket(websocket: WsWebSocket): WsWebSocket {
+  const wrapListener = (listener: (...args: unknown[]) => unknown) => {
+    return (...args: unknown[]): void => {
+      try {
+        const result = listener(...args);
+        if (result instanceof Promise) {
+          result.catch(() => {
+            // 异步反序列化失败（实测路径）：断开该连接而非击穿进程。
+            try {
+              websocket.close();
+            } catch {
+              // 已断开：无操作。
+            }
+          });
+        }
+      } catch {
+        try {
+          websocket.close();
+        } catch {
+          // 已断开：无操作。
+        }
+      }
+    };
+  };
+  return new Proxy(websocket, {
+    get(target, property, receiver) {
+      if (property === "on" || property === "once" || property === "addEventListener") {
+        return (event: string, listener: (...args: unknown[]) => unknown, ...rest: unknown[]) => {
+          const wrapped =
+            event === "message" && typeof listener === "function"
+              ? wrapListener(listener)
+              : listener;
+          const register = Reflect.get(target, property, receiver) as unknown as (
+            ...callArgs: unknown[]
+          ) => unknown;
+          return register.call(target, event, wrapped, ...rest);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 /** 单生命周期地承载 WebUI SPA 与强类型 WebSocket RPC。 */
 export class WebServer {
@@ -294,12 +344,14 @@ export class WebServer {
       return;
     }
     this.rpcWsServer.handleUpgrade(request, socket, head, (websocket) => {
-      void this.rpcHandler.upgrade(websocket, { context: {} }).catch((error: unknown) => {
-        log(
-          `[orpc] websocket upgrade failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        websocket.close();
-      });
+      void this.rpcHandler
+        .upgrade(guardRpcSocket(websocket), { context: {} })
+        .catch((error: unknown) => {
+          log(
+            `[orpc] websocket upgrade failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          websocket.close();
+        });
     });
   }
 
