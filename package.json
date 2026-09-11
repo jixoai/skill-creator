@@ -90,6 +90,7 @@
     "gray-matter": "^4.0.3",
     "opentray": "0.18.0",
     "ws": "^8.18.1",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

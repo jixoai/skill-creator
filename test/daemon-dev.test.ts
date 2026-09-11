@@ -47,7 +47,8 @@ describe("Vite development daemon", () => {
         const result = await execa(process.execPath, [harnessFile], {
           env: environment,
           reject: false,
-          timeout: 15_000,
+          // 双 Vite boot（restart 循环）在负载下可能超 15s；40s 上限防假阴性。
+          timeout: 40_000,
         });
 
         const events = readLines(eventsFile);

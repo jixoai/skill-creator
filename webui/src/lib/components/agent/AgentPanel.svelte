@@ -86,6 +86,15 @@
     );
     return summary ? `${summary.title || summary.sessionId} (${summary.status})` : undefined;
   });
+
+  // 首屏行动的 composer 种子：会话就绪且输入可用时一次性填入（不自动发送）。
+  $effect(() => {
+    if (agentSession.sessionId && agentPanel.seedPrompt && !agentSession.sending) {
+      const seed = agentPanel.seedPrompt;
+      agentPanel.seedPrompt = null;
+      if (composerText.length === 0) composerText = seed;
+    }
+  });
 </script>
 
 <svelte:window
@@ -161,12 +170,32 @@
 
   <div bind:this={scrollBody} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
     {#if !agentSession.sessionId}
+      <!-- 空态 = 模式启动建议（回答「跟它说什么」）：一键按模式开聊。 -->
       <div class="flex h-full flex-col items-center justify-center gap-3 text-center">
         <p class="max-w-[280px] text-xs text-muted-foreground">
-          Start a session to chat with the Skill Creator agent. Skills are managed through the
-          Manager capability tools.
+          Pick a way to work with your skill library:
         </p>
-        <Button size="sm" onclick={() => void createAgentSession()}>New session</Button>
+        <div class="w-full max-w-[300px] space-y-1.5">
+          {#each DSH_AGENT_MODES as entry (entry.id)}
+            <button
+              class="w-full rounded-md border border-border p-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+              disabled={agentSession.sending}
+              onclick={() => void createAgentSession(undefined, entry.id)}
+            >
+              <span class="flex items-center gap-1 text-xs font-medium">
+                {entry.label}
+                {#if entry.tokenHeavy}
+                  <span class="rounded bg-amber-500/15 px-1 text-[9px] text-amber-600">
+                    token-heavy
+                  </span>
+                {/if}
+              </span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
+                {entry.description}
+              </span>
+            </button>
+          {/each}
+        </div>
       </div>
     {:else}
       {#each agentSession.items as item (item.seq)}

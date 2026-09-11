@@ -550,7 +550,8 @@ function prependPath(directory: string): string {
   return `${directory}${path.delimiter}${process.env.PATH ?? ""}`;
 }
 
-async function waitForFile(file: string, timeoutMs = 1_000): Promise<void> {
+async function waitForFile(file: string, timeoutMs = 10_000): Promise<void> {
+  // 0.1.5-rc.2 内核 boot 更重：并行套件负载下 daemon 就绪窗变宽，10s 上限。
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (fs.existsSync(file)) return;

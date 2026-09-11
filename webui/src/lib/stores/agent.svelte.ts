@@ -61,8 +61,11 @@ const updateSettingsGate = createRequestGenerationGate(getConnectionGeneration);
 const setModeGate = createRequestGenerationGate(getConnectionGeneration);
 const credentialGate = createRequestGenerationGate(getConnectionGeneration);
 
-/** drawer 开合（跨 tab 存活）。 */
-export const agentPanel = $state({ open: false });
+/** drawer 开合（跨 tab 存活）；seedPrompt 为首屏行动塞进 composer 的一次性种子。 */
+export const agentPanel = $state({
+  open: false,
+  seedPrompt: null as string | null,
+});
 
 /** 当前会话与帧视图（跨 tab 存活；切会话清空重载）。 */
 export const agentSession = $state({
@@ -148,11 +151,14 @@ export async function loadAgentSessions(): Promise<void> {
 }
 
 /** 新建会话（可选首 prompt）；成功后切换到该会话并开始轮询。 */
-export async function createAgentSession(prompt?: string): Promise<void> {
+export async function createAgentSession(prompt?: string, mode?: DshAgentMode): Promise<void> {
   const request = createGate.issue();
   agentSession.sending = true;
   try {
-    const result = await requireRpc().agent.session.create({ prompt });
+    const result = await requireRpc().agent.session.create({
+      ...(prompt ? { prompt } : {}),
+      ...(mode ? { mode } : {}),
+    });
     if (!request.isCurrent()) return;
     resetSessionView(result.session.sessionId, result.session.status, result.session.mode);
     agentSessionsList.loaded = false;
@@ -164,6 +170,16 @@ export async function createAgentSession(prompt?: string): Promise<void> {
   } finally {
     if (request.isCurrent()) agentSession.sending = false;
   }
+}
+
+/**
+ * 首屏快速行动：打开面板并以指定模式建会话；seedPrompt 在会话就绪后一次性
+ * 填入 composer（不自动发送——用户保有最后一步）。
+ */
+export function startAgentAction(mode: DshAgentMode, seedPrompt?: string): void {
+  agentPanel.open = true;
+  agentPanel.seedPrompt = seedPrompt ?? null;
+  void createAgentSession(undefined, mode);
 }
 
 /** 切换会话（重置视图并立即拉一轮）。 */

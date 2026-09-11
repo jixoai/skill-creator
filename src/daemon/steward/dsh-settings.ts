@@ -23,6 +23,7 @@
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { normalizeApiKey } from "@deepseek-ai/dsh-llm";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   DshStewardSettingsSchema,
   redactDshPayload,
@@ -40,7 +41,9 @@ import {
 } from "../../shared/contracts/dsh-runtime.js";
 import type { SkillToolCall } from "../../shared/contracts/skill-steward.js";
 import { DomainError } from "../domain-error.js";
+import { dshRouteApiKeyEnv, type DshModelRoute } from "../../shared/contracts/dsh-runtime.js";
 import { homeDir } from "../../shared/paths.js";
+import { resolveDefaultDshHome } from "../dsh-host-lifecycle.js";
 import { atomicWriteUtf8 } from "../path-safety.js";
 import {
   STEWARD_DETERMINISTIC_MODEL,
@@ -57,7 +60,73 @@ export function defaultDshStewardSettings(): DshStewardSettings {
     permissions: { approvalPolicy: "ask" },
     session: { streamRetention: 100, streamProjection: "enabled" },
     defaultMode: "create",
+    modelRoutes: [],
   };
+}
+
+/**
+ * 模型路由桥（官方热面，2026-09-11）：把持久路由写进 $DSH_HOME/settings.yaml
+ * 的 llm-pi-ai: 段（settings-file 行热加载，路由即时注册/注销）。写失败按
+ * typed UNAVAILABLE 上抛——桥断则路由不生效，不能静默。
+ */
+async function syncDshModelRoutes(routes: readonly DshModelRoute[]): Promise<void> {
+  const dshHome = resolveDefaultDshHome();
+  const file = path.join(dshHome, "settings.yaml");
+  let doc: Record<string, unknown> = {};
+  try {
+    const raw = await fsp.readFile(file, "utf8");
+    const parsed = parseYaml(raw);
+    if (typeof parsed === "object" && parsed !== null) doc = parsed as Record<string, unknown>;
+  } catch {
+    // 无文件/坏 YAML：以空文档起步（首写会创建）。
+  }
+  const providers: Record<string, Record<string, unknown>> = {};
+  for (const route of routes) {
+    providers[route.provider] = {
+      apiKeyEnv: dshRouteApiKeyEnv(route.provider),
+      ...(route.api ? { api: route.api } : {}),
+      baseURL: route.baseURL,
+      models: route.models.map((model) => ({
+        id: model.id,
+        ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
+      })),
+    };
+  }
+  doc["llm-pi-ai"] = { providers };
+  await fsp.mkdir(dshHome, { recursive: true });
+  try {
+    atomicWriteUtf8(file, stringifyYaml(doc));
+  } catch (error) {
+    throw new DomainError(
+      "UNAVAILABLE",
+      `DSH model-route sync failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * 凭据桥：路由 provider 的 key 写/清 $DSH_HOME/.credentials.yaml（credentials
+ * 行热解析，即时生效）。非路由 provider 只落本地私有面（steward preset 用）。
+ */
+async function syncDshRouteCredential(provider: string, apiKey: string | null): Promise<void> {
+  const ref = dshRouteApiKeyEnv(provider);
+  const dshHome = resolveDefaultDshHome();
+  const file = path.join(dshHome, ".credentials.yaml");
+  let doc: Record<string, unknown> = {};
+  try {
+    const parsed = parseYaml(await fsp.readFile(file, "utf8"));
+    if (typeof parsed === "object" && parsed !== null) doc = parsed as Record<string, unknown>;
+  } catch {
+    // 无文件/坏 YAML：空文档起步。
+  }
+  if (apiKey === null) delete doc[ref];
+  else doc[ref] = apiKey;
+  try {
+    await fsp.mkdir(dshHome, { recursive: true });
+    atomicWriteUtf8(file, stringifyYaml(doc));
+  } catch {
+    // 凭据桥 best-effort：本地私有面仍是事实源，DSH 面下次写入时追平。
+  }
 }
 
 interface PersistedCredentials {
@@ -199,7 +268,8 @@ function settingsEqual(a: DshStewardSettings, b: DshStewardSettings): boolean {
     a.permissions.approvalPolicy === b.permissions.approvalPolicy &&
     a.session.streamRetention === b.session.streamRetention &&
     a.session.streamProjection === b.session.streamProjection &&
-    a.defaultMode === b.defaultMode
+    a.defaultMode === b.defaultMode &&
+    JSON.stringify(a.modelRoutes) === JSON.stringify(b.modelRoutes)
   );
 }
 
@@ -230,6 +300,7 @@ export function createDshSettingsService(): DshSettingsService {
         ...(patch.model ? { model: patch.model } : {}),
         ...(patch.preset ? { preset: patch.preset } : {}),
         ...(patch.defaultMode ? { defaultMode: patch.defaultMode } : {}),
+        ...(patch.modelRoutes ? { modelRoutes: patch.modelRoutes } : {}),
         permissions: { ...settings.permissions, ...(patch.permissions ?? {}) },
         session: { ...settings.session, ...(patch.session ?? {}) },
       };
@@ -252,6 +323,8 @@ export function createDshSettingsService(): DshSettingsService {
       if (changed) {
         next.revision = settings.revision + 1;
         writePrivateJson(settingsFile(), next);
+        // 路由变更即桥接 DSH 热面（官方 settings-file 行热加载）。
+        await syncDshModelRoutes(next.modelRoutes);
       }
       return {
         outcome: "updated",
@@ -277,6 +350,7 @@ export function createDshSettingsService(): DshSettingsService {
         const next = { ...settings, revision: settings.revision + 1 };
         persistCredentials(credentials);
         writePrivateJson(settingsFile(), next);
+        await syncDshRouteCredential(input.provider, check.value);
         return { outcome: "stored", view: viewOf(next, credentials) };
       }
       return { outcome: "stored", view: viewOf(settings, credentials) };
@@ -289,6 +363,7 @@ export function createDshSettingsService(): DshSettingsService {
         const next = { ...settings, revision: settings.revision + 1 };
         persistCredentials(credentials);
         writePrivateJson(settingsFile(), next);
+        await syncDshRouteCredential(input.provider, null);
         return viewOf(next, credentials);
       }
       return viewOf(settings, credentials);

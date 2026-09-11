@@ -52,6 +52,9 @@ export default defineConfig({
           globals: false,
           fileParallelism: false,
           testTimeout: 20_000,
+          // 0.1.5-rc.2 内核更重：before 钩子里的真实 boot/沙箱搭建在负载下
+          // 可能超默认 10s，放宽到与 testTimeout 同级。
+          hookTimeout: 20_000,
         },
       },
       {

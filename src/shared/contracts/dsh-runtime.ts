@@ -205,6 +205,35 @@ export const DSH_AGENT_MODES: readonly DshAgentModeCatalogEntry[] = [
  * LLM preset：deterministic = 脚本化 transport（CI/fixture）；live = 真实 provider。
  * 禁止自动 fallback：live 缺凭据时 resolve 失败，绝不静默回退 deterministic。
  */
+/**
+ * 模型路由（add-agent-settings-modes 迭代三 2026-09-11）：持久化 provider 端点，
+ * 经 daemon 桥接写入 DSH 官方热加载面（$DSH_HOME/settings.yaml 的 llm-pi-ai: 段
+ * + .credentials.yaml），路由与 key 均即时生效、无需重启内核。
+ */
+export const DshModelRouteSchema = z.object({
+  /** 路由名 = llm-pi-ai providers 键（目录内既有路由按字段覆盖，否则整段声明）。 */
+  provider: z.string().min(1),
+  /** wire 协议（目录路由可省略；自定义路由必填，如 anthropic-messages）。 */
+  api: z.string().min(1).optional(),
+  baseURL: z.string().min(1),
+  /** 该路由的模型目录（空缺字段继承 pi-ai 装配目录同名模型）。 */
+  models: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        contextWindow: z.number().int().positive().optional(),
+      }),
+    )
+    .min(1),
+});
+/** 模型路由。 */
+export type DshModelRoute = z.infer<typeof DshModelRouteSchema>;
+
+/** 路由 provider → DSH 凭据引用名（settings.yaml 的 apiKeyEnv；确定性映射）。 */
+export function dshRouteApiKeyEnv(provider: string): string {
+  return `SKILL_CREATOR_ROUTE_KEY_${provider.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}`;
+}
+
 export const DshStewardPresetSchema = z.enum(["deterministic", "live"]);
 /** LLM preset。 */
 export type DshStewardPreset = z.infer<typeof DshStewardPresetSchema>;
@@ -240,6 +269,8 @@ export const DshStewardSettingsSchema = z.object({
   session: DshStewardSessionControlsSchema,
   /** 新会话的默认模式（旧文件缺失读 create——additive 字段）。 */
   defaultMode: DshAgentModeSchema.default("create"),
+  /** 持久化模型路由（桥接 DSH 热加载面；空 = 未配置自定义路由）。 */
+  modelRoutes: z.array(DshModelRouteSchema).default([]),
 });
 /** steward DSH settings。 */
 export type DshStewardSettings = z.infer<typeof DshStewardSettingsSchema>;
@@ -267,6 +298,8 @@ export const DshSettingsUpdateSchema = z.object({
   permissions: DshStewardPermissionsSchema.partial().optional(),
   session: DshStewardSessionControlsSchema.partial().optional(),
   defaultMode: DshAgentModeSchema.optional(),
+  /** 路由整表替换（add/remove/edit 均以全量补丁表达）。 */
+  modelRoutes: z.array(DshModelRouteSchema).optional(),
 });
 /** settings 更新补丁。 */
 export type DshSettingsUpdate = z.infer<typeof DshSettingsUpdateSchema>;

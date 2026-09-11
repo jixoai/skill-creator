@@ -30,8 +30,6 @@ describe("workspaces activity route matching", () => {
     { path: "/workspaces", id: "workspaces.home" },
     { path: `/workspaces/${WS}/openclaw`, id: "workspaces.provider" },
     { path: `/workspaces/intelligence/${WS}/openclaw`, id: "workspaces.intelligence" },
-    { path: `/workspaces/steward/${WS}/openclaw`, id: "workspaces.steward" },
-    { path: `/workspaces/workflow/${WS}/openclaw`, id: "workspaces.steward-workflow" },
   ];
 
   it.each(cases)("matches $id at $path", ({ path, id }) => {

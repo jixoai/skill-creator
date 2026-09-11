@@ -16,7 +16,8 @@
  */
 
 /** 缺省 home：env DSH_HOME ?? ~/.dsh（与官方 storage 解析一致）。 */
-function resolveDefaultDshHome(): string {
+/** DSH 存储 home（官方默认：env DSH_HOME ?? ~/.dsh）；settings 桥接同源使用。 */
+export function resolveDefaultDshHome(): string {
   const env = process.env.DSH_HOME;
   if (env && env.trim() !== "") return env;
   return `${process.env.HOME ?? ""}/.dsh`;

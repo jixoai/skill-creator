@@ -1,16 +1,17 @@
 <!--
-  设置面 Model 分区（add-agent-settings-modes 迭代：自 AgentConfigSection 迁入）。
-  用户原始需求 [2026-09-08]：「要支持模型配置，参考 DSH 官方的 webui 的配置逻辑。」
+  设置面 Model 分区（add-agent-settings-modes 迭代三 2026-09-11 重写）。
+  用户原始需求 [2026-09-11]：「我现在连配个模型都觉得很麻烦。」
   正交意图：
-  1. 模型配置（DSH ModelSelection UX 移植）：provider/model/reasoningEffort 草稿
-     编辑 + 只写凭据（存/清，视图只回 configured 徽章）；跨字段校验由服务端
-     revision 围栏裁决（rejected 带 code 显示）。
-  妥协声明：provider 目录为 datalist（当前 + 已配凭据），不做 DSH 的
-  llm.listProviders 端点发现——本产品路由面小（design D4）。
+  1. 活动模型：跨路由模型下拉（provider · model）+ 可选 effort；选定即生效。
+  2. 模型路由：预设卡（Anthropic 兼容网关 / 本地网关）两三字段建路由，daemon
+     桥接 DSH 官方热面（$DSH_HOME/settings.yaml llm-pi-ai: 段 + .credentials.yaml）
+     ——路由与 key 即时生效，无需重启。
+  3. 凭据：只写输入（存/清），configured 徽章；值任何时刻不回流。
 -->
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
+  import type { DshModelRoute } from "$shared/contracts/dsh-runtime.js";
   import {
     agentRuntimeConfig,
     clearAgentCredential,
@@ -20,53 +21,61 @@
 
   let rejection = $state<string | null>(null);
   /** 模型草稿（视图变化后重置；save 成功后与视图对齐）。 */
-  let provider = $state("");
   let model = $state("");
   let reasoningEffort = $state("");
   /** 只写凭据草稿（存成功即清空；值任何时刻不回流视图）。 */
   let apiKeyDraft = $state("");
+  /** 新路由表单（预设填充；空 = 收起）。 */
+  let routeFormOpen = $state(false);
+  let routeName = $state("");
+  let routeBaseURL = $state("");
+  let routeModels = $state("");
 
   const view = $derived(agentRuntimeConfig.view);
-  /** 草稿与视图同步（load/外部刷新后重置一次；草稿状态不被本 effect 读取）。 */
   $effect(() => {
     const selection = view?.settings.model;
-    provider = selection?.provider ?? "";
-    model = selection?.model ?? "";
+    model = selection ? `${selection.provider}::${selection.model}` : "";
     reasoningEffort = selection?.reasoningEffort ?? "";
     apiKeyDraft = "";
   });
 
+  /** 活动模型选项：路由模型全集 + 当前选择（可能来自 env 路由）保底。 */
+  const modelOptions = $derived.by(() => {
+    const options: Array<{ value: string; label: string }> = [];
+    for (const route of view?.settings.modelRoutes ?? []) {
+      for (const entry of route.models) {
+        options.push({
+          value: `${route.provider}::${entry.id}`,
+          label: `${route.provider} · ${entry.id}`,
+        });
+      }
+    }
+    const selection = view?.settings.model;
+    if (
+      selection &&
+      !options.some((option) => option.value === `${selection.provider}::${selection.model}`)
+    ) {
+      options.unshift({
+        value: `${selection.provider}::${selection.model}`,
+        label: `${selection.provider} · ${selection.model} (current route)`,
+      });
+    }
+    return options;
+  });
+
   const modelDirty = $derived(
     view !== null &&
-      ((provider || "") !== view.settings.model.provider ||
-        (model || "") !== view.settings.model.model ||
+      ((model || "") !== `${view.settings.model.provider}::${view.settings.model.model}` ||
         (reasoningEffort || "") !== (view.settings.model.reasoningEffort ?? "")),
   );
 
-  /** provider datalist：当前选择 + 已配凭据 provider（去重）。 */
-  const providerOptions = $derived.by(() => {
-    const names = new Set<string>();
-    if (view) {
-      names.add(view.settings.model.provider);
-      for (const item of view.providers) names.add(item.provider);
-    }
-    names.delete("");
-    return [...names];
-  });
-
+  const keyTarget = $derived.by(() => model.split("::")[0] ?? "");
   const credentialConfigured = $derived(
-    view?.providers.find((item) => item.provider === (provider || "").trim())?.configured ?? false,
+    view?.providers.find((item) => item.provider === keyTarget)?.configured ?? false,
   );
 
-  async function saveModel(): Promise<void> {
-    if (!modelDirty) return;
-    const result = await updateAgentSettings({
-      model: {
-        provider: (provider || "").trim(),
-        model: (model || "").trim(),
-        ...(reasoningEffort.trim().length > 0 ? { reasoningEffort: reasoningEffort.trim() } : {}),
-      },
-    });
+  async function apply(patch: Parameters<typeof updateAgentSettings>[0]): Promise<void> {
+    const result = await updateAgentSettings(patch);
     if (!result) return;
     rejection =
       result.outcome === "rejected"
@@ -76,11 +85,66 @@
           : null;
   }
 
+  async function saveModel(): Promise<void> {
+    if (!modelDirty || !model.includes("::")) return;
+    const [provider, modelId] = model.split("::");
+    await apply({
+      model: {
+        provider,
+        model: modelId,
+        ...(reasoningEffort.trim().length > 0 ? { reasoningEffort: reasoningEffort.trim() } : {}),
+      },
+    });
+  }
+
+  /** 预设：Anthropic 兼容网关（远端或本地），api 固定 anthropic-messages。 */
+  function presetGateway(local: boolean): void {
+    routeFormOpen = true;
+    routeName = local ? "local-gateway" : "my-gateway";
+    routeBaseURL = local ? "http://localhost:20002/anthropic" : "https://";
+    routeModels = local ? "glm-5.3-flash" : "";
+  }
+
+  async function saveRoute(): Promise<void> {
+    const provider = routeName.trim();
+    const baseURL = routeBaseURL.trim();
+    const models = routeModels
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+    if (provider.length === 0 || baseURL.length === 0 || models.length === 0) {
+      rejection = "Route needs a name, a base URL, and at least one model id.";
+      return;
+    }
+    const route: DshModelRoute = {
+      provider,
+      api: "anthropic-messages",
+      baseURL,
+      models: models.map((id) => ({ id })),
+    };
+    const routes = view?.settings.modelRoutes ?? [];
+    if (routes.some((existing) => existing.provider === provider)) {
+      rejection = `Route "${provider}" already exists.`;
+      return;
+    }
+    await apply({ modelRoutes: [...routes, route] });
+    routeFormOpen = false;
+    routeName = "";
+    routeBaseURL = "";
+    routeModels = "";
+  }
+
+  async function removeRoute(provider: string): Promise<void> {
+    const routes = (view?.settings.modelRoutes ?? []).filter(
+      (route) => route.provider !== provider,
+    );
+    await apply({ modelRoutes: routes });
+  }
+
   async function saveCredential(): Promise<void> {
-    const target = (provider || "").trim();
     const key = apiKeyDraft.trim();
-    if (target.length === 0 || key.length === 0) return;
-    const result = await setAgentCredential(target, key);
+    if (keyTarget.length === 0 || key.length === 0) return;
+    const result = await setAgentCredential(keyTarget, key);
     if (!result) return;
     if (result.outcome === "rejected") {
       rejection = `${result.code}: ${result.detail}`;
@@ -95,50 +159,38 @@
   <div>
     <h3 class="text-sm font-medium">Model</h3>
     <p class="mt-0.5 text-[11px] text-muted-foreground">
-      The route every agent session uses for its next turn.
+      Routes and keys apply immediately — hot-reloaded into the kernel.
     </p>
   </div>
 
   {#if view}
-    <section class="space-y-1.5" aria-label="Model configuration">
-      <div class="grid grid-cols-2 gap-1.5">
-        <label class="space-y-0.5">
-          <span class="text-[10px] text-muted-foreground">Provider</span>
-          <Input
-            class="h-8 text-xs"
-            aria-label="Provider"
-            list="settings-provider-options"
-            bind:value={provider}
-            disabled={agentRuntimeConfig.updating}
-          />
-          <datalist id="settings-provider-options">
-            {#each providerOptions as name (name)}
-              <option value={name}></option>
-            {/each}
-          </datalist>
-        </label>
+    <section class="space-y-1.5" aria-label="Active model">
+      <span class="text-[11px] font-medium text-muted-foreground">Active model</span>
+      <div class="grid grid-cols-[1fr_140px] gap-1.5">
         <label class="space-y-0.5">
           <span class="text-[10px] text-muted-foreground">Model</span>
-          <Input
-            class="h-8 text-xs"
+          <select
+            class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
             aria-label="Model"
             bind:value={model}
+            disabled={agentRuntimeConfig.updating}
+          >
+            {#each modelOptions as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+        <label class="space-y-0.5">
+          <span class="text-[10px] text-muted-foreground">Effort</span>
+          <Input
+            class="h-8 text-xs"
+            aria-label="Reasoning effort"
+            placeholder="default"
+            bind:value={reasoningEffort}
             disabled={agentRuntimeConfig.updating}
           />
         </label>
       </div>
-      <label class="block space-y-0.5">
-        <span class="text-[10px] text-muted-foreground">
-          Reasoning effort (optional, provider-defined)
-        </span>
-        <Input
-          class="h-8 text-xs"
-          aria-label="Reasoning effort"
-          placeholder="provider default"
-          bind:value={reasoningEffort}
-          disabled={agentRuntimeConfig.updating}
-        />
-      </label>
       <div class="flex justify-end">
         <Button
           size="sm"
@@ -146,16 +198,96 @@
           disabled={!modelDirty || agentRuntimeConfig.updating}
           onclick={() => void saveModel()}
         >
-          Save model
+          Apply model
         </Button>
       </div>
     </section>
 
+    <section class="space-y-1.5" aria-label="Model routes">
+      <div class="flex items-center justify-between">
+        <span class="text-[11px] font-medium text-muted-foreground">Routes</span>
+        <div class="flex gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            class="h-6 px-2 text-[10px]"
+            onclick={() => presetGateway(false)}
+          >
+            + Gateway
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            class="h-6 px-2 text-[10px]"
+            onclick={() => presetGateway(true)}
+          >
+            + Local
+          </Button>
+        </div>
+      </div>
+      {#each view.settings.modelRoutes as route (route.provider)}
+        <div class="flex items-center gap-2 rounded-md border border-border p-2">
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-xs font-medium">{route.provider}</p>
+            <p class="truncate text-[10px] text-muted-foreground">
+              {route.baseURL} · {route.models.map((entry) => entry.id).join(", ")}
+            </p>
+          </div>
+          <button
+            class="text-[10px] text-muted-foreground transition-colors hover:text-destructive"
+            aria-label="Remove route {route.provider}"
+            disabled={agentRuntimeConfig.updating}
+            onclick={() => void removeRoute(route.provider)}
+          >
+            Remove
+          </button>
+        </div>
+      {:else}
+        <p
+          class="rounded-md border border-dashed border-border p-2 text-center text-[10px] text-muted-foreground"
+        >
+          No custom routes yet — add one above (Anthropic-compatible endpoint).
+        </p>
+      {/each}
+
+      {#if routeFormOpen}
+        <div class="space-y-1.5 rounded-md border border-border bg-muted/20 p-2">
+          <div class="grid grid-cols-2 gap-1.5">
+            <label class="space-y-0.5">
+              <span class="text-[10px] text-muted-foreground">Route name</span>
+              <Input class="h-7 text-xs" aria-label="Route name" bind:value={routeName} />
+            </label>
+            <label class="space-y-0.5">
+              <span class="text-[10px] text-muted-foreground">Models (comma-separated)</span>
+              <Input class="h-7 text-xs" aria-label="Route models" bind:value={routeModels} />
+            </label>
+          </div>
+          <label class="block space-y-0.5">
+            <span class="text-[10px] text-muted-foreground">Base URL (Anthropic-compatible)</span>
+            <Input class="h-7 text-xs" aria-label="Route base URL" bind:value={routeBaseURL} />
+          </label>
+          <div class="flex justify-end gap-1.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              class="h-7 px-2 text-xs"
+              onclick={() => (routeFormOpen = false)}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" class="h-7 px-2.5 text-xs" onclick={() => void saveRoute()}
+              >Save route</Button
+            >
+          </div>
+        </div>
+      {/if}
+    </section>
+
     <section class="space-y-1.5" aria-label="Provider credential">
       <div class="flex items-center justify-between gap-2">
-        <span class="text-[11px] font-medium text-muted-foreground">
-          API key for {provider || "provider"}
-        </span>
+        <span class="text-[11px] font-medium text-muted-foreground"
+          >API key for {keyTarget || "provider"}</span
+        >
         {#if credentialConfigured}
           <span
             class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
@@ -173,7 +305,7 @@
           aria-label="API key (write-only)"
           placeholder={credentialConfigured ? "stored — enter to replace" : "not set"}
           bind:value={apiKeyDraft}
-          disabled={agentRuntimeConfig.updating || (provider || "").trim().length === 0}
+          disabled={agentRuntimeConfig.updating || keyTarget.length === 0}
         />
         <Button
           size="sm"
@@ -189,14 +321,14 @@
             variant="outline"
             class="h-8 px-2.5 text-xs"
             disabled={agentRuntimeConfig.updating}
-            onclick={() => void clearAgentCredential((provider || "").trim())}
+            onclick={() => void clearAgentCredential(keyTarget)}
           >
             Clear
           </Button>
         {/if}
       </div>
       <span class="text-[10px] text-muted-foreground">
-        Keys are stored locally (0600) and never echoed back.
+        Keys are stored locally (0600), never echoed back, and apply immediately.
       </span>
     </section>
   {:else if agentRuntimeConfig.loading}
