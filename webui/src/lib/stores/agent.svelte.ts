@@ -502,13 +502,15 @@ function appendFrame(frame: DshSessionStreamFrame): void {
                   outputTokens?: number;
                   promptTokens?: number;
                   completionTokens?: number;
+                  input_tokens?: number;
+                  output_tokens?: number;
                 };
               }
             | undefined
         )?.usage;
         if (usage) {
-          const input = usage.inputTokens ?? usage.promptTokens ?? 0;
-          const output = usage.outputTokens ?? usage.completionTokens ?? 0;
+          const input = usage.inputTokens ?? usage.promptTokens ?? usage.input_tokens ?? 0;
+          const output = usage.outputTokens ?? usage.completionTokens ?? usage.output_tokens ?? 0;
           if (input > 0 || output > 0) {
             agentSession.lastUsage = { inputTokens: input, outputTokens: output };
           }

@@ -64,7 +64,7 @@ const KERNEL_DISABLED_TOOL_ROWS = [
  * agent 平面供给；capability MCP 工具（mcp__skill-creator__*）由 dsh-mcp-client
  * 行（task 4.1b）注册——后者是 scoped 注册，不进全局 restrict。
  */
-export const KERNEL_AGENT_TOOL_ALLOWLIST: readonly string[] = ["ask_user_question"];
+export const KERNEL_AGENT_TOOL_ALLOWLIST: readonly string[] = ["ask_user_question", "todo_write"];
 
 /** 内核 boot 记录（无 HTTP 面；facts 供 status.dsh 与测试断言）。 */
 export interface DshKernelBootRecord {

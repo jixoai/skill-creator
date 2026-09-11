@@ -390,12 +390,12 @@
         {:else if item.kind === "user"}
           <div class="group/msg relative ml-auto max-w-[85%] space-y-1">
             <div
-              class="absolute -top-1 right-0 z-10 flex gap-0.5 rounded-md border border-border bg-background px-0.5 py-0.5 opacity-0 shadow-sm transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100"
+              class="absolute top-0 -left-1 z-10 flex -translate-x-full gap-0.5 rounded-md border border-border bg-popover px-1 py-1 opacity-0 shadow-md transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100"
               role="toolbar"
               aria-label="Message actions"
             >
               <button
-                class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                 title="Copy"
                 aria-label="Copy message"
                 onclick={() => void copyText(item.text)}
@@ -403,7 +403,7 @@
                 <IconCopy class="h-3 w-3" />
               </button>
               <button
-                class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                 title="Edit and resend"
                 aria-label="Edit message"
                 onclick={() => editIntoComposer(item.text)}
@@ -411,7 +411,7 @@
                 <IconPen class="h-3 w-3" />
               </button>
               <button
-                class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                 title="Resend this prompt"
                 aria-label="Resend message"
                 disabled={agentSession.sending}
@@ -443,7 +443,9 @@
               </div>
             {/if}
             {#if item.text.length > 0}
-              <div class="rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs whitespace-pre-wrap">
+              <div
+                class="max-h-40 overflow-y-auto rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs whitespace-pre-wrap"
+              >
                 {item.text}
               </div>
             {/if}
@@ -481,11 +483,12 @@
                     : ''}"
                 >
                   <span
-                    class="mt-0.5 h-3 w-3 shrink-0 rounded-full border {todo.status === 'completed'
+                    class="mt-0.5 h-3 w-3 shrink-0 rounded-full border-2 {todo.status ===
+                    'completed'
                       ? 'border-primary bg-primary/20'
                       : todo.status === 'in_progress'
                         ? 'border-primary'
-                        : 'border-border'}"
+                        : 'border-muted-foreground/50'}"
                     aria-hidden="true"
                   ></span>
                   <span class="min-w-0 break-words">{todo.content}</span>
@@ -502,12 +505,12 @@
                preflight 会剥掉列表 marker，须收敛回 12px 面板排版。 -->
           <div class="group/msg relative max-w-full">
             <div
-              class="absolute -top-1 right-0 z-10 flex gap-0.5 rounded-md border border-border bg-background px-0.5 py-0.5 opacity-0 shadow-sm transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100"
+              class="absolute top-0 -left-2 z-10 flex -translate-x-full gap-0.5 rounded-md border border-border bg-popover px-1 py-1 opacity-0 shadow-md transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100"
               role="toolbar"
               aria-label="Message actions"
             >
               <button
-                class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                 title="Copy"
                 aria-label="Copy message"
                 onclick={() => void copyText(item.text)}

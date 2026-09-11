@@ -261,9 +261,40 @@ export const DshModelRouteSchema = z.object({
 /** 模型路由。 */
 export type DshModelRoute = z.infer<typeof DshModelRouteSchema>;
 
-/** 路由 provider → DSH 凭据引用名（settings.yaml 的 apiKeyEnv；确定性映射）。 */
+/**
+ * 路由 provider → DSH 凭据引用名（settings.yaml 的 apiKeyEnv / .credentials.yaml
+ * 键）。0.1.5 内核对 credentials 文件做严格 key 校验：非白名单名直接打挂 boot
+ * （2026-09-12 实测）。因此按 models.dev 官方 env 惯例映射知名 provider，兜底
+ * <PROVIDER>_API_KEY（大写去非字母数字）。
+ */
+const ROUTE_API_KEY_ENVS: Readonly<Record<string, string>> = {
+  zai: "ZAI_API_KEY",
+  "zai-coding": "ZAI_API_KEY",
+  "zai-coding-cn": "ZAI_API_KEY",
+  moonshotai: "MOONSHOT_API_KEY",
+  "moonshotai-cn": "MOONSHOT_API_KEY",
+  "kimi-coding": "MOONSHOT_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  minimax: "MINIMAX_API_KEY",
+  "minimax-cn": "MINIMAX_CN_API_KEY",
+  "qwen-token-plan": "DASHSCOPE_API_KEY",
+  "qwen-token-plan-cn": "DASHSCOPE_API_KEY",
+  "qwen-token-plan-individual": "DASHSCOPE_API_KEY",
+  openai: "OPENAI_API_KEY",
+  "openai-codex": "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  google: "GOOGLE_GENERATIVE_AI_API_KEY",
+  "google-vertex": "GOOGLE_GENERATIVE_AI_API_KEY",
+  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+  "local-gateway": "SKILL_CREATOR_LLM_KEY",
+};
+
+/** 路由 provider → DSH 凭据引用名（确定性映射；知名 provider 走官方惯例）。 */
 export function dshRouteApiKeyEnv(provider: string): string {
-  return `SKILL_CREATOR_ROUTE_KEY_${provider.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}`;
+  return (
+    ROUTE_API_KEY_ENVS[provider] ??
+    `${provider.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}_API_KEY`
+  );
 }
 
 export const DshStewardPresetSchema = z.enum(["deterministic", "live"]);

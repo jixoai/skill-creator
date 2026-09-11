@@ -119,6 +119,11 @@ async function syncDshRouteCredential(provider: string, apiKey: string | null): 
   } catch {
     // 无文件/坏 YAML：空文档起步。
   }
+  // 升级残留治理：早期版本的 SKILL_CREATOR_ROUTE_KEY_* 键不被内核 schema 接受
+  // （严格校验会打挂 boot），写入时顺带清除。
+  for (const key of Object.keys(doc)) {
+    if (key.startsWith("SKILL_CREATOR_ROUTE_KEY_")) delete doc[key];
+  }
   if (apiKey === null) delete doc[ref];
   else doc[ref] = apiKey;
   try {

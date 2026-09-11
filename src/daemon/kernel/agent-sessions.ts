@@ -335,10 +335,14 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           seq: entry.frameSeq++,
           kind: "assistant-text",
           text,
-          payload: redactDshPayload({
-            source: (message as { source?: unknown }).source,
-            usage: (message as { usage?: unknown }).usage,
-          }),
+          payload: {
+            ...(redactDshPayload({
+              source: (message as { source?: unknown }).source,
+            }) as Record<string, unknown>),
+            // usage 在事件 data 顶层；token 计数不是凭据——键名误中脱敏 token 模式
+            // 会把数值打成 [redacted]，故白名单提取（2026-09-12 PM 证据轮实测）。
+            usage: usageSnapshotOf(data),
+          },
         };
       }
       case "tool/call": {
@@ -523,6 +527,31 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       }
     }
     return parts.length > 0 ? parts.join("\n") : undefined;
+  }
+
+  /** 文本类文件判定（mime 未知时按扩展名；≤512KiB 上限由契约保证）。 */
+  function isTextualFile(name: string): boolean {
+    return /\.(txt|md|markdown|json|ya?ml|toml|csv|tsv|log|patch|diff|ts|tsx|js|jsx|py|rs|go|java|c|h|cpp|sh|css|html|xml|ini|env)$/i.test(
+      name,
+    );
+  }
+
+  /** assistant/message 事件顶层 usage 的数值白名单投影（非数值丢弃）。 */
+  function usageSnapshotOf(data: unknown): Record<string, number> | undefined {
+    const usage = (data as { usage?: unknown } | undefined)?.usage;
+    if (typeof usage !== "object" || usage === null) return undefined;
+    const out: Record<string, number> = {};
+    for (const key of [
+      "inputTokens",
+      "outputTokens",
+      "totalTokens",
+      "cacheReadTokens",
+      "cacheWriteTokens",
+    ]) {
+      const value = (usage as Record<string, unknown>)[key];
+      if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
   }
 
   /** 消息 content blocks 的 reasoning（thinking）拼接；无 reasoning 块返回 undefined。 */
@@ -723,7 +752,18 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       // ref（校验解码字节/大小），消息 content = 文本块 + image 块。attachments
       // 服务缺席时 typed INVALID_OPERATION——绝不静默丢图。
       const content: Array<Record<string, unknown>> = [{ type: "text", text }];
-      if (images.length > 0) {
+      // 文本类文件直接内联为文本块（无服务依赖）：受限工具面（无 read 工具）下
+      // 模型无法消费 durable ref（2026-09-12 实测模型反问文件路径）；二进制走 ref。
+      const restFiles = files.filter((file) => {
+        if (!isTextualFile(file.name)) return true;
+        const decoded = Buffer.from(file.data, "base64").toString("utf8");
+        content.push({
+          type: "text",
+          text: `[file: ${file.name}]\n${decoded.slice(0, 200_000)}`,
+        });
+        return false;
+      });
+      if (images.length > 0 || restFiles.length > 0) {
         const kernel = requireKernel();
         const attachments = (
           kernel.ctx as Context & {
@@ -755,13 +795,13 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
             admitEncodedFile?: (input: { data: string; name?: string }) => Promise<unknown>;
           }
         ).admitEncodedFile;
-        if (!admitFile && files.length > 0) {
+        if (!admitFile && restFiles.length > 0) {
           throw new DomainError(
             "INVALID_OPERATION",
             "file attachments require the kernel attachment service (not mounted)",
           );
         }
-        for (const file of files) {
+        for (const file of restFiles) {
           const ref = await admitFile!.call(attachments, { data: file.data, name: file.name });
           content.push({ type: "file", attachment: ref });
         }
