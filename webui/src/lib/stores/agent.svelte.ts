@@ -37,7 +37,7 @@ export interface PanelApprovalQuestion {
 export type PanelItem =
   | { kind: "turn"; seq: number; label: string }
   | { kind: "status"; seq: number; text: string }
-  | { kind: "user"; seq: number; text: string }
+  | { kind: "user"; seq: number; text: string; images?: string[] }
   | { kind: "assistant"; seq: number; text: string; streaming: boolean }
   | { kind: "reasoning"; seq: number; text: string; streaming: boolean }
   | { kind: "tool"; seq: number; toolName: string; phase: "call" | "result"; payload?: unknown }
@@ -234,17 +234,39 @@ export async function setAgentSessionMode(mode: DshAgentMode): Promise<boolean> 
   }
 }
 
-/** 发送一轮用户输入。 */
-export async function sendAgentPrompt(text: string): Promise<void> {
+/** 发送一轮用户输入（可选图片附件：base64 wire，daemon 经内核 attachment 准入）。 */
+export async function sendAgentPrompt(
+  text: string,
+  images: Array<{ mediaType: string; data: string; name?: string; preview?: string }> = [],
+): Promise<void> {
   const sessionId = agentSession.sessionId;
-  if (!sessionId || text.trim().length === 0) return;
+  if (!sessionId || (text.trim().length === 0 && images.length === 0)) return;
   const request = promptGate.issue();
   agentSession.sending = true;
   // 乐观追加用户消息（失败时由错误状态覆盖）；同文本 user-text 帧到达时出队去重。
-  agentSession.items.push({ kind: "user", seq: -Date.now(), text });
+  agentSession.items.push({
+    kind: "user",
+    seq: -Date.now(),
+    text,
+    ...(images.length > 0
+      ? {
+          images: images.map(
+            (image) => image.preview ?? `data:${image.mediaType};base64,${image.data}`,
+          ),
+        }
+      : {}),
+  });
   pendingUserEcho.push(text);
   try {
-    await requireRpc().agent.session.prompt({ sessionId, text });
+    await requireRpc().agent.session.prompt({
+      sessionId,
+      text,
+      images: images.map((image) => ({
+        mediaType: image.mediaType as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+        data: image.data,
+        ...(image.name ? { name: image.name } : {}),
+      })),
+    });
     if (!request.isCurrent()) return;
     agentSession.promptError = null;
   } catch (error) {

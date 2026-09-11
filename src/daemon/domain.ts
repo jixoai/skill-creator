@@ -34,6 +34,7 @@ import {
 } from "./steward/pipeline-service.js";
 import { createDshSettingsService, type DshSettingsService } from "./steward/dsh-settings.js";
 import { createAgentSessionsService, type AgentSessionsService } from "./kernel/agent-sessions.js";
+import { createModelCatalogService, type ModelCatalogService } from "./model-catalog.js";
 import { createSessionTranscripts } from "./kernel/session-transcripts.js";
 import type { DshKernelHandle } from "./kernel/dsh-kernel.js";
 import { createCapabilityRegistry, type CapabilityRegistry } from "./capability/core.js";
@@ -83,6 +84,8 @@ export interface DaemonDomain {
   dshSettings: DshSettingsService;
   /** 内核 agent 会话服务（task 2.2；kernel 句柄由 daemon index boot 后注入）。 */
   agentSessions: AgentSessionsService;
+  /** pi-ai 装配目录（models.dev 镜像）的 provider 画廊投影。 */
+  modelCatalog: ModelCatalogService;
   /** 内核句柄注入（index 在 boot 成功后调用；降级时保持缺席 → typed UNAVAILABLE）。 */
   setKernelHost: (handle: DshKernelHandle) => void;
   /** Manager 能力面（MCP server 与提示词投影消费；task 4.1）。 */
@@ -106,6 +109,7 @@ export function createDaemonDomain(
   const dshSettings = createDshSettingsService();
   // 面板会话转录存储：appDir()/sessions/YYYY/MM/DD/<sessionId>（产品自有持久层）。
   const agentTranscripts = createSessionTranscripts(join(appDir(), "sessions"));
+  const modelCatalog = createModelCatalogService();
   const agentSessions = createAgentSessionsService({
     kernel: () => kernelHostRef.handle,
     modelSelection: async () => (await dshSettings.getView()).settings.model,
@@ -133,6 +137,7 @@ export function createDaemonDomain(
     skillSteward: createSkillStewardPipelineService({ workspaces, skills, creator }),
     dshSettings,
     agentSessions,
+    modelCatalog,
     setKernelHost: (handle: DshKernelHandle): void => {
       kernelHostRef.handle = handle;
       agentSessions.attach(handle);

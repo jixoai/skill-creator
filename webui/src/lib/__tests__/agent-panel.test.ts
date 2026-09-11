@@ -111,6 +111,7 @@ describe("agent panel store (task 3.x)", () => {
     expect(rpc.agent.session.prompt).toHaveBeenCalledWith({
       sessionId: "agent-s1",
       text: "second",
+      images: [],
     });
     expect(agentSession.items.some((item) => item.kind === "user" && item.text === "second")).toBe(
       true,
@@ -303,6 +304,41 @@ describe("agent panel store (task 3.x)", () => {
     await pollAgentStream();
     expect(agentSessionsList.sessions[0]?.title).toBe("Counting probe");
     expect(agentSession.items.some((item) => item.kind === "status")).toBe(false);
+  });
+
+  it("sends prompts with image attachments as multimodal parts", async () => {
+    const rpc = {
+      agent: {
+        session: {
+          prompt: vi.fn().mockResolvedValue({ accepted: true }),
+          stream: vi
+            .fn()
+            .mockResolvedValueOnce({
+              frames: [frame(1, "turn-start"), frame(2, "user-text", { text: "look" })],
+              status: "idle",
+            })
+            .mockResolvedValue({ frames: [], status: "idle" }),
+        },
+      },
+    };
+    connection.rpc = rpc;
+    agentSession.sessionId = "agent-s1";
+    await sendAgentPrompt("look", [
+      {
+        mediaType: "image/png",
+        data: "aGk=",
+        name: "dot.png",
+        preview: "data:image/png;base64,aGk=",
+      },
+    ]);
+    expect(rpc.agent.session.prompt).toHaveBeenCalledWith({
+      sessionId: "agent-s1",
+      text: "look",
+      images: [{ mediaType: "image/png", data: "aGk=", name: "dot.png" }],
+    });
+    // 乐观气泡带图片预览。
+    const bubble = agentSession.items.find((item) => item.kind === "user");
+    expect(bubble).toMatchObject({ images: ["data:image/png;base64,aGk="] });
   });
 
   it("keeps polling while an approval is pending and stops after it resolves (terminal semantics)", async () => {

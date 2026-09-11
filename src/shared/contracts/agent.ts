@@ -63,11 +63,31 @@ export const AgentSessionCreateResultSchema = z.object({
 /** 会话创建结果。 */
 export type AgentSessionCreateResult = z.infer<typeof AgentSessionCreateResultSchema>;
 
-/** prompt 输入。 */
-export const AgentSessionPromptInputSchema = z.object({
-  sessionId: z.string().min(1),
-  text: z.string().min(1).max(20_000),
+/** prompt 的图片附件（wire 层 base64；daemon 经内核 attachment 准入升格 durable ref）。 */
+export const AgentPromptImageSchema = z.object({
+  mediaType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  /** canonical base64（≤4MiB 解码后；超限 schema 拒绝）。 */
+  data: z.string().min(1),
+  name: z.string().min(1).max(120).optional(),
 });
+/** prompt 图片附件。 */
+export type AgentPromptImage = z.infer<typeof AgentPromptImageSchema>;
+
+/** prompt 输入（多模态：文本 + 可选图片；无图片时与纯文本等价）。 */
+export const AgentSessionPromptInputSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    text: z.string().max(20_000),
+    images: z.array(AgentPromptImageSchema).max(4).default([]),
+  })
+  .refine((input) => input.text.trim().length > 0 || input.images.length > 0, {
+    message: "prompt needs text or at least one image",
+  })
+  .refine(
+    // 4MiB 解码后 = base64 长度上限 5,592,406（×4/3 向上取整；browser-safe 无 Buffer）。
+    (input) => input.images.every((image) => image.data.length <= 5_592_406),
+    { message: "each image must decode to ≤4MiB" },
+  );
 /** prompt 输入。 */
 export type AgentSessionPromptInput = z.infer<typeof AgentSessionPromptInputSchema>;
 

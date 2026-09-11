@@ -650,7 +650,11 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     },
     /** 驱动一轮用户输入（长度硬上限与 RPC 契约一致——外部输入 runtime 收窄）。
      * 非live但有转录的会话先经内核 agents.resume 复活（跨 daemon 重启续聊）。 */
-    async prompt(sessionId: string, text: string): Promise<void> {
+    async prompt(
+      sessionId: string,
+      text: string,
+      images: Array<{ mediaType: string; data: string; name?: string }> = [],
+    ): Promise<void> {
       if (text.length > PROMPT_MAX_CHARS) {
         throw new DomainError(
           "INVALID_OPERATION",
@@ -661,10 +665,41 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       if (!entry) {
         entry = await reviveSession(sessionId);
       }
+      // 多模态（迭代四 2026-09-11）：wire 图片经内核 attachment 准入升格 durable
+      // ref（校验解码字节/大小），消息 content = 文本块 + image 块。attachments
+      // 服务缺席时 typed INVALID_OPERATION——绝不静默丢图。
+      const content: Array<Record<string, unknown>> = [{ type: "text", text }];
+      if (images.length > 0) {
+        const kernel = requireKernel();
+        const attachments = (
+          kernel.ctx as Context & {
+            attachments?: {
+              admitPromptContent: (
+                parts: ReadonlyArray<Record<string, unknown>>,
+              ) => Promise<ReadonlyArray<Record<string, unknown>>>;
+            };
+          }
+        ).attachments;
+        if (!attachments) {
+          throw new DomainError(
+            "INVALID_OPERATION",
+            "image attachments require the kernel attachment service (not mounted)",
+          );
+        }
+        const admitted = await attachments.admitPromptContent(
+          images.map((image) => ({
+            type: "image",
+            mediaType: image.mediaType,
+            data: image.data,
+            ...(image.name ? { name: image.name } : {}),
+          })),
+        );
+        content.push(...admitted.map((part) => ({ ...(part as object) })));
+      }
       entry.agent.followup(
         createUserMessage({
           source: { kind: "user" },
-          content: [{ type: "text", text }],
+          content: content as never,
         }),
       );
     },

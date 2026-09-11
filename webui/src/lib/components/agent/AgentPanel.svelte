@@ -19,6 +19,8 @@
   import IconSend from "@lucide/svelte/icons/send";
   import IconStop from "@lucide/svelte/icons/square";
   import IconChevron from "@lucide/svelte/icons/chevron-right";
+  import IconPaperclip from "@lucide/svelte/icons/paperclip";
+  import { showToast } from "$lib/toast.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Textarea } from "$lib/components/ui/textarea";
   import {
@@ -42,6 +44,16 @@
 
   let composerText = $state("");
   let scrollBody = $state<HTMLElement | null>(null);
+  /** 待发图片附件（composer 本地状态；≤4 张、各 ≤4MiB）。 */
+  let attachments = $state<
+    Array<{
+      mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+      data: string;
+      name?: string;
+      preview: string;
+    }>
+  >([]);
+  let fileInput = $state<HTMLInputElement | null>(null);
 
   // 新帧到达时滚动到底（用户向上翻阅时不打扰）。markstream batch 渲染会在帧
   // 落地后继续长高气泡，且单个代码块的一次性增高可超过 160px 跟随门，故判定
@@ -67,9 +79,64 @@
 
   function submit(): void {
     const text = composerText.trim();
-    if (text.length === 0 || agentSession.sending) return;
+    if (text.length === 0 && attachments.length === 0) return;
+    if (agentSession.sending) return;
+    const images = attachments;
     composerText = "";
-    void sendAgentPrompt(text);
+    attachments = [];
+    void sendAgentPrompt(text, images);
+  }
+
+  /** 读入图片文件（类型/数量/大小守卫；base64 + 预览 dataURL）。 */
+  async function addImageFiles(files: FileList | File[]): Promise<void> {
+    for (const file of files) {
+      if (attachments.length >= 4) {
+        showToast("At most 4 images per message.");
+        return;
+      }
+      if (!(file.type in IMAGE_MEDIA_TYPES)) {
+        showToast(`Unsupported image type: ${file.type || "unknown"}.`);
+        continue;
+      }
+      if (file.size > 4 * 1024 * 1024) {
+        showToast(`"${file.name}" exceeds the 4MiB limit.`);
+        continue;
+      }
+      const data = await fileToBase64(file);
+      attachments = [
+        ...attachments,
+        {
+          mediaType: file.type as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+          data,
+          ...(file.name ? { name: file.name } : {}),
+          preview: `data:${file.type};base64,${data}`,
+        },
+      ];
+    }
+  }
+
+  function removeAttachment(index: number): void {
+    attachments = attachments.filter((_, i) => i !== index);
+  }
+
+  function onPaste(event: ClipboardEvent): void {
+    const files = [...(event.clipboardData?.files ?? [])].filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (files.length > 0) {
+      event.preventDefault();
+      void addImageFiles(files);
+    }
+  }
+
+  function onDrop(event: DragEvent): void {
+    const files = [...(event.dataTransfer?.files ?? [])].filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (files.length > 0) {
+      event.preventDefault();
+      void addImageFiles(files);
+    }
   }
 
   function onComposerKeydown(event: KeyboardEvent): void {
@@ -86,6 +153,25 @@
     );
     return summary ? `${summary.title || summary.sessionId} (${summary.status})` : undefined;
   });
+
+  const IMAGE_MEDIA_TYPES: Record<string, true> = {
+    "image/png": true,
+    "image/jpeg": true,
+    "image/webp": true,
+    "image/gif": true,
+  };
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result ?? "");
+        resolve(result.slice(result.indexOf(",") + 1));
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
 
   // 首屏行动的 composer 种子：会话就绪且输入可用时一次性填入（不自动发送）。
   $effect(() => {
@@ -109,6 +195,8 @@
 <aside
   class="flex h-full w-full flex-col border-l border-border bg-background min-[720px]:w-[440px]"
   aria-label="Agent panel"
+  ondragover={(event) => event.preventDefault()}
+  ondrop={onDrop}
 >
   <header class="flex items-center gap-1 border-b border-border px-2 py-1.5">
     <span class="px-1 text-xs font-medium text-muted-foreground">Agent</span>
@@ -218,10 +306,23 @@
         {:else if item.kind === "status"}
           <div class="px-1 text-[11px] text-muted-foreground">{item.text}</div>
         {:else if item.kind === "user"}
-          <div
-            class="ml-auto max-w-[85%] rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs whitespace-pre-wrap"
-          >
-            {item.text}
+          <div class="ml-auto max-w-[85%] space-y-1">
+            {#if item.images && item.images.length > 0}
+              <div class="flex flex-wrap justify-end gap-1">
+                {#each item.images as src, index (index)}
+                  <img
+                    {src}
+                    alt=""
+                    class="max-h-32 rounded-md border border-border object-contain"
+                  />
+                {/each}
+              </div>
+            {/if}
+            {#if item.text.length > 0}
+              <div class="rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs whitespace-pre-wrap">
+                {item.text}
+              </div>
+            {/if}
           </div>
         {:else if item.kind === "reasoning"}
           <!-- thinking 折叠面：默认收起；流式时摘要带进行指示，终帧后可展开回看。 -->
@@ -273,7 +374,48 @@
   {/if}
 
   <footer class="border-t border-border p-2">
+    {#if attachments.length > 0}
+      <div class="mb-1.5 flex flex-wrap gap-1.5" aria-label="Pending attachments">
+        {#each attachments as attachment, index (index)}
+          <div class="group relative h-14 w-14 overflow-hidden rounded-md border border-border">
+            <img
+              src={attachment.preview}
+              alt={attachment.name ?? "image"}
+              class="h-full w-full object-cover"
+            />
+            <button
+              class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+              aria-label="Remove attachment"
+              onclick={() => removeAttachment(index)}
+            >
+              <IconX class="h-2.5 w-2.5" />
+            </button>
+          </div>
+        {/each}
+      </div>
+    {/if}
     <div class="flex items-end gap-1.5">
+      <input
+        bind:this={fileInput}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        multiple
+        class="hidden"
+        aria-label="Attach images"
+        onchange={(event) => {
+          if (event.currentTarget.files) void addImageFiles(event.currentTarget.files);
+          event.currentTarget.value = "";
+        }}
+      />
+      <button
+        class="relative mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
+        title="Attach images (or paste / drop)"
+        aria-label="Attach images"
+        disabled={!agentSession.sessionId}
+        onclick={() => fileInput?.click()}
+      >
+        <IconPaperclip class="h-4 w-4" />
+      </button>
       <Textarea
         rows={2}
         maxlength={20000}
@@ -281,6 +423,7 @@
         disabled={!agentSession.sessionId}
         bind:value={composerText}
         onkeydown={onComposerKeydown}
+        onpaste={onPaste}
         class="min-h-0 flex-1 resize-none text-xs"
       />
       <div class="flex items-end gap-1 pb-0.5">

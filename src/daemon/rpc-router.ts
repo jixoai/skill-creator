@@ -196,7 +196,7 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           session: await domain.agentSessions.create(input),
         })),
         prompt: rpc.agent.session.prompt.handler(async ({ input }) => {
-          await domain.agentSessions.prompt(input.sessionId, input.text);
+          await domain.agentSessions.prompt(input.sessionId, input.text, input.images);
           return { accepted: true as const };
         }),
         cancel: rpc.agent.session.cancel.handler(({ input }) => {
@@ -211,6 +211,11 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         ),
         setMode: rpc.agent.session.setMode.handler(async ({ input }) => ({
           session: await domain.agentSessions.setMode(input.sessionId, input.mode),
+        })),
+      },
+      models: {
+        catalog: rpc.agent.models.catalog.handler(() => ({
+          providers: domain.modelCatalog.list(),
         })),
       },
       settings: {

@@ -6,6 +6,7 @@
  *   [1] Compose browser-safe workspace, skill, Creator, and repository procedures.
  *   [2] Apply one finite, strongly typed business-error vocabulary.
  */
+import { ModelProviderCatalogEntrySchema } from "./contracts/dsh-runtime.js";
 import { oc } from "@orpc/contract";
 import { z } from "zod";
 import {
@@ -327,6 +328,12 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       /** 切换会话模式（add-agent-settings-modes：running 拒绝；live 句柄释放，
        * 下一次 prompt 以新模式 setup 复活，历史由内核 session log 保留）。 */
       setMode: oc.input(AgentSessionSetModeInputSchema).output(AgentSessionSetModeResultSchema),
+    },
+    /** pi-ai 装配目录（models.dev 镜像）投影：全量 provider 画廊（filter 在 UI）。 */
+    models: {
+      catalog: oc
+        .input(z.object({}))
+        .output(z.object({ providers: z.array(ModelProviderCatalogEntrySchema) })),
     },
     /** model/preset/permission/approval 投影（原 dsh.settings 平移）。 */
     settings: {

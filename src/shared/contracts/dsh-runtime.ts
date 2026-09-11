@@ -211,91 +211,25 @@ export interface DshModelProviderPreset {
   cn: boolean;
 }
 
-/** 第一档：重点适配（国产 provider，CN 端点）。 */
-export const DSH_MODEL_PROVIDER_PRESETS_CN: readonly DshModelProviderPreset[] = [
-  {
-    provider: "zai-coding-cn",
-    label: "Z.ai (智谱)",
-    api: "openai-completions",
-    baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
-    models: ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5-turbo", "glm-4.7"],
-    envHint: "ZAI_API_KEY",
-    cn: true,
-  },
-  {
-    provider: "moonshotai-cn",
-    label: "Kimi (月之暗面)",
-    api: "openai-completions",
-    baseURL: "https://api.moonshot.cn/v1",
-    models: [
-      "kimi-k2.7-code",
-      "kimi-k2.6",
-      "kimi-k2.5",
-      "kimi-k2-thinking",
-      "kimi-k2-turbo-preview",
-    ],
-    envHint: "MOONSHOT_API_KEY",
-    cn: true,
-  },
-  {
-    provider: "deepseek",
-    label: "DeepSeek",
-    api: "openai-completions",
-    baseURL: "https://api.deepseek.com",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat"],
-    envHint: "DEEPSEEK_API_KEY",
-    cn: true,
-  },
-  {
-    provider: "minimax-cn",
-    label: "MiniMax",
-    api: "anthropic-messages",
-    baseURL: "https://api.minimaxi.com/anthropic",
-    models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
-    envHint: "MINIMAX_API_KEY",
-    cn: true,
-  },
-  {
-    provider: "qwen-token-plan-cn",
-    label: "阿里云百炼",
-    api: "openai-completions",
-    baseURL: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
-    models: ["qwen3-max", "qwen3-coder-plus", "deepseek-v4-pro", "glm-5.3", "kimi-k2.7-code"],
-    envHint: "DASHSCOPE_API_KEY",
-    cn: true,
-  },
-];
-
-/** 第二档：通用标准协议。 */
-export const DSH_MODEL_PROVIDER_PRESETS_STANDARD: readonly DshModelProviderPreset[] = [
-  {
-    provider: "openai",
-    label: "OpenAI (Responses)",
-    api: "openai-responses",
-    baseURL: "https://api.openai.com/v1",
-    models: ["gpt-5.2", "gpt-5.1", "gpt-5-mini", "o4-mini"],
-    envHint: "OPENAI_API_KEY",
-    cn: false,
-  },
-  {
-    provider: "anthropic",
-    label: "Anthropic",
-    api: "anthropic-messages",
-    baseURL: "https://api.anthropic.com",
-    models: ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
-    envHint: "ANTHROPIC_API_KEY",
-    cn: false,
-  },
-  {
-    provider: "google",
-    label: "Gemini",
-    api: "google-generative-ai",
-    baseURL: "https://generativelanguage.googleapis.com/v1beta",
-    models: ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"],
-    envHint: "GEMINI_API_KEY",
-    cn: false,
-  },
-];
+/** 模型目录条目（pi-ai 装配目录 = models.dev 镜像，daemon 投影；browser 画廊消费）。 */
+export const ModelProviderCatalogEntrySchema = z.object({
+  provider: z.string().min(1),
+  label: z.string().min(1),
+  api: z.string().min(1),
+  baseURL: z.string().min(1),
+  models: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().optional(),
+        /** 模型声明接受图片输入。 */
+        image: z.boolean(),
+      }),
+    )
+    .min(1),
+});
+/** 模型目录条目。 */
+export type ModelProviderCatalogEntry = z.infer<typeof ModelProviderCatalogEntrySchema>;
 
 /**
  * LLM preset：deterministic = 脚本化 transport（CI/fixture）；live = 真实 provider。
