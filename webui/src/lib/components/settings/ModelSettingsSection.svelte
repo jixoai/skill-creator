@@ -11,7 +11,12 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
-  import type { DshModelRoute } from "$shared/contracts/dsh-runtime.js";
+  import {
+    DSH_MODEL_PROVIDER_PRESETS_CN,
+    DSH_MODEL_PROVIDER_PRESETS_STANDARD,
+    type DshModelProviderPreset,
+    type DshModelRoute,
+  } from "$shared/contracts/dsh-runtime.js";
   import {
     agentRuntimeConfig,
     clearAgentCredential,
@@ -30,6 +35,7 @@
   let routeName = $state("");
   let routeBaseURL = $state("");
   let routeModels = $state("");
+  let routeApi = $state("anthropic-messages");
 
   const view = $derived(agentRuntimeConfig.view);
   $effect(() => {
@@ -97,12 +103,22 @@
     });
   }
 
-  /** 预设：Anthropic 兼容网关（远端或本地），api 固定 anthropic-messages。 */
-  function presetGateway(local: boolean): void {
+  /** 目录预设：pi-ai 装配目录内 provider（协议/baseURL/模型已对齐，只需 key）。 */
+  function applyPreset(preset: DshModelProviderPreset): void {
     routeFormOpen = true;
-    routeName = local ? "local-gateway" : "my-gateway";
-    routeBaseURL = local ? "http://localhost:20002/anthropic" : "https://";
-    routeModels = local ? "glm-5.3-flash" : "";
+    routeName = preset.provider;
+    routeBaseURL = preset.baseURL;
+    routeModels = preset.models.slice(0, 4).join(", ");
+    routeApi = preset.api;
+  }
+
+  /** 本地 Anthropic 兼容网关（开发/自建）。 */
+  function presetLocal(): void {
+    routeFormOpen = true;
+    routeName = "local-gateway";
+    routeBaseURL = "http://localhost:20002/anthropic";
+    routeModels = "glm-5.3-flash";
+    routeApi = "anthropic-messages";
   }
 
   async function saveRoute(): Promise<void> {
@@ -118,7 +134,7 @@
     }
     const route: DshModelRoute = {
       provider,
-      api: "anthropic-messages",
+      api: routeApi.trim() || "anthropic-messages",
       baseURL,
       models: models.map((id) => ({ id })),
     };
@@ -211,18 +227,35 @@
             size="sm"
             variant="outline"
             class="h-6 px-2 text-[10px]"
-            onclick={() => presetGateway(false)}
+            onclick={() => presetLocal()}
           >
-            + Gateway
+            + Local
           </Button>
           <Button
             size="sm"
             variant="outline"
             class="h-6 px-2 text-[10px]"
-            onclick={() => presetGateway(true)}
+            onclick={() => (routeFormOpen = true)}
           >
-            + Local
+            + Custom
           </Button>
+        </div>
+      </div>
+      <div class="space-y-1">
+        <p class="text-[10px] text-muted-foreground">
+          Ready-to-use providers (pi-ai catalog — add, then paste a key):
+        </p>
+        <div class="flex flex-wrap gap-1">
+          {#each [...DSH_MODEL_PROVIDER_PRESETS_CN, ...DSH_MODEL_PROVIDER_PRESETS_STANDARD] as preset (preset.provider)}
+            <button
+              class="rounded-md border border-border px-1.5 py-0.5 text-[10px] transition-colors hover:border-primary/50 hover:text-primary"
+              title={`${preset.baseURL} · key: ${preset.envHint}`}
+              disabled={agentRuntimeConfig.updating}
+              onclick={() => applyPreset(preset)}
+            >
+              {preset.label}
+            </button>
+          {/each}
         </div>
       </div>
       {#each view.settings.modelRoutes as route (route.provider)}
@@ -262,10 +295,16 @@
               <Input class="h-7 text-xs" aria-label="Route models" bind:value={routeModels} />
             </label>
           </div>
-          <label class="block space-y-0.5">
-            <span class="text-[10px] text-muted-foreground">Base URL (Anthropic-compatible)</span>
-            <Input class="h-7 text-xs" aria-label="Route base URL" bind:value={routeBaseURL} />
-          </label>
+          <div class="grid grid-cols-[1fr_150px] gap-1.5">
+            <label class="space-y-0.5">
+              <span class="text-[10px] text-muted-foreground">Base URL</span>
+              <Input class="h-7 text-xs" aria-label="Route base URL" bind:value={routeBaseURL} />
+            </label>
+            <label class="space-y-0.5">
+              <span class="text-[10px] text-muted-foreground">API protocol</span>
+              <Input class="h-7 text-xs" aria-label="Route api" bind:value={routeApi} />
+            </label>
+          </div>
           <div class="flex justify-end gap-1.5">
             <Button
               size="sm"

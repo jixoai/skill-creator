@@ -56,14 +56,7 @@
             disabled={agentRuntimeConfig.updating}
             onclick={() => void apply({ defaultMode: entry.id })}
           >
-            <span class="flex items-center gap-1 font-medium">
-              {entry.label}
-              {#if entry.tokenHeavy}
-                <span class="rounded bg-amber-500/15 px-1 text-[9px] text-amber-600">
-                  token-heavy
-                </span>
-              {/if}
-            </span>
+            <span class="flex items-center gap-1 font-medium">{entry.label}</span>
             <span class="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
               {entry.description}
             </span>

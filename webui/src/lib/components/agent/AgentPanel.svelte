@@ -150,9 +150,7 @@
         <option value="">Start a session</option>
       {/if}
       {#each DSH_AGENT_MODES as entry (entry.id)}
-        <option value={entry.id}>
-          {entry.label}{entry.tokenHeavy ? " (heavy)" : ""}
-        </option>
+        <option value={entry.id}>{entry.label}</option>
       {/each}
     </select>
     <!-- 图标按钮统一 8px 外扩命中区（视觉 32px + after 16px = 44px，窄屏覆盖模式达标）。 -->
@@ -188,14 +186,7 @@
               disabled={agentSession.sending}
               onclick={() => void createAgentSession(undefined, entry.id)}
             >
-              <span class="flex items-center gap-1 text-xs font-medium">
-                {entry.label}
-                {#if entry.tokenHeavy}
-                  <span class="rounded bg-amber-500/15 px-1 text-[9px] text-amber-600">
-                    token-heavy
-                  </span>
-                {/if}
-              </span>
+              <span class="flex items-center gap-1 text-xs font-medium">{entry.label}</span>
               <span class="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
                 {entry.description}
               </span>

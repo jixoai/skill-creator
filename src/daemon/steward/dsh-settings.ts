@@ -59,7 +59,7 @@ export function defaultDshStewardSettings(): DshStewardSettings {
     preset: "deterministic",
     permissions: { approvalPolicy: "ask" },
     session: { streamRetention: 100, streamProjection: "enabled" },
-    defaultMode: "create",
+    defaultMode: "free",
     modelRoutes: [],
   };
 }

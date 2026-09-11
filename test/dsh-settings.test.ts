@@ -87,7 +87,7 @@ describe("DshSettingsService", () => {
     expect(view.settings.preset).toBe("deterministic");
     expect(view.settings.permissions.approvalPolicy).toBe("ask");
     expect(view.settings.session).toEqual({ streamRetention: 100, streamProjection: "enabled" });
-    expect(view.settings.defaultMode).toBe("create");
+    expect(view.settings.defaultMode).toBe("free");
     expect(view.providers).toEqual([]);
   });
 

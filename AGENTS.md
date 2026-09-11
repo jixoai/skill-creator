@@ -90,9 +90,11 @@ Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 che
 Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
 Agent Kernel       = headless DSH 内核：单 dsh-base bundle + 产品 preset（persona/ask-user）
                       + 工具面收窄（专注模式禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
-Agent Mode         = create/manage/explore/free(Open) 四种会话模式：专有模式 = 版本化
-                      prompt section + guard 收窄 MCP 工具面；Open 全工具面 + 原生 bash，
-                      经 setMode（dispose+resume）中途切换，mode 持久于转录 meta
+Agent Mode         = create/manage/explore/free(General，默认) 四种会话模式：专有模式 =
+                      版本化 prompt section + guard 收窄 MCP 工具面；General 为轻量入口
+                      段（只列专注模式）+ 全工具面 + 原生 bash，经 setMode（dispose+resume）
+                      中途切换，mode 持久于转录 meta；模型 provider 预设两档（CN 五家 +
+                      OpenAI/Anthropic/Gemini，pi-ai 目录对齐）经 settings.modelRoutes 桥接
 Agent Panel        = shell 级右栏 drawer：agent.* RPC 消费内核会话（帧流/审批/模式 chip）；
                       设置面（list-detail Dialog）为全局面，入口在左导航底部
 capability-core    = 领域能力层：name + Zod IO + handler + authority class

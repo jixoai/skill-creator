@@ -26,11 +26,13 @@ describe("agent mode catalog consistency", () => {
     expect(DSH_AGENT_MODES.map((entry) => entry.id)).toEqual(Object.keys(AGENT_MODES));
   });
 
-  it("free mode is the only un-narrowed definition and shows as Open", () => {
-    expect(AGENT_MODES.free).toEqual({ sectionText: null, tools: null });
+  it("free/General is the default entry: light section, full tool surface", () => {
+    // 通用模式（2026-09-11 用户裁决）：轻量入口提示词（只列专注模式），无工具收窄。
+    expect(AGENT_MODES.free.tools).toBeNull();
+    expect(AGENT_MODES.free.sectionText).toBeTruthy();
+    expect(AGENT_MODES.free.sectionText).toContain("Create");
     expect(DSH_AGENT_MODES.find((entry) => entry.id === "free")).toMatchObject({
-      label: "Open",
-      tokenHeavy: true,
+      label: "General",
     });
     for (const mode of ["create", "manage", "explore"] as const) {
       expect(AGENT_MODES[mode].sectionText).toBeTruthy();
@@ -118,10 +120,11 @@ describe("applyAgentMode setup injection", () => {
     expect(guard({ name: "mcp__skill-creator__repository_scan" })).toContain("manage");
   });
 
-  it("free mode registers only the guard (no narrowing section)", () => {
+  it("free/General registers its light entry section plus the permissive guard", () => {
     const { ctx, captured } = fakeCtx();
     applyAgentMode(ctx as never, "free");
-    expect(captured.sections).toHaveLength(0);
+    expect(captured.sections).toHaveLength(1);
+    expect(captured.sections[0]).toMatchObject({ name: "skill-creator-mode-free", order: 40 });
     expect(captured.guards).toHaveLength(1);
     const guard = captured.guards[0]!;
     expect(guard({ name: "mcp__skill-creator__repository_scan" })).toBeUndefined();

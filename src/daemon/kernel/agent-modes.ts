@@ -21,7 +21,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { DshAgentMode } from "../../shared/contracts/dsh-runtime.js";
 
 /** 模式提示词版本（任一模式 section 内容变更必 bump）。 */
-export const AGENT_MODE_PROMPT_VERSION = "1";
+export const AGENT_MODE_PROMPT_VERSION = "2";
 
 /** MCP 工具全名前缀（dsh-mcp-client 注册命名）。 */
 const MCP_TOOL_PREFIX = "mcp__skill-creator__";
@@ -30,7 +30,7 @@ const PROPOSE_SUFFIX = "_propose";
 
 /** 一种模式的组合事实。 */
 export interface AgentModeDefinition {
-  /** 专有 prompt section 文本；free 为 null（无收窄即其定义）。 */
+  /** 专有 prompt section 文本；free/General 为轻量入口段（只列专注模式）。 */
   sectionText: string | null;
   /**
    * 允许的 MCP capability 基名（creator_save 等；*_propose 变体随基名继承）。
@@ -110,6 +110,20 @@ browsing.
 - Never install silently; installs are proposals the human approves.
 - Prefer two well-scoped skills over one that does everything badly.`;
 
+/** 通用模式（General/free）的轻量入口提示词：只列专注模式作为可切换的 skill。 */
+const GENERAL_SECTION = `# Skill Creator mode: General (v${AGENT_MODE_PROMPT_VERSION})
+
+You are in the general session: every capability is available and no focus is
+imposed. Focused modes exist as ready-to-use skills the human can switch to from
+the panel header at any time:
+
+- **Create** — authoring new skills (drafting, frontmatter law, validation).
+- **Manage** — curating the local library (dedupe, merge, optimize, update).
+- **Explore** — searching skill sources and analyzing fit.
+
+When a task clearly belongs to one of them, mention that switching will make
+the agent more focused; otherwise just do the work here.`;
+
 /** 模式注册表（daemon 侧组合事实；与 DSH_AGENT_MODES 目录一一对应，单测校验）。 */
 export const AGENT_MODES: Readonly<Record<DshAgentMode, AgentModeDefinition>> = {
   create: {
@@ -155,7 +169,12 @@ export const AGENT_MODES: Readonly<Record<DshAgentMode, AgentModeDefinition>> = 
       "repository_sources_remove",
     ],
   },
-  free: { sectionText: null, tools: null },
+  free: {
+    // 通用模式轻提示词（2026-09-11 用户裁决）：只给其它模式的入口，不再赘述
+    // 全量法则——专注内容在各自模式的 section 里。
+    sectionText: GENERAL_SECTION,
+    tools: null,
+  },
 };
 
 /** 模式专有 section 名（base best-practices 段之外）。 */

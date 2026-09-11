@@ -66,3 +66,13 @@
 - [x] 6.4 bash 接入开放模式：tool-bash 行从 boot 禁用表移除（内核原生 bash 工具
       激活）；productToolDenyList 按模式计算 deny——专注模式拒 bash，开放模式
       放行；AGENTS.md 安全边界 #14 同步。
+
+## 7. 迭代三（2026-09-11 用户反馈：模式改名 + provider 适配）
+
+- [x] 7.1 Open(Heavy) → General（通用模式）：去 token-heavy 标签；默认模式改
+      free/General（schema default + defaults）；轻量入口提示词（v2，只列专注
+      模式为可切换 skill）。
+- [x] 7.2 provider 预设两档（pi-ai 装配目录即 models.dev 镜像，实测提取）：
+      CN 档 zai/kimi/deepseek/minimax/阿里百炼 + 标准档 OpenAI(Responses)/
+      Anthropic/Gemini + Local/Custom；预设一键建路由（协议/baseURL/模型对齐），
+      key 走 DSH 凭据热面。社区无第三方 dsh-llm-* 插件（npm 实查）。

@@ -166,8 +166,6 @@ export interface DshAgentModeCatalogEntry {
   id: DshAgentMode;
   label: string;
   description: string;
-  /** true = 全工具面，token 消耗更高（UI 明示）。 */
-  tokenHeavy: boolean;
 }
 
 /** 模式目录（顺序即 UI 展示序；与 daemon kernel 注册表对齐，单测校验一致性）。 */
@@ -177,27 +175,125 @@ export const DSH_AGENT_MODES: readonly DshAgentModeCatalogEntry[] = [
     label: "Create",
     description:
       "Author new skills: frontmatter law, progressive disclosure, validation-first workflow.",
-    tokenHeavy: false,
   },
   {
     id: "manage",
     label: "Manage",
     description:
       "Curate the local library: dedupe, merge, optimize, toggle, and update installed skills.",
-    tokenHeavy: false,
   },
   {
     id: "explore",
     label: "Explore",
     description:
       "Search skill sources, read candidates, and analyze fit against your requirements.",
-    tokenHeavy: false,
   },
   {
     id: "free",
-    label: "Open",
-    description: "All capabilities in one session, no focused narrowing (bash included).",
-    tokenHeavy: true,
+    label: "General",
+    description: "One session with everything available; focused modes are one switch away.",
+  },
+];
+
+/** 模型 provider 预设档位条目（pi-ai 装配目录即 models.dev 数据的镜像，
+ * 2026-09-11 实测提取；CN 端点为国内默认）。 */
+export interface DshModelProviderPreset {
+  /** 路由名（= pi-ai 目录 provider id，compat/协议自动对齐）。 */
+  provider: string;
+  label: string;
+  api: string;
+  baseURL: string;
+  /** 目录内的当打模型（非全集——路由可后续手补）。 */
+  models: readonly string[];
+  /** 凭据环境变量惯例名（展示用；实际引用走 dshRouteApiKeyEnv）。 */
+  envHint: string;
+  /** true = 国内默认端点。 */
+  cn: boolean;
+}
+
+/** 第一档：重点适配（国产 provider，CN 端点）。 */
+export const DSH_MODEL_PROVIDER_PRESETS_CN: readonly DshModelProviderPreset[] = [
+  {
+    provider: "zai-coding-cn",
+    label: "Z.ai (智谱)",
+    api: "openai-completions",
+    baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
+    models: ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5-turbo", "glm-4.7"],
+    envHint: "ZAI_API_KEY",
+    cn: true,
+  },
+  {
+    provider: "moonshotai-cn",
+    label: "Kimi (月之暗面)",
+    api: "openai-completions",
+    baseURL: "https://api.moonshot.cn/v1",
+    models: [
+      "kimi-k2.7-code",
+      "kimi-k2.6",
+      "kimi-k2.5",
+      "kimi-k2-thinking",
+      "kimi-k2-turbo-preview",
+    ],
+    envHint: "MOONSHOT_API_KEY",
+    cn: true,
+  },
+  {
+    provider: "deepseek",
+    label: "DeepSeek",
+    api: "openai-completions",
+    baseURL: "https://api.deepseek.com",
+    models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat"],
+    envHint: "DEEPSEEK_API_KEY",
+    cn: true,
+  },
+  {
+    provider: "minimax-cn",
+    label: "MiniMax",
+    api: "anthropic-messages",
+    baseURL: "https://api.minimaxi.com/anthropic",
+    models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
+    envHint: "MINIMAX_API_KEY",
+    cn: true,
+  },
+  {
+    provider: "qwen-token-plan-cn",
+    label: "阿里云百炼",
+    api: "openai-completions",
+    baseURL: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    models: ["qwen3-max", "qwen3-coder-plus", "deepseek-v4-pro", "glm-5.3", "kimi-k2.7-code"],
+    envHint: "DASHSCOPE_API_KEY",
+    cn: true,
+  },
+];
+
+/** 第二档：通用标准协议。 */
+export const DSH_MODEL_PROVIDER_PRESETS_STANDARD: readonly DshModelProviderPreset[] = [
+  {
+    provider: "openai",
+    label: "OpenAI (Responses)",
+    api: "openai-responses",
+    baseURL: "https://api.openai.com/v1",
+    models: ["gpt-5.2", "gpt-5.1", "gpt-5-mini", "o4-mini"],
+    envHint: "OPENAI_API_KEY",
+    cn: false,
+  },
+  {
+    provider: "anthropic",
+    label: "Anthropic",
+    api: "anthropic-messages",
+    baseURL: "https://api.anthropic.com",
+    models: ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
+    envHint: "ANTHROPIC_API_KEY",
+    cn: false,
+  },
+  {
+    provider: "google",
+    label: "Gemini",
+    api: "google-generative-ai",
+    baseURL: "https://generativelanguage.googleapis.com/v1beta",
+    models: ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"],
+    envHint: "GEMINI_API_KEY",
+    cn: false,
   },
 ];
 
@@ -267,8 +363,8 @@ export const DshStewardSettingsSchema = z.object({
   preset: DshStewardPresetSchema,
   permissions: DshStewardPermissionsSchema,
   session: DshStewardSessionControlsSchema,
-  /** 新会话的默认模式（旧文件缺失读 create——additive 字段）。 */
-  defaultMode: DshAgentModeSchema.default("create"),
+  /** 新会话的默认模式（General/free——通用入口，旧文件缺失同读）。 */
+  defaultMode: DshAgentModeSchema.default("free"),
   /** 持久化模型路由（桥接 DSH 热加载面；空 = 未配置自定义路由）。 */
   modelRoutes: z.array(DshModelRouteSchema).default([]),
 });
