@@ -73,12 +73,22 @@ export const AgentPromptImageSchema = z.object({
 /** prompt 图片附件。 */
 export type AgentPromptImage = z.infer<typeof AgentPromptImageSchema>;
 
+/** prompt 文件附件（wire 层 base64；daemon 经内核 admitEncodedFile 升格 durable ref）。 */
+export const AgentPromptFileSchema = z.object({
+  name: z.string().min(1).max(200),
+  /** canonical base64（≤512KiB 解码后）。 */
+  data: z.string().min(1).max(710_000),
+});
+/** prompt 文件附件。 */
+export type AgentPromptFile = z.infer<typeof AgentPromptFileSchema>;
+
 /** prompt 输入（多模态：文本 + 可选图片；无图片时与纯文本等价）。 */
 export const AgentSessionPromptInputSchema = z
   .object({
     sessionId: z.string().min(1),
     text: z.string().max(20_000),
     images: z.array(AgentPromptImageSchema).max(4).default([]),
+    files: z.array(AgentPromptFileSchema).max(2).default([]),
   })
   .refine((input) => input.text.trim().length > 0 || input.images.length > 0, {
     message: "prompt needs text or at least one image",

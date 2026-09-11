@@ -442,6 +442,8 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   "mode-changed",
   /** 会话自动命名（session/title 事件投影；text = 新标题）。 */
   "session-title",
+  /** Todo 列表快照（todo/write 事件投影；payload.todos = {content,status}[]）。 */
+  "todo-snapshot",
 ]);
 /** session stream 帧类别。 */
 export type DshSessionStreamFrameKind = z.infer<typeof DshSessionStreamFrameKindSchema>;

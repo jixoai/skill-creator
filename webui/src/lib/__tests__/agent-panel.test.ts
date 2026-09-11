@@ -112,6 +112,7 @@ describe("agent panel store (task 3.x)", () => {
       sessionId: "agent-s1",
       text: "second",
       images: [],
+      files: [],
     });
     expect(agentSession.items.some((item) => item.kind === "user" && item.text === "second")).toBe(
       true,
@@ -335,10 +336,55 @@ describe("agent panel store (task 3.x)", () => {
       sessionId: "agent-s1",
       text: "look",
       images: [{ mediaType: "image/png", data: "aGk=", name: "dot.png" }],
+      files: [],
     });
     // 乐观气泡带图片预览。
     const bubble = agentSession.items.find((item) => item.kind === "user");
     expect(bubble).toMatchObject({ images: ["data:image/png;base64,aGk="] });
+  });
+
+  it("renders todo snapshots latest-wins and extracts turn usage", async () => {
+    let polls = 0;
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockImplementation(async () => {
+            polls += 1;
+            if (polls === 1) {
+              return {
+                frames: [
+                  frame(1, "turn-start"),
+                  frame(2, "todo-snapshot", {
+                    payload: { todos: [{ content: "draft", status: "in_progress" }] },
+                  }),
+                  frame(3, "assistant-text", {
+                    text: "ok",
+                    payload: { usage: { inputTokens: 1200, outputTokens: 34 } },
+                  }),
+                ],
+                status: "idle",
+              };
+            }
+            return {
+              frames: [
+                frame(4, "todo-snapshot", {
+                  payload: { todos: [{ content: "draft", status: "completed" }] },
+                }),
+              ],
+              status: "idle",
+            };
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    expect(agentSession.items.filter((item) => item.kind === "todo")).toHaveLength(1);
+    expect(agentSession.lastUsage).toEqual({ inputTokens: 1200, outputTokens: 34 });
+    await pollAgentStream();
+    const todos = agentSession.items.filter((item) => item.kind === "todo");
+    expect(todos).toHaveLength(1);
+    expect((todos[0] as { todos: Array<{ status: string }> }).todos[0]?.status).toBe("completed");
   });
 
   it("keeps polling while an approval is pending and stops after it resolves (terminal semantics)", async () => {

@@ -196,7 +196,7 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           session: await domain.agentSessions.create(input),
         })),
         prompt: rpc.agent.session.prompt.handler(async ({ input }) => {
-          await domain.agentSessions.prompt(input.sessionId, input.text, input.images);
+          await domain.agentSessions.prompt(input.sessionId, input.text, input.images, input.files);
           return { accepted: true as const };
         }),
         cancel: rpc.agent.session.cancel.handler(({ input }) => {

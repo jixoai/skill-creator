@@ -37,7 +37,7 @@ export interface PanelApprovalQuestion {
 export type PanelItem =
   | { kind: "turn"; seq: number; label: string }
   | { kind: "status"; seq: number; text: string }
-  | { kind: "user"; seq: number; text: string; images?: string[] }
+  | { kind: "user"; seq: number; text: string; images?: string[]; files?: string[] }
   | { kind: "assistant"; seq: number; text: string; streaming: boolean }
   | { kind: "reasoning"; seq: number; text: string; streaming: boolean }
   | { kind: "tool"; seq: number; toolName: string; phase: "call" | "result"; payload?: unknown }
@@ -47,7 +47,8 @@ export type PanelItem =
       questions: PanelApprovalQuestion[];
       resolved: boolean;
     }
-  | { kind: "mode"; seq: number; from: DshAgentMode; to: DshAgentMode };
+  | { kind: "mode"; seq: number; from: DshAgentMode; to: DshAgentMode }
+  | { kind: "todo"; seq: number; todos: Array<{ content: string; status: string }> };
 
 const sessionsGate = createRequestGenerationGate(getConnectionGeneration);
 const createGate = createRequestGenerationGate(getConnectionGeneration);
@@ -80,6 +81,8 @@ export const agentSession = $state({
   error: null as string | null,
   /** prompt 提交失败（独立于轮询错误：轮询成功不得清掉它，由下次成功提交清除）。 */
   promptError: null as string | null,
+  /** 最近一次模型回合的 token 用量（assistant-text payload.usage 投影）。 */
+  lastUsage: null as { inputTokens: number; outputTokens: number } | null,
 });
 
 /** 会话列表投影。 */
@@ -201,6 +204,7 @@ function resetSessionView(
   agentSession.items = [];
   agentSession.cursor = 0;
   agentSession.error = null;
+  agentSession.lastUsage = null;
   pendingUserEcho = [];
 }
 
@@ -238,9 +242,12 @@ export async function setAgentSessionMode(mode: DshAgentMode): Promise<boolean> 
 export async function sendAgentPrompt(
   text: string,
   images: Array<{ mediaType: string; data: string; name?: string; preview?: string }> = [],
+  files: Array<{ name: string; data: string }> = [],
 ): Promise<void> {
   const sessionId = agentSession.sessionId;
-  if (!sessionId || (text.trim().length === 0 && images.length === 0)) return;
+  if (!sessionId || (text.trim().length === 0 && images.length === 0 && files.length === 0)) {
+    return;
+  }
   const request = promptGate.issue();
   agentSession.sending = true;
   // 乐观追加用户消息（失败时由错误状态覆盖）；同文本 user-text 帧到达时出队去重。
@@ -255,6 +262,7 @@ export async function sendAgentPrompt(
           ),
         }
       : {}),
+    ...(files.length > 0 ? { files: files.map((file) => file.name) } : {}),
   });
   pendingUserEcho.push(text);
   try {
@@ -266,6 +274,7 @@ export async function sendAgentPrompt(
         data: image.data,
         ...(image.name ? { name: image.name } : {}),
       })),
+      files,
     });
     if (!request.isCurrent()) return;
     agentSession.promptError = null;
@@ -456,6 +465,21 @@ function appendFrame(frame: DshSessionStreamFrame): void {
       }
       break;
     }
+    case "todo-snapshot": {
+      // 全量快照 latest-wins：移除旧 todo 项后追加新快照（重放/直播一致）。
+      const todos = (frame.payload as { todos?: unknown }).todos;
+      if (Array.isArray(todos)) {
+        for (let i = agentSession.items.length - 1; i >= 0; i--) {
+          if (agentSession.items[i]?.kind === "todo") agentSession.items.splice(i, 1);
+        }
+        agentSession.items.push({
+          kind: "todo",
+          seq: frame.seq,
+          todos: todos as Array<{ content: string; status: string }>,
+        });
+      }
+      break;
+    }
     case "session-title": {
       // 内核自动命名：即时更新会话列表标题（不进对话流；持久回放走转录 meta）。
       const title = typeof frame.text === "string" ? frame.text.trim() : "";
@@ -469,6 +493,26 @@ function appendFrame(frame: DshSessionStreamFrame): void {
     case "assistant-text": {
       if (typeof frame.text === "string" && frame.text.length > 0) {
         finalizeStreamingItem("assistant", frame.seq, frame.text);
+        // usage 快照：终帧 payload.usage（inputTokens/outputTokens 或 provider 别名）。
+        const usage = (
+          frame.payload as
+            | {
+                usage?: {
+                  inputTokens?: number;
+                  outputTokens?: number;
+                  promptTokens?: number;
+                  completionTokens?: number;
+                };
+              }
+            | undefined
+        )?.usage;
+        if (usage) {
+          const input = usage.inputTokens ?? usage.promptTokens ?? 0;
+          const output = usage.outputTokens ?? usage.completionTokens ?? 0;
+          if (input > 0 || output > 0) {
+            agentSession.lastUsage = { inputTokens: input, outputTokens: output };
+          }
+        }
       }
       break;
     }

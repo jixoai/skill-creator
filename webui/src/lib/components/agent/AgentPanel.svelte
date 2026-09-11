@@ -20,6 +20,10 @@
   import IconStop from "@lucide/svelte/icons/square";
   import IconChevron from "@lucide/svelte/icons/chevron-right";
   import IconPaperclip from "@lucide/svelte/icons/paperclip";
+  import IconCopy from "@lucide/svelte/icons/copy";
+  import IconPen from "@lucide/svelte/icons/pen-line";
+  import IconRefresh from "@lucide/svelte/icons/refresh-cw";
+  import IconFile from "@lucide/svelte/icons/file";
   import { showToast } from "$lib/toast.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Textarea } from "$lib/components/ui/textarea";
@@ -54,6 +58,9 @@
     }>
   >([]);
   let fileInput = $state<HTMLInputElement | null>(null);
+  /** 待发文件附件（非图片，≤2 个、各 ≤512KiB）。 */
+  let pendingFiles = $state<Array<{ name: string; data: string }>>([]);
+  let docInput = $state<HTMLInputElement | null>(null);
 
   // 新帧到达时滚动到底（用户向上翻阅时不打扰）。markstream batch 渲染会在帧
   // 落地后继续长高气泡，且单个代码块的一次性增高可超过 160px 跟随门，故判定
@@ -77,14 +84,66 @@
     return () => observer.disconnect();
   });
 
+  /** 消息级操作（差距-1）：复制 / 编辑回填 / 重发。 */
+  async function copyText(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Copied.");
+    } catch {
+      showToast("Copy failed — clipboard unavailable.");
+    }
+  }
+
+  function editIntoComposer(text: string): void {
+    composerText = text;
+    document
+      .querySelector<HTMLTextAreaElement>('aside[aria-label="Agent panel"] textarea')
+      ?.focus();
+  }
+
+  function retryPrompt(text: string): void {
+    if (agentSession.sending) return;
+    void sendAgentPrompt(text);
+  }
+
+  function compact(): void {
+    if (agentSession.sending || !agentSession.sessionId) return;
+    // 内核 /compact 命令（daemon 端分流，不进 LLM）。
+    void sendAgentPrompt("/compact");
+  }
+
+  function formatTokens(count: number): string {
+    if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
+    return String(count);
+  }
+
   function submit(): void {
     const text = composerText.trim();
-    if (text.length === 0 && attachments.length === 0) return;
+    if (text.length === 0 && attachments.length === 0 && pendingFiles.length === 0) return;
     if (agentSession.sending) return;
     const images = attachments;
+    const files = pendingFiles;
     composerText = "";
     attachments = [];
-    void sendAgentPrompt(text, images);
+    pendingFiles = [];
+    void sendAgentPrompt(text, images, files);
+  }
+
+  /** 读入任意文件为附件（≤2 个、各 ≤512KiB；图片走图片通道）。 */
+  async function addDocFiles(list: FileList | File[]): Promise<void> {
+    for (const file of list) {
+      if (file.type.startsWith("image/")) continue;
+      if (pendingFiles.length >= 2) {
+        showToast("At most 2 file attachments per message.");
+        return;
+      }
+      if (file.size > 512 * 1024) {
+        showToast(`"${file.name}" exceeds the 512KiB limit.`);
+        continue;
+      }
+      const data = await fileToBase64(file);
+      pendingFiles = [...pendingFiles, { name: file.name, data }];
+    }
   }
 
   /** 读入图片文件（类型/数量/大小守卫；base64 + 预览 dataURL）。 */
@@ -130,13 +189,12 @@
   }
 
   function onDrop(event: DragEvent): void {
-    const files = [...(event.dataTransfer?.files ?? [])].filter((file) =>
-      file.type.startsWith("image/"),
-    );
-    if (files.length > 0) {
-      event.preventDefault();
-      void addImageFiles(files);
-    }
+    const all = [...(event.dataTransfer?.files ?? [])];
+    const images = all.filter((file) => file.type.startsWith("image/"));
+    const docs = all.filter((file) => !file.type.startsWith("image/"));
+    if (all.length > 0) event.preventDefault();
+    if (images.length > 0) void addImageFiles(images);
+    if (docs.length > 0) void addDocFiles(docs);
   }
 
   function onComposerKeydown(event: KeyboardEvent): void {
@@ -260,6 +318,30 @@
     </button>
   </header>
 
+  {#if agentSession.sessionId}
+    <!-- 差距-2：上下文状态（最近回合 token 用量 + 手动 compact 入口）。 -->
+    <div
+      class="flex items-center justify-between gap-2 border-b border-border px-3 py-1 text-[10px] text-muted-foreground"
+      aria-label="Context status"
+    >
+      <span>
+        {#if agentSession.lastUsage}
+          last turn: {formatTokens(agentSession.lastUsage.inputTokens)} in ·
+          {formatTokens(agentSession.lastUsage.outputTokens)} out
+        {:else}
+          no turns yet
+        {/if}
+      </span>
+      <button
+        class="underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground disabled:opacity-50"
+        title="Compact the conversation history (kernel /compact)"
+        disabled={agentSession.sending || agentSession.status === "running"}
+        onclick={compact}
+      >
+        compact
+      </button>
+    </div>
+  {/if}
   <div bind:this={scrollBody} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
     {#if !agentSession.sessionId}
       <!-- 空态 = 模式启动建议（回答「跟它说什么」）：一键按模式开聊。 -->
@@ -306,7 +388,38 @@
         {:else if item.kind === "status"}
           <div class="px-1 text-[11px] text-muted-foreground">{item.text}</div>
         {:else if item.kind === "user"}
-          <div class="ml-auto max-w-[85%] space-y-1">
+          <div class="group/msg relative ml-auto max-w-[85%] space-y-1">
+            <div
+              class="absolute -top-1 right-0 z-10 flex gap-0.5 rounded-md border border-border bg-background px-0.5 py-0.5 opacity-0 shadow-sm transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100"
+              role="toolbar"
+              aria-label="Message actions"
+            >
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Copy"
+                aria-label="Copy message"
+                onclick={() => void copyText(item.text)}
+              >
+                <IconCopy class="h-3 w-3" />
+              </button>
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Edit and resend"
+                aria-label="Edit message"
+                onclick={() => editIntoComposer(item.text)}
+              >
+                <IconPen class="h-3 w-3" />
+              </button>
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Resend this prompt"
+                aria-label="Resend message"
+                disabled={agentSession.sending}
+                onclick={() => retryPrompt(item.text)}
+              >
+                <IconRefresh class="h-3 w-3" />
+              </button>
+            </div>
             {#if item.images && item.images.length > 0}
               <div class="flex flex-wrap justify-end gap-1">
                 {#each item.images as src, index (index)}
@@ -318,6 +431,17 @@
                 {/each}
               </div>
             {/if}
+            {#if item.files && item.files.length > 0}
+              <div class="flex flex-wrap justify-end gap-1">
+                {#each item.files as name, index (index)}
+                  <span
+                    class="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-[10px]"
+                  >
+                    📄 {name}
+                  </span>
+                {/each}
+              </div>
+            {/if}
             {#if item.text.length > 0}
               <div class="rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs whitespace-pre-wrap">
                 {item.text}
@@ -326,7 +450,10 @@
           </div>
         {:else if item.kind === "reasoning"}
           <!-- thinking 折叠面：默认收起；流式时摘要带进行指示，终帧后可展开回看。 -->
-          <details class="group rounded-md border border-border/70 bg-muted/20">
+          <details
+            class="group rounded-md border border-border/70 bg-muted/20"
+            open={item.streaming}
+          >
             <summary
               class="flex cursor-pointer list-none items-center gap-1 px-2 py-1 text-[11px] text-muted-foreground select-none [&::-webkit-details-marker]:hidden"
             >
@@ -340,6 +467,32 @@
               {item.text}
             </div>
           </details>
+        {:else if item.kind === "todo"}
+          <!-- 差距-3：Todo 快照卡（latest-wins；pending/in_progress/completed 三态）。 -->
+          <div class="rounded-lg border border-border bg-muted/20 p-2" aria-label="Agent todo list">
+            <p class="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Tasks
+            </p>
+            <ul class="space-y-0.5">
+              {#each item.todos as todo, index (index)}
+                <li
+                  class="flex items-start gap-1.5 text-[11px] {todo.status === 'completed'
+                    ? 'text-muted-foreground line-through'
+                    : ''}"
+                >
+                  <span
+                    class="mt-0.5 h-3 w-3 shrink-0 rounded-full border {todo.status === 'completed'
+                      ? 'border-primary bg-primary/20'
+                      : todo.status === 'in_progress'
+                        ? 'border-primary'
+                        : 'border-border'}"
+                    aria-hidden="true"
+                  ></span>
+                  <span class="min-w-0 break-words">{todo.content}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
         {:else if item.kind === "assistant"}
           <!-- markstream 增量渲染：内容增长只重解析尾部、不完整 fence/强调容错、
                离屏节点延迟；htmlPolicy=escape 锁死模型输出的 HTML 直通（与既有
@@ -347,10 +500,26 @@
                结构按流式容错渲染；终帧到达后置 true 收敛。密度覆写在下方 scoped
                style：库默认面向文档页（16px/IBM Plex/clamp 巨标题），且 Tailwind
                preflight 会剥掉列表 marker，须收敛回 12px 面板排版。 -->
-          <div
-            class="ms-md rounded-lg border border-border px-2.5 py-1.5 text-xs [&_a]:text-primary"
-          >
-            <MarkdownRender content={item.text} htmlPolicy="escape" final={!item.streaming} />
+          <div class="group/msg relative max-w-full">
+            <div
+              class="absolute -top-1 right-0 z-10 flex gap-0.5 rounded-md border border-border bg-background px-0.5 py-0.5 opacity-0 shadow-sm transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100"
+              role="toolbar"
+              aria-label="Message actions"
+            >
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Copy"
+                aria-label="Copy message"
+                onclick={() => void copyText(item.text)}
+              >
+                <IconCopy class="h-3 w-3" />
+              </button>
+            </div>
+            <div
+              class="ms-md rounded-lg border border-border px-2.5 py-1.5 text-xs [&_a]:text-primary"
+            >
+              <MarkdownRender content={item.text} htmlPolicy="escape" final={!item.streaming} />
+            </div>
           </div>
         {:else if item.kind === "tool"}
           <AgentToolRow toolName={item.toolName} phase={item.phase} payload={item.payload} />
@@ -374,6 +543,24 @@
   {/if}
 
   <footer class="border-t border-border p-2">
+    {#if pendingFiles.length > 0}
+      <div class="mb-1.5 flex flex-wrap gap-1.5" aria-label="Pending file attachments">
+        {#each pendingFiles as file, index (index)}
+          <span
+            class="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-[10px]"
+          >
+            📄 {file.name}
+            <button
+              class="text-muted-foreground hover:text-destructive"
+              aria-label="Remove file {file.name}"
+              onclick={() => (pendingFiles = pendingFiles.filter((_, i) => i !== index))}
+            >
+              ×
+            </button>
+          </span>
+        {/each}
+      </div>
+    {/if}
     {#if attachments.length > 0}
       <div class="mb-1.5 flex flex-wrap gap-1.5" aria-label="Pending attachments">
         {#each attachments as attachment, index (index)}
@@ -415,6 +602,26 @@
         onclick={() => fileInput?.click()}
       >
         <IconPaperclip class="h-4 w-4" />
+      </button>
+      <input
+        bind:this={docInput}
+        type="file"
+        multiple
+        class="hidden"
+        aria-label="Attach files"
+        onchange={(event) => {
+          if (event.currentTarget.files) void addDocFiles(event.currentTarget.files);
+          event.currentTarget.value = "";
+        }}
+      />
+      <button
+        class="relative mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
+        title="Attach a file (text, config, data — ≤512KiB)"
+        aria-label="Attach file"
+        disabled={!agentSession.sessionId}
+        onclick={() => docInput?.click()}
+      >
+        <IconFile class="h-4 w-4" />
       </button>
       <Textarea
         rows={2}

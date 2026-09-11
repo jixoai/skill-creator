@@ -256,6 +256,34 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           payload: redactDshPayload(data),
         };
       }
+      case "todo/write": {
+        // todo/write 是全量快照（latest wins）：投影 todos 数组，UI 渲染 checklist。
+        const todos = (data as { todos?: unknown }).todos;
+        if (!Array.isArray(todos)) return null;
+        const cleaned = todos
+          .map((todo) =>
+            typeof todo === "object" && todo !== null
+              ? {
+                  content:
+                    typeof (todo as { content?: unknown }).content === "string"
+                      ? (todo as { content: string }).content
+                      : "",
+                  status:
+                    (todo as { status?: unknown }).status === "completed" ||
+                    (todo as { status?: unknown }).status === "in_progress"
+                      ? ((todo as { status: string }).status as "completed" | "in_progress")
+                      : "pending",
+                }
+              : null,
+          )
+          .filter((todo): todo is { content: string; status: string } => todo !== null);
+        return {
+          ...base,
+          seq: entry.frameSeq++,
+          kind: "todo-snapshot",
+          payload: redactDshPayload({ todos: cleaned }),
+        };
+      }
       case "session/title": {
         // 内核 session-title 行（dsh-base 自带，首 prompt 后经辅助 LLM 生成、失败
         // 回退首词截断）投出的标题：更新 live title + 转录 meta，并以帧驱动面板
@@ -654,6 +682,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       sessionId: string,
       text: string,
       images: Array<{ mediaType: string; data: string; name?: string }> = [],
+      files: Array<{ name: string; data: string }> = [],
     ): Promise<void> {
       if (text.length > PROMPT_MAX_CHARS) {
         throw new DomainError(
@@ -664,6 +693,31 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       let entry = live.get(sessionId);
       if (!entry) {
         entry = await reviveSession(sessionId);
+      }
+      // slash 命令分流（差距-2 2026-09-12）："/compact" 等经内核 ctx.commands
+      // 执行（不进 LLM）；非命令（execute 返回 undefined）回落普通消息。
+      if (text.startsWith("/") && images.length === 0 && files.length === 0) {
+        const commands = (
+          requireKernel().ctx as Context & {
+            commands?: {
+              execute: (
+                agent: unknown,
+                line: string,
+                attachments: readonly unknown[],
+                signal: AbortSignal,
+              ) => Promise<unknown>;
+            };
+          }
+        ).commands;
+        if (commands) {
+          const executed = await commands.execute(
+            entry.agent,
+            text,
+            [],
+            new AbortController().signal,
+          );
+          if (executed !== undefined) return;
+        }
       }
       // 多模态（迭代四 2026-09-11）：wire 图片经内核 attachment 准入升格 durable
       // ref（校验解码字节/大小），消息 content = 文本块 + image 块。attachments
@@ -695,6 +749,22 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           })),
         );
         content.push(...admitted.map((part) => ({ ...(part as object) })));
+        // 文件附件：base64 → durable ref（大小/编码由 attachment 层校验）。
+        const admitFile = (
+          attachments as {
+            admitEncodedFile?: (input: { data: string; name?: string }) => Promise<unknown>;
+          }
+        ).admitEncodedFile;
+        if (!admitFile && files.length > 0) {
+          throw new DomainError(
+            "INVALID_OPERATION",
+            "file attachments require the kernel attachment service (not mounted)",
+          );
+        }
+        for (const file of files) {
+          const ref = await admitFile!.call(attachments, { data: file.data, name: file.name });
+          content.push({ type: "file", attachment: ref });
+        }
       }
       entry.agent.followup(
         createUserMessage({
