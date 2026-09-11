@@ -233,7 +233,7 @@
             >
               <IconMessage class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span class="min-w-0 flex-1 truncate text-xs">
-                {session.title || session.sessionId.slice(0, 14)}
+                {session.title || "Untitled session"}
               </span>
               <span
                 class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"

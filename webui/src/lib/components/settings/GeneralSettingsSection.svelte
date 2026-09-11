@@ -56,8 +56,9 @@
       <p class="text-[10px] text-destructive" role="alert">{connectionState.error}</p>
     {:else}
       <p class="text-[10px] text-muted-foreground">
-        The panel reconnects automatically; keep the daemon running via the tray or
-        <code class="rounded bg-muted px-1 font-mono">skill-creator start</code>.
+        The panel reconnects automatically; keep the daemon running via the tray or the <code
+          class="rounded bg-muted px-1 font-mono">skill-creator start</code
+        > command.
       </p>
     {/if}
   </section>

@@ -121,7 +121,10 @@
       value={agentSession.sessionId ?? ""}
       onchange={(event) => selectAgentSession(event.currentTarget.value)}
     >
-      {#if agentSessionsList.sessions.length === 0}
+      {#if agentSession.sessionId === null}
+        <option value="">New session…</option>
+      {/if}
+      {#if agentSessionsList.sessions.length === 0 && agentSession.sessionId !== null}
         <option value="">No sessions</option>
       {/if}
       {#each agentSessionsList.sessions as session (session.sessionId)}
@@ -143,6 +146,9 @@
       value={agentSession.mode ?? ""}
       onchange={(event) => void setAgentSessionMode(event.currentTarget.value as DshAgentMode)}
     >
+      {#if !agentSession.sessionId}
+        <option value="">Start a session</option>
+      {/if}
       {#each DSH_AGENT_MODES as entry (entry.id)}
         <option value={entry.id}>
           {entry.label}{entry.tokenHeavy ? " (heavy)" : ""}
