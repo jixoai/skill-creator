@@ -5,7 +5,8 @@
  * composition rows 与 capability matrix。missing packages, version mismatch and
  * missing plugin rows return typed unavailable; no implicit fallback。」
  * 事实源：docs/research/2026-09-06-dsh-integration.md（官方仓库 commit
- * d347e703 的源码审计）与 npm 上实际安装的 0.1.2-rc.1 包。
+ * d347e703 的 0.1.3-alpha.1 源码审计）与 npm 上实际安装的 0.1.5-rc.2 包
+ * （2026-09-11 升级：行 id 与 seam 经 bootDshKernel 激活断言实测兼容）。
  *
  * 正交意图：
  *   [1] 锁定声明：五个官方 package 的精确版本 + 审计 commit（运行时只认这套组合）。
@@ -18,11 +19,11 @@ import { z } from "zod";
 
 /** 锁定的官方 package 集合（npm 精确版本；与审计 commit 的源码同族）。 */
 export const DSH_LOCKED_PACKAGES = {
-  "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
-  "@deepseek-ai/dsh-agent-loop": "0.1.2-rc.1",
-  "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
-  "@deepseek-ai/dsh-system-prompt": "0.1.2-rc.1",
-  "@deepseek-ai/dsh-session": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+  "@deepseek-ai/dsh-agent-loop": "0.1.5-rc.2",
+  "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+  "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
+  "@deepseek-ai/dsh-session": "0.1.5-rc.2",
 } as const;
 /** 锁定 package 名集合。 */
 export type DshLockedPackageName = keyof typeof DSH_LOCKED_PACKAGES;
@@ -35,11 +36,11 @@ export const DSH_AUDITED_COMMIT = "d347e703908d0406b7a7ef80e3a0e594d86b2215";
  * peer 闭包四包（README 依赖事实，2026-09-08 实测）。漂移 → typed unavailable。
  */
 export const DSH_MCP_BRIDGE_PACKAGES = {
-  "@deepseek-ai/dsh-mcp-client": "0.1.2-rc.1",
-  "@deepseek-ai/dsh-scope": "0.1.2-rc.1",
-  "@deepseek-ai/dsh-timeout": "0.1.2-rc.1",
-  "@deepseek-ai/dsh-attachment": "0.1.2-rc.1",
-  "@deepseek-ai/dsh-subprocess": "0.1.2-rc.1",
+  "@deepseek-ai/dsh-mcp-client": "0.1.5-rc.2",
+  "@deepseek-ai/dsh-scope": "0.1.5-rc.2",
+  "@deepseek-ai/dsh-timeout": "0.1.5-rc.2",
+  "@deepseek-ai/dsh-attachment": "0.1.5-rc.2",
+  "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2",
 } as const;
 /** MCP 桥锁定包名集合。 */
 export type DshMcpBridgePackageName = keyof typeof DSH_MCP_BRIDGE_PACKAGES;
