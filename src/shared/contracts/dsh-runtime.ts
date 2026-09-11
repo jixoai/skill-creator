@@ -217,6 +217,8 @@ export const ModelProviderCatalogEntrySchema = z.object({
   label: z.string().min(1),
   api: z.string().min(1),
   baseURL: z.string().min(1),
+  /** provider 图标（内联 dataURL；无图标为 null → UI 字母头像回退）。 */
+  icon: z.string().nullable(),
   models: z
     .array(
       z.object({

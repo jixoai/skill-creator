@@ -21,6 +21,8 @@ describe("model provider catalog", () => {
       expect(entry.label.length).toBeGreaterThan(0);
       expect(entry.baseURL).toMatch(/^https?:\/\//);
       expect(entry.models.length).toBeGreaterThan(0);
+      // icon：dataURL 或 null（字母回退），不可能是外链。
+      if (entry.icon !== null) expect(entry.icon).toMatch(/^data:image\/svg\+xml;base64,/);
     }
   });
 
@@ -41,6 +43,18 @@ describe("model provider catalog", () => {
     }
     const anthropic = providers.find((entry) => entry.provider === "anthropic");
     expect(anthropic?.models.some((model) => model.image)).toBe(true);
+    expect(anthropic?.icon).toMatch(/^data:image\/svg\+xml;base64,/);
+    // 用户点名厂商必须带图标（models.dev 有 logo）。
+    for (const expected of [
+      "zai-coding-cn",
+      "moonshotai-cn",
+      "minimax-cn",
+      "deepseek",
+      "openai",
+      "google",
+    ]) {
+      expect(providers.find((entry) => entry.provider === expected)?.icon).toBeTruthy();
+    }
   });
 
   it("pins known providers first and excludes internal routes", () => {

@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import type { ModelProviderCatalogEntry } from "../shared/contracts/dsh-runtime.js";
+import { PROVIDER_ICONS } from "../shared/provider-icons.generated.js";
 import { DomainError } from "./domain-error.js";
 
 /** 重点 provider 置顶顺序 + 显示名覆写（2026-09-11 用户点名）。 */
@@ -138,6 +139,7 @@ export function listModelProviders(): ModelProviderCatalogEntry[] {
       label: labelOf(provider),
       api,
       baseURL,
+      icon: PROVIDER_ICONS[provider] ?? null,
       models: models.map((model) => ({
         id: model.id,
         ...(model.name ? { name: model.name } : {}),

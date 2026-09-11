@@ -12,6 +12,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
+  import ModelTagsInput from "./ModelTagsInput.svelte";
   import type { DshModelRoute, ModelProviderCatalogEntry } from "$shared/contracts/dsh-runtime.js";
   import {
     agentRuntimeConfig,
@@ -24,6 +25,9 @@
   import { getConnectionGeneration } from "$lib/stores/connection.svelte";
 
   let rejection = $state<string | null>(null);
+  /** 加路由成功提示（引导粘 key）。 */
+  let routeAddedFor = $state<string | null>(null);
+  let keySection = $state<HTMLElement | null>(null);
   let model = $state("");
   let reasoningEffort = $state("");
   let apiKeyDraft = $state("");
@@ -41,7 +45,7 @@
   let routeName = $state("");
   let routeBaseURL = $state("");
   let routeApi = $state("anthropic-messages");
-  let routeModels = $state("");
+  let routeModels = $state<string[]>([]);
 
   const catalogGate = createRequestGenerationGate(getConnectionGeneration);
 
@@ -79,6 +83,13 @@
     }
   }
 
+  /** Custom 表单的补全候选：routeName 命中目录 provider 时用该家模型，否则空。 */
+  const customCandidates = $derived.by(() => {
+    const name = routeName.trim();
+    const entry = catalog?.providers.find((provider) => provider.provider === name);
+    return entry?.models ?? [];
+  });
+
   const filtered = $derived.by(() => {
     const needle = filter.trim().toLowerCase();
     const providers = catalog?.providers ?? [];
@@ -106,12 +117,20 @@
       selection &&
       !options.some((option) => option.value === `${selection.provider}::${selection.model}`)
     ) {
+      // 引用不在 Routes 表的路由（env 注入等）：如实标注来源，不伪装成可选路由。
       options.unshift({
         value: `${selection.provider}::${selection.model}`,
-        label: `${selection.provider} · ${selection.model} (current route)`,
+        label: `${selection.provider} · ${selection.model} (outside Routes)`,
       });
     }
     return options;
+  });
+
+  /** 活动模型引用了 Routes 之外的路由（env 注入）→ 下拉警示。 */
+  const activeOutsideRoutes = $derived.by(() => {
+    if (!view || !model.includes("::")) return false;
+    const [provider] = model.split("::");
+    return !(view.settings.modelRoutes ?? []).some((route) => route.provider === provider);
   });
 
   const modelDirty = $derived(
@@ -124,6 +143,11 @@
   const credentialConfigured = $derived(
     view?.providers.find((item) => item.provider === keyTarget)?.configured ?? false,
   );
+
+  /** 该 provider 已有路由（画廊卡片 Added 徽标 + route 行 key 状态用）。 */
+  function routeOf(provider: string): DshModelRoute | undefined {
+    return (view?.settings.modelRoutes ?? []).find((route) => route.provider === provider);
+  }
 
   /** 卡片头像底色（provider id 确定性色相）。 */
   function avatarHue(provider: string): number {
@@ -168,13 +192,6 @@
     selectedModels = new Set(picks);
   }
 
-  function toggleModel(id: string): void {
-    const next = new Set(selectedModels);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    selectedModels = next;
-  }
-
   async function saveSelectedRoute(): Promise<void> {
     const entry = selected;
     if (!entry || selectedModels.size === 0) {
@@ -195,25 +212,15 @@
     if (await apply({ modelRoutes: [...routes, route] })) {
       model = `${entry.provider}::${[...selectedModels][0]}`;
       selected = null;
+      routeAddedFor = entry.label;
+      keySection?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  }
-
-  function presetLocal(): void {
-    selected = null;
-    routeFormOpen = true;
-    routeName = "local-gateway";
-    routeBaseURL = "http://localhost:20002/anthropic";
-    routeApi = "anthropic-messages";
-    routeModels = "glm-5.3-flash";
   }
 
   async function saveCustomRoute(): Promise<void> {
     const provider = routeName.trim();
     const baseURL = routeBaseURL.trim();
-    const ids = routeModels
-      .split(",")
-      .map((id) => id.trim())
-      .filter((id) => id.length > 0);
+    const ids = routeModels;
     if (provider.length === 0 || !/^https?:\/\//.test(baseURL) || ids.length === 0) {
       rejection = "Custom route needs a name, an http(s) base URL, and model ids.";
       return;
@@ -233,7 +240,7 @@
       routeFormOpen = false;
       routeName = "";
       routeBaseURL = "";
-      routeModels = "";
+      routeModels = [];
     }
   }
 
@@ -262,13 +269,24 @@
   <div>
     <h3 class="text-sm font-medium">Model</h3>
     <p class="mt-0.5 text-[11px] text-muted-foreground">
-      Routes and keys apply immediately — hot-reloaded into the kernel.
+      Changes apply immediately to your agent sessions — no restart needed.
     </p>
   </div>
 
   {#if view}
     <section class="space-y-1.5" aria-label="Active model">
       <span class="text-[11px] font-medium text-muted-foreground">Active model</span>
+      {#if (view.settings.modelRoutes ?? []).length === 0}
+        <p class="text-[10px] text-muted-foreground">
+          No routes yet — pick a provider under “Add a route” below, or use + Custom.
+        </p>
+      {/if}
+      {#if activeOutsideRoutes}
+        <p class="text-[10px] text-amber-600">
+          Current model rides a route outside this list (env-provided); pick a route below to move
+          it under management.
+        </p>
+      {/if}
       <div class="grid grid-cols-[1fr_140px] gap-1.5">
         <label class="space-y-0.5">
           <span class="text-[10px] text-muted-foreground">Model</span>
@@ -283,7 +301,10 @@
             {/each}
           </select>
         </label>
-        <label class="space-y-0.5">
+        <label
+          class="space-y-0.5"
+          title="Provider-specific reasoning effort (optional, e.g. low / medium / high)"
+        >
           <span class="text-[10px] text-muted-foreground">Effort</span>
           <Input
             class="h-8 text-xs"
@@ -309,38 +330,54 @@
     <section class="space-y-1.5" aria-label="Model routes">
       <div class="flex items-center justify-between">
         <span class="text-[11px] font-medium text-muted-foreground">Routes</span>
-        <div class="flex gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            class="h-6 px-2 text-[10px]"
-            onclick={() => presetLocal()}
-          >
-            + Local
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            class="h-6 px-2 text-[10px]"
-            onclick={() => {
-              selected = null;
-              routeFormOpen = true;
-            }}
-          >
-            + Custom
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          class="h-6 px-2 text-[10px]"
+          onclick={() => {
+            selected = null;
+            routeFormOpen = true;
+          }}
+        >
+          + Custom
+        </Button>
       </div>
       {#each view.settings.modelRoutes as route (route.provider)}
+        {@const routeIcon = catalog?.providers.find((p2) => p2.provider === route.provider)?.icon}
+        {@const keyReady = view.providers.some(
+          (p2) => p2.provider === route.provider && p2.configured,
+        )}
         <div class="flex items-center gap-2 rounded-md border border-border p-2">
+          {#if routeIcon}
+            <img src={routeIcon} alt="" class="h-5 w-5 shrink-0 object-contain dark:invert" />
+          {/if}
           <div class="min-w-0 flex-1">
             <p class="truncate text-xs font-medium">{route.provider}</p>
-            <p class="truncate text-[10px] text-muted-foreground">
-              {route.baseURL} · {route.models.map((entry) => entry.id).join(", ")}
+            <p
+              class="truncate text-[10px] text-muted-foreground"
+              title={route.models.map((entry) => entry.id).join(", ")}
+            >
+              {route.baseURL.replace(/^https?:\/\//, "")} · {route.models
+                .slice(0, 2)
+                .map((entry) => entry.id)
+                .join(", ")}{route.models.length > 2 ? ` +${route.models.length - 2} more` : ""}
             </p>
           </div>
           <button
-            class="text-[10px] text-muted-foreground transition-colors hover:text-destructive"
+            class="shrink-0 rounded px-1 text-[9px] underline decoration-dotted underline-offset-2 transition-colors {keyReady
+              ? 'bg-primary/10 text-primary'
+              : 'bg-amber-500/15 text-amber-600 hover:bg-amber-500/25'}"
+            title={keyReady ? "API key configured" : "API key missing — click to add it below"}
+            aria-label="Key status for {route.provider}"
+            onclick={() => {
+              model = `${route.provider}::${route.models[0]?.id ?? ""}`;
+              keySection?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+          >
+            {keyReady ? "key ✓" : "add key →"}
+          </button>
+          <button
+            class="shrink-0 text-[10px] text-muted-foreground transition-colors hover:text-destructive"
             aria-label="Remove route {route.provider}"
             disabled={agentRuntimeConfig.updating}
             onclick={() => void removeRoute(route.provider)}
@@ -359,9 +396,15 @@
 
     <section class="space-y-1.5" aria-label="Provider gallery">
       <div class="flex items-center justify-between gap-2">
-        <span class="text-[11px] font-medium text-muted-foreground">Providers</span>
+        <div>
+          <span class="text-[11px] font-medium text-muted-foreground">Add a route</span>
+          <p class="text-[10px] text-muted-foreground">
+            Click a provider to add it with its catalog models ({catalog?.providers.length ?? 0}
+            providers, from models.dev).
+          </p>
+        </div>
         <Input
-          class="h-7 w-44 text-xs"
+          class="h-7 w-44 shrink-0 text-xs"
           aria-label="Filter providers"
           placeholder="Filter providers…"
           bind:value={filter}
@@ -372,8 +415,10 @@
       {:else if catalog === null}
         <p class="py-3 text-center text-[10px] text-muted-foreground">Loading catalog…</p>
       {:else if selected}
-        <div class="space-y-1.5 rounded-md border border-border bg-muted/20 p-2">
-          <div class="flex items-start justify-between gap-2">
+        <div
+          class="flex max-h-[52vh] flex-col gap-1.5 rounded-md border border-border bg-muted/20 p-2"
+        >
+          <div class="flex shrink-0 items-start justify-between gap-2">
             <div class="min-w-0">
               <p class="truncate text-xs font-medium">{selected.label}</p>
               <p class="truncate text-[10px] text-muted-foreground">{selected.baseURL}</p>
@@ -386,30 +431,20 @@
               Back
             </button>
           </div>
-          <div class="max-h-44 space-y-0.5 overflow-y-auto pr-1">
-            {#each selected.models as entry (entry.id)}
-              <label
-                class="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] hover:bg-muted"
-              >
-                <input
-                  type="checkbox"
-                  class="h-3 w-3"
-                  checked={selectedModels.has(entry.id)}
-                  onchange={() => toggleModel(entry.id)}
-                />
-                <span class="min-w-0 flex-1 truncate">
-                  {entry.name ?? entry.id}
-                  <span class="text-muted-foreground">({entry.id})</span>
-                </span>
-                {#if entry.image}
-                  <span class="shrink-0 rounded bg-primary/10 px-1 text-[9px] text-primary">
-                    vision
-                  </span>
-                {/if}
-              </label>
-            {/each}
+          <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+            <ModelTagsInput
+              selected={[...selectedModels]}
+              candidates={selected.models}
+              placeholder="Pick models for this route…"
+              onchange={(next) => (selectedModels = new Set(next))}
+            />
+            {#if routeOf(selected.provider)}
+              <p class="mt-1.5 text-[10px] text-amber-600">
+                A route for this provider already exists — adding again will be rejected.
+              </p>
+            {/if}
           </div>
-          <div class="flex items-center justify-between">
+          <div class="flex shrink-0 items-center justify-between border-t border-border pt-1.5">
             <span class="text-[10px] text-muted-foreground">{selectedModels.size} selected</span>
             <Button
               size="sm"
@@ -429,21 +464,37 @@
               title={`${entry.baseURL} · ${entry.api}`}
               onclick={() => selectProvider(entry)}
             >
-              <span
-                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"
-                style="background: hsl({avatarHue(entry.provider)} 55% 45%)"
-                aria-hidden="true"
-              >
-                {entry.label.slice(0, 1).toUpperCase()}
-              </span>
+              {#if entry.icon}
+                <img
+                  src={entry.icon}
+                  alt=""
+                  class="h-7 w-7 shrink-0 rounded-md bg-background object-contain p-0.5 dark:invert"
+                />
+              {:else}
+                <span
+                  class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"
+                  style="background: hsl({avatarHue(entry.provider)} 55% 45%)"
+                  aria-hidden="true"
+                >
+                  {entry.label.slice(0, 1).toUpperCase()}
+                </span>
+              {/if}
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-xs font-medium">{entry.label}</span>
                 <span class="block truncate text-[10px] text-muted-foreground">
                   {entry.baseURL.replace(/^https?:\/\//, "")}
                 </span>
               </span>
-              <span class="mr-0.5 shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground">
-                {entry.models.length}
+              <span class="mr-0.5 flex shrink-0 items-center gap-1">
+                {#if routeOf(entry.provider)}
+                  <span class="rounded bg-primary/10 px-1 text-[9px] text-primary">Added ✓</span>
+                {/if}
+                <span
+                  class="rounded bg-muted px-1 text-[9px] text-muted-foreground"
+                  title="{entry.models.length} models in catalog"
+                >
+                  {entry.models.length}
+                </span>
               </span>
             </button>
           {/each}
@@ -472,8 +523,13 @@
             <Input class="h-7 text-xs" aria-label="Route base URL" bind:value={routeBaseURL} />
           </label>
           <label class="block space-y-0.5">
-            <span class="text-[10px] text-muted-foreground">Models (comma-separated)</span>
-            <Input class="h-7 text-xs" aria-label="Route models" bind:value={routeModels} />
+            <span class="text-[10px] text-muted-foreground">Models</span>
+            <ModelTagsInput
+              selected={routeModels}
+              candidates={customCandidates}
+              placeholder="Add model id…"
+              onchange={(next) => (routeModels = next)}
+            />
           </label>
           <div class="flex justify-end gap-1.5">
             <Button
@@ -492,7 +548,18 @@
       {/if}
     </section>
 
-    <section class="space-y-1.5" aria-label="Provider credential">
+    <section
+      class="space-y-1.5 rounded-md border p-2 {routeAddedFor
+        ? 'border-primary/50 bg-primary/5'
+        : 'border-transparent'}"
+      aria-label="Provider credential"
+      bind:this={keySection}
+    >
+      {#if routeAddedFor}
+        <p class="text-[11px] font-medium text-primary">
+          Route “{routeAddedFor}” added — paste its API key to finish connecting.
+        </p>
+      {/if}
       <div class="flex items-center justify-between gap-2">
         <span class="text-[11px] font-medium text-muted-foreground">
           API key for {keyTarget || "provider"}
