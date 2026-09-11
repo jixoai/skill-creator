@@ -442,7 +442,7 @@
                   {entry.baseURL.replace(/^https?:\/\//, "")}
                 </span>
               </span>
-              <span class="shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground">
+              <span class="mr-0.5 shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground">
                 {entry.models.length}
               </span>
             </button>

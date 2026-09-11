@@ -313,7 +313,7 @@
                   <img
                     {src}
                     alt=""
-                    class="max-h-32 rounded-md border border-border object-contain"
+                    class="max-h-32 max-w-48 rounded-md border border-border object-contain"
                   />
                 {/each}
               </div>
