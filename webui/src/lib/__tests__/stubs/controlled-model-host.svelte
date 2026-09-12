@@ -1,6 +1,7 @@
 <!--
-  测试 stub（R7 8.7）：ModelListItem 的受控宿主——把 onchange 回填进 $state model
-  再传回（模拟真实父级的受控往返）；data-testid="model-json" 暴露当前态供断言。
+  测试 stub（R7 8.7 + R10）：ModelListItem 的受控宿主——把 onchange 回填进 $state
+  model 再传回（模拟真实父级的受控往返）；data-testid="model-json" 暴露当前态供
+  断言。R10 追加 dirty / initialExpanded 直通（折叠行小圆点与挂载展开测试）。
 -->
 <script lang="ts">
   import ModelListItem from "$lib/components/settings/ModelListItem.svelte";
@@ -14,6 +15,8 @@
     baseURL = "http://localhost:20002/anthropic",
     provider = "",
     apiKeyConfigured = false,
+    dirty = false,
+    initialExpanded = false,
     onchangeLog,
     onvalidityLog,
     onremoveLog,
@@ -25,6 +28,8 @@
     baseURL?: string;
     provider?: string;
     apiKeyConfigured?: boolean;
+    dirty?: boolean;
+    initialExpanded?: boolean;
     onchangeLog: (next: RouteModelEntry) => void;
     onvalidityLog: (valid: boolean) => void;
     onremoveLog: () => void;
@@ -44,6 +49,8 @@
   {baseURL}
   {provider}
   {apiKeyConfigured}
+  {dirty}
+  {initialExpanded}
   onchange={(next) => {
     model = next;
     onchangeLog(next);

@@ -95,3 +95,14 @@
       tags+补全/上下文窗口与最大输出 token 简写解析/输入类型多选/输出类型勾选/
       连接测试）+ Active 块 effort 数据源改模型配置（去硬编码）+ 桥接剥离与
       testConnection RPC。
+
+## 9. R10 修复（用户走查反馈 5 项：补全/折叠/chips/预填/efforts）
+
+- [x] 9.0 数据层：契约 catalog models[] += inputTypes/maxOutputTokens/effortTiers
+      （pi-ai input 数组 / maxTokens 1354 全覆盖 / thinkingLevelMap 599，剔 off）+ model-catalog 投影 + glm-5.3 真实数据钉（7/7）。
+- [x] 9.1 补全净化：跨 provider 候选剔除命名空间 id（@cf/…）；当前 provider 置顶。
+- [x] 9.2 ModelListItem 折叠态：默认只显示 ModelName + test/edit/remove 三钮；dirty 点。
+- [x] 9.3 input/output chips 明确选中态；目录默认（inputTypes 预填，output 恒 text 锁定）。
+- [x] 9.4 maxOutputTokens 目录预填（maxTokens）。
+- [x] 9.5 efforts：EFFORT_TIERS 标准档位 + 目录 effortTiers 融合 + datalist 补全 +
+      默认 low/high/max 三档。

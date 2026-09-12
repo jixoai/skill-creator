@@ -211,6 +211,16 @@ export interface DshModelProviderPreset {
   cn: boolean;
 }
 
+/** 模型路由的模型级输入类型（text 为缺省必含）。 */
+export const DshModelInputTypeSchema = z.enum(["text", "image", "video", "pdf"]);
+export type DshModelInputType = z.infer<typeof DshModelInputTypeSchema>;
+
+/** 模型路由的模型级输出类型（text 必含；image = 图像生成模型。pi-ai 镜像未带
+ * output 模态数据（models.dev 有、镜像缺失，2026-09-12 实测 0/1354）——目录
+ * 不投影 outputTypes，UI 以 ["text"] 为默认选中（codex R10 P1）。 */
+export const DshModelOutputTypeSchema = z.enum(["text", "image"]);
+export type DshModelOutputType = z.infer<typeof DshModelOutputTypeSchema>;
+
 /** 模型目录条目（pi-ai 装配目录 = models.dev 镜像，daemon 投影；browser 画廊消费）。 */
 export const ModelProviderCatalogEntrySchema = z.object({
   provider: z.string().min(1),
@@ -230,6 +240,12 @@ export const ModelProviderCatalogEntrySchema = z.object({
         contextWindow: z.number().int().positive().optional(),
         /** 目录声明是否支持 reasoning effort（缺省未知；effort 补全的候选门）。 */
         supportsReasoningEffort: z.boolean().optional(),
+        /** 输入模态（pi-ai 目录 input 数组过滤到产品域 text/image/video/pdf；R10-3）。 */
+        inputTypes: z.array(DshModelInputTypeSchema).optional(),
+        /** 最大输出 token（pi-ai 目录 maxTokens；R10-4）。 */
+        maxOutputTokens: z.number().int().positive().optional(),
+        /** thinking 档位键（pi-ai thinkingLevelMap 键，剔除 off；R10-5 补全源）。 */
+        effortTiers: z.array(z.string().min(1)).optional(),
       }),
     )
     .min(1),
@@ -241,14 +257,6 @@ export type ModelProviderCatalogEntry = z.infer<typeof ModelProviderCatalogEntry
  * LLM preset：deterministic = 脚本化 transport（CI/fixture）；live = 真实 provider。
  * 禁止自动 fallback：live 缺凭据时 resolve 失败，绝不静默回退 deterministic。
  */
-/** 模型路由的模型级输入类型（text 为缺省必含）。 */
-export const DshModelInputTypeSchema = z.enum(["text", "image", "video", "pdf"]);
-export type DshModelInputType = z.infer<typeof DshModelInputTypeSchema>;
-
-/** 模型路由的模型级输出类型（当前产品面仅 text）。 */
-export const DshModelOutputTypeSchema = z.enum(["text"]);
-export type DshModelOutputType = z.infer<typeof DshModelOutputTypeSchema>;
-
 /** pi-ai 装配目录实测的 wire 协议枚举（api 字段允许值；自定义路由必选其一）。 */
 export const DSH_ROUTE_API_PROTOCOLS = [
   "anthropic-messages",

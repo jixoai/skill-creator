@@ -6,6 +6,9 @@
   「api 从自由输入改为 Select（DSH_ROUTE_API_PROTOCOLS）」；「模型补全源 = 全部
   已知供应商的模型并集（Set 去重、排序；手输仍允许任意 id）」；「Models 区重构为
   模型 list-item 列表（含连接测试）」。
+  用户原始需求 [2026-09-12 R10]：「@cf/... 这明显是无效的」（补全池当前草案
+  provider 置顶、跨 provider 剔命名空间 id）；「Add model 默认 efforts 三档
+  Low/High/Max」。
   正交意图：
   1. pick 态：搜索 + 2 列卡片网格（目录全量 + 「Your presets」本地分组置顶、
      hover × 删除）；已建路由的目录卡显示 Added ✓（×N 计数），不再 disabled——
@@ -13,8 +16,9 @@
   2. form 态：与 RouteTabContent 同一字段集的新建语境（IconPicker 三控制 /
      Route name / Base URL / api Select / ModelListItem 列表），Add route 校验
      通过启用；成功即 onadded（分区选中新 tab 并引导粘 key）。
-  3. 预填源三态：目录条目（编号 slug + top-4 image 优先模型 + contextWindow）、
-     本地 preset（全量）、seed（env 注入的活动 provider 名）。
+  3. 预填源三态：目录条目（编号 slug + top-4 image 优先模型，catalogEntryDefaults
+     富预填：name/contextWindow/inputTypes/maxOutputTokens/outputTypes/efforts 三档）、
+     本地 preset（全量 + 默认三档）、seed（env 注入的活动 provider 名）。
 -->
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
@@ -23,7 +27,12 @@
   import ModelListItem from "./ModelListItem.svelte";
   import { hueAvatarColor, routeLetter } from "./route-icon.js";
   import { nextRouteSlug, numberedSlugParts, routeDisplayLabel } from "./route-naming.js";
-  import { catalogModelCandidates, type RouteModelEntry } from "./model-fields.js";
+  import {
+    catalogEntryDefaults,
+    catalogModelCandidates,
+    DEFAULT_MODEL_EFFORTS,
+    type RouteModelEntry,
+  } from "./model-fields.js";
   import {
     deleteProviderPreset,
     loadProviderPresets,
@@ -94,8 +103,12 @@
       entry.icon ? [{ provider: entry.provider, icon: entry.icon }] : [],
     ),
   );
-  const modelCandidates = $derived(catalogModelCandidates(catalog));
   const providerName = $derived(draftProvider.trim());
+  /** 补全池（R10-1）：草案 provider（编号 slug 归一 base）命中目录时其模型置顶
+   * （含命名空间 id），其余供应商剔除命名空间 id；未定名 = 纯净化并集。 */
+  const modelCandidates = $derived(
+    catalogModelCandidates(catalog, numberedSlugParts(providerName)?.base ?? providerName),
+  );
   const displayName = $derived(routeDisplayLabel({ provider: providerName }, catalog));
   const draftLetter = $derived(
     routeLetter({ provider: providerName, iconLetter: draftIconLetter }, displayName),
@@ -162,13 +175,16 @@
     ).length;
   }
 
-  /** seed 模型条目：目录同 id 模型携带 contextWindow（B7 语义保持）。 */
+  /** seed 模型条目：目录同 id 模型走 catalogEntryDefaults（R10-3/4/5 富预填，
+   * B7 contextWindow 语义包含在内）；未命中 = 裸 id + 默认三档 efforts。 */
   function seedModelEntry(id: string): RouteModelEntry {
     const base = numberedSlugParts(seed?.provider ?? "")?.base ?? seed?.provider ?? "";
     const model = catalog?.providers
       .find((entry) => entry.provider === base)
       ?.models.find((entry) => entry.id === id);
-    return model?.contextWindow !== undefined ? { id, contextWindow: model.contextWindow } : { id };
+    return model !== undefined
+      ? catalogEntryDefaults(model)
+      : { id, efforts: [...DEFAULT_MODEL_EFFORTS] };
   }
 
   // 挂载：加载本地 presets + pick 态聚焦搜索框。
@@ -200,11 +216,7 @@
     draftModels = [...entry.models]
       .sort((a, b) => Number(b.image) - Number(a.image))
       .slice(0, 4)
-      .map((model) =>
-        model.contextWindow !== undefined
-          ? { id: model.id, contextWindow: model.contextWindow }
-          : { id: model.id },
-      );
+      .map((model) => catalogEntryDefaults(model));
     draftModelsValid = draftModels.map(() => true);
     enterForm();
   }
@@ -220,7 +232,7 @@
     draftIconSuppressed = preset.iconSuppressed;
     draftBaseURL = preset.baseURL;
     draftApi = preset.api ?? DEFAULT_API;
-    draftModels = preset.models.map((id) => ({ id }));
+    draftModels = preset.models.map((id) => ({ id, efforts: [...DEFAULT_MODEL_EFFORTS] }));
     draftModelsValid = preset.models.map(() => true);
     enterForm();
   }
@@ -252,8 +264,9 @@
     draftModelsValid = draftModelsValid.filter((_, i) => i !== index);
   }
 
+  /** 新增条目（R10-5）：efforts 默认三档写入草稿（Add route 持久化）；空 id 展开态。 */
   function addModel(): void {
-    draftModels = [...draftModels, { id: "" }];
+    draftModels = [...draftModels, { id: "", efforts: [...DEFAULT_MODEL_EFFORTS] }];
     draftModelsValid = [...draftModelsValid, false];
   }
 
@@ -548,6 +561,7 @@
             provider={providerName}
             {apiKeyConfigured}
             disabled={agentRuntimeConfig.updating}
+            initialExpanded={entry.id === ""}
             onchange={(next) => setModelAt(index, next)}
             onremove={() => removeModel(index)}
             onvalidity={(valid) => setModelValidity(index, valid)}

@@ -40,6 +40,12 @@ vi.mock("../components/settings/IconPicker.svelte", async () => {
   return { default: stub };
 });
 
+// ModelListItem 的三个 icon-button（R10-2）经 @lucide/svelte 引入 node_modules 的
+// .svelte 图标——同签名 stub 替换。
+vi.mock("@lucide/svelte/icons/pencil", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/plug-zap", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/trash-2", async () => await import("./stubs/lucide-icon-mocks.js"));
+
 import RouteTabContent from "../components/settings/RouteTabContent.svelte";
 import { flushSync, mount, unmount } from "./svelte-client";
 import type { DshStewardSettingsView } from "$shared/contracts/dsh-runtime.js";
@@ -102,6 +108,11 @@ function mountTab(route: Record<string, unknown>, view = baseView([route])) {
       target.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!,
     buttonByText: (text: string) =>
       [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === text)!,
+    /** 展开第一个 ModelListItem（R10-2 默认折叠；edit icon-button 切换）。 */
+    expandFirstModel: (): void => {
+      target.querySelector<HTMLButtonElement>('button[aria-label^="Edit model"]')!.click();
+      flushSync();
+    },
     /** Models 块的 Save（与 Endpoint 的 Save 同名——按 section 作用域区分）。 */
     modelsSaveButton: (): HTMLButtonElement => {
       const buttons = [
@@ -213,16 +224,20 @@ describe("RouteTabContent (R7 8.2/8.6/8.7)", () => {
       baseURL: "https://r.example/v1",
       models: [{ id: "glm-4.7", contextWindow: 200000 }],
     });
-    // Models 块的 Save：初始 not dirty → disabled。
+    // Models 块的 Save：初始 not dirty → disabled；折叠行无 dirty 点。
     const modelsSave = ctx.modelsSaveButton();
     expect(modelsSave.disabled).toBe(true);
+    expect(ctx.target.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
 
-    // 改上下文窗口（253k → 259072）→ dirty → Save 补丁。
+    // R10-2：条目默认折叠；edit 展开 → 改上下文窗口（253k → 259072）→ dirty →
+    // Save 补丁 + 折叠行小圆点出现。
+    ctx.expandFirstModel();
     agentStore.updateAgentSettings.mockReset();
     agentStore.updateAgentSettings.mockResolvedValue({ outcome: "updated", changed: true });
     typeValue(ctx.inputByLabel("Context window (tokens)"), "253k");
     blurEl(ctx.inputByLabel("Context window (tokens)"));
     expect(modelsSave.disabled).toBe(false);
+    expect(ctx.target.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
     modelsSave.click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalled());
@@ -242,6 +257,7 @@ describe("RouteTabContent (R7 8.2/8.6/8.7)", () => {
       baseURL: "https://r.example/v1",
       models: [{ id: "glm-4.7" }],
     });
+    ctx.expandFirstModel();
     const modelsSave = ctx.modelsSaveButton();
     const field = ctx.inputByLabel("Context window (tokens)");
     typeValue(field, "huge");
@@ -251,6 +267,53 @@ describe("RouteTabContent (R7 8.2/8.6/8.7)", () => {
     blurEl(field);
     expect(modelsSave.disabled).toBe(false);
     ctx.cleanup();
+  });
+
+  it("pins the route provider's catalog models in the completion pool (R10-1)", () => {
+    agentStore.view = baseView([
+      {
+        provider: "zai",
+        baseURL: "https://api.z.ai/api/paas/v4",
+        models: [{ id: "glm-4.7" }],
+      },
+    ]);
+    const catalog = {
+      providers: [
+        ...CATALOG.providers,
+        {
+          provider: "deepseek",
+          label: "DeepSeek",
+          api: "openai-completions",
+          baseURL: "https://api.deepseek.com/v1",
+          icon: null,
+          models: [{ id: "deepseek-chat", image: false }],
+        },
+      ],
+    };
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const instance = mount(RouteTabContent, {
+      target,
+      props: {
+        route: {
+          provider: "zai",
+          baseURL: "https://api.z.ai/api/paas/v4",
+          models: [{ id: "glm-4.7" }],
+        } as never,
+        catalog: catalog as never,
+        onremove: vi.fn(),
+      },
+    });
+    flushSync();
+    target.querySelector<HTMLButtonElement>('button[aria-label^="Edit model"]')!.click();
+    flushSync();
+    const ids = [...target.querySelectorAll<HTMLOptionElement>("datalist option")].map(
+      (option) => option.value,
+    );
+    // 当前路由 provider（zai）的目录模型置顶，其余供应商随后。
+    expect(ids).toEqual(["glm-4.7", "deepseek-chat"]);
+    unmount(instance);
+    target.remove();
   });
 
   it("derives Active effort suggestions from the selected model's efforts (8.7)", () => {

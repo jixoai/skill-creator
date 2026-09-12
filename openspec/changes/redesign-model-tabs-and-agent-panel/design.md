@@ -137,7 +137,7 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 
 **块 4 · Models**
 
-- `ModelTagsInput`（原样复用）。候选：目录同名 provider 的 models（含 vision 徽标）；无目录命中则空（纯手输）。
+- **R7+ 重构落地（取代初版单 tags-input 描述）**：Models 块 = `ModelListItem` 列表 + Add model。每个条目默认折叠（ModelName + dirty 点 + test/edit/remove 三个 44px icon-button），展开为全表单：modelId（datalist 补全——当前 provider 模型置顶，跨 provider 候选剔除 `/`、`@` 命名空间 id）、ModelName（自动生成可改）、efforts（tags-input + 补全：标准档位 minimal/low/medium/high/xhigh/max ∪ 目录 effortTiers ∪ 路由并集；默认 `low/high/max` 三档——用户裁定）、上下文窗口与最大输出 token（`0.5M`/`253k` 简写，目录预填 contextWindow/maxTokens）、输入类型 chips（目录 inputTypes 预填；text 锁定选中）、输出类型 chips（text 锁定选中 + image 可切换持久化——pi-ai 镜像无 output 数据，默认 `["text"]`，codex R11 P1）、连接测试（已存 key → provider 注入；草案 → test-only key 直传）。
 - **即时应用**：每次 add/remove tag 即发 `modelRoutes` 全量补丁（低风险字段，无 Save 按钮）。补丁期间 `agentRuntimeConfig.updating` 置灰输入。
 
 **块 5 · Active model**
@@ -167,7 +167,7 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 
 1. Identity：`IconPicker`（预设带入图标）+ `Route name` Input（必填；与现有路由重名 → 内联 amber 错误「Route "x" already exists.」，沿用现有校验文案）。
 2. Endpoint：`Base URL`（必填，`/^https?:///` 校验，错误文案沿用）+ `API protocol`（预设命中目录时隐藏，自定义必填，默认 `anthropic-messages`）。
-3. Models：`ModelTagsInput`，预设带入 top-4 模型（沿用现有 `selectProvider` 的排序启发：image 能力优先取 4）；名字命中目录 provider 时自动出补全候选（沿用 `customCandidates`）。
+3. Models：`ModelListItem` 列表（与 RouteTabContent 同款表单集），预设带入 top-4 模型（目录命中预填 name/contextWindow/maxOutputTokens/inputTypes/effortTiers，efforts 默认 `low/high/max`）；名字命中目录 provider 时自动出补全候选（当前 provider 置顶 + 跨 provider 剔命名空间 id）。
 4. 底部：`Add route` primary（校验通过启用）+ `Back` ghost。成功 → 关闭 NewTab、自动选中新 tab、展开块 2 并聚焦 key 输入（替代现有 `routeAddedFor` + `scrollIntoView` 引导）。
 
 **IconPicker**（两处复用）：

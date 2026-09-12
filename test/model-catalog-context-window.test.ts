@@ -74,3 +74,27 @@ describe("catalog projection passes pi-ai contextWindow through (PM 修复 1)", 
     }
   });
 });
+
+describe("catalog rich model fields (R10)", () => {
+  it("projects inputTypes / maxOutputTokens / effortTiers from pi-ai data", () => {
+    const zai = listModelProviders().find((entry) => entry.provider === "zai");
+    expect(zai).toBeDefined();
+    const glm = zai!.models.find((model) => model.id === "glm-5.3");
+    expect(glm).toBeDefined();
+    // pi-ai 实测：input ["text"]、maxTokens 131072、thinkingLevelMap 含 max/xhigh。
+    expect(glm!.inputTypes).toEqual(["text"]);
+    expect(glm!.maxOutputTokens).toBe(131072);
+    expect(glm!.effortTiers).toEqual(expect.arrayContaining(["xhigh", "max"]));
+  });
+
+  it("keeps effortTiers free of the off switch and deduplicates", () => {
+    for (const entry of listModelProviders()) {
+      for (const model of entry.models) {
+        if (model.effortTiers !== undefined) {
+          expect(model.effortTiers).not.toContain("off");
+          expect(new Set(model.effortTiers).size).toBe(model.effortTiers.length);
+        }
+      }
+    }
+  });
+});

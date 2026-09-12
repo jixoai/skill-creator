@@ -44,6 +44,11 @@ vi.mock("../components/settings/IconPicker.svelte", async () => {
   return { default: stub };
 });
 
+// ModelListItem 的三个 icon-button（R10-2）同样经 @lucide/svelte 引入。
+vi.mock("@lucide/svelte/icons/pencil", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/plug-zap", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/trash-2", async () => await import("./stubs/lucide-icon-mocks.js"));
+
 import NewRouteTab from "../components/settings/NewRouteTab.svelte";
 import { flushSync, mount, unmount } from "./svelte-client";
 import { DSH_ROUTE_API_PROTOCOLS } from "$shared/contracts/dsh-runtime.js";
@@ -163,7 +168,10 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
       modelRoutes: Array<{ provider: string; models: Array<{ id: string }> }>;
     };
     expect(patch.modelRoutes[0]!.provider).toBe("my-relay");
-    expect(patch.modelRoutes[0]!.models).toEqual([{ id: "gpt-test" }]);
+    // R10-5：+ Add model 的新条目携带默认三档 efforts（Save 持久化）。
+    expect(patch.modelRoutes[0]!.models).toEqual([
+      { id: "gpt-test", efforts: ["low", "high", "max"] },
+    ]);
     ctx.cleanup();
   });
 
@@ -174,24 +182,44 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
     const ctx = mountTab({ catalog: CATALOG, seed: { provider: "zai", models: ["glm-4.7"] } });
 
     typeValue(ctx.inputByLabel("Base URL"), "https://api.z.ai/api/paas/v4");
-    // 第二个模型走 + Add model（seed 条目已有一个）。
+    // 第二个模型走 + Add model（seed 条目已有一个；R10-2 下已存条目折叠、新空
+    // 条目挂载即展开 → 可见的 Model id 输入只有一个，属于新条目）。
     ctx.buttonByText("+ Add model").click();
     flushSync();
+    const headers = [...ctx.target.querySelectorAll("[data-header-name]")].map(
+      (el) => el.textContent,
+    );
+    expect(headers).toEqual(["GLM 4.7", "New model"]);
     const idInputs = [
       ...ctx.target.querySelectorAll<HTMLInputElement>('input[aria-label="Model id"]'),
     ];
-    expect(idInputs.length).toBe(2);
-    typeValue(idInputs[1]!, "glm-4.7-flash");
+    expect(idInputs.length).toBe(1);
+    typeValue(idInputs[0]!, "glm-4.7-flash");
     ctx.buttonByText("Add route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
     const patch = agentStore.updateAgentSettings.mock.calls[0]![0] as {
-      modelRoutes: Array<{ models: Array<{ id: string; contextWindow?: number }> }>;
+      modelRoutes: Array<{ models: Array<Record<string, unknown>> }>;
     };
-    // 第二条：手输已知目录 id → 预填 name/inputTypes（R7 8.7 选中即预填语义）。
+    // 第一条：seed 走 catalogEntryDefaults（R10-3/4/5 富预填）；
+    // 第二条：+ Add model 新条目（默认三档 efforts）手输已知目录 id → 预填
+    // name/inputTypes/outputTypes（R7 8.7 选中即预填语义）。
     expect(patch.modelRoutes[0]!.models).toEqual([
-      { id: "glm-4.7", contextWindow: 200000 },
-      { id: "glm-4.7-flash", name: "GLM 4.7 Flash", inputTypes: ["text"] },
+      {
+        id: "glm-4.7",
+        name: "GLM 4.7",
+        contextWindow: 200000,
+        inputTypes: ["text", "image"],
+        outputTypes: ["text"],
+        efforts: ["low", "high", "max"],
+      },
+      {
+        id: "glm-4.7-flash",
+        name: "GLM 4.7 Flash",
+        inputTypes: ["text"],
+        outputTypes: ["text"],
+        efforts: ["low", "high", "max"],
+      },
     ]);
     ctx.cleanup();
   });
@@ -219,6 +247,70 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
     ctx.cleanup();
   });
 
+  it("drops namespace ids from the cross-provider pool; unnamed drafts never see @cf/... (R10-1)", () => {
+    agentStore.view = baseView();
+    agentStore.updating = false;
+    const catalog = [
+      ...CATALOG,
+      {
+        provider: "cloudflare",
+        label: "Cloudflare",
+        api: "openai-completions",
+        baseURL: "https://api.cloudflare.com/client/v4",
+        icon: null,
+        models: [
+          { id: "@cf/zai-org/glm-5.3", image: false },
+          { id: "workers-ai-smol", image: true },
+        ],
+      },
+    ];
+    const ctx = mountTab({ catalog });
+    ctx.buttonByText("+ Add model").click();
+    flushSync();
+    const ids = [...ctx.target.querySelectorAll<HTMLOptionElement>("datalist option")].map(
+      (option) => option.value,
+    );
+    expect(ids).not.toContain("@cf/zai-org/glm-5.3");
+    expect(ids).toEqual(["deepseek-chat", "glm-4.7", "glm-4.7-flash", "workers-ai-smol"]);
+    ctx.cleanup();
+  });
+
+  it("pins the draft provider's catalog models first (namespace ids included) once named (R10-1)", () => {
+    agentStore.view = baseView();
+    agentStore.updating = false;
+    const catalog = [
+      {
+        provider: "cloudflare",
+        label: "Cloudflare",
+        api: "openai-completions",
+        baseURL: "https://api.cloudflare.com/client/v4",
+        icon: null,
+        models: [
+          { id: "@cf/zai-org/glm-5.3", image: false },
+          { id: "workers-ai-smol", image: true },
+        ],
+      },
+      ...CATALOG,
+    ];
+    const ctx = mountTab({ catalog });
+    typeValue(ctx.inputByLabel("Route name"), "cloudflare");
+    ctx.buttonByText("+ Add model").click();
+    flushSync();
+    const ids = [...ctx.target.querySelectorAll<HTMLOptionElement>("datalist option")].map(
+      (option) => option.value,
+    );
+    // 当前 provider（cloudflare）置顶且保留其命名空间 id；其余供应商净化后随下。
+    expect(ids.slice(0, 2)).toEqual(["@cf/zai-org/glm-5.3", "workers-ai-smol"]);
+    expect(ids).toEqual([
+      "@cf/zai-org/glm-5.3",
+      "workers-ai-smol",
+      "deepseek-chat",
+      "glm-4.7",
+      "glm-4.7-flash",
+    ]);
+    ctx.cleanup();
+  });
+
   it("re-adding an added provider numbers the slug: zai → zai-2 (R7 8.4)", async () => {
     agentStore.view = baseView();
     agentStore.updating = false;
@@ -243,9 +335,23 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
       }>;
     };
     expect(first.modelRoutes[0]!.provider).toBe("zai");
+    // top-4 模型走 catalogEntryDefaults（R10 富预填 + 默认三档 efforts）。
     expect(first.modelRoutes[0]!.models).toEqual([
-      { id: "glm-4.7", contextWindow: 200000 },
-      { id: "glm-4.7-flash" },
+      {
+        id: "glm-4.7",
+        name: "GLM 4.7",
+        contextWindow: 200000,
+        inputTypes: ["text", "image"],
+        outputTypes: ["text"],
+        efforts: ["low", "high", "max"],
+      },
+      {
+        id: "glm-4.7-flash",
+        name: "GLM 4.7 Flash",
+        inputTypes: ["text"],
+        outputTypes: ["text"],
+        efforts: ["low", "high", "max"],
+      },
     ]);
 
     // 模拟 daemon 落库（mock store 非响应式——重挂载拾取新 view）。

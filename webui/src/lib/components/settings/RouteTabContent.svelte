@@ -5,6 +5,9 @@
   （iconLetter）三个独立控制」；「api 从自由输入改为 Select（DSH_ROUTE_API_PROTOCOLS），
   预设路径同字段预填可改」；「Models 区重构为模型 list-item 列表 + Add model，
   每条目全字段 + 连接测试；effort 数据源 = 当前模型的 efforts ?? 自由输入」。
+  用户原始需求 [2026-09-12 R10]：「@cf/... 这明显是无效的」（补全池当前 provider
+  置顶、跨 provider 剔命名空间 id）；「Add model 默认 efforts 三档 Low/High/Max」；
+  「折叠行 dirty 小圆点」。
   正交意图：
   1. 六块布局：Identity（图标三控制 + 只读路由名 + key pill）/ Credential（折叠
      pill ↔ 展开写入盒）/ Endpoint（baseURL + api Select 脏态显式 Save）/ Models
@@ -13,8 +16,10 @@
   2. 写路径：icon/iconColor/iconLetter/models 走 updateAgentSettings({modelRoutes})
      全量补丁；key 走 setAgentCredential/clear 旁路（值永不回流）；活动模型走
      settings.model 单例。
-  3. 数据源派生：Active effort 建议词 = 当前模型 efforts（无硬编码数组）；
-     ModelListItem 补全池 = 全供应商目录并集（model-fields.catalogModelCandidates）。
+  3. 数据源派生：Active effort 建议词 = 当前模型的 efforts（无硬编码数组）；
+     ModelListItem 补全池 = catalogModelCandidates（R10-1：当前 provider（编号
+     slug 归一 base）置顶 + 跨 provider 净化并集）；新增条目 efforts 默认三档
+     （DEFAULT_MODEL_EFFORTS）；条目级 dirty 传给折叠行小圆点。
   妥协声明：路由名只读——provider 名 = 凭据 env 映射键（dshRouteApiKeyEnv），
   改名等于换身份需重粘 key，以「复制重建」覆盖改名需求（design §7）。
 -->
@@ -24,8 +29,12 @@
   import IconPicker from "./IconPicker.svelte";
   import ModelListItem from "./ModelListItem.svelte";
   import { routeAvatarColor, routeLetter, resolveRouteIcon } from "./route-icon.js";
-  import { routeDisplayLabel } from "./route-naming.js";
-  import { catalogModelCandidates, type RouteModelEntry } from "./model-fields.js";
+  import { numberedSlugParts, routeDisplayLabel } from "./route-naming.js";
+  import {
+    catalogModelCandidates,
+    DEFAULT_MODEL_EFFORTS,
+    type RouteModelEntry,
+  } from "./model-fields.js";
   import { saveProviderPreset } from "$lib/stores/provider-presets.svelte";
   import {
     agentRuntimeConfig,
@@ -76,7 +85,11 @@
       entry.icon ? [{ provider: entry.provider, icon: entry.icon }] : [],
     ),
   );
-  const modelCandidates = $derived(catalogModelCandidates(catalog));
+  /** 补全池（R10-1 净化/置顶）：编号 slug（zai-2）归一到目录 base provider 后
+   * 置顶该 provider 的模型（含命名空间 id），其余供应商剔除命名空间 id。 */
+  const modelCandidates = $derived(
+    catalogModelCandidates(catalog, numberedSlugParts(route.provider)?.base ?? route.provider),
+  );
   const routeIcon = $derived(resolveRouteIcon(route, catalogEntry));
   const displayName = $derived(routeDisplayLabel(route, catalog));
   const avatarLetter = $derived(routeLetter(route, displayName));
@@ -230,8 +243,17 @@
     modelsValid = modelsValid.filter((_, i) => i !== index);
   }
 
+  /** 条目级 dirty（R10-2 折叠行小圆点）：草案与已存路由逐条对照。 */
+  function modelEntryDirty(index: number): boolean {
+    const draft = modelsDraft[index];
+    const saved = route.models[index];
+    if (draft === undefined || saved === undefined) return true;
+    return JSON.stringify(draft) !== JSON.stringify(saved);
+  }
+
+  /** 新增条目（R10-5）：efforts 默认三档写入草稿（Save 持久化）；空 id 挂载即展开。 */
   function addModel(): void {
-    modelsDraft = [...modelsDraft, { id: "" }];
+    modelsDraft = [...modelsDraft, { id: "", efforts: [...DEFAULT_MODEL_EFFORTS] }];
     modelsValid = [...modelsValid, false];
   }
 
@@ -493,6 +515,8 @@
           provider={route.provider}
           apiKeyConfigured={keyReady}
           disabled={agentRuntimeConfig.updating}
+          dirty={modelEntryDirty(index)}
+          initialExpanded={entry.id === ""}
           onchange={(next) => setModelAt(index, next)}
           onremove={() => removeModel(index)}
           onvalidity={(valid) => setModelValidity(index, valid)}

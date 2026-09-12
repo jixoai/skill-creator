@@ -29,6 +29,11 @@ vi.mock("../components/settings/IconPicker.svelte", async () => {
   return { default: stub };
 });
 
+// ModelListItem 的三个 icon-button（R10-2）同样经 @lucide/svelte 引入。
+vi.mock("@lucide/svelte/icons/pencil", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/plug-zap", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/trash-2", async () => await import("./stubs/lucide-icon-mocks.js"));
+
 import NewRouteTab from "../components/settings/NewRouteTab.svelte";
 import {
   loadProviderPresets,

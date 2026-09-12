@@ -10,9 +10,12 @@
  *
  * 正交意图：
  *   [1] 投影：provider → {label(known 覆写/美化), api, baseURL, models[{id,name,
- *       image,supportsReasoningEffort}]}；重点 provider 置顶，其余字母序；排除
- *       内部 faux。supportsReasoningEffort 只透传 pi-ai compat 布尔，缺失 =
- *       undefined 不伪造（codex R7 B2：effort 补全的候选门数据源）。
+ *       image,supportsReasoningEffort,inputTypes,maxOutputTokens,effortTiers}]}；
+ *       重点 provider 置顶，其余字母序；排除内部 faux。supportsReasoningEffort
+ *       只透传 pi-ai compat 布尔，缺失 = undefined 不伪造（codex R7 B2：effort
+ *       补全的候选门数据源）；inputTypes = input 模态数组过滤到产品域（R10-3）、
+ *       maxOutputTokens = maxTokens（R10-4）、effortTiers = thinkingLevelMap 键
+ *       剔 off 去重（R10-5）；pi-ai 镜像无 output 模态数据——目录不投影。
  *   [2] 单次加载缓存（目录随包版本变化，进程内不变）。
  * 妥协声明：resolve 失败返回 typed UNAVAILABLE——不静默空目录。
  */
@@ -82,6 +85,8 @@ function parseCatalogFile(raw: unknown): Array<{
   contextWindow?: number;
   input?: unknown;
   supportsReasoningEffort?: boolean;
+  maxTokens?: number;
+  effortTiers?: string[];
 }> {
   if (typeof raw !== "object" || raw === null) return [];
   const models: Array<{
@@ -92,6 +97,8 @@ function parseCatalogFile(raw: unknown): Array<{
     contextWindow?: number;
     input?: unknown;
     supportsReasoningEffort?: boolean;
+    maxTokens?: number;
+    effortTiers?: string[];
   }> = [];
   for (const byApi of Object.values(raw as Record<string, unknown>)) {
     if (typeof byApi !== "object" || byApi === null) continue;
@@ -105,12 +112,25 @@ function parseCatalogFile(raw: unknown): Array<{
         contextWindow?: unknown;
         input?: unknown;
         compat?: unknown;
+        maxTokens?: unknown;
+        thinkingLevelMap?: unknown;
       };
       if (typeof m.id !== "string" || typeof m.api !== "string") continue;
       const compat =
         typeof m.compat === "object" && m.compat !== null
           ? (m.compat as { supportsReasoningEffort?: unknown })
           : {};
+      // thinking 档位键（R10-5）：对象键即档位名；off 是关闭开关不是档位，剔除。
+      const effortTiers: string[] = [];
+      if (
+        typeof m.thinkingLevelMap === "object" &&
+        m.thinkingLevelMap !== null &&
+        !Array.isArray(m.thinkingLevelMap)
+      ) {
+        for (const tier of Object.keys(m.thinkingLevelMap)) {
+          if (tier !== "off" && tier.length > 0) effortTiers.push(tier);
+        }
+      }
       models.push({
         id: m.id,
         name: typeof m.name === "string" ? m.name : undefined,
@@ -127,6 +147,11 @@ function parseCatalogFile(raw: unknown): Array<{
           typeof compat.supportsReasoningEffort === "boolean"
             ? compat.supportsReasoningEffort
             : undefined,
+        maxTokens:
+          typeof m.maxTokens === "number" && Number.isInteger(m.maxTokens) && m.maxTokens > 0
+            ? m.maxTokens
+            : undefined,
+        effortTiers: effortTiers.length > 0 ? [...new Set(effortTiers)].sort() : undefined,
       });
     }
   }
@@ -166,10 +191,28 @@ export function listModelProviders(): ModelProviderCatalogEntry[] {
         id: model.id,
         ...(model.name ? { name: model.name } : {}),
         image: Array.isArray(model.input) && model.input.includes("image"),
+        ...(Array.isArray(model.input)
+          ? {
+              // 输入模态过滤到产品域（text/image/video/pdf；R10-3 默认选中数据源）。
+              inputTypes: [
+                ...new Set(
+                  (model.input as unknown[]).filter(
+                    (modality): modality is "text" | "image" | "video" | "pdf" =>
+                      modality === "text" ||
+                      modality === "image" ||
+                      modality === "video" ||
+                      modality === "pdf",
+                  ),
+                ),
+              ],
+            }
+          : {}),
         ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
         ...(model.supportsReasoningEffort !== undefined
           ? { supportsReasoningEffort: model.supportsReasoningEffort }
           : {}),
+        ...(model.maxTokens !== undefined ? { maxOutputTokens: model.maxTokens } : {}),
+        ...(model.effortTiers !== undefined ? { effortTiers: model.effortTiers } : {}),
       })),
     });
   }
