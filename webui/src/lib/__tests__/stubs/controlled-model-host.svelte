@@ -15,6 +15,7 @@
     baseURL = "http://localhost:20002/anthropic",
     provider = "",
     apiKeyConfigured = false,
+    formKey = "",
     dirty = false,
     initialExpanded = false,
     onchangeLog,
@@ -28,6 +29,7 @@
     baseURL?: string;
     provider?: string;
     apiKeyConfigured?: boolean;
+    formKey?: string;
     dirty?: boolean;
     initialExpanded?: boolean;
     onchangeLog: (next: RouteModelEntry) => void;
@@ -49,6 +51,7 @@
   {baseURL}
   {provider}
   {apiKeyConfigured}
+  {formKey}
   {dirty}
   {initialExpanded}
   onchange={(next) => {

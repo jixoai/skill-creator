@@ -21,12 +21,16 @@ const agentStore = vi.hoisted(() => ({
   view: null as unknown,
   updateAgentSettings: vi.fn(),
   testRouteConnection: vi.fn(),
+  setAgentCredential: vi.fn(),
 }));
 
+vi.mock("@lucide/svelte/icons/eye", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/eye-off", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("../stores/agent.svelte", () => ({
   agentRuntimeConfig: agentStore,
   updateAgentSettings: agentStore.updateAgentSettings,
   testRouteConnection: agentStore.testRouteConnection,
+  setAgentCredential: agentStore.setAgentCredential,
 }));
 
 const presetStore = vi.hoisted(() => ({ list: [] as Array<Record<string, unknown>> }));
@@ -424,5 +428,104 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
     expect("iconSuppressed" in plain.modelRoutes[0]!).toBe(false);
     ctx2.cleanup();
     presetStore.list = [];
+  });
+});
+
+describe("NewRouteTab route-level API key (R13)", () => {
+  it("renders the API key input (password + eye) from the form start", () => {
+    agentStore.view = baseView();
+    const ctx = mountTab({});
+    const keyInput = ctx.inputByLabel("API key");
+    expect(keyInput.type).toBe("password");
+    const eye = ctx.target.querySelector('button[aria-label="Show API key"]');
+    expect(eye).not.toBeNull();
+    ctx.cleanup();
+  });
+
+  it("stores the form key as a credential when Add route succeeds", async () => {
+    agentStore.view = baseView();
+    agentStore.updating = false;
+    agentStore.updateAgentSettings.mockReset();
+    agentStore.updateAgentSettings.mockResolvedValue({ outcome: "updated" });
+    agentStore.setAgentCredential.mockReset();
+    agentStore.setAgentCredential.mockResolvedValue({ outcome: "stored" });
+    const ctx = mountTab({});
+    typeValue(ctx.inputByLabel("Route name"), "key-relay");
+    typeValue(ctx.inputByLabel("Base URL"), "https://r.example/v1");
+    ctx.inputByLabel("Base URL").dispatchEvent(new Event("blur", { bubbles: true }));
+    flushSync();
+    ctx.buttonByText("+ Add model").click();
+    flushSync();
+    typeValue(ctx.inputByLabel("Model id"), "m-1");
+    typeValue(ctx.inputByLabel("API key"), "sk-form-1");
+    expect(ctx.buttonByText("Add route").disabled).toBe(false);
+    ctx.buttonByText("Add route").click();
+    flushSync();
+    await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(agentStore.setAgentCredential).toHaveBeenCalledWith("key-relay", "sk-form-1"),
+    );
+    ctx.cleanup();
+  });
+});
+
+describe("addRoute credential failure closure (codex R13 P1)", () => {
+  function readyCtx() {
+    agentStore.view = baseView();
+    agentStore.updating = false;
+    agentStore.updateAgentSettings.mockReset();
+    agentStore.setAgentCredential.mockReset();
+    const ctx = mountTab({});
+    typeValue(ctx.inputByLabel("Route name"), "key-relay");
+    typeValue(ctx.inputByLabel("Base URL"), "https://r.example/v1");
+    ctx.inputByLabel("Base URL").dispatchEvent(new Event("blur", { bubbles: true }));
+    flushSync();
+    ctx.buttonByText("+ Add model").click();
+    flushSync();
+    typeValue(ctx.inputByLabel("Model id"), "m-1");
+    typeValue(ctx.inputByLabel("API key"), "sk-bad-1");
+    return ctx;
+  }
+
+  it("stays in the form with an inline error when the key is rejected (route NOT created)", async () => {
+    const ctx = readyCtx();
+    agentStore.setAgentCredential.mockResolvedValue({
+      outcome: "rejected",
+      code: "INVALID_API_KEY",
+      detail: "whitespace only",
+    });
+    ctx.buttonByText("Add route").click();
+    flushSync();
+    await vi.waitFor(() => expect(agentStore.setAgentCredential).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync(); // addRoute 的 rejection 赋值在 await 微任务后——补一次渲染 flush
+    expect(agentStore.updateAgentSettings).not.toHaveBeenCalled();
+    expect(ctx.target.textContent).toContain("INVALID_API_KEY");
+    expect(ctx.inputByLabel("API key")).not.toBeNull(); // 表单未退出
+    ctx.cleanup();
+  });
+
+  it("stays in the form with an inline error when the credential save disconnects (null)", async () => {
+    const ctx = readyCtx();
+    agentStore.setAgentCredential.mockResolvedValue(null);
+    ctx.buttonByText("Add route").click();
+    flushSync();
+    await vi.waitFor(() => expect(agentStore.setAgentCredential).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(agentStore.updateAgentSettings).not.toHaveBeenCalled();
+    expect(ctx.target.textContent).toContain("Could not save the API key");
+    ctx.cleanup();
+  });
+
+  it("stores the key BEFORE creating the route on the happy path", async () => {
+    const ctx = readyCtx();
+    agentStore.setAgentCredential.mockResolvedValue({ outcome: "stored" });
+    agentStore.updateAgentSettings.mockResolvedValue({ outcome: "updated" });
+    ctx.buttonByText("Add route").click();
+    flushSync();
+    await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalled());
+    expect(agentStore.setAgentCredential).toHaveBeenCalledWith("key-relay", "sk-bad-1");
+    ctx.cleanup();
   });
 });

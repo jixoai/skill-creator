@@ -66,6 +66,7 @@ function mountItem(
   initial: Record<string, unknown>,
   props: Partial<{
     apiKeyConfigured: boolean;
+    formKey?: string;
     provider: string;
     api: string;
     baseURL: string;
@@ -90,6 +91,7 @@ function mountItem(
       baseURL: props.baseURL ?? "http://localhost:20002/anthropic",
       provider: props.provider ?? "",
       apiKeyConfigured: props.apiKeyConfigured ?? false,
+      formKey: props.formKey ?? "",
       dirty: props.dirty ?? false,
       initialExpanded: props.initialExpanded ?? false,
       onchangeLog: onchange as never,
@@ -605,11 +607,11 @@ describe("ModelListItem connection test (R7 B4)", () => {
     ctx.testButton().click();
     flushSync();
     await vi.waitFor(() => expect(ctx.statusText()).toContain("ok · 88 ms"));
+    // R13 codex P1 新契约：直传 apiKey 时 payload 不带 provider。
     expect(agentStore.testRouteConnection).toHaveBeenCalledWith({
       api: "anthropic-messages",
       baseURL: "http://localhost:20002/anthropic",
       modelId: "m1",
-      provider: "zai-2",
       apiKey: "sk-draft-1",
     });
     ctx.cleanup();
@@ -697,6 +699,89 @@ describe("output selectTags persistence boundaries (codex R11 P1)", () => {
     typeValue(ctx.inputByLabel("Model id"), "glm-5.3-flash");
     // 换目录 id：预填重新接管（含 output 回默认）。
     expect(ctx.state().outputTypes).toEqual(["text"]);
+    ctx.cleanup();
+  });
+});
+
+describe("ModelListItem formKey (R13)", () => {
+  it("treats a form-level key as test-ready without stored credentials and hides the per-item input", () => {
+    const ctx = mountItem({ id: "m1" }, { apiKeyConfigured: false, formKey: "sk-form-1" });
+    ctx.expand();
+    // 条目级 test-only 输入隐藏（路由级 key 已就位）。
+    expect(ctx.keyInput()).toBeNull();
+    const testBtn = [...ctx.target.querySelectorAll("button")].find((b) =>
+      /test connection/i.test(b.textContent || ""),
+    )!;
+    expect(testBtn.disabled).toBe(false);
+    expect(testBtn.title).toContain("route key above");
+    ctx.cleanup();
+  });
+
+  it("sends the formKey directly as apiKey in the probe payload", async () => {
+    const ctx = mountItem(
+      { id: "glm-5.3-flash" },
+      { apiKeyConfigured: false, formKey: "sk-form-2", candidates: CANDIDATES as never },
+    );
+    ctx.expand();
+    agentStore.testRouteConnection.mockReset();
+    agentStore.testRouteConnection.mockResolvedValue({ outcome: "ok", latencyMs: 42 });
+    const testBtn = [...ctx.target.querySelectorAll("button")].find((b) =>
+      /test connection/i.test(b.textContent || ""),
+    )!;
+    testBtn.click();
+    await vi.waitFor(() => expect(agentStore.testRouteConnection).toHaveBeenCalled());
+    expect(agentStore.testRouteConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: "sk-form-2", modelId: "glm-5.3-flash" }),
+    );
+    const payload = agentStore.testRouteConnection.mock.calls.at(-1)![0] as {
+      provider?: string;
+    };
+    expect(payload.provider).toBeUndefined();
+    ctx.cleanup();
+  });
+});
+
+describe("formKey payload contract with a real provider (codex R13 P1)", () => {
+  it("omits provider from the probe payload when formKey is direct", async () => {
+    const ctx = mountItem(
+      { id: "glm-5.3-flash" },
+      {
+        apiKeyConfigured: false,
+        formKey: "sk-form-3",
+        provider: "zai",
+        candidates: CANDIDATES as never,
+      },
+    );
+    ctx.expand();
+    agentStore.testRouteConnection.mockReset();
+    agentStore.testRouteConnection.mockResolvedValue({ outcome: "ok", latencyMs: 7 });
+    const testBtn = [...ctx.target.querySelectorAll("button")].find((b) =>
+      /test connection/i.test(b.textContent || ""),
+    )!;
+    testBtn.click();
+    await vi.waitFor(() => expect(agentStore.testRouteConnection).toHaveBeenCalled());
+    const payload = agentStore.testRouteConnection.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(payload.apiKey).toBe("sk-form-3");
+    expect("provider" in payload).toBe(false);
+    ctx.cleanup();
+  });
+
+  it("keeps provider injection (no apiKey key) when no formKey and credentials exist", async () => {
+    const ctx = mountItem(
+      { id: "glm-5.3-flash" },
+      { apiKeyConfigured: true, provider: "zai", candidates: CANDIDATES as never },
+    );
+    ctx.expand();
+    agentStore.testRouteConnection.mockReset();
+    agentStore.testRouteConnection.mockResolvedValue({ outcome: "ok", latencyMs: 7 });
+    const testBtn = [...ctx.target.querySelectorAll("button")].find((b) =>
+      /test connection/i.test(b.textContent || ""),
+    )!;
+    testBtn.click();
+    await vi.waitFor(() => expect(agentStore.testRouteConnection).toHaveBeenCalled());
+    const payload = agentStore.testRouteConnection.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(payload.provider).toBe("zai");
+    expect("apiKey" in payload).toBe(false);
     ctx.cleanup();
   });
 });

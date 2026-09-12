@@ -62,6 +62,9 @@
     provider?: string;
     /** 路由凭据已存（false = 显示 test-only key 输入后可测）。 */
     apiKeyConfigured: boolean;
+    /** 表单级 key 草稿（R13：NewRouteTab 的路由 key 输入直传测试；非空时隐藏
+     * 条目级 test-only 输入并视为已可测，apiKeyConfigured 被其覆盖）。 */
+    formKey?: string;
     disabled?: boolean;
     /** 条目有未保存改动（父级对照 saved 路由计算；折叠行名字旁小圆点）。 */
     dirty?: boolean;
@@ -81,6 +84,7 @@
     baseURL,
     provider = "",
     apiKeyConfigured,
+    formKey = "",
     disabled = false,
     dirty = false,
     initialExpanded = false,
@@ -88,6 +92,9 @@
     onremove,
     onvalidity,
   }: Props = $props();
+
+  /** 测试可用 key：表单级草稿优先（R13），否则看已存凭据/条目级输入。 */
+  const hasFormKey = $derived(formKey.trim().length > 0);
 
   const OPTIONAL_INPUT_TYPES: readonly DshModelInputType[] = ["image", "video", "pdf"];
   /** datalist id 实例化（多条目并存时不串档）。 */
@@ -143,7 +150,7 @@
       testing ||
       api.length === 0 ||
       baseURL.length === 0 ||
-      (!apiKeyConfigured && draftKey.length === 0),
+      (!hasFormKey && !apiKeyConfigured && draftKey.length === 0),
   );
 
   $effect(() => {
@@ -292,18 +299,20 @@
   }
 
   async function runTest(): Promise<void> {
-    // 已存 key → provider 注入路径（输入面无 key）；未存 → draft key 直传
-    // （test-only：探活用完即弃，不写凭据存储）。
+    // key 优先级（R13）：表单级 formKey 直传 > 已存凭据 provider 注入 > 条目级
+    // test-only draft 直传（探活用完即弃，不写凭据存储）。直传 apiKey 时**不带
+    // provider**（R13 codex P1：payload 契约——直传即全部凭据事实，避免与注入
+    // 路径歧义）。
     if (testing || !idValid) return;
-    if (!apiKeyConfigured && draftKey.length === 0) return;
+    if (!hasFormKey && !apiKeyConfigured && draftKey.length === 0) return;
+    const directKey = hasFormKey ? formKey.trim() : apiKeyConfigured ? null : draftKey;
     testing = true;
     testResult = null;
     const result = await testRouteConnection({
       api,
       baseURL,
       modelId: idText.trim(),
-      ...(provider.length > 0 ? { provider } : {}),
-      ...(!apiKeyConfigured && draftKey.length > 0 ? { apiKey: draftKey } : {}),
+      ...(directKey === null ? (provider.length > 0 ? { provider } : {}) : { apiKey: directKey }),
     });
     testing = false;
     if (result !== null) testResult = result;
@@ -348,9 +357,11 @@
         type="button"
         class="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         aria-label="Test connection for {model.id || 'new model'}"
-        title={apiKeyConfigured
-          ? "Send a minimal probe request"
-          : "Expand and paste a key to test (not saved)"}
+        title={hasFormKey
+          ? "Send a minimal probe with the route key (saved on add)"
+          : apiKeyConfigured
+            ? "Send a minimal probe request"
+            : "Expand and paste a key to test (not saved)"}
         disabled={testDisabled}
         onclick={() => void runTest()}
       >
@@ -538,6 +549,8 @@
           ok · {testResult.latencyMs} ms
         {:else if testResult?.outcome === "failed"}
           failed · {testResult.detail}
+        {:else if hasFormKey}
+          Probing with the route key above (saved on add).
         {:else if !apiKeyConfigured}
           No saved key for this route — paste one to test (never stored).
         {:else}
@@ -545,7 +558,7 @@
         {/if}
       </span>
       <span class="flex shrink-0 items-center gap-1.5">
-        {#if !apiKeyConfigured}
+        {#if !apiKeyConfigured && !hasFormKey}
           <Input
             type="password"
             class="h-6 w-44 font-mono text-[10px]"
@@ -561,9 +574,11 @@
           variant="outline"
           class="h-6 shrink-0 px-2 text-[10px]"
           disabled={testDisabled}
-          title={apiKeyConfigured
-            ? "Send a minimal probe request"
-            : "Send a minimal probe with the pasted key (not saved)"}
+          title={hasFormKey
+            ? "Send a minimal probe with the route key above (saved on add)"
+            : apiKeyConfigured
+              ? "Send a minimal probe request"
+              : "Send a minimal probe with the pasted key (not saved)"}
           onclick={() => void runTest()}
         >
           {testing ? "Testing…" : "Test connection"}

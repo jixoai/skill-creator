@@ -43,7 +43,6 @@
     DEFAULT_MODEL_EFFORTS,
     type RouteModelEntry,
   } from "./model-fields.js";
-  import { saveProviderPreset } from "$lib/stores/provider-presets.svelte";
   import {
     agentRuntimeConfig,
     clearAgentCredential,
@@ -122,9 +121,7 @@
   let addedHint = $state(autoFocusCredential);
   let credInput = $state<HTMLInputElement | null>(null);
   let rejection = $state<string | null>(null);
-  let presetSaved = $state(false);
   let savedFlash = $state(false);
-  let presetTimer: ReturnType<typeof setTimeout> | null = null;
   let savedTimer: ReturnType<typeof setTimeout> | null = null;
   /** Models 条目元素索引（Add model 后 scrollIntoView 定位锚）。 */
   let modelItemEls: (HTMLElement | null)[] = [];
@@ -153,7 +150,6 @@
 
   $effect(() => {
     return () => {
-      if (presetTimer !== null) clearTimeout(presetTimer);
       if (savedTimer !== null) clearTimeout(savedTimer);
     };
   });
@@ -243,8 +239,9 @@
     modelItemEls[modelItemEls.length - 1]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
-  /** 常驻凭据输入（R12-A5）：失焦/Enter 保存；空输入 no-op；已存 key 以占位
-   * 提示 replace 语义（值永不回显）。 */
+  /** 常驻凭据输入（R12-A5 + R13 用户修正）：失焦/Enter 保存但**不清空已输入值**
+   * （password 掩码展示，blur 清空曾被用户判为数据丢失；替换语义 = 改写后再次
+   * 失焦即覆盖保存）。空输入 no-op；已存 key 以占位提示，值永不回显。 */
   async function saveCredential(): Promise<void> {
     const key = apiKeyDraft.trim();
     if (key.length === 0) return;
@@ -254,30 +251,13 @@
       rejection = `${result.code}: ${result.detail}`;
       return;
     }
-    apiKeyDraft = "";
     rejection = null;
     addedHint = false;
   }
 
   async function clearCredential(): Promise<void> {
     await clearAgentCredential(route.provider);
-  }
-
-  function saveAsPreset(): void {
-    saveProviderPreset({
-      provider: route.provider,
-      label: displayName,
-      api: apiDraft,
-      baseURL: route.baseURL,
-      models: route.models.map((entry) => entry.id),
-      ...(route.icon ? { icon: route.icon } : {}),
-      ...(route.iconColor ? { iconColor: route.iconColor } : {}),
-      ...(route.iconLetter ? { iconLetter: route.iconLetter } : {}),
-      ...(route.iconSuppressed ? { iconSuppressed: true } : {}),
-    });
-    presetSaved = true;
-    if (presetTimer !== null) clearTimeout(presetTimer);
-    presetTimer = setTimeout(() => (presetSaved = false), 1000);
+    apiKeyDraft = "";
   }
 </script>
 
@@ -333,37 +313,30 @@
         {route.models.length === 1 ? "model" : "models"}
       </p>
     </div>
-    <Button
-      size="sm"
-      variant="ghost"
-      class="mt-0.5 h-6 shrink-0 px-2 text-[10px]"
-      disabled={agentRuntimeConfig.updating}
-      onclick={saveAsPreset}
-    >
-      {presetSaved ? "Saved ✓" : "Save as preset"}
-    </Button>
-    <button
-      type="button"
-      class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] transition-colors {keyReady
-        ? 'bg-primary/10 text-primary'
-        : 'bg-amber-500/15 text-amber-700 hover:bg-amber-500/25'}"
-      title={keyReady
-        ? "API key configured — enter a new one below to replace it"
-        : "API key missing — add it below"}
-      aria-label="Key status for {route.provider}"
-      onclick={() => credInput?.focus()}
-    >
-      {keyReady ? "key ✓" : "add key →"}
-    </button>
   </div>
 
-  <!-- 块 2 · Credential（R12-A5：常驻 password 输入 + eye-toggle；不回显已存值）。 -->
+  <!-- 块 2 · Credential（R12-A5 + R13：常驻 password 输入 + eye-toggle；key 状态
+       样式并入本区标签行（用户裁决：Identity 的 key pill 与 Save as preset 删除，
+       右上角只留 [Remove][Save]）。 -->
   <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Credential">
     {#if addedHint}
       <p class="text-[11px] font-medium text-primary">
         Route “{route.provider}” added — paste its API key to finish connecting.
       </p>
     {/if}
+    <div class="flex items-center justify-between">
+      <span class="text-[10px] font-medium text-muted-foreground">API key</span>
+      <span
+        class="rounded px-1.5 py-0.5 text-[10px] {keyReady
+          ? 'bg-primary/10 text-primary'
+          : 'bg-amber-500/15 text-amber-700'}"
+        title={keyReady
+          ? "API key configured — enter a new one to replace it"
+          : "API key missing — connection test needs it"}
+      >
+        {keyReady ? "key ✓" : "key missing"}
+      </span>
+    </div>
     <div class="flex gap-1.5">
       <div class="relative min-w-0 flex-1">
         <Input

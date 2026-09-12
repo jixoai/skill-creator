@@ -408,9 +408,7 @@ describe("RouteTabContent single top-right Save/Remove (R12-A2)", () => {
     ctx.cleanup();
   });
 
-  it("keeps Save as preset as a secondary text button in the Identity area", async () => {
-    const { saveProviderPreset } = await import("../stores/provider-presets.svelte");
-    vi.mocked(saveProviderPreset).mockClear();
+  it("no longer renders Save as preset (R13 user decree: top-right keeps only Remove + Save)", async () => {
     agentStore.view = baseView([
       { provider: "my-relay", baseURL: "https://r.example/v1", models: [{ id: "m1" }] },
     ]);
@@ -419,9 +417,8 @@ describe("RouteTabContent single top-right Save/Remove (R12-A2)", () => {
       baseURL: "https://r.example/v1",
       models: [{ id: "m1" }],
     });
-    ctx.buttonByText("Save as preset").click();
-    flushSync();
-    expect(saveProviderPreset).toHaveBeenCalledTimes(1);
+    expect(ctx.buttonByText("Save as preset")).toBeUndefined();
+    expect(ctx.target.textContent).not.toContain("Save as preset");
     ctx.cleanup();
   });
 });
@@ -510,8 +507,8 @@ describe("RouteTabContent persistent credential input (R12-A5)", () => {
     const input = ctx.keyInput();
     expect(input.type).toBe("password");
     expect(input.placeholder).toBe("API key");
-    // Identity 状态 pill 数据源保留：未配置 → add key →。
-    expect(ctx.buttonByText("add key →")).toBeTruthy();
+    // R13：key 状态并入 Credential 标签行（pill 已删；未配置 → key missing）。
+    expect(ctx.target.textContent).toContain("key missing");
 
     // eye 切 type（只控制新输入的可见性）。
     const eye = ctx.eyeButton();
@@ -524,14 +521,14 @@ describe("RouteTabContent persistent credential input (R12-A5)", () => {
     flushSync();
     expect(input.type).toBe("password");
 
-    // 输入 + 失焦 → setAgentCredential（provider + 新值），草稿清空。
+    // 输入 + 失焦 → setAgentCredential（provider + 新值）；R13：保存后值保留（掩码）。
     agentStore.setAgentCredential.mockReset();
     agentStore.setAgentCredential.mockResolvedValue({ outcome: "stored" });
     typeValue(input, "sk-test-1");
     blurEl(input);
     await vi.waitFor(() => expect(agentStore.setAgentCredential).toHaveBeenCalled());
     expect(agentStore.setAgentCredential).toHaveBeenCalledWith("my-relay", "sk-test-1");
-    await vi.waitFor(() => expect(input.value).toBe(""));
+    expect(input.value).toBe("sk-test-1");
     ctx.cleanup();
   });
 
@@ -600,10 +597,10 @@ describe("RouteTabContent persistent credential input (R12-A5)", () => {
     ]);
     const ctx = mountTab(routes[0] as Record<string, unknown>, agentStore.view as never);
     const input = ctx.keyInput();
-    // 已配置：占位提示 replace 语义，值不回显；状态 pill = key ✓。
+    // 已配置：占位提示 replace 语义，值不回显；R13 状态在 Credential 标签行。
     expect(input.placeholder).toBe("stored — enter to replace");
     expect(input.value).toBe("");
-    expect(ctx.buttonByText("key ✓")).toBeTruthy();
+    expect(ctx.target.textContent).toContain("key ✓");
 
     // 输入新 key + Enter → 替换（同一 setAgentCredential 旁路）。
     agentStore.setAgentCredential.mockReset();
@@ -614,8 +611,10 @@ describe("RouteTabContent persistent credential input (R12-A5)", () => {
     await vi.waitFor(() =>
       expect(agentStore.setAgentCredential).toHaveBeenCalledWith("my-relay", "sk-replace-1"),
     );
+    // R13：blur/Enter 保存后输入值保留（掩码展示；用户裁决不清空）。
+    expect(input.value).toBe("sk-replace-1");
 
-    // Clear 旁路保留。
+    // Clear 旁路保留：同时清空草稿文本。
     agentStore.clearAgentCredential.mockReset();
     agentStore.clearAgentCredential.mockResolvedValue(undefined);
     ctx.buttonByText("Clear").click();
@@ -623,6 +622,44 @@ describe("RouteTabContent persistent credential input (R12-A5)", () => {
     await vi.waitFor(() =>
       expect(agentStore.clearAgentCredential).toHaveBeenCalledWith("my-relay"),
     );
+    await vi.waitFor(() => expect(input.value).toBe(""));
+    ctx.cleanup();
+  });
+});
+
+describe("credential save vs Clear ordering (codex R13 probe)", () => {
+  it("a pending blur-save followed by Clear ends with the credential cleared and the draft empty", async () => {
+    const routes = [
+      { provider: "my-relay", baseURL: "https://r.example/v1", models: [{ id: "m1" }] },
+    ];
+    agentStore.view = baseView(routes, undefined, [{ provider: "my-relay", configured: true }]);
+    // 慢保存：blur 发起的 setAgentCredential 挂起期间点 Clear。
+    let releaseSave: (() => void) | null = null;
+    agentStore.setAgentCredential.mockReset();
+    agentStore.setAgentCredential.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseSave = () => resolve({ outcome: "stored" });
+        }),
+    );
+    agentStore.clearAgentCredential.mockReset();
+    agentStore.clearAgentCredential.mockResolvedValue(undefined);
+    const ctx = mountTab(routes[0] as Record<string, unknown>, agentStore.view as never);
+    const input = ctx.keyInput();
+    typeValue(input, "sk-race-1");
+    input.dispatchEvent(new Event("blur"));
+    // blur 保存挂起中点 Clear：草稿立即清空，clear 旁路发出。
+    ctx.buttonByText("Clear").click();
+    flushSync();
+    expect(agentStore.clearAgentCredential).toHaveBeenCalledWith("my-relay");
+    // Clear 的草稿清空在 await clear 之后——有界等待。
+    await vi.waitFor(() => expect(input.value).toBe(""));
+    // 释放迟到的保存：值已被清、不再回填（save 成功只影响存储态，不回写草稿）。
+    (releaseSave as (() => void) | null)?.();
+    await vi.waitFor(() => expect(agentStore.setAgentCredential).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(input.value).toBe("");
     ctx.cleanup();
   });
 });

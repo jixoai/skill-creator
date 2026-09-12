@@ -33,6 +33,8 @@ vi.mock("../components/settings/IconPicker.svelte", async () => {
 vi.mock("@lucide/svelte/icons/pencil", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/plug-zap", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/trash-2", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/eye", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/eye-off", async () => await import("./stubs/lucide-icon-mocks.js"));
 
 import NewRouteTab from "../components/settings/NewRouteTab.svelte";
 import {

@@ -21,6 +21,8 @@
      本地 preset（全量 + 默认三档）、seed（env 注入的活动 provider 名）。
 -->
 <script lang="ts">
+  import IconEye from "@lucide/svelte/icons/eye";
+  import IconEyeOff from "@lucide/svelte/icons/eye-off";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import IconPicker from "./IconPicker.svelte";
@@ -39,7 +41,11 @@
     providerPresets,
     type LocalProviderPreset,
   } from "$lib/stores/provider-presets.svelte";
-  import { agentRuntimeConfig, updateAgentSettings } from "$lib/stores/agent.svelte";
+  import {
+    agentRuntimeConfig,
+    setAgentCredential,
+    updateAgentSettings,
+  } from "$lib/stores/agent.svelte";
   import {
     DSH_ROUTE_API_PROTOCOLS,
     type DshModelRoute,
@@ -84,6 +90,10 @@
   /** 显式无图标（preset 应用；codex R7 B3 的 iconSuppressed 草稿态）。 */
   let draftIconSuppressed = $state<boolean | undefined>(undefined);
   let draftBaseURL = $state("");
+  /** R13：路由级 key 草稿（表单起点即可填；测试直传，add 成功后落凭据存储）。 */
+  let formKeyText = $state("");
+  let formKeyVisible = $state(false);
+  const formKey = $derived(formKeyText.trim());
   // svelte-ignore state_referenced_locally
   let draftApi = $state(DEFAULT_API);
   // svelte-ignore state_referenced_locally
@@ -272,6 +282,20 @@
 
   async function addRoute(): Promise<void> {
     if (!canSubmit) return;
+    // R13 codex P1：key 先落存——失败（rejected/断线 null）→ 内联错误 + 留在表单，
+    // 不创建路由。成功后路由创建失败会留下孤立凭据（无害：slug 未被引用，重加
+    // 同 slug 直接复用）。
+    if (formKey.length > 0) {
+      // undefined/null（RPC 替换或异常被上游吞掉）同按失败治理——绝不静默成功。
+      const credResult = await setAgentCredential(providerName, formKey);
+      if (credResult == null || credResult.outcome === "rejected") {
+        rejection =
+          credResult == null
+            ? "Could not save the API key — connection unavailable. The route was not created."
+            : `${credResult.code}: ${credResult.detail}`;
+        return;
+      }
+    }
     const route: DshModelRoute = {
       provider: providerName,
       baseURL: draftBaseURL.trim(),
@@ -529,6 +553,40 @@
       </select>
     </label>
 
+    <!-- R13：路由级 API key 从表单起点即可填写（用户：「一开始就要能填写，否则
+         无法做 api-test」）——password + eye；连接测试优先直传此值；Add route
+         成功后写入凭据存储。 -->
+    <div class="block space-y-0.5">
+      <span class="text-[10px] text-muted-foreground">API key</span>
+      <div class="relative">
+        <Input
+          class="h-8 pr-9 text-xs"
+          type={formKeyVisible ? "text" : "password"}
+          autocomplete="off"
+          aria-label="API key"
+          placeholder={apiKeyConfigured ? "stored — this key overrides for add & test" : "API key"}
+          bind:value={formKeyText}
+          disabled={agentRuntimeConfig.updating}
+        />
+        <button
+          type="button"
+          class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-2.5 after:content-[''] hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          aria-label={formKeyVisible ? "Hide API key" : "Show API key"}
+          aria-pressed={formKeyVisible}
+          title={formKeyVisible ? "Hide API key" : "Show API key"}
+          disabled={agentRuntimeConfig.updating}
+          onmousedown={(event) => event.preventDefault()}
+          onclick={() => (formKeyVisible = !formKeyVisible)}
+        >
+          {#if formKeyVisible}
+            <IconEyeOff class="h-3.5 w-3.5" aria-hidden="true" />
+          {:else}
+            <IconEye class="h-3.5 w-3.5" aria-hidden="true" />
+          {/if}
+        </button>
+      </div>
+    </div>
+
     <!-- 3 · Models（ModelListItem 列表；R7 8.7） -->
     <div class="space-y-1.5">
       <div class="flex items-center justify-between">
@@ -560,6 +618,7 @@
             baseURL={draftBaseURL.trim()}
             provider={providerName}
             {apiKeyConfigured}
+            {formKey}
             disabled={agentRuntimeConfig.updating}
             initialExpanded={entry.id === ""}
             onchange={(next) => setModelAt(index, next)}
