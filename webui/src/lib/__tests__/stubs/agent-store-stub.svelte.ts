@@ -16,6 +16,8 @@ export const agentRuntimeConfig = $state({
 export const agentSession = $state({
   sessionId: null as string | null,
   mode: null as string | null,
+  /** 待建会话模式（R12-B 6：New Session 态模式卡/chip 的共享数据源）。 */
+  pendingMode: "free" as string,
   status: "idle" as "idle" | "running",
   sending: false,
   items: [] as unknown[],
@@ -29,6 +31,7 @@ export const createAgentSession = vi.fn();
 export const sendAgentPrompt = vi.fn();
 export const setAgentSessionMode = vi.fn();
 export const cancelAgentSession = vi.fn();
+export const beginNewAgentSession = vi.fn();
 
 export function resetAgentStoreStub(view: DshStewardSettingsView | null): void {
   agentRuntimeConfig.view = view;
@@ -37,6 +40,7 @@ export function resetAgentStoreStub(view: DshStewardSettingsView | null): void {
   agentRuntimeConfig.error = null;
   agentSession.sessionId = null;
   agentSession.mode = null;
+  agentSession.pendingMode = "free";
   agentSession.status = "idle";
   agentSession.sending = false;
   agentSession.items = [];
@@ -48,4 +52,5 @@ export function resetAgentStoreStub(view: DshStewardSettingsView | null): void {
   sendAgentPrompt.mockReset();
   setAgentSessionMode.mockReset();
   cancelAgentSession.mockReset();
+  beginNewAgentSession.mockReset();
 }

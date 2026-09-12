@@ -486,6 +486,58 @@ describe("ModelListItem field editing (R7 8.7)", () => {
     ctx.cleanup();
   });
 
+  it("keeps effort chips through click-on-chip + blur (R12-A1 label-activation repro)", () => {
+    // 用户原文 [2026-09-12 R12-A]：「effect 点击的时候会导致误删：Focus 然后 blur
+    // 就会触发」。复现：点击 chip 主体（非 × 按钮）→ blur → chip 必须仍在。
+    // 根因：Efforts 字段曾用 <label> 包裹 ModelTagsInput——chip 文本是非交互内容，
+    // label 激活行为会向「第一个 labelable 后代」（第一枚 chip 的 × button）转发
+    // 合成 click，误删第一枚 chip。
+    const ctx = mountItem({ id: "m1", efforts: ["low", "high", "max"] });
+    ctx.expand();
+    const chips = (): HTMLElement[] =>
+      [...ctx.target.querySelectorAll<HTMLElement>("span.rounded.bg-muted")].filter(
+        (n) => n.querySelector("button") !== null,
+      );
+    expect(chips().length).toBe(3);
+    const chipBody = (text: string): HTMLElement => {
+      const chip = chips().find((n) => n.textContent?.startsWith(text))!;
+      // 点击目标是 chip 文本区（span 本体，非 × 按钮）。
+      const textNode = [...chip.childNodes].find(
+        (n) => n.nodeType === 3 && (n.textContent ?? "").trim() === text,
+      )!;
+      return textNode.parentElement as HTMLElement;
+    };
+    // 完整鼠标序列（mousedown/focus → mouseup → click）打在 "high" chip 主体。
+    const target = chipBody("high");
+    target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    ctx.effortInput().dispatchEvent(new Event("blur"));
+    target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    flushSync();
+    expect(ctx.state()).toMatchObject({ efforts: ["low", "high", "max"] });
+    // blur 之后再点击另一枚 chip 主体，仍然不得删除。
+    const second = chipBody("max");
+    second.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    second.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    second.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    flushSync();
+    expect(ctx.state()).toMatchObject({ efforts: ["low", "high", "max"] });
+    ctx.cleanup();
+  });
+
+  it("removes exactly one chip through its own × button (R12-A1 regression)", () => {
+    const ctx = mountItem({ id: "m1", efforts: ["low", "high", "max"] });
+    ctx.expand();
+    const removeButton = (text: string): HTMLButtonElement =>
+      [...ctx.target.querySelectorAll<HTMLButtonElement>("button[aria-label^='Remove']")].find(
+        (b) => b.getAttribute("aria-label") === `Remove ${text}`,
+      )!;
+    removeButton("high").click();
+    flushSync();
+    expect(ctx.state()).toMatchObject({ efforts: ["low", "max"] });
+    ctx.cleanup();
+  });
+
   it("parses token shorthand on blur and echoes the normalized form (0.5M / 253k / raw)", () => {
     const ctx = mountItem({ id: "m1" });
     ctx.expand();

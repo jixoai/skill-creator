@@ -20,7 +20,7 @@
 
 ### 1.1 定义
 
-**RouteTab = 一份路由配置的完整自持单元**。一个 tab 承载一条 `DshModelRoute` 的全部横向：图标、名字、key 状态、端点、模型清单、活动切换、删除。用户在 tab A 里永远看不到也不操作 tab B 的任何字段——「不乱窜」的形式化表述。
+**RouteTab = 一份路由配置的完整自持单元**。一个 tab 承载一条 `DshModelRoute` 的全部横向：图标、名字、key 状态、端点、模型清单、删除（活动切换已随 R12-4 删除——活动模型唯一写入口 = composer 热切）。用户在 tab A 里永远看不到也不操作 tab B 的任何字段——「不乱窜」的形式化表述。
 
 **NewTab = 预设选择页与空白表单是同一表单的两个入口态**。Provider 预设（`agent.models.catalog` 目录，36 家含内联 dataURL 图标）与 Custom 不是两种配置类型，而是同一份 Custom 表单的「预填」与「空白」两种起始态：
 
@@ -62,14 +62,14 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 
 ### 1.4 Active model 的归属（论证）
 
-**结论：操作归属 tab 内；真相是全局单例 `settings.model`；可见性全局化（tab 条标记 + composer chip 同步）。**
+**结论（R12-4 修订）：tab 内不再持有活动切换；真相是全局单例 `settings.model`；可见性全局化（tab 条标记 + composer chip 同步），唯一写入口 = composer 下拉热切。**
 
 论证：
 
 1. **内核只有一份 `settings.model`**。任何「每个 tab 各自的活动模型」都是未持久化的假状态，重载/重启后必然漂移——这正是「乱窜」的根源之一。真相只能是单例。
-2. **操作 locality**：切活动模型的意图几乎总是「用这家的某个模型」，而用户此刻正盯着该 tab。`Set active` 放在 tab 内一步完成；放全局下拉（现状）则要在跨 provider 的长列表里找模型——现状痛点。
+2. **操作 locality**：切活动模型的意图几乎总是「用这家的某个模型」。R12-4 用户裁决删除 tab 内 `Set active` 后，唯一写入口 = composer 下拉按 routes 分组热切（组头即 provider label，满足 locality）。
 3. **不选「tab 选中即激活」**：浏览/编辑其他 route 的配置不得有切换活动模型的副作用。配置浏览（视图状态）与状态变更（settings 写入）必须解耦，这是「不乱窜」的第二形式化表述。
-4. **可见性全局化**：active 是跨 tab 单例，其标记必须跨 tab 可见——tab 条上活动路由的 tab 带 primary 下划线 + 圆点；Agent 面板 composer 的 model chip 同步显示全局 active（§3.4）。两处只读，一处可写（tab 内）。
+4. **可见性全局化**：active 是跨 tab 单例，其标记必须跨 tab 可见——tab 条上活动路由的 tab 带 primary 下划线 + 圆点；Agent 面板 composer 的 model chip 同步显示全局 active（§3.4）。展示只读，可写面唯一（composer）。
 
 边界情形：活动模型引用 Routes 之外的 provider（env 注入）→ tab 条右端显示 amber 警示 chip「active outside tabs」（title 说明），点击跳 NewTab 并预填 provider 名。composer model chip 同步降级为警示色。
 
@@ -115,42 +115,41 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 - `+ New`：ghost 按钮，h-7 px-2，`text-[11px]`，点击进入 NewTab（`pick` 态，除非 tab 条为空则直接 `form` 空白态，见 §2.5 空态）。
 - 无路由空态：tab 条只有 `+ New`；内容区显示 onboarding（不是旧画廊）：标题「Add your first model route」+ 两个大按钮「Browse providers」（→ pick 态）/「Custom endpoint」（→ form 空白态）。
 
-### 2.3 RouteTabContent（tab 内布局，自上而下六个块）
+### 2.3 RouteTabContent（R12 后布局：块 0 全局动作行 [Remove + 唯一 Save] + Identity（含 Save as preset 次级按钮与常驻 key 输入）+ Endpoint + Models 列表；原六块中的 Credential 折叠块与 Active 块已被 R12-5/R12-4 取代）
 
 **块 1 · Identity（无卡身，行布局）**
 
 - 28px 图标按钮：点击开 `IconPicker` popover；hover 出现右下角 8px 铅笔角标。
 - provider 名：14px semibold，**只读**（title：「Route name keys the credential mapping — duplicate this route to rename it」。理由：provider 名 = DSH providers 键 = `dshRouteApiKeyEnv` 凭据名，改名等于换身份需重粘 key，本轮以复制重建覆盖改名需求）。
-- 右侧 key 状态 pill：`configured`（primary/10 底）或 `add key →`（amber 底，点击展开块 2 并聚焦）。
+- key 状态以常驻 password 输入承载（R12-5：placeholder/amber 点表状态，无折叠 pill 子流程）。
 - 次行 meta：`baseURL 去协议 · N models`，10px muted。
 
-**块 2 · Credential（bordered，默认折叠为 pill；展开后）**
+**块 2 · Credential（R12-5：常驻输入，无折叠态）**
 
-- password Input（h-8）+ `Save key` 按钮 + （已配置时）`Clear` outline 按钮——搬现有逻辑原样。
+- R12-5：常驻 password Input + eye-toggle（失焦/Enter 保存；已配置 placeholder "stored — enter to replace" 不回显值；Clear 保留）。
 - 辅助文案保留：「Keys are stored locally (0600), never echoed back, and apply immediately.」
-- 保存成功 → pill 翻绿（`configured`），输入框清空，块保持展开 800ms 后自动折叠。
+- 保存成功 → configured 状态刷新（tab amber 点与提示保留）；无展开/折叠子流程（输入常驻）。
 
 **块 3 · Endpoint（bordered）**
 
-- `Base URL` Input（mono 12px），脏态启用 `Save` 按钮，保存 = `modelRoutes` 全量补丁。
-- `API protocol` 字段**仅当该 provider 不在目录中时渲染**（自定义路由必填；目录路由继承 pi-ai 装配协议，不显示以免误导）。控件：Input + datalist（候选 = 目录出现过的 api 值并集）。
+- `Base URL` Input（mono 12px）；R12-2 后本块无局部 Save——脏改动由右上角唯一全局 Save 合并提交。
+- `API protocol` 字段：目录/自定义路由统一渲染的 Select（R7-8.6；候选 = DSH_ROUTE_API_PROTOCOLS）。
 
 **块 4 · Models**
 
 - **R7+ 重构落地（取代初版单 tags-input 描述）**：Models 块 = `ModelListItem` 列表 + Add model。每个条目默认折叠（ModelName + dirty 点 + test/edit/remove 三个 44px icon-button），展开为全表单：modelId（datalist 补全——当前 provider 模型置顶，跨 provider 候选剔除 `/`、`@` 命名空间 id）、ModelName（自动生成可改）、efforts（tags-input + 补全：标准档位 minimal/low/medium/high/xhigh/max ∪ 目录 effortTiers ∪ 路由并集；默认 `low/high/max` 三档——用户裁定）、上下文窗口与最大输出 token（`0.5M`/`253k` 简写，目录预填 contextWindow/maxTokens）、输入类型 chips（目录 inputTypes 预填；text 锁定选中）、输出类型 chips（text 锁定选中 + image 可切换持久化——pi-ai 镜像无 output 数据，默认 `["text"]`，codex R11 P1）、连接测试（已存 key → provider 注入；草案 → test-only key 直传）。
-- **即时应用**：每次 add/remove tag 即发 `modelRoutes` 全量补丁（低风险字段，无 Save 按钮）。补丁期间 `agentRuntimeConfig.updating` 置灰输入。
+- **保存语义（R12-2 修订）**：块内无局部按钮；全部脏改动经右上角唯一全局 Save 一次合并 `modelRoutes` 补丁。`agentRuntimeConfig.updating` 期间置灰输入。
 
-**块 5 · Active model**
+**块 5 · Active model（R12-4 已删除）**
 
-- 本 tab 持有活动模型（`route.provider === view.settings.model.provider`）时：
-  - 头部 badge「Active route」（primary/10）；
-  - 模型 select（本 route 的 models）+ `Effort` Input（h-8，placeholder `low / medium / high`）+ `Apply` 按钮（脏态启用）——搬现有 `saveModel` 逻辑；此块仅在**活动 tab** 展开。
-- 非 active tab：紧凑形态——模型 chip 行（每 model 一个 chip，hover 浮现 `Use`）+ 底部 `Set active` 按钮（以第一个 model 为默认值）。点击 = `apply({ model: {provider, model} })`，成功 toast + tab 条 primary 下划线迁移。
+- 用户裁决 [2026-09-12]：「Active model 这个配置没有意义，删掉」。本块整体移除——
+  活动模型切换唯一入口 = composer 下拉热切（PRODUCT_MODEL §5 会话运行时路径）；
+  tab 条的 active 下划线与「active outside tabs」amber chip 为纯展示，数据源不变。
 
-**块 6 · Danger / Preset（行布局，右对齐）**
+**块 6 · Danger / Preset（R12-2 后并入全局动作行与 Identity）**
 
-- `Save as preset`（ghost，11px）：写本地 presets；已存在同名 preset 时变 `Saved ✓`（1s）。
-- `Remove route`（ghost-destructive）：弹 `confirm-dialog.svelte` 复用；确认 = 全量补丁移除。若移除的是活动路由 → 全局 active 变 dangling，§1.4 警示 chip 出现（预期行为，不阻止）。
+- `Remove route` = 右上角全局动作行的 trash icon（44px 命中区）→ ConfirmDialog；确认 = 全量补丁移除。若移除的是活动路由 → 全局 active 变 dangling，§1.4 警示 chip 出现（预期行为，不阻止）。
+- `Save as preset` = Identity 区次级文字按钮；已存在同名 preset 时变 `Saved ✓`（1s）。
 
 ### 2.4 NewRouteTab（两态）
 
@@ -166,9 +165,9 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 **form 态**（与 RouteTabContent 同一字段集，新建语境）：
 
 1. Identity：`IconPicker`（预设带入图标）+ `Route name` Input（必填；与现有路由重名 → 内联 amber 错误「Route "x" already exists.」，沿用现有校验文案）。
-2. Endpoint：`Base URL`（必填，`/^https?:///` 校验，错误文案沿用）+ `API protocol`（预设命中目录时隐藏，自定义必填，默认 `anthropic-messages`）。
+2. Endpoint：`Base URL`（必填，`/^https?:///` 校验，错误文案沿用）+ `API protocol`（预设/自定义统一渲染的 Select，预填目录 api 可改——R7-8.6）。
 3. Models：`ModelListItem` 列表（与 RouteTabContent 同款表单集），预设带入 top-4 模型（目录命中预填 name/contextWindow/maxOutputTokens/inputTypes/effortTiers，efforts 默认 `low/high/max`）；名字命中目录 provider 时自动出补全候选（当前 provider 置顶 + 跨 provider 剔命名空间 id）。
-4. 底部：`Add route` primary（校验通过启用）+ `Back` ghost。成功 → 关闭 NewTab、自动选中新 tab、展开块 2 并聚焦 key 输入（替代现有 `routeAddedFor` + `scrollIntoView` 引导）。
+4. 底部：`Add route` primary（校验通过启用）+ `Back` ghost。成功 → 关闭 NewTab、自动选中新 tab 并 scrollIntoView、聚焦常驻 key 输入（R12-5：无折叠展开子流程；引导语义保留）。
 
 **IconPicker**（两处复用）：
 
@@ -225,7 +224,7 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 | **TurnStatus**（替换 "working…" 行） | running 时缀于流尾：`.sweep` 渐变文字「Working」；**15s 后**追加计时「· 18s」（1s tick；reduced-motion 降级为静态文字）。                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **TodoDock**                         | **移出转录流**：todo-snapshot 不再进 items，改投影 `agentSession.todos`（latest-wins）。dock 卡在 composer 上方（mx-3 mb-1.5），默认折叠，头部 28px：`[check-circle] Tasks  done N · active M · pending K  [chevron]`；展开体 `max-h-40` 内滚，行 = 12px + 状态点（completed 划线灰 / in_progress primary 空心 / pending 灰空心，沿用现有三态样式）。无 todos 时 dock 整体隐藏。                                                                                                                                                          |
 
-**空会话态**：现有四模式启动卡保留，重排版为居中 280px 宽卡列（样式对齐 §2 卡片语言）。composer 的 mode chip 在无会话时点击 = 以该模式创建会话（与空态卡等价的第二入口）。
+**空会话态**：现有四模式启动卡保留，重排版为居中 280px 宽卡列（样式对齐 §2 卡片语言）。模式卡与 composer mode chip 双向同步（唯一数据源 `agentSession.pendingMode`，默认 General/free）；二者只切换待建会话的模式，**不创建会话**——会话创建惰性发生在首条消息发出时（R12-6/8）。
 
 ### 3.3 组件处置表
 
@@ -242,9 +241,9 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 卡身：`mx-3 mb-3 rounded-[22px] border border-border bg-card shadow-sm`，纵排 [附件条 → textarea → 工具行]。
 
 - **附件条**（非空时渲染，`px-3 pt-3`）：图片 56×56 缩略（rounded-lg，hover × 移除，沿用）；文件 chip（icon + name + ×）。与转录 UserMessage 附件行同视觉语言。
-- **textarea**：无边框透明，`px-3.5 py-2.5 text-[13px] leading-5`，`maxlength 20000`，min-h 44px（1 行）max-h 160px 自动长高（4 行封顶内滚）；Enter 发送 / Shift+Enter 换行（沿用）；paste 图片 / drop 混合文件（沿用）。placeholder：有会话「Message the agent…」，无会话「Pick a mode to start…」。
+- **textarea**：无边框透明，`px-3.5 py-2.5 text-[13px] leading-5`，`maxlength 20000`，min-h 44px（1 行）max-h 160px 自动长高（4 行封顶内滚）；Enter 发送 / Shift+Enter 换行（沿用）；paste 图片 / drop 混合文件（沿用）。placeholder 统一「Message the agent…」（R12-6：无会话态可输入，首条消息即建会话）。
 - **工具行**（h-11，`px-2.5 items-center gap-1`）：
-  - 左簇：**模式 chip**（`General ▾`，h-7 rounded-full border px-2.5 text-11；DropdownMenu 列 DSH_AGENT_MODES；running 置灰 + title「Switch after the current turn ends」；**无会话时点击 = 以该模式建会话**）+ **📎 图片**（32px icon 按钮，44px 外扩命中区沿用）+ **📄 文件**。
+  - 左簇：**模式 chip**（`General ▾`，h-7 rounded-full border px-2.5 text-11；DropdownMenu 列 DSH_AGENT_MODES；running 置灰 + title「Switch after the current turn ends」；无会话时只更新 `pendingMode`（首条消息才惰性建会话——R12-6 修订））+ **📎 图片**（32px icon 按钮，44px 外扩命中区沿用）+ **📄 文件**。
   - 右簇：**model chip**（h-7 rounded-full，`provider · model` 截断 + effort 后缀；DropdownMenu 按 routes 分组列模型；选中 = `updateAgentSettings({model})` 热切；running 置灰；active 悬空于 Routes 外 = amber 警示态。canonical 裁决 [2026-09-12]：活动模型选择是会话运行时字段，composer 热切只写 `settings.model`、不构成路由配置的第二写入面——见 PRODUCT_MODEL.md §5 修订；R1 实现「只读 chip 跳设置」属实现偏差，R2 已按本规格落地）+ **ContextMeter**（14px SVG 环：`lastUsage.inputTokens / contextWindow`；contextWindow 取活动 route 匹配 model 的 `contextWindow`，缺省 128k 常量且 popover 标注 assumed；点击弹用量面板：in/out/capacity + `compact` 按钮——原上下文条的 compact 迁入此处，语义不变）+ **主按钮**（**34px 圆形** `rounded-full`：默认发送 ↑（有稿可用）；running + 空稿 → 变停止 ■（destructive 底）；running + 有稿 → 禁用置灰，title「Wait for the current turn」）。
 - **edit-mode 注记条**（composer 卡上方，amber tint，h-7）：`Editing — resending keeps your full history  [× cancel]`（§4.3）。
 - **SlashMenu**：稿文以 `/` 开头且光标在首行时，于 composer 上方锚定浮现（绝对定位列表，非新依赖）：当前命令 `/compact`（执行并发送）；↑↓ 导航 + Enter 执行 + Esc 关闭；结构开放供后续命令注册。
@@ -308,12 +307,12 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 
 ## 5. 切片计划（每片可独立验收合入）
 
-| 切片               | 范围                                                                                                                                                             | 依赖                                 | 退出标准                                                                                              |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| **S1 Model tabs**  | §2 全部四组件 + 本地 presets store + settings 分区重写。**不碰面板**。                                                                                           | 无（契约 icon 字段已存在，桥已剥离） | 旧 ModelSettingsSection 的画廊/Routes/key 盒三块全部消失；路由 CRUD/图标/key/活动切换全在 tabs 内闭环 |
-| **S2 面板转录流**  | §3.1 骨架 + §3.2 全 row 类型 + §3.3 拆分 + §3.5 store 重构（tool 合并行、turn-end 药丸、todo 出列）+ §3.6 CSS。composer 维持旧 footer 简化挂底（不阻断面板可用） | S1 无依赖，可与 S1 并行              | 面板视觉/交互与 §3.2 表逐行对齐；无 "working…" 纯文字行、无双 tool 行、无内联 todo 卡                 |
-| **S3 composer 卡** | §3.4 全部（模式 chip 迁移、model chip、ContextMeter、34px 主按钮形态、SlashMenu、edit-mode 注记条、附件条入卡）+ 上下文条删除                                    | S2（骨架就位）                       | composer 单卡承载输入/附件/模式/模型/上下文/发送停止；旧 footer 与上下文条删除                        |
-| **S4 差距收尾**    | §4.1 契约+daemon+store+UI；§4.2 契约+daemon+UI；§4.3 标注                                                                                                        | S2（行结构）、S3（注记条）           | 三项差距在发布会演示脚本中可复现且语义正确                                                            |
+| 切片               | 范围                                                                                                                                                             | 依赖                                 | 退出标准                                                                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| **S1 Model tabs**  | §2 全部四组件 + 本地 presets store + settings 分区重写。**不碰面板**。                                                                                           | 无（契约 icon 字段已存在，桥已剥离） | 旧 ModelSettingsSection 的画廊/Routes/key 盒三块全部消失；路由 CRUD/图标/key 在 tabs 内闭环（活动切换 R12-4 后归 composer 热切） |
+| **S2 面板转录流**  | §3.1 骨架 + §3.2 全 row 类型 + §3.3 拆分 + §3.5 store 重构（tool 合并行、turn-end 药丸、todo 出列）+ §3.6 CSS。composer 维持旧 footer 简化挂底（不阻断面板可用） | S1 无依赖，可与 S1 并行              | 面板视觉/交互与 §3.2 表逐行对齐；无 "working…" 纯文字行、无双 tool 行、无内联 todo 卡                                            |
+| **S3 composer 卡** | §3.4 全部（模式 chip 迁移、model chip、ContextMeter、34px 主按钮形态、SlashMenu、edit-mode 注记条、附件条入卡）+ 上下文条删除                                    | S2（骨架就位）                       | composer 单卡承载输入/附件/模式/模型/上下文/发送停止；旧 footer 与上下文条删除                                                   |
+| **S4 差距收尾**    | §4.1 契约+daemon+store+UI；§4.2 契约+daemon+UI；§4.3 标注                                                                                                        | S2（行结构）、S3（注记条）           | 三项差距在发布会演示脚本中可复现且语义正确                                                                                       |
 
 ---
 
@@ -326,7 +325,7 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 **PM 功能点**
 
 - [ ] 新建路由三条路径齐通：预设选卡、空白 Custom、另存预设后再用。
-- [ ] 每 tab 闭环：换图标 → 粘 key（pill 翻 configured）→ 增删模型 tag（即时生效，kernel 热加载，面板 composer model chip 同步出新模型）→ Set active（tab 条下划线迁移 + toast）。
+- [ ] 每 tab 闭环：换图标 → 粘 key（password+eye 输入保存翻 configured）→ 模型条目增删（右上角唯一 Save 一次合并补丁）→ composer 下拉热切活动模型（tab 条下划线迁移；R12-4 后本页无 Set active）。
 - [ ] 删除路由有确认；删除活动路由后「active outside tabs」警示出现。
 - [ ] env 注入活动模型（无对应 tab）→ 警示 chip 常显。
 - [ ] 重复 provider 名内联报错；非法 URL/空 models 报错文案与现有一致。
@@ -361,7 +360,7 @@ UI 本地态只有三样：当前选中 tab、NewTab 的 `mode(pick|form)` 与�
 
 **PM 功能点**
 
-- [ ] 模式 chip：切模式（idle 成功 / running 拒绝）；无会话时点击 = 以该模式开新会话。
+- [ ] 模式 chip：切模式（idle 成功 / running 拒绝）；无会话时只更新 pendingMode，首条消息才建会话（R12-6/8）。
 - [ ] model chip：热切模型后面板下一轮即用新模型；running 置灰；悬空路由警示态。
 - [ ] ContextMeter 环随 lastUsage 变化；点击弹用量面板 + compact 可用（原上下文条语义无回归）。
 - [ ] 主按钮形态机：空稿禁用 → 有稿发送↑ → running 空稿停止■ → running 有稿置灰。

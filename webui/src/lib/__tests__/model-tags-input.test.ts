@@ -134,4 +134,51 @@ describe("ModelTagsInput (B1 Enter commit, controlled round-trip)", () => {
     expect(input.value).toBe("model");
     ctx.cleanup();
   });
+
+  it("keeps chips when their body is clicked and the input blurs (R12-A1)", () => {
+    // 用户原文 [2026-09-12 R12-A]：「effect 点击的时候会导致误删：Focus 然后
+    // blur 就会触发」。chip 主体（非 × 按钮）的完整鼠标序列 + blur 不得删除。
+    // 防御面：即便宿主把本组件包进 <label>，input 是 DOM 首个 labelable 后代，
+    // label 激活只会聚焦输入框（合成 click 落在 input 上），不会命中 ×。
+    const ctx = mountHost(["low", "high"]);
+    const input = ctx.input();
+    input.focus();
+    flushSync();
+    const chipBody = (text: string): HTMLElement => {
+      const chip = [...ctx.target.querySelectorAll("span.rounded.bg-muted")].find((n) =>
+        n.textContent?.startsWith(text),
+      )!;
+      return [...chip.childNodes].find(
+        (n) => n.nodeType === 3 && (n.textContent ?? "").trim() === text,
+      )!.parentElement as HTMLElement;
+    };
+    for (const text of ["high", "low"]) {
+      const target = chipBody(text);
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      input.dispatchEvent(new Event("blur"));
+      target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      flushSync();
+    }
+    expect(ctx.onchange).not.toHaveBeenCalled();
+    expect(ctx.chips()).toEqual(["low", "high"]);
+    expect(ctx.selected()).toEqual(["low", "high"]);
+    ctx.cleanup();
+  });
+
+  it("removes exactly its own chip through the × button (R12-A1)", () => {
+    const ctx = mountHost(["low", "high"]);
+    const removeButton = (text: string): HTMLButtonElement =>
+      ctx.target.querySelector<HTMLButtonElement>(`button[aria-label="Remove ${text}"]`)!;
+    removeButton("high").click();
+    flushSync();
+    expect(ctx.onchange).toHaveBeenCalledWith(["low"]);
+    expect(ctx.chips()).toEqual(["low"]);
+    // 另一枚的 × 仍可用。
+    removeButton("low").click();
+    flushSync();
+    expect(ctx.onchange).toHaveBeenLastCalledWith([]);
+    expect(ctx.chips()).toEqual([]);
+    ctx.cleanup();
+  });
 });

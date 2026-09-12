@@ -19,9 +19,10 @@
 ## What Changes
 
 - **Model 配置 tabs 化**：Model 设置分区重构为「路由 tabs + New tab」——每个已建
-  路由一个 tab（内联其 key 状态与活动模型切换），`+ New` 打开统一建路由体验：
+  路由一个 tab（内联 key 状态；活动模型切换原计划在 tab 内，R12-4 用户裁决删除，
+  唯一入口 = composer 热切），`+ New` 打开统一建路由体验：
   预设目录（provider 卡，预填 icon/协议/模型）与空白 Custom 是同一表单的两种起
-  始态；图标可换（内置目录图 + 上传自定义 svg）；活动模型选择并入 tabs 语境，
+  始态；图标可换（内置目录图 + 上传自定义 svg）；活动模型切换归 composer 热切（R12-4），
   不再与画廊混排。
 - **Agent 面板重设计**：对照 dsh-webui conversation 完成度重排信息架构（消息/
   工具行/思考/composer/附件的解剖学对齐官方），保留必要组件（markstream 气泡、

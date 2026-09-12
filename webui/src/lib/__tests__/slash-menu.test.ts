@@ -6,14 +6,14 @@
  * 用户原始需求 [2026-09-12]：「SlashMenu：稿文以 `/` 开头且光标在首行时，于
  * composer 上方锚定浮现……当前命令 `/compact`（执行并发送）；↑↓ 导航 + Enter
  * 执行 + Esc 关闭」；「模式 chip（`General ▾`……DropdownMenu 列 DSH_AGENT_MODES；
- * running 置灰 + title「Switch after the current turn ends」；无会话时点击 = 以
- * 该模式建会话）」。
+ * running 置灰 + title「Switch after the current turn ends」」；R12-B 6 修订：
+ * 无会话时点击 = 预选 pendingMode（默认 General），不建会话。
  *
  * 正交意图：
  *   [1] SlashMenu：`/` 浮现、`/x` 无匹配隐藏、Enter 以命令文本发送并清稿、
  *       Esc 对当前稿文一次性驳回（稿文再变化重新浮现）。
- *   [2] 模式 chip：目录渲染 + 当前项 check；会话内切换 / 无会话建会话；running
- *       禁用与 title 文案。
+ *   [2] 模式 chip：目录渲染 + 当前项 check；会话内切换 / 无会话预选待建模式
+ *       （R12-B 6/8）；running 禁用与 title 文案。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -233,7 +233,7 @@ describe("ComposerCard mode chip dropdown (design §3.4)", () => {
     ctx.cleanup();
   });
 
-  it("switches the session mode in-session, and starts a session with the mode when none exists", async () => {
+  it("switches the session mode in-session, and pre-selects the pending mode when none exists", async () => {
     // 有会话：切换模式。
     resetAgentStoreStub(null);
     agentSession.sessionId = "agent-s1";
@@ -245,14 +245,18 @@ describe("ComposerCard mode chip dropdown (design §3.4)", () => {
     expect(setAgentSessionMode).toHaveBeenCalledWith("explore");
     withSession.cleanup();
 
-    // 无会话：以该模式建会话（空态卡等价第二入口）。
+    // 无会话（R12-B 6）：chip 默认 General（pendingMode），选择只改待建模式，
+    // 不建会话——首条消息才创建（R12-B 8）。
     resetAgentStoreStub(null);
     const withoutSession = mountComposer();
-    expect(withoutSession.modeTrigger()?.textContent).toContain("Mode");
+    expect(withoutSession.modeTrigger()?.textContent).toContain("General");
     await withoutSession.openModeMenu();
     const create = withoutSession.modeItems().find((n) => n.textContent?.includes("Create"));
     create!.click();
-    expect(createAgentSession).toHaveBeenCalledWith(undefined, "create");
+    flushSync();
+    expect(createAgentSession).not.toHaveBeenCalled();
+    expect(agentSession.pendingMode).toBe("create");
+    expect(withoutSession.modeTrigger()?.textContent).toContain("Create");
     withoutSession.cleanup();
   });
 

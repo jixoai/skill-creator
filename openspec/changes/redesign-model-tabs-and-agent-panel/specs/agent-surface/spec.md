@@ -4,7 +4,7 @@
 
 ### Requirement: Model configuration is a RouteTabs surface
 
-Settings → Model MUST present model routes as tabs, one route per tab, with a single NewTab entry unifying provider presets and custom endpoints (a preset is a prefill of the same form, never a runtime category). Each tab is a self-contained unit (identity/icon, credential, endpoint, models, active selection, remove); edits in one tab MUST NOT touch another tab's fields. The tab strip MUST surface per-route key status (amber dot when missing), the active route (primary underline), an amber chip when the active model dangles outside configured routes, and local "Your presets" (prefill packs stored browser-side, never runtime config).
+Settings → Model MUST present model routes as tabs, one route per tab, with a single NewTab entry unifying provider presets and custom endpoints (a preset is a prefill of the same form, never a runtime category). Each tab is a self-contained unit (identity/icon, credential, endpoint, models, remove; the Active-model block was removed by user decree [2026-09-12] — the active model's only switch surface is the composer runtime dropdown); edits in one tab MUST NOT touch another tab's fields. The tab strip MUST surface per-route key status (amber dot when missing), the active route (primary underline), an amber chip when the active model dangles outside configured routes, and local "Your presets" (prefill packs stored browser-side, never runtime config).
 
 #### Scenario: add route from a provider preset
 

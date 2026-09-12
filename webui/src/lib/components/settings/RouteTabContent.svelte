@@ -1,5 +1,6 @@
 <!--
-  单路由完整编辑面（redesign-model-tabs-and-agent-panel S1；R7 8.2/8.6/8.7 重写）。
+  单路由完整编辑面（redesign-model-tabs-and-agent-panel S1；R7 8.2/8.6/8.7 重写；
+  R12-A 五项交互收敛 [2026-09-12]）。
   用户原始需求 [2026-09-12]：「一个 tab 承载一条 DshModelRoute 的全部横向」；
   「颜色与 Letter 分离：图标（含无图标）、头像颜色（iconColor）、Letter 文字
   （iconLetter）三个独立控制」；「api 从自由输入改为 Select（DSH_ROUTE_API_PROTOCOLS），
@@ -8,26 +9,33 @@
   用户原始需求 [2026-09-12 R10]：「@cf/... 这明显是无效的」（补全池当前 provider
   置顶、跨 provider 剔命名空间 id）；「Add model 默认 efforts 三档 Low/High/Max」；
   「折叠行 dirty 小圆点」。
+  用户原始需求 [2026-09-12 R12-A]：「一共只提供一个 save 按钮就好，现在给了 3 个，
+  save 和 remove 都放到右上角」；「AddModel，新增的 Model，要 scrollInToView」；
+  「Active model 这个配置没有意义，删掉」（活动模型切换唯一入口 = composer 下拉）；
+  「key 直接通过一个 input-password 直接显示出来，提供 eye-toggle 即可」。
   正交意图：
-  1. 六块布局：Identity（图标三控制 + 只读路由名 + key pill）/ Credential（折叠
-     pill ↔ 展开写入盒）/ Endpoint（baseURL + api Select 脏态显式 Save）/ Models
-     （ModelListItem 列表 + dirty Save + validity 门）/ Active（活动路由全形态 vs
-     紧凑形态）/ Danger+Preset（右对齐行）。
-  2. 写路径：icon/iconColor/iconLetter/models 走 updateAgentSettings({modelRoutes})
-     全量补丁；key 走 setAgentCredential/clear 旁路（值永不回流）；活动模型走
-     settings.model 单例。
-  3. 数据源派生：Active effort 建议词 = 当前模型的 efforts（无硬编码数组）；
-     ModelListItem 补全池 = catalogModelCandidates（R10-1：当前 provider（编号
-     slug 归一 base）置顶 + 跨 provider 净化并集）；新增条目 efforts 默认三档
-     （DEFAULT_MODEL_EFFORTS）；条目级 dirty 传给折叠行小圆点。
+  1. 布局：右上角全局动作行（Save + Remove icon-button）/ Identity（图标三控制 +
+     只读路由名 + preset 次级文字按钮 + key 状态 pill）/ Credential（常驻
+     password 输入 + eye-toggle + Clear）/ Endpoint（baseURL + api Select）/
+     Models（ModelListItem 列表 + Add model；新增条目 scrollIntoView）。
+  2. 写路径：全局 Save 把 endpoint + models 的全部脏改动合并为一次
+     updateAgentSettings({modelRoutes}) 补丁；identity 三控制在 pick 时即时落库
+     （IconPicker 无草稿态）；key 走 setAgentCredential/clear 旁路（值永不回流）。
+  3. 数据源派生：ModelListItem 补全池 = catalogModelCandidates（R10-1：当前
+     provider（编号 slug 归一 base）置顶 + 跨 provider 净化并集）；新增条目
+     efforts 默认三档（DEFAULT_MODEL_EFFORTS）；条目级 dirty 传给折叠行小圆点。
   妥协声明：路由名只读——provider 名 = 凭据 env 映射键（dshRouteApiKeyEnv），
   改名等于换身份需重粘 key，以「复制重建」覆盖改名需求（design §7）。
 -->
 <script lang="ts">
+  import { tick } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import IconPicker from "./IconPicker.svelte";
   import ModelListItem from "./ModelListItem.svelte";
+  import IconEye from "@lucide/svelte/icons/eye";
+  import IconEyeOff from "@lucide/svelte/icons/eye-off";
+  import IconTrash from "@lucide/svelte/icons/trash-2";
   import { routeAvatarColor, routeLetter, resolveRouteIcon } from "./route-icon.js";
   import { numberedSlugParts, routeDisplayLabel } from "./route-naming.js";
   import {
@@ -42,7 +50,6 @@
     setAgentCredential,
     updateAgentSettings,
   } from "$lib/stores/agent.svelte";
-  import { showToast } from "$lib/toast.svelte";
   import {
     DSH_ROUTE_API_PROTOCOLS,
     type DshModelRoute,
@@ -52,7 +59,7 @@
   interface Props {
     route: DshModelRoute;
     catalog: { providers: ModelProviderCatalogEntry[] } | null;
-    /** 新建引导：挂载即展开凭据盒并聚焦；完成后经 onCredentialFocused 清除。 */
+    /** 新建引导：挂载即聚焦凭据输入；完成后经 onCredentialFocused 清除。 */
     autoFocusCredential?: boolean;
     onCredentialFocused?: () => void;
     /** 请求移除（确认对话框由分区持有——tab 条 Delete 键与本按钮共用一条路径）。 */
@@ -97,82 +104,57 @@
   const keyReady = $derived(
     view?.providers.some((p) => p.provider === route.provider && p.configured) ?? false,
   );
-  const isActiveRoute = $derived(view !== null && view.settings.model.provider === route.provider);
 
-  /** Endpoint 草稿（显式 Save；tab 切换经分区 {#key} 重挂载自然重置）。 */
+  /** Endpoint 草稿（全局 Save；tab 切换经分区 {#key} 重挂载自然重置）。 */
   // svelte-ignore state_referenced_locally
   let baseURLDraft = $state(route.baseURL);
   // svelte-ignore state_referenced_locally
   let apiDraft = $state(route.api ?? catalogEntry?.api ?? DEFAULT_API);
-  /** Models 草稿（dirty-gated Save；条目字段见 ModelListItem）。 */
+  /** Models 草稿（dirty-gated 全局 Save；条目字段见 ModelListItem）。 */
   // svelte-ignore state_referenced_locally
   let modelsDraft = $state<RouteModelEntry[]>(route.models.map((entry) => ({ ...entry })));
   // svelte-ignore state_referenced_locally
   let modelsValid = $state<boolean[]>(route.models.map(() => true));
-  /** 活动模型草稿（挂载时初始化一次；避免无关补丁回写打断编辑中草稿）。 */
-  const initialSelection = agentRuntimeConfig.view?.settings.model;
-  // svelte-ignore state_referenced_locally
-  let modelDraft = $state(
-    initialSelection && initialSelection.provider === route.provider
-      ? initialSelection.model
-      : (route.models[0]?.id ?? ""),
-  );
-  // svelte-ignore state_referenced_locally
-  let effortDraft = $state(
-    initialSelection && initialSelection.provider === route.provider
-      ? (initialSelection.reasoningEffort ?? "")
-      : "",
-  );
+  /** 常驻凭据输入（R12-A5）：只装新输入；已存 key 永不回显。 */
   let apiKeyDraft = $state("");
-  // svelte-ignore state_referenced_locally
-  let credOpen = $state(autoFocusCredential);
+  let keyVisible = $state(false);
   // svelte-ignore state_referenced_locally
   let addedHint = $state(autoFocusCredential);
   let credInput = $state<HTMLInputElement | null>(null);
   let rejection = $state<string | null>(null);
   let presetSaved = $state(false);
-  let endpointSaved = $state(false);
-  let collapseTimer: ReturnType<typeof setTimeout> | null = null;
+  let savedFlash = $state(false);
   let presetTimer: ReturnType<typeof setTimeout> | null = null;
-  let endpointTimer: ReturnType<typeof setTimeout> | null = null;
+  let savedTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Models 条目元素索引（Add model 后 scrollIntoView 定位锚）。 */
+  let modelItemEls: (HTMLElement | null)[] = [];
 
-  const modelOptions = $derived.by(() => {
-    const ids = modelsDraft.map((entry) => entry.id).filter((id) => id.length > 0);
-    if (isActiveRoute && view !== null && !ids.includes(view.settings.model.model)) {
-      ids.unshift(view.settings.model.model);
-    }
-    return ids;
-  });
-  /** Active effort 建议词 = 当前模型的 efforts（数据源派生，无硬编码数组）。 */
-  const effortSuggestions = $derived(
-    modelsDraft.find((entry) => entry.id === modelDraft)?.efforts ?? [],
-  );
   const endpointDirty = $derived(
     baseURLDraft.trim() !== route.baseURL ||
       apiDraft !== (route.api ?? catalogEntry?.api ?? DEFAULT_API),
   );
   const modelsDirty = $derived(JSON.stringify(modelsDraft) !== JSON.stringify(route.models));
   const modelsAllValid = $derived(modelsValid.every((flag) => flag));
-  const modelDirty = $derived(
-    view !== null &&
-      isActiveRoute &&
-      ((modelDraft || "") !== view.settings.model.model ||
-        (effortDraft || "") !== (view.settings.model.reasoningEffort ?? "")),
+  /** 全局 Save 门（R12-A2）：tab 内任一块 dirty 且校验通过才解禁。 */
+  const saveDisabled = $derived(
+    !(endpointDirty || modelsDirty) ||
+      !modelsAllValid ||
+      modelsDraft.length === 0 ||
+      agentRuntimeConfig.updating,
   );
 
-  // 凭据盒展开即聚焦（新建引导与 pill 点击共用；autoFocus 路径同时清除分区挂起标记）。
+  // 新建引导：挂载即聚焦常驻凭据输入；autoFocus 路径同时清除分区挂起标记。
   $effect(() => {
-    if (credOpen && credInput !== null) {
+    if (autoFocusCredential && credInput !== null) {
       credInput.focus();
-      if (autoFocusCredential) onCredentialFocused?.();
+      onCredentialFocused?.();
     }
   });
 
   $effect(() => {
     return () => {
-      if (collapseTimer !== null) clearTimeout(collapseTimer);
       if (presetTimer !== null) clearTimeout(presetTimer);
-      if (endpointTimer !== null) clearTimeout(endpointTimer);
+      if (savedTimer !== null) clearTimeout(savedTimer);
     };
   });
 
@@ -209,24 +191,25 @@
     await patchRoute({ ...route, ...patch });
   }
 
-  async function saveEndpoint(): Promise<void> {
+  /** 全局 Save（R12-A2）：endpoint + models 全部脏改动合并为一次补丁；identity
+   * 三控制已在 pick 时即时落库（无草稿态），经 {...route} 透传不丢。 */
+  async function saveAll(): Promise<void> {
     const baseURL = baseURLDraft.trim();
     if (!/^https?:\/\//.test(baseURL)) {
       rejection = "Custom route needs an http(s) base URL.";
       return;
     }
-    const ok = await patchRoute({ ...route, baseURL, api: apiDraft });
+    const ok = await patchRoute({
+      ...route,
+      baseURL,
+      api: apiDraft,
+      models: modelsDraft.map((entry) => ({ ...entry })),
+    });
     if (!ok) return;
-    // 保存确认：1.5s 绿色 Saved ✓；组件卸载清 timer。
-    endpointSaved = true;
-    if (endpointTimer !== null) clearTimeout(endpointTimer);
-    endpointTimer = setTimeout(() => (endpointSaved = false), 1500);
-  }
-
-  /** Models dirty Save（R7 8.7：全量补丁，条目级编辑/校验在 ModelListItem）。 */
-  async function saveModels(): Promise<void> {
-    if (!modelsDirty || !modelsAllValid || modelsDraft.length === 0) return;
-    await patchRoute({ ...route, models: modelsDraft.map((entry) => ({ ...entry })) });
+    // 保存确认：1.5s Saved ✓ 回显在右上角按钮上；组件卸载清 timer。
+    savedFlash = true;
+    if (savedTimer !== null) clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => (savedFlash = false), 1500);
   }
 
   function setModelAt(index: number, next: RouteModelEntry): void {
@@ -251,17 +234,17 @@
     return JSON.stringify(draft) !== JSON.stringify(saved);
   }
 
-  /** 新增条目（R10-5）：efforts 默认三档写入草稿（Save 持久化）；空 id 挂载即展开。 */
-  function addModel(): void {
+  /** 新增条目（R10-5 + R12-A3）：efforts 默认三档写入草稿；空 id 挂载即展开；
+   * DOM 更新后将条目滚入视野（nearest + smooth）。 */
+  async function addModel(): Promise<void> {
     modelsDraft = [...modelsDraft, { id: "", efforts: [...DEFAULT_MODEL_EFFORTS] }];
     modelsValid = [...modelsValid, false];
+    await tick();
+    modelItemEls[modelItemEls.length - 1]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
-  function toggleCredential(): void {
-    credOpen = !credOpen;
-    if (!credOpen) addedHint = false;
-  }
-
+  /** 常驻凭据输入（R12-A5）：失焦/Enter 保存；空输入 no-op；已存 key 以占位
+   * 提示 replace 语义（值永不回显）。 */
   async function saveCredential(): Promise<void> {
     const key = apiKeyDraft.trim();
     if (key.length === 0) return;
@@ -274,52 +257,10 @@
     apiKeyDraft = "";
     rejection = null;
     addedHint = false;
-    if (collapseTimer !== null) clearTimeout(collapseTimer);
-    collapseTimer = setTimeout(() => (credOpen = false), 800);
   }
 
   async function clearCredential(): Promise<void> {
     await clearAgentCredential(route.provider);
-  }
-
-  async function saveModel(): Promise<void> {
-    if (!modelDirty || modelDraft.length === 0) return;
-    const result = await updateAgentSettings({
-      model: {
-        provider: route.provider,
-        model: modelDraft,
-        ...(effortDraft.trim().length > 0 ? { reasoningEffort: effortDraft.trim() } : {}),
-      },
-    });
-    if (!result) return;
-    if (result.outcome === "rejected") {
-      rejection = `${result.code}: ${result.detail}`;
-      return;
-    }
-    if (result.outcome === "error") {
-      rejection = result.message;
-      return;
-    }
-    rejection = null;
-  }
-
-  /** 非活动路由一步切换全局活动模型（真相单例；tab 条下划线随 view 迁移）。 */
-  async function setActive(modelId: string): Promise<void> {
-    if (modelId.length === 0) return;
-    const result = await updateAgentSettings({
-      model: { provider: route.provider, model: modelId },
-    });
-    if (!result) return;
-    if (result.outcome === "rejected") {
-      rejection = `${result.code}: ${result.detail}`;
-      return;
-    }
-    if (result.outcome === "error") {
-      rejection = result.message;
-      return;
-    }
-    rejection = null;
-    showToast(`Active model → ${route.provider} · ${modelId}`);
   }
 
   function saveAsPreset(): void {
@@ -341,7 +282,31 @@
 </script>
 
 <div class="space-y-3">
-  <!-- 块 1 · Identity（图标 + 颜色 + Letter 三控制） -->
+  <!-- 块 0 · 全局动作行（R12-A2：唯一 Save + Remove 都在右上角；gap-2.5 保证
+       Remove 的 44px after 外扩命中区与 Save 不相交）。 -->
+  <div class="flex items-center justify-end gap-2.5">
+    <button
+      type="button"
+      class="relative flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors after:absolute after:-inset-2 after:content-[''] hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
+      aria-label="Remove route"
+      title="Remove route"
+      disabled={agentRuntimeConfig.updating}
+      onclick={() => onremove?.()}
+    >
+      <IconTrash class="h-4 w-4" aria-hidden="true" />
+    </button>
+    <Button
+      size="sm"
+      class="relative h-9 px-3 text-xs after:absolute after:-top-1 after:-bottom-1 after:left-0 after:right-0 after:content-['']"
+      data-route-save="true"
+      disabled={saveDisabled}
+      onclick={() => void saveAll()}
+    >
+      {savedFlash ? "Saved ✓" : "Save"}
+    </Button>
+  </div>
+
+  <!-- 块 1 · Identity（图标 + 颜色 + Letter 三控制；preset 次级文字按钮）。 -->
   <div class="flex items-start gap-2">
     <IconPicker
       icon={routeIcon}
@@ -368,80 +333,93 @@
         {route.models.length === 1 ? "model" : "models"}
       </p>
     </div>
+    <Button
+      size="sm"
+      variant="ghost"
+      class="mt-0.5 h-6 shrink-0 px-2 text-[10px]"
+      disabled={agentRuntimeConfig.updating}
+      onclick={saveAsPreset}
+    >
+      {presetSaved ? "Saved ✓" : "Save as preset"}
+    </Button>
     <button
       type="button"
       class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] transition-colors {keyReady
         ? 'bg-primary/10 text-primary'
         : 'bg-amber-500/15 text-amber-700 hover:bg-amber-500/25'}"
       title={keyReady
-        ? "API key configured — click to replace it"
-        : "API key missing — click to add it"}
+        ? "API key configured — enter a new one below to replace it"
+        : "API key missing — add it below"}
       aria-label="Key status for {route.provider}"
-      onclick={toggleCredential}
+      onclick={() => credInput?.focus()}
     >
       {keyReady ? "key ✓" : "add key →"}
     </button>
   </div>
 
-  <!-- 块 2 · Credential（默认折叠为 Identity 行的 pill） -->
-  {#if credOpen}
-    <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Credential">
-      {#if addedHint}
-        <p class="text-[11px] font-medium text-primary">
-          Route “{route.provider}” added — paste its API key to finish connecting.
-        </p>
-      {/if}
-      <div class="flex gap-1.5">
+  <!-- 块 2 · Credential（R12-A5：常驻 password 输入 + eye-toggle；不回显已存值）。 -->
+  <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Credential">
+    {#if addedHint}
+      <p class="text-[11px] font-medium text-primary">
+        Route “{route.provider}” added — paste its API key to finish connecting.
+      </p>
+    {/if}
+    <div class="flex gap-1.5">
+      <div class="relative min-w-0 flex-1">
         <Input
-          class="h-8 flex-1 text-xs"
-          type="password"
+          class="h-8 pr-9 text-xs"
+          type={keyVisible ? "text" : "password"}
           autocomplete="off"
-          aria-label="API key (write-only)"
-          placeholder={keyReady ? "stored — enter to replace" : "not set"}
-          ref={credInput}
+          aria-label="API key"
+          placeholder={keyReady ? "stored — enter to replace" : "API key"}
+          bind:ref={credInput}
           bind:value={apiKeyDraft}
           disabled={agentRuntimeConfig.updating}
+          onblur={() => void saveCredential()}
+          onkeydown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void saveCredential();
+            }
+          }}
         />
+        <button
+          type="button"
+          class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-2.5 after:content-[''] hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          aria-label={keyVisible ? "Hide API key" : "Show API key"}
+          aria-pressed={keyVisible}
+          title={keyVisible ? "Hide API key" : "Show API key"}
+          disabled={agentRuntimeConfig.updating}
+          onmousedown={(event) => event.preventDefault()}
+          onclick={() => (keyVisible = !keyVisible)}
+        >
+          {#if keyVisible}
+            <IconEyeOff class="h-3.5 w-3.5" aria-hidden="true" />
+          {:else}
+            <IconEye class="h-3.5 w-3.5" aria-hidden="true" />
+          {/if}
+        </button>
+      </div>
+      {#if keyReady}
         <Button
           size="sm"
-          class="h-8 px-2.5 text-xs"
-          disabled={agentRuntimeConfig.updating || apiKeyDraft.trim().length === 0}
-          onclick={() => void saveCredential()}
+          variant="outline"
+          class="relative h-9 px-2.5 text-xs after:absolute after:-top-1 after:-bottom-1 after:left-0 after:right-0 after:content-['']"
+          disabled={agentRuntimeConfig.updating}
+          onclick={() => void clearCredential()}
         >
-          Save key
+          Clear
         </Button>
-        {#if keyReady}
-          <Button
-            size="sm"
-            variant="outline"
-            class="h-8 px-2.5 text-xs"
-            disabled={agentRuntimeConfig.updating}
-            onclick={() => void clearCredential()}
-          >
-            Clear
-          </Button>
-        {/if}
-      </div>
-      <span class="text-[10px] text-muted-foreground">
-        Keys are stored locally (0600), never echoed back, and apply immediately.
-      </span>
-    </section>
-  {/if}
-
-  <!-- 块 3 · Endpoint（baseURL + api Select；脏态显式 Save） -->
-  <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Endpoint">
-    <div class="flex items-center justify-between">
-      <span class="text-[11px] font-medium text-muted-foreground">Endpoint</span>
-      {#if endpointSaved}
-        <span
-          class="text-[10px] font-medium text-primary"
-          data-endpoint-saved="true"
-          aria-live="polite"
-        >
-          Saved ✓
-        </span>
       {/if}
     </div>
+    <span class="text-[10px] text-muted-foreground">
+      Keys are stored locally (0600), never echoed back, and apply immediately.
+    </span>
+  </section>
+
+  <!-- 块 3 · Endpoint（baseURL + api Select；脏态由右上角全局 Save 持久化）。 -->
+  <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Endpoint">
+    <span class="text-[11px] font-medium text-muted-foreground">Endpoint</span>
     <div class="flex gap-1.5">
       <Input
         class="h-8 flex-1 font-mono text-xs"
@@ -450,14 +428,6 @@
         bind:value={baseURLDraft}
         disabled={agentRuntimeConfig.updating}
       />
-      <Button
-        size="sm"
-        class="h-8 shrink-0 px-2.5 text-xs"
-        disabled={!endpointDirty || agentRuntimeConfig.updating}
-        onclick={() => void saveEndpoint()}
-      >
-        Save
-      </Button>
     </div>
     <label class="block space-y-0.5">
       <span class="text-[10px] text-muted-foreground">API protocol</span>
@@ -474,7 +444,7 @@
     </label>
   </section>
 
-  <!-- 块 4 · Models（ModelListItem 列表 + dirty Save；R7 8.7） -->
+  <!-- 块 4 · Models（ModelListItem 列表 + Add model；R7 8.7 + R12-A3 滚入视野）。 -->
   <section class="space-y-1.5" aria-label="Models">
     <div class="flex items-center justify-between">
       <span class="text-[11px] font-medium text-muted-foreground">Models</span>
@@ -487,160 +457,36 @@
           variant="ghost"
           class="h-6 px-2 text-[11px]"
           disabled={agentRuntimeConfig.updating}
-          onclick={addModel}
+          onclick={() => void addModel()}
         >
           + Add model
-        </Button>
-        <Button
-          size="sm"
-          class="h-6 px-2.5 text-[11px]"
-          disabled={!modelsDirty ||
-            !modelsAllValid ||
-            modelsDraft.length === 0 ||
-            agentRuntimeConfig.updating}
-          onclick={() => void saveModels()}
-        >
-          Save
         </Button>
       </div>
     </div>
     <div class="space-y-1.5">
       {#each modelsDraft as entry, index (index)}
-        <ModelListItem
-          model={entry}
-          candidates={modelCandidates}
-          routeModels={allRouteModels}
-          api={apiDraft}
-          baseURL={baseURLDraft.trim()}
-          provider={route.provider}
-          apiKeyConfigured={keyReady}
-          disabled={agentRuntimeConfig.updating}
-          dirty={modelEntryDirty(index)}
-          initialExpanded={entry.id === ""}
-          onchange={(next) => setModelAt(index, next)}
-          onremove={() => removeModel(index)}
-          onvalidity={(valid) => setModelValidity(index, valid)}
-        />
+        <div bind:this={modelItemEls[index]}>
+          <ModelListItem
+            model={entry}
+            candidates={modelCandidates}
+            routeModels={allRouteModels}
+            api={apiDraft}
+            baseURL={baseURLDraft.trim()}
+            provider={route.provider}
+            apiKeyConfigured={keyReady}
+            disabled={agentRuntimeConfig.updating}
+            dirty={modelEntryDirty(index)}
+            initialExpanded={entry.id === ""}
+            onchange={(next) => setModelAt(index, next)}
+            onremove={() => removeModel(index)}
+            onvalidity={(valid) => setModelValidity(index, valid)}
+          />
+        </div>
       {/each}
     </div>
-  </section>
-
-  <!-- 块 5 · Active model -->
-  <section aria-label="Active model">
-    {#if isActiveRoute}
-      <div class="space-y-1.5 rounded-md border border-primary/30 bg-primary/5 p-2">
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] font-medium text-muted-foreground">Active model</span>
-          <span class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-            Active route
-          </span>
-        </div>
-        <div class="grid grid-cols-[1fr_140px] gap-1.5">
-          <label class="space-y-0.5">
-            <span class="text-[10px] text-muted-foreground">Model</span>
-            <select
-              class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
-              aria-label="Model"
-              bind:value={modelDraft}
-              disabled={agentRuntimeConfig.updating}
-            >
-              {#each modelOptions as id (id)}
-                <option value={id}>{id}</option>
-              {/each}
-            </select>
-          </label>
-          <label
-            class="space-y-0.5"
-            title="Provider-specific reasoning effort (optional, e.g. low / medium / high)"
-          >
-            <span class="text-[10px] text-muted-foreground">Effort</span>
-            <Input
-              class="h-8 text-xs"
-              aria-label="Reasoning effort"
-              placeholder={effortSuggestions.length > 0 ? effortSuggestions.join(" / ") : "effort"}
-              list="active-effort-suggestions"
-              bind:value={effortDraft}
-              disabled={agentRuntimeConfig.updating}
-            />
-            <datalist id="active-effort-suggestions">
-              {#each effortSuggestions as suggestion (suggestion)}
-                <option value={suggestion}></option>
-              {/each}
-            </datalist>
-          </label>
-        </div>
-        <div class="flex justify-end">
-          <Button
-            size="sm"
-            class="h-7 px-2.5 text-xs"
-            disabled={!modelDirty || agentRuntimeConfig.updating}
-            onclick={() => void saveModel()}
-          >
-            Apply
-          </Button>
-        </div>
-      </div>
-    {:else}
-      <div class="space-y-1.5 rounded-md border border-border p-2">
-        <span class="text-[11px] font-medium text-muted-foreground">Active model</span>
-        <div class="flex flex-wrap gap-1">
-          {#each route.models as entry (entry.id)}
-            <span
-              class="group/chip flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px]"
-            >
-              {entry.id}
-              <button
-                type="button"
-                class="text-primary opacity-0 transition-opacity group-hover/chip:opacity-100"
-                aria-label="Use {entry.id} as the active model"
-                disabled={agentRuntimeConfig.updating}
-                onclick={() => void setActive(entry.id)}
-              >
-                Use
-              </button>
-            </span>
-          {/each}
-        </div>
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-[10px] text-muted-foreground">
-            Make this route the active model source.
-          </span>
-          <Button
-            size="sm"
-            class="h-7 shrink-0 px-2.5 text-xs"
-            disabled={route.models.length === 0 || agentRuntimeConfig.updating}
-            onclick={() => void setActive(route.models[0]?.id ?? "")}
-          >
-            Set active
-          </Button>
-        </div>
-      </div>
-    {/if}
   </section>
 
   {#if rejection}
     <p class="text-xs text-destructive" role="alert">{rejection}</p>
   {/if}
-
-  <!-- 块 6 · Danger / Preset -->
-  <div class="flex items-center justify-end gap-1.5 border-t border-border pt-2">
-    <Button
-      size="sm"
-      variant="ghost"
-      class="h-6 px-2 text-[11px]"
-      disabled={agentRuntimeConfig.updating}
-      onclick={saveAsPreset}
-    >
-      {presetSaved ? "Saved ✓" : "Save as preset"}
-    </Button>
-    <Button
-      size="sm"
-      variant="ghost"
-      class="h-6 px-2 text-[11px] text-destructive hover:text-destructive"
-      disabled={agentRuntimeConfig.updating}
-      onclick={() => onremove?.()}
-    >
-      Remove route
-    </Button>
-  </div>
 </div>

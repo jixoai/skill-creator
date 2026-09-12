@@ -9,7 +9,8 @@
 ## 2. Model 配置 tabs 化
 
 - [x] 2.1 Model 分区重构为路由 tabs：每 tab = provider 图标+名 + key 状态 +
-      模型 tags 编辑 + 设为活动模型；+ New 打开统一建路由。
+      模型编辑；+ New 打开统一建路由。（原「设为活动模型」已被 R12-4 取代：
+      Active 块删除，活动模型唯一入口 = composer 热切。）
 - [x] 2.2 New Tab 体验：预设网格（icon/名/URL 卡）→ 选中预填同一表单；空白
       Custom = 同表单纯手填；图标可替换（内置 + 自定义 svg dataURL，路由持久
       化）。
@@ -106,3 +107,15 @@
 - [x] 9.4 maxOutputTokens 目录预填（maxTokens）。
 - [x] 9.5 efforts：EFFORT_TIERS 标准档位 + 目录 effortTiers 融合 + datalist 补全 +
       默认 low/high/max 三档。
+
+## 10. R12 修复（用户走查第三轮：路由页收敛 + New Session 语义）
+
+- [x] 10.1 effort chip 误删修复（click→blur 不得触发移除；复现测试先行）。
+- [x] 10.2 单 Save 收敛：右上角 save + remove；多块 dirty 一次补丁；
+      Save as preset 降级 Identity 区。
+- [x] 10.3 AddModel scrollIntoView。
+- [x] 10.4 删除 Active model 配置块（活动模型唯一入口 = composer 热切）。
+- [x] 10.5 key 常驻 input-password + eye-toggle（不回显已存值）。
+- [x] 10.6 New Session 模式卡与 composer chip 双向同步（默认 General）。
+- [x] 10.7 New Session 态隐藏顶部 + 按钮。
+- [x] 10.8 Session 态 + 跳转 New Session 态（不即建会话；首消息惰性创建）。

@@ -7,13 +7,16 @@
   配置仍以 Settings→Model 为唯一真源（菜单底部保留跳转入口）。
   修订 [2026-09-12]（codex R2）：模式 chip 由原生 select 改为同族 DropdownMenu
   （design §3.4 `General ▾` 规格）；SlashMenu 落地（§3.4 末段，defer 解除）。
+  修订 [2026-09-12]（R12-B 6/8）：New Session 态的显示模式 = agentSession.pendingMode
+  （与空态模式卡同一数据源，双向同步，默认 General）；chip 在无会话时只改选择，
+  不再 eager 建会话——首条消息发出时才创建（textarea/附件/发送在空态可用）。
   正交意图：
   1. 输入卡：附件条（图片缩略/文件 chip，与 UserMessage 附件同视觉语言）、
      自动长高 textarea（1 行 44px → 4 行 160px 封顶内滚；Enter 发送 /
      Shift+Enter 换行 / paste 图片沿用）+ SlashMenu 键盘先占与首行光标判定。
   2. 工具行：模式 chip（DropdownMenu 列 DSH_AGENT_MODES、当前项打勾；running
-     置灰 + title「Switch after the current turn ends」；无会话 = 以该模式建会
-     话）、model chip（agentRuntimeConfig 投影 + effort 点 + 悬空 amber；
+     置灰 + title「Switch after the current turn ends」；无会话 = 只更新
+     pendingMode（R12：首条消息惰性建会话））、model chip（agentRuntimeConfig 投影 + effort 点 + 悬空 amber；
      DropdownMenu 按 routes 分组列模型、当前项打勾、选中走
      updateAgentSettings({model}) 只写 model 字段保留 reasoningEffort、running
      整菜单禁用）、ContextMeter（§3.4）、主按钮形态机（空稿禁用 → 发送↑ →
@@ -67,7 +70,6 @@
     agentRuntimeConfig,
     agentSession,
     cancelAgentSession,
-    createAgentSession,
     sendAgentPrompt,
     setAgentSessionMode,
     updateAgentSettings,
@@ -116,11 +118,7 @@
   const editing = $derived(agentComposer.editing !== null);
 
   const placeholder = $derived(
-    editing
-      ? "Edit your message — sending will resend it as a new message"
-      : agentSession.sessionId
-        ? "Message the agent…"
-        : "Pick a mode to start…",
+    editing ? "Edit your message — sending will resend it as a new message" : "Message the agent…",
   );
 
   /** 主按钮形态机（§3.4）：running 空稿 → 停止；running 有稿 → 置灰；否则发送。 */
@@ -130,9 +128,13 @@
     return "send" as const;
   });
 
-  const modeLabel = $derived(
-    DSH_AGENT_MODES.find((entry) => entry.id === agentSession.mode)?.label,
+  /** 显示态模式（R12-B 6）：会话内 = agentSession.mode；New Session 态 =
+   * pendingMode——空态模式卡与 chip 双向同步的唯一数据源。 */
+  const activeMode = $derived(
+    agentSession.sessionId ? agentSession.mode : agentSession.pendingMode,
   );
+
+  const modeLabel = $derived(DSH_AGENT_MODES.find((entry) => entry.id === activeMode)?.label);
 
   /** model chip 投影：provider · model + effort 点；活动路由悬空于 Routes 外 = amber。 */
   const modelChip = $derived.by(() => {
@@ -233,10 +235,11 @@
     clearComposerEdit();
   }
 
-  /** 模式切换：无会话 = 以该模式建会话（空态卡等价第二入口）；running 拒绝。 */
+  /** 模式切换（R12-B 6/8）：无会话 = 预选待建模式（pendingMode，与空态卡同步），
+   * 不建会话——创建只发生在首条消息；有会话 = setMode（running 拒绝沿用）。 */
   function onModeChange(mode: DshAgentMode): void {
     if (!agentSession.sessionId) {
-      void createAgentSession(undefined, mode);
+      agentSession.pendingMode = mode;
       return;
     }
     void setAgentSessionMode(mode);
@@ -326,12 +329,13 @@
       {/each}
     </div>
   {/if}
+  <!-- New Session 态（R12-B 8）输入可用：首条消息即会话创建向量，不再按
+       sessionId 禁用。 -->
   <textarea
     bind:this={textareaEl}
     rows={1}
     maxlength={20000}
     {placeholder}
-    disabled={!agentSession.sessionId}
     bind:value={agentComposer.text}
     onkeydown={onKeydown}
     onkeyup={syncCaret}
@@ -349,7 +353,7 @@
           ? "Switch after the current turn ends"
           : agentSession.sessionId
             ? "Switch this session's mode"
-            : "Start a session in this mode"}
+            : "Pick the mode for your next session"}
         aria-label="Session mode"
         disabled={running}
         onkeydown={(event) => {
@@ -382,12 +386,12 @@
         >
           {#each DSH_AGENT_MODES as entry (entry.id)}
             <DropdownMenu.Item
-              data-mode-active={agentSession.mode === entry.id ? "true" : undefined}
+              data-mode-active={activeMode === entry.id ? "true" : undefined}
               class="gap-1.5"
               onclick={() => onModeChange(entry.id)}
             >
               <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                {#if agentSession.mode === entry.id}
+                {#if activeMode === entry.id}
                   <IconCheck class="h-3 w-3" aria-hidden="true" />
                 {/if}
               </span>
@@ -414,7 +418,6 @@
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
       title="Attach images (or paste / drop)"
       aria-label="Attach images"
-      disabled={!agentSession.sessionId}
       onclick={() => fileInput?.click()}
     >
       <IconPaperclip class="h-4 w-4" />
@@ -435,7 +438,6 @@
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
       title="Attach a file (text, config, data — ≤512KiB)"
       aria-label="Attach file"
-      disabled={!agentSession.sessionId}
       onclick={() => docInput?.click()}
     >
       <IconFile class="h-4 w-4" />
@@ -545,8 +547,7 @@
         : primaryMode === "wait"
           ? "Wait for the current turn"
           : "Send (Enter)"}
-      disabled={primaryMode !== "stop" &&
-        (!agentSession.sessionId || !hasDraft || agentSession.sending)}
+      disabled={primaryMode !== "stop" && (!hasDraft || agentSession.sending)}
       onclick={() => (primaryMode === "stop" ? void cancelAgentSession() : submit())}
     >
       {#if primaryMode === "stop"}

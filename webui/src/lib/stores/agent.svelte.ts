@@ -17,6 +17,9 @@
  *   [2] 轮询生命周期：running 或有待答审批时 1.2s 轮询；idle 且无待答时停轮询
  *       （终态停轮询语义平移），prompt/answer/手动刷新重启。
  *   [3] 配置投影：model/preset/approval policy 的 load/patch（agent.settings.*）。
+ *   [4] New Session 态（R12-B 6/8）：pendingMode 是空态模式卡与 composer 模式
+ *       chip 的唯一数据源（默认 free/General）；会话创建是惰性的——只发生在
+ *       首条消息发出时（sendAgentPrompt 无会话先建），header 的 + 只回到空态。
  * 妥协声明：面板不是 MCP client——会话经 agent.* RPC 消费内核（design D2）；
  * 无 callId 的 tool-result 回退匹配在并行同名工具时可能错位（design §7）。
  */
@@ -121,6 +124,12 @@ export const agentSession = $state({
   status: "idle" as AgentSessionSummary["status"],
   /** 会话模式（setMode 成功或 mode-changed 帧到达时更新；无会话为 null）。 */
   mode: null as DshAgentMode | null,
+  /**
+   * 待建会话模式（R12-B 6）：New Session 态的唯一数据源——空态模式卡与
+   * composer 模式 chip 双向同步，默认 free（General）；首条消息惰性建会话时
+   * 消费（sendAgentPrompt）。会话建立后显示态切换为 agentSession.mode。
+   */
+  pendingMode: "free" as DshAgentMode,
   items: [] as PanelItem[],
   /** Todo 快照（latest-wins；TodoDock 消费，不再进 items）。 */
   todos: [] as Array<{ content: string; status: string }>,
@@ -237,13 +246,38 @@ export async function createAgentSession(prompt?: string, mode?: DshAgentMode): 
 }
 
 /**
- * 首屏快速行动：打开面板并以指定模式建会话；seedPrompt 在会话就绪后一次性
- * 填入 composer（不自动发送——用户保有最后一步）。
+ * 首屏快速行动：打开面板进入 New Session 态并预选模式；seedPrompt 在面板就绪
+ * 后一次性填入 composer（不自动发送——会话由首条消息惰性创建，用户保有最后
+ * 一步）。
  */
 export function startAgentAction(mode: DshAgentMode, seedPrompt?: string): void {
+  beginNewAgentSession();
   agentPanel.open = true;
   agentPanel.seedPrompt = seedPrompt ?? null;
-  void createAgentSession(undefined, mode);
+  agentSession.pendingMode = mode;
+}
+
+/**
+ * 进入 New Session 空态（R12-B 8）：退出当前会话视图（内核会话与列表不动），
+ * 不创建任何会话——创建只发生在首条消息发出时（sendAgentPrompt 惰性建会话）。
+ * pendingMode 复位 free：空态默认选中 General。
+ */
+export function beginNewAgentSession(): void {
+  stopPolling();
+  agentSession.sessionId = null;
+  agentSession.status = "idle";
+  agentSession.mode = null;
+  agentSession.pendingMode = "free";
+  agentSession.items = [];
+  agentSession.todos = [];
+  agentSession.turnStartedAt = null;
+  agentSession.cursor = 0;
+  agentSession.error = null;
+  agentSession.promptError = null;
+  agentSession.lastUsage = null;
+  pendingUserEcho = [];
+  pendingUsage = null;
+  pendingToolArgs = new Map();
 }
 
 /** 切换会话（重置视图并立即拉一轮）。 */
@@ -303,16 +337,23 @@ export async function setAgentSessionMode(mode: DshAgentMode): Promise<boolean> 
   }
 }
 
-/** 发送一轮用户输入（可选图片附件：base64 wire，daemon 经内核 attachment 准入）。 */
+/** 发送一轮用户输入（可选图片附件：base64 wire，daemon 经内核 attachment 准入）。
+ * New Session 态的首条消息先以待建模式（pendingMode）惰性建会话——这是空态下
+ * 唯一的会话创建向量（R12-B 8：模式卡/chip 只改选择，不 eager 建会话）。 */
 export async function sendAgentPrompt(
   text: string,
   images: Array<{ mediaType: string; data: string; name?: string; preview?: string }> = [],
   files: Array<{ name: string; data: string }> = [],
 ): Promise<void> {
-  const sessionId = agentSession.sessionId;
-  if (!sessionId || (text.trim().length === 0 && images.length === 0 && files.length === 0)) {
+  if (text.trim().length === 0 && images.length === 0 && files.length === 0) {
     return;
   }
+  if (!agentSession.sessionId) {
+    await createAgentSession(undefined, agentSession.pendingMode);
+    // 创建失败（含被代次门取代）：sessionId 仍为 null，错误已进 error 面。
+    if (!agentSession.sessionId) return;
+  }
+  const sessionId = agentSession.sessionId;
   const request = promptGate.issue();
   agentSession.sending = true;
   // 乐观追加用户消息（失败时由错误状态覆盖）；同文本 user-text 帧到达时出队去重。

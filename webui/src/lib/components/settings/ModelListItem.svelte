@@ -6,6 +6,10 @@
   解析、输入类型多选 chip、输出类型勾选、连接测试、移除。」（codex R7 B2/B4 纠偏
   [2026-09-12]：「Effort 设置这里，不能硬编码」——候选 = 标准档位 ∪ 目录 ∪ 路由
   并集；「新建自定义草案无法探活」——无已存 key 时提供 test-only key 输入。）
+  用户原始需求 [2026-09-12 R12]：「effect 点击的时候会导致误删：Focus 然后 blur
+  就会触发」——根因 = Efforts 曾以 <label> 包裹 tags-input，label 激活向首个
+  labelable 后代（第一枚 × button）转发合成 click；修复 = label→div（本文件）
+  + ModelTagsInput input DOM 前置防御。
   用户原始需求 [2026-09-12 R10]：「默认收起，只显示一行：ModelName + test/edit/
   remove 三个 icon-button（44px 命中区）；有未保存改动时名字旁加小圆点」；
   「input/output chips 选中 = primary 底白字，text 恒选中不可去（视觉锁定）；
@@ -407,7 +411,10 @@
       </label>
     </div>
 
-    <label class="block space-y-0.5">
+    <!-- R12-A1：不用 <label> 包裹——chips 的 × button 是 labelable 后代，label
+         激活会把 chip 主体的点击转发成第一枚 × 的合成 click（误删第一枚 chip）。
+         标题用 span，点击面语义不变。 -->
+    <div class="block space-y-0.5">
       <span class="text-[10px] text-muted-foreground">Efforts</span>
       <ModelTagsInput
         selected={model.efforts ?? []}
@@ -423,7 +430,7 @@
       {#if effortPool.hint !== null}
         <p class="text-[10px] text-muted-foreground" role="note">{effortPool.hint}</p>
       {/if}
-    </label>
+    </div>
 
     <div class="grid grid-cols-2 gap-1.5">
       <label class="min-w-0 space-y-0.5">

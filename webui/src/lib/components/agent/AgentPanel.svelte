@@ -45,9 +45,11 @@
     }
   });
 
-  // 首屏行动的 composer 种子：会话就绪且输入可用时一次性填入（不自动发送）。
+  // 首屏行动的 composer 种子：面板挂载即一次性填入（不自动发送；R12-B 8 后
+  // startAgentAction 不再 eager 建会话——会话由首条消息惰性创建，种子无需等待
+  // sessionId）。
   $effect(() => {
-    if (agentSession.sessionId && agentPanel.seedPrompt && !agentSession.sending) {
+    if (agentPanel.seedPrompt) {
       const seed = agentPanel.seedPrompt;
       agentPanel.seedPrompt = null;
       if (agentComposer.text.length === 0) agentComposer.text = seed;
