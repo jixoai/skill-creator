@@ -18,6 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
+import { parse } from "yaml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain } from "../src/daemon/domain.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
@@ -29,6 +30,7 @@ import { setHomeOverride } from "../src/shared/paths.js";
 import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
+const previousDshHome = process.env.DSH_HOME;
 let sandbox = "";
 
 beforeEach(() => {
@@ -36,12 +38,17 @@ beforeEach(() => {
   const isolatedHome = path.join(sandbox, "state");
   process.env.SKILL_CREATOR_HOME = isolatedHome;
   setHomeOverride(isolatedHome);
+  // 凭据桥写 $DSH_HOME/.credentials.yaml：必须沙箱隔离，否则测试会污染真实
+  // ~/.dsh（内核严格校验下顶层平铺键会打挂下一次 boot）。
+  process.env.DSH_HOME = path.join(sandbox, "dsh");
 });
 
 afterEach(() => {
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousHome;
+  if (previousDshHome === undefined) delete process.env.DSH_HOME;
+  else process.env.DSH_HOME = previousDshHome;
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
@@ -338,5 +345,63 @@ describe("dsh RPC surface", () => {
     await client.agent.credentials.clear({ provider: "deepseek" });
     const cleared = await client.agent.settings.get({});
     expect(cleared.providers).toEqual([]);
+  });
+});
+
+describe("DSH credentials bridge writes the kernel version-1 layout", () => {
+  // 内核 credentials-local（0.1.5-rc.2）严格校验：顶层仅 version/refs/records；
+  // 平铺键打挂下一次 boot（2026-09-12 R2 实测回归）。
+  it("nests route keys under refs and stamps version: 1", async () => {
+    const service = createDshSettingsService();
+    const stored = await service.setCredential({ provider: "zai", apiKey: "sk-shape-1" });
+    expect(stored.outcome).toBe("stored");
+    const file = path.join(process.env.DSH_HOME ?? "", ".credentials.yaml");
+    const doc = parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    expect(doc.version).toBe(1);
+    const refs = doc.refs as Record<string, unknown>;
+    expect(refs.ZAI_API_KEY).toBe("sk-shape-1");
+    expect(Object.keys(doc).filter((k) => !["version", "refs", "records"].includes(k))).toEqual([]);
+  });
+
+  it("migrates legacy flat top-level keys into refs on the next write", async () => {
+    const dsh = process.env.DSH_HOME ?? "";
+    fs.mkdirSync(dsh, { recursive: true });
+    fs.writeFileSync(
+      path.join(dsh, ".credentials.yaml"),
+      [
+        "version: 1",
+        "refs:",
+        "  OPENAI_API_KEY: sk-keep",
+        "records: {}",
+        "DEEPSEEK_API_KEY: sk-flat",
+        "SKILL_CREATOR_ROUTE_KEY_zai: sk-old",
+        "",
+      ].join("\n"),
+    );
+    const service = createDshSettingsService();
+    await service.setCredential({ provider: "zai", apiKey: "sk-shape-2" });
+    const doc = parse(fs.readFileSync(path.join(dsh, ".credentials.yaml"), "utf8")) as {
+      [k: string]: unknown;
+      refs?: Record<string, unknown>;
+    };
+    expect(doc.DEEPSEEK_API_KEY).toBeUndefined();
+    expect(doc.SKILL_CREATOR_ROUTE_KEY_zai).toBeUndefined();
+    expect(doc.refs?.ZAI_API_KEY).toBe("sk-shape-2");
+    expect(doc.refs?.DEEPSEEK_API_KEY).toBe("sk-flat");
+    expect(doc.refs?.OPENAI_API_KEY).toBe("sk-keep");
+  });
+
+  it("clear removes the ref and keeps the version-1 layout", async () => {
+    const service = createDshSettingsService();
+    await service.setCredential({ provider: "zai", apiKey: "sk-shape-3" });
+    const cleared = await service.clearCredential({ provider: "zai" });
+    expect(cleared.providers).toEqual([]);
+    const file = path.join(process.env.DSH_HOME ?? "", ".credentials.yaml");
+    const doc = parse(fs.readFileSync(file, "utf8")) as {
+      version?: unknown;
+      refs?: Record<string, unknown>;
+    };
+    expect(doc.refs?.ZAI_API_KEY).toBeUndefined();
+    expect(doc.version).toBe(1);
   });
 });

@@ -86,6 +86,7 @@ async function syncDshModelRoutes(routes: readonly DshModelRoute[]): Promise<voi
       apiKeyEnv: dshRouteApiKeyEnv(route.provider),
       ...(route.api ? { api: route.api } : {}),
       baseURL: route.baseURL,
+      // icon 是本地 UI 字段，不进 DSH profile（未知键内核拒收）。
       models: route.models.map((model) => ({
         id: model.id,
         ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
@@ -107,6 +108,10 @@ async function syncDshModelRoutes(routes: readonly DshModelRoute[]): Promise<voi
 /**
  * 凭据桥：路由 provider 的 key 写/清 $DSH_HOME/.credentials.yaml（credentials
  * 行热解析，即时生效）。非路由 provider 只落本地私有面（steward preset 用）。
+ *
+ * 内核 credentials-local（0.1.5-rc.2）读 version-1 布局：顶层仅 version/refs/
+ * records，凭据必须嵌在 refs 下；顶层平铺键会让下一次 boot 直接失败
+ * （2026-09-12 R2 实测：B 轮粘贴 key 后冷启动 kernel unavailable）。
  */
 async function syncDshRouteCredential(provider: string, apiKey: string | null): Promise<void> {
   const ref = dshRouteApiKeyEnv(provider);
@@ -119,13 +124,29 @@ async function syncDshRouteCredential(provider: string, apiKey: string | null): 
   } catch {
     // 无文件/坏 YAML：空文档起步。
   }
-  // 升级残留治理：早期版本的 SKILL_CREATOR_ROUTE_KEY_* 键不被内核 schema 接受
-  // （严格校验会打挂 boot），写入时顺带清除。
+  const existingRefs = doc.refs;
+  const refs: Record<string, unknown> =
+    typeof existingRefs === "object" && existingRefs !== null && !Array.isArray(existingRefs)
+      ? (existingRefs as Record<string, unknown>)
+      : {};
+  // 升级残留治理：历史版本把 key 平铺在顶层（内核严格校验打挂 boot），写入时顺带
+  // 迁进 refs；SKILL_CREATOR_ROUTE_KEY_* 旧前缀已废弃，直接清除。
   for (const key of Object.keys(doc)) {
-    if (key.startsWith("SKILL_CREATOR_ROUTE_KEY_")) delete doc[key];
+    if (key === "version" || key === "refs" || key === "records") continue;
+    const value = doc[key];
+    if (key.startsWith("SKILL_CREATOR_ROUTE_KEY_")) {
+      delete doc[key];
+      continue;
+    }
+    if (typeof value === "string" && value.length > 0 && /^[A-Z0-9_]+_API_KEY$/.test(key)) {
+      if (!(key in refs)) refs[key] = value;
+      delete doc[key];
+    }
   }
-  if (apiKey === null) delete doc[ref];
-  else doc[ref] = apiKey;
+  if (apiKey === null) delete refs[ref];
+  else refs[ref] = apiKey;
+  doc.version = 1;
+  doc.refs = refs;
   try {
     await fsp.mkdir(dshHome, { recursive: true });
     atomicWriteUtf8(file, stringifyYaml(doc));
