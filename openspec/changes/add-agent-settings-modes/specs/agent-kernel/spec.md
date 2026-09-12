@@ -4,7 +4,7 @@
 
 ### Requirement: agent modes compose prompt section and tool surface
 
-模式的权威注册表在 daemon kernel：每种模式携带版本化 prompt section（free 无专有
+模式的权威注册表 MUST 位于 daemon kernel：每种模式携带版本化 prompt section（free 无专有
 section）与 MCP 工具名单。agent setup 时按会话模式注入 section，并以 agent-scoped
 `tools.guard` 拒绝名单外的 `mcp__skill-creator__*` 调用（返回模式切换指引）；全局
 restrict（fs/shell/web 收窄）不因模式放宽。
@@ -21,7 +21,7 @@ restrict（fs/shell/web 收窄）不因模式放宽。
 
 ### Requirement: mode switch persists and revives with history
 
-`agent.session.setMode` 在 running 会话上返回 typed INVALID_OPERATION；否则原子更新
+`agent.session.setMode` MUST 在 running 会话上返回 typed INVALID_OPERATION；否则 MUST 原子更新
 转录 meta 的 mode、有界释放 live 句柄（待答以空答案解决）、写入 `mode-changed` 帧。
 后续 prompt 经内核 `agents.resume` 以新模式 setup 复活，LLM 历史由内核 session log
 重建。转录 meta 缺失/非法 mode 读为 free（旧会话能力的事实投影）。

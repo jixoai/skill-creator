@@ -4,7 +4,7 @@
 
 ### Requirement: agent settings panel edits model configuration and credentials
 
-设置面板以分区表单承载模型配置：provider、model、可选 reasoningEffort 构成
+设置面板 MUST 以分区表单承载模型配置：provider、model、可选 reasoningEffort 构成
 ModelSelection 形状；provider 凭据为只写输入（存/清），视图永不回显凭据值，只回
 configured 状态。全部写入经 `agent.settings.update` / `agent.credentials.*` RPC，
 服务端 revision 与跨字段校验（live preset ↔ 凭据）裁决冲突。
@@ -24,7 +24,7 @@ configured 状态。全部写入经 `agent.settings.update` / `agent.credentials
 
 ### Requirement: agent panel exposes four switchable modes
 
-面板提供 create/manage/explore/free 四种模式：设置面选择新会话默认模式；面板 header
+面板 MUST 提供 create/manage/explore/free 四种模式：设置面选择新会话默认模式；面板 header
 的模式 chip 切换当前会话模式；`mode-changed` 帧以分隔行渲染。free 模式在 UI 上明示
 token 成本更高。
 
