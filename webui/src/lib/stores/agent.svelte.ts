@@ -7,18 +7,28 @@
  *
  * 正交意图：
  *   [1] 面板状态：open/当前会话/帧视图累积（latest-request-wins 代次门 +
- *       连接 owner generation；失效响应投影为无结果）。
+ *       连接 owner generation；失效响应投影为无结果）。帧视图按
+ *       redesign-model-tabs-and-agent-panel §3.5 投影：tool call+result 合并
+ *       单行（toolCallId 关联 + 同名回退）、turn-end 药丸（pendingUsage 合入）、
+ *       tool-args-delta 渐进参数、todos 出列 TodoDock、user-text 附件回显。
+ *       2026-09-12 codex R2 阻塞 4：todo-snapshot / approval-request /
+ *       mode-changed 帧 payload 经模块级 Zod schema safeParse 收窄，畸形帧
+ *       静默丢弃并保留上一个投影状态。
  *   [2] 轮询生命周期：running 或有待答审批时 1.2s 轮询；idle 且无待答时停轮询
  *       （终态停轮询语义平移），prompt/answer/手动刷新重启。
  *   [3] 配置投影：model/preset/approval policy 的 load/patch（agent.settings.*）。
- * 妥协声明：面板不是 MCP client——会话经 agent.* RPC 消费内核（design D2）。
+ * 妥协声明：面板不是 MCP client——会话经 agent.* RPC 消费内核（design D2）；
+ * 无 callId 的 tool-result 回退匹配在并行同名工具时可能错位（design §7）。
  */
-import type { AgentSessionSummary } from "$shared/contracts/agent.js";
-import type {
-  DshAgentMode,
-  DshSettingsUpdate,
-  DshSessionStreamFrame,
-  DshStewardSettingsView,
+import { z } from "zod";
+import { AgentApprovalQuestionSchema, type AgentSessionSummary } from "$shared/contracts/agent.js";
+import {
+  DshAgentModeSchema,
+  DshUserTextAttachmentSchema,
+  type DshAgentMode,
+  type DshSettingsUpdate,
+  type DshSessionStreamFrame,
+  type DshStewardSettingsView,
 } from "$shared/contracts/dsh-runtime.js";
 import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
@@ -33,22 +43,55 @@ export interface PanelApprovalQuestion {
   options?: Array<{ label: string; description?: string }>;
 }
 
-/** 面板视图项（帧流的结构化分组投影）。 */
+/**
+ * 面板视图项（帧流的结构化分组投影；redesign-model-tabs-and-agent-panel §3.5）。
+ * tool 行 = call+result 合并单行（callId 关联，缺省回退同 turn 同名最近未闭合项）；
+ * turn-end 独立项承载 usage/elapsed 药丸；todos 出列到 agentSession.todos。
+ */
 export type PanelItem =
-  | { kind: "turn"; seq: number; label: string }
+  | { kind: "turn"; seq: number; label?: string }
+  | {
+      /** 轮次收尾药丸行（usage ↑/↓ + elapsed；替换旧「Turn end (reason)」假分隔行）。 */
+      kind: "turn-end";
+      seq: number;
+      reason: string;
+      usage?: { inputTokens: number; outputTokens: number };
+      elapsedMs?: number;
+    }
   | { kind: "status"; seq: number; text: string }
-  | { kind: "user"; seq: number; text: string; images?: string[]; files?: string[] }
+  | {
+      kind: "user";
+      seq: number;
+      text: string;
+      /** 图片预览（乐观路径 = 本地 dataURL；回放路径 = payload.attachments.thumb）。 */
+      images?: string[];
+      /** 文件/无缩略图片的名字 chip（乐观 = 上传名；回放 = attachments.name）。 */
+      files?: string[];
+      /** files 中属图片附件（无 thumb）的名字子集——chip 图标分型（IconImage；
+       * PM 修复 3 的对称 chip 方案：live 有图、回放 chip，跨处视觉语言一致）。 */
+      imageChipNames?: string[];
+    }
   | { kind: "assistant"; seq: number; text: string; streaming: boolean }
   | { kind: "reasoning"; seq: number; text: string; streaming: boolean }
-  | { kind: "tool"; seq: number; toolName: string; phase: "call" | "result"; payload?: unknown }
+  | {
+      /** 一次工具调用一行：argsText 渐进累积（tool-args-delta），result 回填收敛。 */
+      kind: "tool";
+      seq: number;
+      toolCallId?: string;
+      toolName: string;
+      argsText?: string;
+      result?: unknown;
+      phase: "calling" | "done" | "error";
+      startedAt: string;
+      endedAt?: string;
+    }
   | {
       kind: "approval";
       seq: number;
       questions: PanelApprovalQuestion[];
       resolved: boolean;
     }
-  | { kind: "mode"; seq: number; from: DshAgentMode; to: DshAgentMode }
-  | { kind: "todo"; seq: number; todos: Array<{ content: string; status: string }> };
+  | { kind: "mode"; seq: number; from: DshAgentMode; to: DshAgentMode };
 
 const sessionsGate = createRequestGenerationGate(getConnectionGeneration);
 const createGate = createRequestGenerationGate(getConnectionGeneration);
@@ -75,6 +118,10 @@ export const agentSession = $state({
   /** 会话模式（setMode 成功或 mode-changed 帧到达时更新；无会话为 null）。 */
   mode: null as DshAgentMode | null,
   items: [] as PanelItem[],
+  /** Todo 快照（latest-wins；TodoDock 消费，不再进 items）。 */
+  todos: [] as Array<{ content: string; status: string }>,
+  /** 当前轮起始时间戳（turn-start 帧驱动 Working 计时与 turn-end elapsed）。 */
+  turnStartedAt: null as string | null,
   /** 最新帧 seq（轮询游标）。 */
   cursor: 0,
   sending: false,
@@ -108,6 +155,16 @@ let pollSession: string | null = null;
  * 到达时出队并跳过（气泡已在视图）；prompt 失败或切换会话时清空对应项。
  */
 let pendingUserEcho: string[] = [];
+/**
+ * assistant-text 终帧 usage 的暂存：turn-end 到达时合入 turn-end 药丸行
+ * （§3.5；终帧先于 turn-end 落序，且轮询可能分批）。
+ */
+let pendingUsage: { inputTokens: number; outputTokens: number } | null = null;
+/**
+ * tool-args-delta 的先到缓冲（callId 键）：参数分片先于终帧 tool-call 落序，
+ * 终帧以完整参数收敛（payload 缺失时以缓冲拼接兜底）；切会话/新轮清空。
+ */
+let pendingToolArgs = new Map<string, { name?: string; text: string }>();
 
 /** 打开/关闭 drawer（打开时惰性加载会话列表）。 */
 export function setAgentPanelOpen(open: boolean): void {
@@ -202,10 +259,14 @@ function resetSessionView(
   agentSession.status = status;
   agentSession.mode = mode;
   agentSession.items = [];
+  agentSession.todos = [];
+  agentSession.turnStartedAt = null;
   agentSession.cursor = 0;
   agentSession.error = null;
   agentSession.lastUsage = null;
   pendingUserEcho = [];
+  pendingUsage = null;
+  pendingToolArgs = new Map();
 }
 
 /**
@@ -398,10 +459,140 @@ function finalizeStreamingItem(kind: "assistant" | "reasoning", seq: number, tex
   agentSession.items.push({ kind, seq, text, streaming: false });
 }
 
+/** assistant-text 终帧 payload.usage 的白名单提取（provider 别名归一）。 */
+function usageOfPayload(payload: unknown): { inputTokens: number; outputTokens: number } | null {
+  const usage = (
+    payload as
+      | {
+          usage?: {
+            inputTokens?: number;
+            outputTokens?: number;
+            promptTokens?: number;
+            completionTokens?: number;
+            input_tokens?: number;
+            output_tokens?: number;
+          };
+        }
+      | undefined
+  )?.usage;
+  if (!usage) return null;
+  const input = usage.inputTokens ?? usage.promptTokens ?? usage.input_tokens ?? 0;
+  const output = usage.outputTokens ?? usage.completionTokens ?? usage.output_tokens ?? 0;
+  return input > 0 || output > 0 ? { inputTokens: input, outputTokens: output } : null;
+}
+
+/**
+ * 本轮内未闭合的工具行匹配（§3.5 + §7 妥协）：优先 toolCallId 精确关联；缺省时
+ * 回退同 toolName 最近一个无 result 的项（并行同名工具可能错位——已知妥协，
+ * callId 落地后消除）。跨过 turn 边界即停（匹配只在当前轮内）。
+ */
+function openToolInTurn(
+  toolCallId: string | undefined,
+  toolName: string,
+): Extract<PanelItem, { kind: "tool" }> | null {
+  for (let i = agentSession.items.length - 1; i >= 0; i--) {
+    const item = agentSession.items[i];
+    if (item.kind === "turn") return null;
+    if (item.kind !== "tool" || item.result !== undefined) continue;
+    if (toolCallId !== undefined) {
+      if (item.toolCallId === toolCallId) return item;
+      continue;
+    }
+    if (item.toolName === toolName) return item;
+  }
+  return null;
+}
+
+/** tool-result 错误信号面：isError 字面量 true，或非空 error 字符串/对象（空串不算错）。 */
+const ToolErrorSignalSchema = z
+  .object({
+    isError: z.literal(true).optional(),
+    error: z.union([z.string().min(1), z.object()]).optional(),
+  })
+  .passthrough();
+
+/** tool-result 的错误判定（外部帧 payload 经 safeParse，无 cast）。 */
+function isToolErrorResult(result: unknown): boolean {
+  const checked = ToolErrorSignalSchema.safeParse(result);
+  if (!checked.success) return false;
+  return checked.data.isError === true || checked.data.error !== undefined;
+}
+
+/** user-text 帧附件信封（外部 payload 无 cast 收窄）。 */
+const UserTextAttachmentsEnvelopeSchema = z
+  .object({ attachments: z.array(z.unknown()).optional() })
+  .passthrough();
+
+/** user-text 帧 payload.attachments 的 safeParse 投影（外部输入 runtime 收窄）。
+ * 无 thumb 的图片附件名字照常进 files（既有回显事实），同时记入 imageChipNames
+ * 供 UI 以 IconImage 渲染 image-typed chip。 */
+function attachmentsFromPayload(payload: unknown): {
+  images: string[];
+  files: string[];
+  imageChipNames: string[];
+} | null {
+  const checked = UserTextAttachmentsEnvelopeSchema.safeParse(payload);
+  const raw = checked.success ? checked.data.attachments : undefined;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const images: string[] = [];
+  const files: string[] = [];
+  const imageChipNames: string[] = [];
+  for (const entry of raw) {
+    const parsed = DshUserTextAttachmentSchema.safeParse(entry);
+    if (!parsed.success) continue;
+    if (parsed.data.kind === "image" && parsed.data.thumb !== undefined) {
+      images.push(parsed.data.thumb);
+    } else {
+      const name = parsed.data.name ?? (parsed.data.kind === "image" ? "image" : "file");
+      files.push(name);
+      if (parsed.data.kind === "image") imageChipNames.push(name);
+    }
+  }
+  return images.length > 0 || files.length > 0 ? { images, files, imageChipNames } : null;
+}
+
+/*
+ * 帧 payload 消费 schema（2026-09-12 codex R2 阻塞 4）：服务端帧是跨进程外部
+ * 输入，todo/approval/mode 三面写入 agentSession 前统一 safeParse 收窄。模块级
+ * 常量（热路径不随帧重建）；失败静默丢弃该帧（WebUI 侧不打 console 噪音），
+ * 保留上一个投影状态。形状对齐 $shared/contracts（dsh-runtime / agent）既有类型，
+ * 不在 WebUI 维护第二份手写镜像。
+ */
+const TodoSnapshotPayloadSchema = z.object({
+  todos: z.array(z.unknown()),
+});
+/** todo 条目（TodoDock 消费面）：content/status 字符串；畸形条目逐条丢弃。 */
+const TodoEntrySchema = z.object({ content: z.string(), status: z.string() });
+/** approval-request：questions 是 requestSeq 键的原子请求单元，整面收窄。 */
+const ApprovalRequestPayloadSchema = z.object({
+  questions: z.array(AgentApprovalQuestionSchema),
+});
+/** mode-changed：from/to 必须命中闭合 mode 枚举（任意字符串不得污染 mode 状态）。 */
+const ModeChangedPayloadSchema = z.object({
+  from: DshAgentModeSchema,
+  to: DshAgentModeSchema,
+});
+
+/** todo-snapshot payload → 全量快照数组（条目级收窄，extra 键剥除）；畸形 payload → null（丢帧）。 */
+function todosFromSnapshotPayload(
+  payload: unknown,
+): Array<{ content: string; status: string }> | null {
+  const checked = TodoSnapshotPayloadSchema.safeParse(payload);
+  if (!checked.success) return null;
+  const todos: Array<{ content: string; status: string }> = [];
+  for (const entry of checked.data.todos) {
+    const parsed = TodoEntrySchema.safeParse(entry);
+    if (parsed.success) todos.push(parsed.data);
+  }
+  return todos;
+}
+
 /** 帧到视图项的追加（未知帧丢弃）。user-text 与乐观气泡按文本回声去重。 */
 function appendFrame(frame: DshSessionStreamFrame): void {
   switch (frame.kind) {
     case "turn-start":
+      agentSession.turnStartedAt = frame.at;
+      pendingToolArgs = new Map();
       agentSession.items.push({ kind: "turn", seq: frame.seq, label: "Turn" });
       break;
     case "status":
@@ -413,14 +604,24 @@ function appendFrame(frame: DshSessionStreamFrame): void {
       break;
     case "user-text": {
       // 直播路径：乐观气泡已展示同文本，帧只做出队确认；切换/重连路径（气泡已
-      // 重置）队列必空，帧即唯一来源。
+      // 重置）队列必空，帧即唯一来源（attachments 元数据同时回填回显）。
       if (typeof frame.text === "string" && frame.text.length > 0) {
         const echoIndex = pendingUserEcho.indexOf(frame.text);
         if (echoIndex >= 0) {
           pendingUserEcho.splice(echoIndex, 1);
           break;
         }
-        agentSession.items.push({ kind: "user", seq: frame.seq, text: frame.text });
+        const attachments = attachmentsFromPayload(frame.payload);
+        agentSession.items.push({
+          kind: "user",
+          seq: frame.seq,
+          text: frame.text,
+          ...(attachments && attachments.images.length > 0 ? { images: attachments.images } : {}),
+          ...(attachments && attachments.files.length > 0 ? { files: attachments.files } : {}),
+          ...(attachments && attachments.imageChipNames.length > 0
+            ? { imageChipNames: attachments.imageChipNames }
+            : {}),
+        });
       }
       break;
     }
@@ -466,18 +667,10 @@ function appendFrame(frame: DshSessionStreamFrame): void {
       break;
     }
     case "todo-snapshot": {
-      // 全量快照 latest-wins：移除旧 todo 项后追加新快照（重放/直播一致）。
-      const todos = (frame.payload as { todos?: unknown }).todos;
-      if (Array.isArray(todos)) {
-        for (let i = agentSession.items.length - 1; i >= 0; i--) {
-          if (agentSession.items[i]?.kind === "todo") agentSession.items.splice(i, 1);
-        }
-        agentSession.items.push({
-          kind: "todo",
-          seq: frame.seq,
-          todos: todos as Array<{ content: string; status: string }>,
-        });
-      }
+      // 全量快照 latest-wins：出列到 agentSession.todos（TodoDock 消费）；
+      // 畸形 payload（含缺失）丢弃该帧，保留上一个快照（codex R2 阻塞 4）。
+      const todos = todosFromSnapshotPayload(frame.payload);
+      if (todos !== null) agentSession.todos = todos;
       break;
     }
     case "session-title": {
@@ -493,61 +686,112 @@ function appendFrame(frame: DshSessionStreamFrame): void {
     case "assistant-text": {
       if (typeof frame.text === "string" && frame.text.length > 0) {
         finalizeStreamingItem("assistant", frame.seq, frame.text);
-        // usage 快照：终帧 payload.usage（inputTokens/outputTokens 或 provider 别名）。
-        const usage = (
-          frame.payload as
-            | {
-                usage?: {
-                  inputTokens?: number;
-                  outputTokens?: number;
-                  promptTokens?: number;
-                  completionTokens?: number;
-                  input_tokens?: number;
-                  output_tokens?: number;
-                };
-              }
-            | undefined
-        )?.usage;
+        // usage 快照：终帧 payload.usage 暂存 pendingUsage（turn-end 药丸合入）
+        // + lastUsage（composer ContextMeter 消费）。
+        const usage = usageOfPayload(frame.payload);
         if (usage) {
-          const input = usage.inputTokens ?? usage.promptTokens ?? usage.input_tokens ?? 0;
-          const output = usage.outputTokens ?? usage.completionTokens ?? usage.output_tokens ?? 0;
-          if (input > 0 || output > 0) {
-            agentSession.lastUsage = { inputTokens: input, outputTokens: output };
-          }
+          agentSession.lastUsage = usage;
+          pendingUsage = usage;
         }
       }
       break;
     }
-    case "tool-call":
+    case "tool-args-delta": {
+      // 参数流分片：行已开（终帧前重复到达）则渐进追加；否则按 callId 暂存，
+      // 终帧 tool-call 以完整参数收敛。
+      if (typeof frame.text === "string" && frame.text.length > 0 && frame.toolCallId) {
+        const open = openToolInTurn(frame.toolCallId, frame.toolName ?? "");
+        if (open && open.toolCallId === frame.toolCallId && open.phase === "calling") {
+          open.argsText = (open.argsText ?? "") + frame.text;
+        } else if (!open) {
+          const buffered = pendingToolArgs.get(frame.toolCallId);
+          pendingToolArgs.set(frame.toolCallId, {
+            ...(frame.toolName ? { name: frame.toolName } : {}),
+            text: (buffered?.text ?? "") + frame.text,
+          });
+        }
+      }
+      break;
+    }
+    case "tool-call": {
+      const toolName = frame.toolName ?? "tool";
+      const callId = frame.toolCallId;
+      // 幂等：重复 tool-call（回放竞态）不重建行。
+      if (callId !== undefined && openToolInTurn(callId, toolName) !== null) break;
+      const buffered = callId !== undefined ? pendingToolArgs.get(callId) : undefined;
+      if (callId !== undefined) pendingToolArgs.delete(callId);
+      // 完整参数优先（终帧收敛）；payload 空而缓冲有值时以缓冲拼接兜底。
+      let argsText: string | undefined;
+      if (frame.payload !== undefined && frame.payload !== null) {
+        argsText =
+          typeof frame.payload === "string" ? frame.payload : safeJsonStringify(frame.payload);
+      }
+      if ((argsText === undefined || argsText.length === 0) && buffered) {
+        argsText = buffered.text;
+      }
       agentSession.items.push({
         kind: "tool",
         seq: frame.seq,
-        toolName: frame.toolName ?? "tool",
-        phase: "call",
-        payload: frame.payload,
+        ...(callId !== undefined ? { toolCallId: callId } : {}),
+        toolName,
+        ...(argsText !== undefined && argsText.length > 0 ? { argsText } : {}),
+        phase: "calling",
+        startedAt: frame.at,
       });
       break;
-    case "tool-result":
+    }
+    case "tool-result": {
+      const toolName = frame.toolName ?? "tool";
+      const open = openToolInTurn(frame.toolCallId, toolName);
+      if (open) {
+        open.result = frame.payload;
+        open.phase = isToolErrorResult(frame.payload) ? "error" : "done";
+        open.endedAt = frame.at;
+        break;
+      }
+      // 无可闭合行（结果先于 call 到达/跨轮残留）：防御性单行回放。
       agentSession.items.push({
         kind: "tool",
         seq: frame.seq,
-        toolName: frame.toolName ?? "tool",
-        phase: "result",
-        payload: frame.payload,
+        ...(frame.toolCallId !== undefined ? { toolCallId: frame.toolCallId } : {}),
+        toolName,
+        result: frame.payload,
+        phase: isToolErrorResult(frame.payload) ? "error" : "done",
+        startedAt: frame.at,
+        endedAt: frame.at,
       });
       break;
+    }
     case "turn-end": {
       const reason =
         typeof frame.text === "string" && frame.text.length > 0 ? frame.text : "completed";
-      agentSession.items.push({ kind: "turn", seq: frame.seq, label: `Turn end (${reason})` });
+      const usage = pendingUsage;
+      pendingUsage = null;
+      const startedAt = agentSession.turnStartedAt;
+      const elapsed =
+        startedAt !== null
+          ? Number.isNaN(Date.parse(startedAt)) || Number.isNaN(Date.parse(frame.at))
+            ? undefined
+            : Math.max(0, Date.parse(frame.at) - Date.parse(startedAt))
+          : undefined;
+      agentSession.items.push({
+        kind: "turn-end",
+        seq: frame.seq,
+        reason,
+        ...(usage ? { usage } : {}),
+        ...(elapsed !== undefined ? { elapsedMs: elapsed } : {}),
+      });
       break;
     }
     case "approval-request": {
-      const payload = frame.payload as { questions?: PanelApprovalQuestion[] } | undefined;
+      // questions 整面 safeParse：畸形（含缺失 payload）丢弃该帧，不产生审批卡，
+      // 也不把未收窄的问题对象写入 items（codex R2 阻塞 4）。
+      const checked = ApprovalRequestPayloadSchema.safeParse(frame.payload);
+      if (!checked.success) break;
       agentSession.items.push({
         kind: "approval",
         seq: frame.seq,
-        questions: Array.isArray(payload?.questions) ? payload!.questions! : [],
+        questions: checked.data.questions,
         resolved: false,
       });
       break;
@@ -558,17 +802,32 @@ function appendFrame(frame: DshSessionStreamFrame): void {
       }
       break;
     case "mode-changed": {
-      const payload = frame.payload as { from?: unknown; to?: unknown } | undefined;
-      const from = (typeof payload?.from === "string" ? payload.from : "free") as DshAgentMode;
-      const to = (typeof payload?.to === "string" ? payload.to : "free") as DshAgentMode;
-      agentSession.items.push({ kind: "mode", seq: frame.seq, from, to });
-      agentSession.mode = to;
+      // from/to 必须命中闭合 mode 枚举：畸形（含任意字符串 mode）丢弃该帧，
+      // agentSession.mode 与 items 均不被污染（codex R2 阻塞 4）。
+      const checked = ModeChangedPayloadSchema.safeParse(frame.payload);
+      if (!checked.success) break;
+      agentSession.items.push({
+        kind: "mode",
+        seq: frame.seq,
+        from: checked.data.from,
+        to: checked.data.to,
+      });
+      agentSession.mode = checked.data.to;
       break;
     }
   }
   const cap = 500;
   if (agentSession.items.length > cap) {
     agentSession.items.splice(0, agentSession.items.length - cap);
+  }
+}
+
+/** JSON 序列化兜底（循环引用等异常形状退化为 String()）。 */
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? "";
+  } catch {
+    return String(value);
   }
 }
 

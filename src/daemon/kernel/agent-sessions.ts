@@ -10,9 +10,12 @@
  *       收窄 setup）；prompt 经 followup；cancel 经 agent.cancel；list 从 sessions
  *       store 投影摘要。
  *   [2] 脱敏 stream 环形投影：订阅 session/event firehose，把 turn/status/
- *       message 事件映射为 DshSessionStreamFrame（payload 过 redactDshPayload）。
- *   [3] 跨重启持久：帧 write-through 到转录存储（sessions/YYYY/MM/DD/<id>）；
- *       重启后 list/stream 由转录回放，prompt 经内核 agents.resume 续聊。
+ *       message 事件映射为 DshSessionStreamFrame（payload 过 redactDshPayload）；
+ *       全部被消费事件类型的 data 先过 Zod safeParse，畸形丢弃 + 有界诊断
+ *       （2026-09-12 codex R2：六类 tool/message 事件补齐收窄）。
+ *   [3] 跨重启持久：帧 write-through 到转录存储（sessions/YYYY/MM/DD/<id>），
+ *       含 assistant-reasoning 终帧（Thinking 与正文同序 durable，回放等价
+ *       live）；重启后 list/stream 由转录回放，prompt 经内核 agents.resume 续聊。
  *   [4] 可选宿主：内核未挂载时 typed UNAVAILABLE（DomainError），不静默空面。
  *   [5] 模式生命周期（add-agent-settings-modes）：create/revive 按转录 meta 的
  *       mode 组合 setup；setMode = meta 原子改写 + live 句柄有界释放 + mode-changed
@@ -24,6 +27,7 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "@deepseek-ai/cordis";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
+import { z } from "zod";
 import {
   redactDshPayload,
   type DshAgentMode,
@@ -95,6 +99,191 @@ interface SessionEventLike {
   data: unknown;
 }
 
+/**
+ * firehose 载荷的入口 schema 家族（2026-09-12 codex 阻塞 3 + R2 阻塞 1：
+ * event.data 是内核来的外部输入，必须 unknown→safeParse，禁止 TS cast 直读——
+ * 所有被消费的事件类型都有对应 schema，无消费面的事件除外）。assistant/chunk
+ * 覆盖 text/reasoning/tool-call delta 三种分片形状（tool-call-delta = type/id/
+ * name/argumentsDelta）；todo/write 是 {content,status} 全量快照；其余六类
+ * （turn/end、session/title、user/message、assistant/message、tool/call、
+ * tool/result）见下方各自 schema。失败丢弃该事件并记有界诊断——畸形载荷不进
+ * 缓冲、不落转录、不打断帧序列。
+ */
+export const AgentChunkEventSchema = z.object({
+  chunk: z.object({
+    type: z.string().min(1),
+    text: z.string().optional(),
+    id: z.string().optional(),
+    name: z.string().optional(),
+    argumentsDelta: z.string().optional(),
+  }),
+});
+
+export const TodoWriteEventSchema = z.object({
+  todos: z.array(
+    z.object({
+      content: z.string(),
+      status: z.string().min(1),
+    }),
+  ),
+});
+
+/**
+ * firehose 其余被消费事件的入口 schema（2026-09-12 codex R2 阻塞 1：六类
+ * tool/message 事件同样 unknown→safeParse，禁止 Record cast 直读）。形状按
+ * dsh-session SessionEventMap 实测契约最小化：直接读取的键类型严格（缺失
+ * 可选、存在必合型），未消费键 passthrough（整体仍要进 redactDshPayload）；
+ * 畸形即整事件丢弃 + 有界诊断。turn/start（不读 data）与 agent/status
+ * （data 只整体过 redactDshPayload，无字段读取）无消费面，不需要 schema。
+ */
+
+/** 消息 source 的消费面：kind（user/model/tool 判别）与 callId（tool/result 回填名）。 */
+const MessageSourceSchema = z
+  .object({
+    kind: z.string().optional(),
+    callId: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * 消息 content 块的最小消费面：type 是 merge-extensible 判别串（text/
+ * reasoning/image/file/tool-call/tool-result + 插件扩展），故不枚举；text/
+ * name 被 textOf/reasoningOf/attachmentsOf 读取，存在即必须 string。未消费
+ * 字段（attachment ref、id、arguments…）passthrough 给脱敏 payload。
+ */
+const MessageBlockSchema = z
+  .object({
+    type: z.string().min(1),
+    text: z.string().optional(),
+    name: z.string().optional(),
+  })
+  .passthrough();
+
+/** 消息外壳：source + content 块数组（user/assistant 消息共用；content 契约必在且非空——空消息事件按畸形丢弃）。 */
+const MessageShapeSchema = z
+  .object({
+    source: MessageSourceSchema.optional(),
+    content: z.array(MessageBlockSchema).min(1),
+  })
+  .passthrough();
+
+/**
+ * {message: M} 信封解包：M 为对象则取 M，否则 data 即 message（user/message
+ * 实测形状是后者，assistant/message 实测形状是前者；与原 `data.message ?? data`
+ * 解析序等价——nullish/非对象 message 回退 data 本身）。
+ */
+function messageEnvelopeOf(raw: unknown): unknown {
+  if (typeof raw === "object" && raw !== null && "message" in raw) {
+    const wrapped = raw.message;
+    if (typeof wrapped === "object" && wrapped !== null) return wrapped;
+  }
+  return raw;
+}
+
+/**
+ * user/message 与 assistant/message 共用事件形状（当前契约一致：信封 + source
+ * + content 块）。assistant 的 usage 在信封顶层（TokenUsage 白名单数值），
+ * 由分支读原始 data 投影，不经本 schema 约束。
+ */
+export const MessageEventSchema = z.preprocess(messageEnvelopeOf, MessageShapeSchema);
+
+/** turn/end：reason.kind 投影为帧 text；整体 data passthrough 进脱敏 payload。 */
+export const TurnEndEventSchema = z
+  .object({
+    reason: z.object({ kind: z.string().optional() }).passthrough().optional(),
+  })
+  .passthrough();
+
+/** session/title：title 存在即必须 string；缺失/空白由分支静默丢弃（不产帧）。 */
+export const SessionTitleEventSchema = z
+  .object({
+    title: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * tool/call：dsh-session 契约三键必填——callId、name 非空串，arguments 为模型
+ * 产出的原始 JSON 字符串（未解析）。缺失任一即畸形丢弃（不产帧不消耗 seq）。
+ */
+export const ToolCallEventSchema = z
+  .object({
+    callId: z.string().min(1),
+    name: z.string().min(1),
+    arguments: z.string(),
+  })
+  .passthrough();
+
+/**
+ * tool/result：dsh-llm `ToolResultMessage` 精确契约——`source.kind` 字面量
+ * 'tool' 且 callId 必填（回填工具名的关联键），content 是单个 `type:'tool-result'`
+ * 块的 tuple（块 type 字面量锁死），块内 toolCallId 必填、content 为含至少一个
+ * 非空 text part 的块数组（消费面只读 text；纯 image/未知块 = 无可消费内容）。
+ * 空 message/空数组/空块/错误 discriminant 全部按畸形丢弃（codex R4/R5）。
+ */
+export const ToolResultEventSchema = z.object({
+  message: z
+    .object({
+      source: z.object({ kind: z.literal("tool"), callId: z.string().min(1) }).passthrough(),
+      content: z.tuple([
+        z
+          .object({
+            type: z.literal("tool-result"),
+            toolCallId: z.string().min(1),
+            content: z
+              .array(
+                z
+                  .object({
+                    type: z.string().min(1),
+                    text: z.string().optional(),
+                  })
+                  .passthrough(),
+              )
+              .min(1)
+              .refine(
+                (parts) =>
+                  parts.some(
+                    (part) =>
+                      part.type === "text" && typeof part.text === "string" && part.text.length > 0,
+                  ),
+                { message: "tool-result block needs a consumable text part" },
+              ),
+          })
+          .passthrough(),
+      ]),
+    })
+    .passthrough(),
+});
+
+/** turn/start：消费面不读 data；非对象载荷按畸形丢弃（record 门）。 */
+export const TurnStartEventSchema = z.record(z.string(), z.unknown());
+
+/** agent/status：data 整体进脱敏投影；非对象载荷按畸形丢弃（record 门）。 */
+export const AgentStatusEventSchema = z.record(z.string(), z.unknown());
+
+/** assistant/message 顶层 usage 的数值白名单信封（usage 存在则必须为对象）。 */
+const UsageEnvelopeSchema = z
+  .object({ usage: z.record(z.string(), z.unknown()).optional() })
+  .passthrough();
+
+/** 诊断日志的整行硬上限（绝不打印全 payload）。 */
+const DROPPED_EVENT_LOG_MAX = 200;
+
+/** 畸形事件的丢弃诊断：整行截断 ≤200ch（与 session-transcripts 的 console 前缀约定一致）。 */
+function logDroppedEvent(sessionId: string, type: string, data: unknown): void {
+  let detail: string;
+  try {
+    const serialized = JSON.stringify(data);
+    detail = serialized === undefined ? String(data) : serialized;
+  } catch {
+    detail = String(data);
+  }
+  let line = `[agent-sessions] dropped malformed ${type} event for ${sessionId}: ${detail}`;
+  if (line.length > DROPPED_EVENT_LOG_MAX) {
+    line = `${line.slice(0, DROPPED_EVENT_LOG_MAX - 1)}…`;
+  }
+  console.warn(line);
+}
+
 /** 待答问题的 live 记录（answerer Promise 由 agent.session.answer resolve）。 */
 interface PendingApproval {
   requestSeq: number;
@@ -122,6 +311,8 @@ interface LivePanelSession {
   deltaBuffer: string[];
   /** assistant/chunk reasoning-delta 的合并缓冲（thinking 流，同窗口）。 */
   reasoningBuffer: string[];
+  /** assistant/chunk tool-call-delta 的分 call 合并缓冲（键 = callId ?? name）。 */
+  toolArgBuffers: Map<string, { name?: string; parts: string[] }>;
   /** 上次 delta 帧冲刷时刻（ms）。 */
   deltaAt: number;
 }
@@ -172,50 +363,77 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     ).on("session/event", (session, event) => {
       const entry = live.get(session.id);
       if (!entry) return;
-      // 流式增量：assistant/chunk（text-delta / reasoning-delta）各进合并缓冲，
-      // 按时间窗成帧；其余事件先冲刷缓冲，保证增量帧先于收尾帧落序。
+      // 流式增量：assistant/chunk（text-delta / reasoning-delta / tool-call-delta）
+      // 各进合并缓冲，按时间窗成帧；其余事件先冲刷缓冲，保证增量帧先于收尾帧落序。
+      // data 先过 AgentChunkEventSchema safeParse：畸形丢弃 + 有界诊断（codex 阻塞 3）。
       if (event.type === "assistant/chunk") {
-        const chunk = (event.data as { chunk?: { type?: string; text?: string } } | undefined)
-          ?.chunk;
+        const checked = AgentChunkEventSchema.safeParse(event.data);
+        if (!checked.success) {
+          logDroppedEvent(session.id, event.type, event.data);
+          return;
+        }
+        const chunk = checked.data.chunk;
         if (
-          typeof chunk?.text === "string" &&
+          typeof chunk.text === "string" &&
           chunk.text.length > 0 &&
           (chunk.type === "text-delta" || chunk.type === "reasoning-delta")
         ) {
           const buffer = chunk.type === "text-delta" ? entry.deltaBuffer : entry.reasoningBuffer;
           buffer.push(chunk.text);
           if (Date.now() - entry.deltaAt >= DELTA_FLUSH_MS) flushDeltas(entry);
+          return;
+        }
+        // 工具参数流式分片（§4.1）：按 callId（缺省 name，再缺省丢弃——无法关联）
+        // 分桶缓冲；终帧 tool/call 事件前的非 chunk 事件会先冲刷保证落序。
+        if (chunk.type === "tool-call-delta" && typeof chunk.argumentsDelta === "string") {
+          const key =
+            typeof chunk.id === "string" && chunk.id.length > 0
+              ? chunk.id
+              : typeof chunk.name === "string" && chunk.name.length > 0
+                ? chunk.name
+                : undefined;
+          if (key !== undefined) {
+            const bucket = entry.toolArgBuffers.get(key) ?? { parts: [] };
+            if (bucket.name === undefined && typeof chunk.name === "string") {
+              bucket.name = chunk.name;
+            }
+            bucket.parts.push(chunk.argumentsDelta);
+            entry.toolArgBuffers.set(key, bucket);
+          }
+          if (Date.now() - entry.deltaAt >= DELTA_FLUSH_MS) flushDeltas(entry);
         }
         return;
       }
       flushDeltas(entry);
-      const frame = projectEvent(entry, event);
-      if (!frame) return;
-      entry.frames.push(frame);
-      if (entry.frames.length > retention) {
-        entry.frames.splice(0, entry.frames.length - retention);
+      // projectEvent 返回有序帧列表（assistant/message 一步可产 reasoning + text
+      // 两帧）；每帧统一走 push + retention trim + 转录 append 提交，reasoning
+      // 终帧由此获得 durable 持久化与 retention 约束（codex R2 阻塞 2）。
+      const frames = projectEvent(entry, event);
+      for (const frame of frames) {
+        entry.frames.push(frame);
+        if (entry.frames.length > retention) {
+          entry.frames.splice(0, entry.frames.length - retention);
+        }
+        // write-through：转录落盘 best-effort（失败由存储层记日志，不打断 live）。
+        deps.transcripts.append(session.id, frame);
       }
-      // write-through：转录落盘 best-effort（失败由存储层记日志，不打断 live）。
-      deps.transcripts.append(session.id, frame);
     });
   }
 
   /**
-   * 冲刷增量缓冲为帧（reasoning 先于 text——同一步内思考在前）；live 环 +
-   * 转录同序落盘。
+   * 冲刷增量缓冲为帧（reasoning 先于 text——同一步内思考在前；text 先于工具参数
+   * ——工具调用在正文之后）；live 环 + 转录同序落盘。
    */
   function flushDeltas(entry: LivePanelSession): void {
-    if (entry.deltaBuffer.length === 0 && entry.reasoningBuffer.length === 0) return;
+    if (
+      entry.deltaBuffer.length === 0 &&
+      entry.reasoningBuffer.length === 0 &&
+      entry.toolArgBuffers.size === 0
+    ) {
+      return;
+    }
     entry.deltaAt = Date.now();
-    const emit = (kind: "assistant-delta" | "assistant-reasoning-delta", text: string): void => {
-      const frame: DshSessionStreamFrame = {
-        at: new Date().toISOString(),
-        runId: entry.agent.session.id,
-        sessionId: entry.agent.session.id,
-        seq: entry.frameSeq++,
-        kind,
-        text,
-      };
+    const emit = (frame: DshSessionStreamFrame): void => {
       entry.frames.push(frame);
       if (entry.frames.length > retention) {
         entry.frames.splice(0, entry.frames.length - retention);
@@ -223,195 +441,281 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       deps.transcripts.append(entry.agent.session.id, frame);
     };
     if (entry.reasoningBuffer.length > 0) {
-      emit("assistant-reasoning-delta", entry.reasoningBuffer.join(""));
+      emit({
+        at: new Date().toISOString(),
+        runId: entry.agent.session.id,
+        sessionId: entry.agent.session.id,
+        seq: entry.frameSeq++,
+        kind: "assistant-reasoning-delta",
+        text: entry.reasoningBuffer.join(""),
+      });
       entry.reasoningBuffer = [];
     }
     if (entry.deltaBuffer.length > 0) {
-      emit("assistant-delta", entry.deltaBuffer.join(""));
+      emit({
+        at: new Date().toISOString(),
+        runId: entry.agent.session.id,
+        sessionId: entry.agent.session.id,
+        seq: entry.frameSeq++,
+        kind: "assistant-delta",
+        text: entry.deltaBuffer.join(""),
+      });
       entry.deltaBuffer = [];
+    }
+    if (entry.toolArgBuffers.size > 0) {
+      for (const [callKey, bucket] of entry.toolArgBuffers) {
+        emit({
+          at: new Date().toISOString(),
+          runId: entry.agent.session.id,
+          sessionId: entry.agent.session.id,
+          seq: entry.frameSeq++,
+          kind: "tool-args-delta",
+          text: bucket.parts.join(""),
+          ...(bucket.name ? { toolName: bucket.name } : {}),
+          toolCallId: callKey,
+        });
+      }
+      entry.toolArgBuffers.clear();
     }
   }
 
-  /** 单事件 → 帧投影（未知事件类型返回 null 丢弃；payload 脱敏）。 */
-  function projectEvent(
-    entry: LivePanelSession,
-    event: SessionEventLike,
-  ): DshSessionStreamFrame | null {
+  /**
+   * 单事件 → 有序帧列表投影（空数组 = 丢弃；未知事件类型/合法但无内容的载荷
+   * 都投影为空；payload 脱敏）。每个被消费的事件类型在分支入口 safeParse，
+   * 畸形走 ≤200ch 有界诊断（codex R2 阻塞 1）。
+   */
+  function projectEvent(entry: LivePanelSession, event: SessionEventLike): DshSessionStreamFrame[] {
     const base = {
       at: new Date().toISOString(),
       runId: entry.agent.session.id,
       sessionId: entry.agent.session.id,
     };
-    const data = (event.data ?? {}) as Record<string, unknown>;
+    // data 保持原始 event.data（不归一化）：缺失/非对象载荷必须被各分支的
+    // record/schema 门拒绝——`?? {}` 会把 undefined 伪装成合法空对象绕过门
+    // （codex R4 阻塞 2）。
+    const data: unknown = event.data;
     switch (event.type) {
-      case "turn/start":
-        return { ...base, seq: entry.frameSeq++, kind: "turn-start" };
+      case "turn/start": {
+        const checked = TurnStartEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        return [{ ...base, seq: entry.frameSeq++, kind: "turn-start" }];
+      }
       case "turn/end": {
-        const reason = (data as { reason?: { kind?: string } }).reason?.kind;
-        return {
-          ...base,
-          seq: entry.frameSeq++,
-          kind: "turn-end",
-          text: typeof reason === "string" ? reason : undefined,
-          payload: redactDshPayload(data),
-        };
+        const checked = TurnEndEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        const reason = checked.data.reason?.kind;
+        return [
+          {
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "turn-end",
+            text: reason,
+            payload: redactDshPayload(checked.data),
+          },
+        ];
       }
       case "todo/write": {
-        // todo/write 是全量快照（latest wins）：投影 todos 数组，UI 渲染 checklist。
-        const todos = (data as { todos?: unknown }).todos;
-        if (!Array.isArray(todos)) return null;
-        const cleaned = todos
-          .map((todo) =>
-            typeof todo === "object" && todo !== null
-              ? {
-                  content:
-                    typeof (todo as { content?: unknown }).content === "string"
-                      ? (todo as { content: string }).content
-                      : "",
-                  status:
-                    (todo as { status?: unknown }).status === "completed" ||
-                    (todo as { status?: unknown }).status === "in_progress"
-                      ? ((todo as { status: string }).status as "completed" | "in_progress")
-                      : "pending",
-                }
-              : null,
-          )
-          .filter((todo): todo is { content: string; status: string } => todo !== null);
-        return {
-          ...base,
-          seq: entry.frameSeq++,
-          kind: "todo-snapshot",
-          payload: redactDshPayload({ todos: cleaned }),
-        };
+        // todo/write 是全量快照（latest wins）：payload 先过 TodoWriteEventSchema
+        // safeParse（畸形丢弃 + 有界诊断），投影 todos 数组，UI 渲染 checklist。
+        const checked = TodoWriteEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        const cleaned = checked.data.todos.map((todo) => ({
+          content: todo.content,
+          status:
+            todo.status === "completed" || todo.status === "in_progress"
+              ? todo.status
+              : ("pending" as const),
+        }));
+        return [
+          {
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "todo-snapshot",
+            payload: redactDshPayload({ todos: cleaned }),
+          },
+        ];
       }
       case "session/title": {
         // 内核 session-title 行（dsh-base 自带，首 prompt 后经辅助 LLM 生成、失败
         // 回退首词截断）投出的标题：更新 live title + 转录 meta，并以帧驱动面板
         // 会话列表即时改名（重启后的标题回放走转录 meta）。
-        const title =
-          typeof (data as { title?: unknown }).title === "string"
-            ? (data as { title: string }).title.trim()
-            : "";
-        if (title.length === 0) return null;
+        const checked = SessionTitleEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        const title = checked.data.title?.trim() ?? "";
+        if (title.length === 0) return [];
         entry.title = title;
         deps.transcripts.updateTitle(entry.agent.session.id, title);
-        return { ...base, seq: entry.frameSeq++, kind: "session-title", text: title };
+        return [{ ...base, seq: entry.frameSeq++, kind: "session-title", text: title }];
       }
-      case "agent/status":
-        return { ...base, seq: entry.frameSeq++, kind: "status", payload: redactDshPayload(data) };
+      case "agent/status": {
+        const checked = AgentStatusEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        return [
+          {
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "status",
+            payload: redactDshPayload(checked.data),
+          },
+        ];
+      }
       case "user/message": {
         // 事件形状实测（2026-09-08 内核日志）：真实人类输入 data 即 message 且
         // data.source.kind === "user"；内核注入（system-reminder、runtime context）
         // 无 user source，不进对话流。user 帧是切换会话后从帧缓冲重建消息列表的
         // 唯一用户消息来源——丢弃会让切换后的转录缺失全部用户输入。
-        const message = (data as { message?: unknown }).message ?? data;
-        const source = (message as { source?: { kind?: unknown } } | undefined)?.source;
-        if (source?.kind !== "user") return null;
+        const checked = MessageEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        const message = checked.data;
+        if (message.source?.kind !== "user") return [];
         const text = textOf(message);
-        if (text === undefined || text.length === 0) return null;
-        return {
-          ...base,
-          seq: entry.frameSeq++,
-          kind: "user-text",
-          text,
-        };
+        if (text === undefined || text.length === 0) return [];
+        // 附件回显元数据（§4.2）：从 content 的 image/file 块派生 kind+名字，不回
+        // 传字节；切换会话/重连的回放路径据此重建附件行（乐观预览仍优先）。
+        const attachments = attachmentsOf(message);
+        return [
+          {
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "user-text",
+            text,
+            ...(attachments.length > 0 ? { payload: redactDshPayload({ attachments }) } : {}),
+          },
+        ];
       }
       case "assistant/message": {
         // 事件形状实测（2026-09-08 真实会话）：{turn, step, message:{content:[...]}}。
-        // reasoning 块（thinking）先投影为折叠终帧，再投正文——一步内思考在前。
-        const message = (data as { message?: unknown }).message ?? data;
+        // reasoning 块（thinking）先投影为折叠终帧，再投正文——一步内思考在前；
+        // 两帧都经监听器统一提交路径落转录（durable Thinking，R2 阻塞 2）。
+        const checked = MessageEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        const message = checked.data;
         const reasoning = reasoningOf(message);
+        const text = textOf(message);
+        // assistant 至少要有可消费的 reasoning 或 text（契约：事件即已组装的消息；
+        // 空消息按畸形丢弃，不消耗 seq）。reasoning-only 步骤不产空 text 帧
+        //（usage 白名单挂到 reasoning 帧避免丢失）。
+        const usage = usageSnapshotOf(data);
+        if (reasoning === undefined && (text === undefined || text.length === 0)) {
+          return [];
+        }
+        const frames: DshSessionStreamFrame[] = [];
         if (reasoning !== undefined) {
-          entry.frames.push({
+          frames.push({
             ...base,
             seq: entry.frameSeq++,
             kind: "assistant-reasoning",
             text: reasoning,
+            ...(text === undefined || text.length === 0
+              ? {
+                  payload: {
+                    source: redactDshPayload(message.source),
+                    usage,
+                  },
+                }
+              : {}),
           });
         }
-        const text = textOf(message);
-        return {
-          ...base,
-          seq: entry.frameSeq++,
-          kind: "assistant-text",
-          text,
-          payload: {
-            ...(redactDshPayload({
-              source: (message as { source?: unknown }).source,
-            }) as Record<string, unknown>),
-            // usage 在事件 data 顶层；token 计数不是凭据——键名误中脱敏 token 模式
-            // 会把数值打成 [redacted]，故白名单提取（2026-09-12 PM 证据轮实测）。
-            usage: usageSnapshotOf(data),
-          },
-        };
+        if (text !== undefined && text.length > 0) {
+          frames.push({
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "assistant-text",
+            text,
+            payload: {
+              source: redactDshPayload(message.source),
+              // usage 在事件 data 顶层；token 计数不是凭据——键名误中脱敏 token 模式
+              // 会把数值打成 [redacted]，故白名单提取（2026-09-12 PM 证据轮实测）。
+              usage,
+            },
+          });
+        }
+        return frames;
       }
       case "tool/call": {
-        const args =
-          (data as { arguments?: unknown }).arguments ?? (data as { args?: unknown }).args;
-        let parsedArgs: unknown = args;
-        if (typeof args === "string") {
-          try {
-            parsedArgs = JSON.parse(args);
-          } catch {
-            parsedArgs = args;
-          }
+        const checked = ToolCallEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
         }
-        const callName = typeof data.name === "string" ? data.name : undefined;
-        const callId = typeof data.callId === "string" ? data.callId : undefined;
-        if (callId && callName) entry.toolNames.set(callId, callName);
-        return {
-          ...base,
-          seq: entry.frameSeq++,
-          kind: "tool-call",
-          toolName: callName,
-          payload: redactDshPayload(parsedArgs),
-        };
+        // arguments 是模型产出的原始 JSON 字符串（契约必填）：尽力解析为对象供
+        // 脱敏投影，解析失败保持原文。
+        let parsedArgs: unknown = checked.data.arguments;
+        try {
+          parsedArgs = JSON.parse(checked.data.arguments);
+        } catch {
+          parsedArgs = checked.data.arguments;
+        }
+        const callName = checked.data.name;
+        const callId = checked.data.callId;
+        entry.toolNames.set(callId, callName);
+        // toolCallId（§4.1）：call+result 合并行的关联键；参数流增量已在此帧前
+        // 冲刷（非 chunk 事件先 flush），store 以完整参数收敛 argsText。
+        return [
+          {
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "tool-call",
+            toolName: callName,
+            toolCallId: callId,
+            payload: redactDshPayload(parsedArgs),
+          },
+        ];
       }
       case "tool/result": {
-        // 实测形状：{turn, step, message:{source:{callId}, content:[{type:'tool-result',
-        // toolCallId, content:[{type:'text', text:'<json>'}]}]}}——callId 两处皆可回填名。
-        const message = (data as { message?: unknown }).message;
-        const blocks = (message as { content?: unknown[] } | undefined)?.content;
+        // 契约形状：{turn, step, message:{source:{kind:'tool', callId},
+        // content:[{type:'tool-result', toolCallId, content:[{type:'text', text}]}]}}。
+        const checked = ToolResultEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        const message = checked.data.message;
+        const block = message.content[0];
         let text: string | undefined;
-        let resultCallId: string | undefined;
-        if (Array.isArray(blocks)) {
-          for (const block of blocks) {
-            if (
-              resultCallId === undefined &&
-              typeof (block as { toolCallId?: unknown }).toolCallId === "string"
-            ) {
-              resultCallId = (block as { toolCallId: string }).toolCallId;
-            }
-            const inner = (block as { content?: unknown[] }).content;
-            if (Array.isArray(inner)) {
-              for (const part of inner) {
-                if ((part as { type?: string }).type === "text") {
-                  text = (part as { text?: string }).text;
-                  break;
-                }
-              }
-            }
-            if (text !== undefined) break;
+        for (const part of block.content) {
+          if (part.type === "text") {
+            text = part.text;
+            break;
           }
         }
-        if (resultCallId === undefined) {
-          const sourceCallId = (message as { source?: { callId?: unknown } } | undefined)?.source
-            ?.callId;
-          if (typeof sourceCallId === "string") resultCallId = sourceCallId;
-        }
-        const resolvedName =
-          resultCallId !== undefined ? entry.toolNames.get(resultCallId) : undefined;
-        return {
-          ...base,
-          seq: entry.frameSeq++,
-          kind: "tool-result",
-          toolName: resolvedName,
-          text,
-          payload: redactDshPayload(text !== undefined ? safeJsonParse(text) : data),
-        };
+        const resultCallId = message.source.callId;
+        const resolvedName = entry.toolNames.get(resultCallId);
+        return [
+          {
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "tool-result",
+            toolName: resolvedName,
+            toolCallId: resultCallId,
+            text,
+            payload: redactDshPayload(text !== undefined ? safeJsonParse(text) : data),
+          },
+        ];
       }
       default:
-        return null;
+        return [];
     }
   }
 
@@ -495,6 +799,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       toolNames: new Map(),
       deltaBuffer: [],
       reasoningBuffer: [],
+      toolArgBuffers: new Map(),
       deltaAt: Date.now(),
     };
     registerPanelAnswerer(entry);
@@ -529,6 +834,31 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     return parts.length > 0 ? parts.join("\n") : undefined;
   }
 
+  /**
+   * 消息 content blocks 的附件元数据投影（§4.2）：image/file 块 → {kind, name?}。
+   * 名字尽力提取（块直书 name，或 durable ref 对象上的 name）；不携带字节。
+   */
+  function attachmentsOf(message: unknown): Array<{ kind: "image" | "file"; name?: string }> {
+    const content = (message as { content?: unknown } | null | undefined)?.content;
+    if (!Array.isArray(content)) return [];
+    const out: Array<{ kind: "image" | "file"; name?: string }> = [];
+    for (const block of content) {
+      if (typeof block !== "object" || block === null) continue;
+      const type = (block as { type?: unknown }).type;
+      if (type !== "image" && type !== "file") continue;
+      const nameSources = [
+        (block as { name?: unknown }).name,
+        ((block as { attachment?: { name?: unknown } }).attachment ?? {}) as { name?: unknown },
+        ((block as { ref?: { name?: unknown } }).ref ?? {}) as { name?: unknown },
+      ];
+      const name = nameSources.find(
+        (candidate) => typeof candidate === "string" && candidate.length > 0,
+      );
+      out.push(name === undefined ? { kind: type } : { kind: type, name: name as string });
+    }
+    return out;
+  }
+
   /** 文本类文件判定（mime 未知时按扩展名；≤512KiB 上限由契约保证）。 */
   function isTextualFile(name: string): boolean {
     return /\.(txt|md|markdown|json|ya?ml|toml|csv|tsv|log|patch|diff|ts|tsx|js|jsx|py|rs|go|java|c|h|cpp|sh|css|html|xml|ini|env)$/i.test(
@@ -536,10 +866,12 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     );
   }
 
-  /** assistant/message 事件顶层 usage 的数值白名单投影（非数值丢弃）。 */
+  /** assistant/message 事件顶层 usage 的数值白名单投影（非数值丢弃；信封经 safeParse，无 cast）。 */
   function usageSnapshotOf(data: unknown): Record<string, number> | undefined {
-    const usage = (data as { usage?: unknown } | undefined)?.usage;
-    if (typeof usage !== "object" || usage === null) return undefined;
+    const checked = UsageEnvelopeSchema.safeParse(data);
+    if (!checked.success) return undefined;
+    const usage = checked.data.usage;
+    if (usage === undefined) return undefined;
     const out: Record<string, number> = {};
     for (const key of [
       "inputTokens",
@@ -548,7 +880,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       "cacheReadTokens",
       "cacheWriteTokens",
     ]) {
-      const value = (usage as Record<string, unknown>)[key];
+      const value = usage[key];
       if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
     }
     return Object.keys(out).length > 0 ? out : undefined;
@@ -684,6 +1016,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         toolNames: new Map(),
         deltaBuffer: [],
         reasoningBuffer: [],
+        toolArgBuffers: new Map(),
         deltaAt: Date.now(),
       };
       registerPanelAnswerer(entry);

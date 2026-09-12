@@ -56,13 +56,17 @@ beforeEach(() => {
   connection.rpc = null;
   connection.generation = 0;
   agentPanel.open = false;
+  agentPanel.seedPrompt = null;
   agentSession.sessionId = null;
   agentSession.mode = null;
   agentSession.items = [];
+  agentSession.todos = [];
+  agentSession.turnStartedAt = null;
   agentSession.cursor = 0;
   agentSession.error = null;
   agentSession.promptError = null;
   agentSession.status = "idle";
+  agentSession.lastUsage = null;
   agentSessionsList.loaded = false;
   agentSessionsList.sessions = [];
 });
@@ -343,7 +347,7 @@ describe("agent panel store (task 3.x)", () => {
     expect(bubble).toMatchObject({ images: ["data:image/png;base64,aGk="] });
   });
 
-  it("renders todo snapshots latest-wins and extracts turn usage", async () => {
+  it("projects todo snapshots latest-wins into the dock state and extracts turn usage", async () => {
     let polls = 0;
     connection.rpc = {
       agent: {
@@ -379,12 +383,12 @@ describe("agent panel store (task 3.x)", () => {
     };
     agentSession.sessionId = "agent-s1";
     await pollAgentStream();
-    expect(agentSession.items.filter((item) => item.kind === "todo")).toHaveLength(1);
+    // todos 出列（§3.5）：不再进 items，改投影 TodoDock 状态（负断言走宽化字串）。
+    expect(agentSession.items.some((item) => (item.kind as string) === "todo")).toBe(false);
+    expect(agentSession.todos).toEqual([{ content: "draft", status: "in_progress" }]);
     expect(agentSession.lastUsage).toEqual({ inputTokens: 1200, outputTokens: 34 });
     await pollAgentStream();
-    const todos = agentSession.items.filter((item) => item.kind === "todo");
-    expect(todos).toHaveLength(1);
-    expect((todos[0] as { todos: Array<{ status: string }> }).todos[0]?.status).toBe("completed");
+    expect(agentSession.todos).toEqual([{ content: "draft", status: "completed" }]);
   });
 
   it("keeps polling while an approval is pending and stops after it resolves (terminal semantics)", async () => {
@@ -586,5 +590,230 @@ describe("agent panel store (task 3.x)", () => {
     connection.rpc = { agent: { sessions: { list } } };
     await vi.waitFor(() => expect(agentSessionsList.loaded).toBe(true));
     expect(list).toHaveBeenCalled();
+  });
+
+  it("merges tool call and result into one row keyed by toolCallId (§3.5)", async () => {
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockResolvedValue({
+            frames: [
+              frame(1, "turn-start"),
+              frame(2, "tool-call", {
+                toolName: "bash",
+                toolCallId: "c1",
+                payload: { command: "ls -la", description: "list files" },
+              }),
+              frame(3, "tool-result", {
+                toolName: "bash",
+                toolCallId: "c1",
+                payload: { ok: true },
+              }),
+            ],
+            status: "idle",
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    const tools = agentSession.items.filter((item) => item.kind === "tool");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      kind: "tool",
+      toolName: "bash",
+      toolCallId: "c1",
+      phase: "done",
+      result: { ok: true },
+    });
+    expect((tools[0] as { argsText?: string }).argsText).toContain("list files");
+  });
+
+  it("falls back to name matching within the turn when callId is absent (§7 妥协)", async () => {
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockResolvedValue({
+            frames: [
+              frame(1, "turn-start"),
+              frame(2, "tool-call", { toolName: "read", payload: { file_path: "/tmp/a.md" } }),
+              frame(3, "tool-result", { toolName: "read", payload: "file body" }),
+            ],
+            status: "idle",
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    const tools = agentSession.items.filter((item) => item.kind === "tool");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ toolName: "read", phase: "done", result: "file body" });
+    expect((tools[0] as { argsText?: string }).argsText).toContain("/tmp/a.md");
+  });
+
+  it("accumulates tool-args-delta before the final tool-call converges the args (§4.1)", async () => {
+    let polls = 0;
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockImplementation(async () => {
+            polls += 1;
+            if (polls === 1) {
+              return {
+                frames: [
+                  frame(1, "turn-start"),
+                  frame(2, "tool-args-delta", {
+                    toolCallId: "c2",
+                    toolName: "bash",
+                    text: '{"comm',
+                  }),
+                  frame(3, "tool-args-delta", { toolCallId: "c2", text: 'and":"ls -la"}' }),
+                ],
+                status: "running",
+              };
+            }
+            return {
+              frames: [
+                frame(4, "tool-call", {
+                  toolCallId: "c2",
+                  toolName: "bash",
+                  payload: { command: "ls -la", description: "list files" },
+                }),
+                frame(5, "tool-result", { toolCallId: "c2", payload: { ok: true } }),
+              ],
+              status: "idle",
+            };
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    // 分片先到：终帧 tool-call 前不建行（缓冲）。
+    expect(agentSession.items.some((item) => item.kind === "tool")).toBe(false);
+    await pollAgentStream();
+    const tools = agentSession.items.filter((item) => item.kind === "tool");
+    expect(tools).toHaveLength(1);
+    // 终帧以完整参数收敛（不保留渐进前缀拼接）。
+    expect((tools[0] as { argsText?: string }).argsText).toContain("list files");
+    expect(tools[0]).toMatchObject({ toolCallId: "c2", phase: "done" });
+  });
+
+  it("keeps buffered args when the final tool-call carries no payload", async () => {
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockResolvedValue({
+            frames: [
+              frame(1, "turn-start"),
+              frame(2, "tool-args-delta", {
+                toolCallId: "c3",
+                toolName: "grep",
+                text: '{"pattern":"todo"',
+              }),
+              frame(3, "tool-call", { toolCallId: "c3", toolName: "grep" }),
+            ],
+            status: "running",
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    const tools = agentSession.items.filter((item) => item.kind === "tool");
+    expect(tools).toHaveLength(1);
+    expect((tools[0] as { argsText?: string }).argsText).toBe('{"pattern":"todo"');
+    expect(tools[0]).toMatchObject({ phase: "calling" });
+  });
+
+  it("marks a tool row as error when the result payload carries an error face", async () => {
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockResolvedValue({
+            frames: [
+              frame(1, "turn-start"),
+              frame(2, "tool-call", {
+                toolCallId: "c4",
+                toolName: "bash",
+                payload: { command: "boom" },
+              }),
+              frame(3, "tool-result", {
+                toolCallId: "c4",
+                payload: { isError: true, error: "command not found" },
+              }),
+            ],
+            status: "idle",
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    const tools = agentSession.items.filter((item) => item.kind === "tool");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ phase: "error" });
+  });
+
+  it("renders a turn-end pill carrying the stashed usage and elapsed time", async () => {
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockResolvedValue({
+            frames: [
+              frame(1, "turn-start", { at: "2026-09-08T00:00:00.000Z" }),
+              frame(2, "assistant-text", {
+                text: "ok",
+                payload: { usage: { inputTokens: 1200, outputTokens: 340 } },
+              }),
+              frame(3, "turn-end", { at: "2026-09-08T00:00:08.400Z", text: "completed" }),
+            ],
+            status: "idle",
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    const end = agentSession.items.find((item) => item.kind === "turn-end");
+    expect(end).toMatchObject({
+      kind: "turn-end",
+      reason: "completed",
+      usage: { inputTokens: 1200, outputTokens: 340 },
+      elapsedMs: 8400,
+    });
+  });
+
+  it("replays user-text attachments from the frame payload (§4.2)", async () => {
+    connection.rpc = {
+      agent: {
+        session: {
+          stream: vi.fn().mockResolvedValue({
+            frames: [
+              frame(0, "user-text", {
+                text: "see these",
+                payload: {
+                  attachments: [
+                    { kind: "image", name: "a.png", thumb: "data:image/png;base64,xx" },
+                    { kind: "file", name: "b.txt" },
+                    { kind: "image", name: "c.jpg" },
+                  ],
+                },
+              }),
+            ],
+            status: "idle",
+          }),
+        },
+      },
+    };
+    agentSession.sessionId = "agent-s1";
+    await pollAgentStream();
+    const bubble = agentSession.items.find((item) => item.kind === "user");
+    // 带 thumb 的 image → 预览；file 与无 thumb 的 image → 名字 chip。
+    expect(bubble).toMatchObject({
+      images: ["data:image/png;base64,xx"],
+      files: ["b.txt", "c.jpg"],
+    });
   });
 });

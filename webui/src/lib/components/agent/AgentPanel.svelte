@@ -1,249 +1,63 @@
 <!--
   用户原始需求 [2026-09-08]：「我们可以简单理解成，我们在 skill creator 的右侧
-  嵌入了一个聊天对话框。」
+  嵌入了一个聊天对话框。」——2026-09-12 redesign §3.3：面板拆分为 AgentHeader /
+  TranscriptView / ComposerCard 后，AgentPanel 收敛为容器（drawer 编排 + 数据
+  接线），行渲染器与 header 语义见对应组件。
   正交意图：
   1. shell 级右栏 drawer：≥720px 常驻侧栏（w-[440px]），<720px 单屏覆盖；
-     跨 tab 存活（挂载于 +layout，状态在 module store）。
-  2. 对话流：帧视图项分组渲染（turn/status/user/assistant/tool/approval/mode）；
-     断线与错误可见；assistant 文本经 markstream-svelte 增量渲染（流式优化：
-     内容增长只重解析尾部、不完整 markdown 容错、离屏节点延迟），HTML 策略
-     锁定 escape——模型输出零 HTML 直通。
-  3. composer 与模式：textarea 发送（Enter 提交 / Shift+Enter 换行）；停止按钮
-     仅在 turn 运行中出现，图标按钮带 44px 外扩命中区；header 模式 chip 切换
-     当前会话模式（add-agent-settings-modes；running 拒绝）。
-  妥协声明：katex/mermaid/stream-diffs 为可选 peer，未安装时回退纯文本块。
+     跨 tab 存活（挂载于 +layout，状态在 module store）。Esc 收起（模态打开时
+     让位）；面板级 drop 分流；挂载重置草稿 + 惰性加载配置；首屏种子注入。
+  2. 面板纵向编排：TranscriptView → 错误条 → TodoDock → edit-mode 注记条 →
+     ComposerCard（§3.1 骨架顺序）。
+  妥协声明：无（各分片语义在子组件内自持）。
 -->
 <script lang="ts">
   import IconX from "@lucide/svelte/icons/x";
-  import IconPlus from "@lucide/svelte/icons/plus";
-  import IconSend from "@lucide/svelte/icons/send";
-  import IconStop from "@lucide/svelte/icons/square";
-  import IconChevron from "@lucide/svelte/icons/chevron-right";
-  import IconPaperclip from "@lucide/svelte/icons/paperclip";
-  import IconCopy from "@lucide/svelte/icons/copy";
-  import IconPen from "@lucide/svelte/icons/pen-line";
-  import IconRefresh from "@lucide/svelte/icons/refresh-cw";
-  import IconFile from "@lucide/svelte/icons/file";
-  import { showToast } from "$lib/toast.svelte";
-  import { Button } from "$lib/components/ui/button";
-  import { Textarea } from "$lib/components/ui/textarea";
   import {
     agentPanel,
     agentSession,
-    agentSessionsList,
-    cancelAgentSession,
-    createAgentSession,
-    loadAgentSessions,
-    pollAgentStream,
-    selectAgentSession,
-    sendAgentPrompt,
+    loadAgentSettings,
+    agentRuntimeConfig,
     setAgentPanelOpen,
-    setAgentSessionMode,
   } from "$lib/stores/agent.svelte";
-  import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
-  import AgentApprovalCard from "./AgentApprovalCard.svelte";
-  import AgentToolRow from "./AgentToolRow.svelte";
-  import MarkdownRender from "markstream-svelte";
-  import "markstream-svelte/index.css";
+  import {
+    agentComposer,
+    handleComposerDrop,
+    resetComposer,
+  } from "$lib/stores/agent-composer.svelte";
+  import AgentHeader from "./AgentHeader.svelte";
+  import TranscriptView from "./TranscriptView.svelte";
+  import TodoDock from "./TodoDock.svelte";
+  import ComposerCard from "./ComposerCard.svelte";
 
-  let composerText = $state("");
-  let scrollBody = $state<HTMLElement | null>(null);
-  /** 待发图片附件（composer 本地状态；≤4 张、各 ≤4MiB）。 */
-  let attachments = $state<
-    Array<{
-      mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-      data: string;
-      name?: string;
-      preview: string;
-    }>
-  >([]);
-  let fileInput = $state<HTMLInputElement | null>(null);
-  /** 待发文件附件（非图片，≤2 个、各 ≤512KiB）。 */
-  let pendingFiles = $state<Array<{ name: string; data: string }>>([]);
-  let docInput = $state<HTMLInputElement | null>(null);
-
-  // 新帧到达时滚动到底（用户向上翻阅时不打扰）。markstream batch 渲染会在帧
-  // 落地后继续长高气泡，且单个代码块的一次性增高可超过 160px 跟随门，故判定
-  // 改用「增高前是否贴底」：贴底即钉住，手动上滚（ scrollTop 变小）自然脱离。
-  let lastContentHeight = 0;
+  // 挂载即重置草稿（一次性；对齐旧组件态生命周期）。resetComposer 不读任何响应
+  // 依赖，本 effect 只在挂载时运行——model 热切/凭据更新/settings reload 引起的
+  // view/loading 变化不得重放清空用户草稿（codex R2 阻塞 5）。
   $effect(() => {
-    void agentSession.items.length;
-    void agentSession.status;
-    const body = scrollBody;
-    if (!body) return;
-    const follow = (): void => {
-      const wasNearBottom = lastContentHeight - body.scrollTop - body.clientHeight < 160;
-      lastContentHeight = body.scrollHeight;
-      if (wasNearBottom || body.scrollHeight - body.scrollTop - body.clientHeight < 160) {
-        body.scrollTop = body.scrollHeight;
-      }
-    };
-    follow();
-    const observer = new ResizeObserver(follow);
-    for (const child of body.children) observer.observe(child);
-    return () => observer.disconnect();
+    resetComposer();
   });
 
-  /** 消息级操作（差距-1）：复制 / 编辑回填 / 重发。 */
-  async function copyText(text: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("Copied.");
-    } catch {
-      showToast("Copy failed — clipboard unavailable.");
+  // 惰性加载配置投影（model chip 消费）：view 缺失且非加载中时补拉；与草稿重置
+  // 分属两个 effect，配置更新只重跑本 effect，不触碰 composer。
+  $effect(() => {
+    if (agentRuntimeConfig.view === null && !agentRuntimeConfig.loading) {
+      void loadAgentSettings();
     }
-  }
-
-  function editIntoComposer(text: string): void {
-    composerText = text;
-    document
-      .querySelector<HTMLTextAreaElement>('aside[aria-label="Agent panel"] textarea')
-      ?.focus();
-  }
-
-  function retryPrompt(text: string): void {
-    if (agentSession.sending) return;
-    void sendAgentPrompt(text);
-  }
-
-  function compact(): void {
-    if (agentSession.sending || !agentSession.sessionId) return;
-    // 内核 /compact 命令（daemon 端分流，不进 LLM）。
-    void sendAgentPrompt("/compact");
-  }
-
-  function formatTokens(count: number): string {
-    if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
-    return String(count);
-  }
-
-  function submit(): void {
-    const text = composerText.trim();
-    if (text.length === 0 && attachments.length === 0 && pendingFiles.length === 0) return;
-    if (agentSession.sending) return;
-    const images = attachments;
-    const files = pendingFiles;
-    composerText = "";
-    attachments = [];
-    pendingFiles = [];
-    void sendAgentPrompt(text, images, files);
-  }
-
-  /** 读入任意文件为附件（≤2 个、各 ≤512KiB；图片走图片通道）。 */
-  async function addDocFiles(list: FileList | File[]): Promise<void> {
-    for (const file of list) {
-      if (file.type.startsWith("image/")) continue;
-      if (pendingFiles.length >= 2) {
-        showToast("At most 2 file attachments per message.");
-        return;
-      }
-      if (file.size > 512 * 1024) {
-        showToast(`"${file.name}" exceeds the 512KiB limit.`);
-        continue;
-      }
-      const data = await fileToBase64(file);
-      pendingFiles = [...pendingFiles, { name: file.name, data }];
-    }
-  }
-
-  /** 读入图片文件（类型/数量/大小守卫；base64 + 预览 dataURL）。 */
-  async function addImageFiles(files: FileList | File[]): Promise<void> {
-    for (const file of files) {
-      if (attachments.length >= 4) {
-        showToast("At most 4 images per message.");
-        return;
-      }
-      if (!(file.type in IMAGE_MEDIA_TYPES)) {
-        showToast(`Unsupported image type: ${file.type || "unknown"}.`);
-        continue;
-      }
-      if (file.size > 4 * 1024 * 1024) {
-        showToast(`"${file.name}" exceeds the 4MiB limit.`);
-        continue;
-      }
-      const data = await fileToBase64(file);
-      attachments = [
-        ...attachments,
-        {
-          mediaType: file.type as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
-          data,
-          ...(file.name ? { name: file.name } : {}),
-          preview: `data:${file.type};base64,${data}`,
-        },
-      ];
-    }
-  }
-
-  function removeAttachment(index: number): void {
-    attachments = attachments.filter((_, i) => i !== index);
-  }
-
-  function onPaste(event: ClipboardEvent): void {
-    const files = [...(event.clipboardData?.files ?? [])].filter((file) =>
-      file.type.startsWith("image/"),
-    );
-    if (files.length > 0) {
-      event.preventDefault();
-      void addImageFiles(files);
-    }
-  }
-
-  function onDrop(event: DragEvent): void {
-    const all = [...(event.dataTransfer?.files ?? [])];
-    const images = all.filter((file) => file.type.startsWith("image/"));
-    const docs = all.filter((file) => !file.type.startsWith("image/"));
-    if (all.length > 0) event.preventDefault();
-    if (images.length > 0) void addImageFiles(images);
-    if (docs.length > 0) void addDocFiles(docs);
-  }
-
-  function onComposerKeydown(event: KeyboardEvent): void {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      submit();
-    }
-  }
-
-  /** 当前会话在列表中的完整身份（select 的 title 提示）。 */
-  const selectedSessionTitle = $derived.by(() => {
-    const summary = agentSessionsList.sessions.find(
-      (item) => item.sessionId === agentSession.sessionId,
-    );
-    return summary ? `${summary.title || summary.sessionId} (${summary.status})` : undefined;
   });
-
-  const IMAGE_MEDIA_TYPES: Record<string, true> = {
-    "image/png": true,
-    "image/jpeg": true,
-    "image/webp": true,
-    "image/gif": true,
-  };
-
-  function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = String(reader.result ?? "");
-        resolve(result.slice(result.indexOf(",") + 1));
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-  }
 
   // 首屏行动的 composer 种子：会话就绪且输入可用时一次性填入（不自动发送）。
   $effect(() => {
     if (agentSession.sessionId && agentPanel.seedPrompt && !agentSession.sending) {
       const seed = agentPanel.seedPrompt;
       agentPanel.seedPrompt = null;
-      if (composerText.length === 0) composerText = seed;
+      if (agentComposer.text.length === 0) agentComposer.text = seed;
     }
   });
 </script>
 
 <svelte:window
   onkeydown={(event) => {
-    // 有模态（设置面等）打开时 Esc 归模态所有，不连带收起面板。
+    // 有模态（设置面/ContextMeter popover 等）打开时 Esc 归模态所有，不连带收起面板。
     if (event.key === "Escape" && agentPanel.open && !document.querySelector("[role='dialog']")) {
       setAgentPanelOpen(false);
     }
@@ -254,287 +68,11 @@
   class="flex h-full w-full flex-col border-l border-border bg-background min-[720px]:w-[440px]"
   aria-label="Agent panel"
   ondragover={(event) => event.preventDefault()}
-  ondrop={onDrop}
+  ondrop={handleComposerDrop}
 >
-  <header class="flex items-center gap-1 border-b border-border px-2 py-1.5">
-    <span class="px-1 text-xs font-medium text-muted-foreground">Agent</span>
-    <!-- 选项文本刻意短化（原生 select 无省略号，长文本会被硬裁）；完整身份走
-         title 提示。 -->
-    <select
-      class="h-8 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 py-0 text-xs"
-      aria-label="Session"
-      title={selectedSessionTitle}
-      value={agentSession.sessionId ?? ""}
-      onchange={(event) => selectAgentSession(event.currentTarget.value)}
-    >
-      {#if agentSession.sessionId === null}
-        <option value="">New session…</option>
-      {/if}
-      {#if agentSessionsList.sessions.length === 0 && agentSession.sessionId !== null}
-        <option value="">No sessions</option>
-      {/if}
-      {#each agentSessionsList.sessions as session (session.sessionId)}
-        <option value={session.sessionId}>
-          {session.title || session.sessionId.slice(0, 14)}
-          {session.status === "disposed" ? "· ended" : `· ${session.status}`}
-        </option>
-      {/each}
-    </select>
-    <!-- 会话模式 chip（DSH preset chip UX 移植；切换 = setMode RPC：running 拒绝，
-         idle 切换后下一次 prompt 以新模式复活）。 -->
-    <select
-      class="h-8 w-[6.5rem] rounded-md border border-border bg-transparent px-1.5 py-0 text-xs"
-      aria-label="Session mode"
-      title={agentSession.status === "running"
-        ? "Switch modes after the current turn ends"
-        : "Switch this session's mode"}
-      disabled={!agentSession.sessionId || agentSession.status === "running"}
-      value={agentSession.mode ?? ""}
-      onchange={(event) => void setAgentSessionMode(event.currentTarget.value as DshAgentMode)}
-    >
-      {#if !agentSession.sessionId}
-        <option value="">Start a session</option>
-      {/if}
-      {#each DSH_AGENT_MODES as entry (entry.id)}
-        <option value={entry.id}>{entry.label}</option>
-      {/each}
-    </select>
-    <!-- 图标按钮统一 8px 外扩命中区（视觉 32px + after 16px = 44px，窄屏覆盖模式达标）。 -->
-    <button
-      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
-      title="New session"
-      aria-label="New session"
-      onclick={() => void createAgentSession()}
-    >
-      <IconPlus class="h-4 w-4" />
-    </button>
-    <button
-      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
-      title="Close panel"
-      aria-label="Close panel"
-      onclick={() => setAgentPanelOpen(false)}
-    >
-      <IconX class="h-4 w-4" />
-    </button>
-  </header>
+  <AgentHeader />
 
-  {#if agentSession.sessionId}
-    <!-- 差距-2：上下文状态（最近回合 token 用量 + 手动 compact 入口）。 -->
-    <div
-      class="flex items-center justify-between gap-2 border-b border-border px-3 py-1 text-[10px] text-muted-foreground"
-      aria-label="Context status"
-    >
-      <span>
-        {#if agentSession.lastUsage}
-          last turn: {formatTokens(agentSession.lastUsage.inputTokens)} in ·
-          {formatTokens(agentSession.lastUsage.outputTokens)} out
-        {:else}
-          no turns yet
-        {/if}
-      </span>
-      <button
-        class="underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground disabled:opacity-50"
-        title="Compact the conversation history (kernel /compact)"
-        disabled={agentSession.sending || agentSession.status === "running"}
-        onclick={compact}
-      >
-        compact
-      </button>
-    </div>
-  {/if}
-  <div bind:this={scrollBody} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
-    {#if !agentSession.sessionId}
-      <!-- 空态 = 模式启动建议（回答「跟它说什么」）：一键按模式开聊。 -->
-      <div class="flex h-full flex-col items-center justify-center gap-3 text-center">
-        <p class="max-w-[280px] text-xs text-muted-foreground">
-          Pick a way to work with your skill library:
-        </p>
-        <div class="w-full max-w-[300px] space-y-1.5">
-          {#each DSH_AGENT_MODES as entry (entry.id)}
-            <button
-              class="w-full rounded-md border border-border p-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
-              disabled={agentSession.sending}
-              onclick={() => void createAgentSession(undefined, entry.id)}
-            >
-              <span class="flex items-center gap-1 text-xs font-medium">{entry.label}</span>
-              <span class="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
-                {entry.description}
-              </span>
-            </button>
-          {/each}
-        </div>
-      </div>
-    {:else}
-      {#each agentSession.items as item (item.seq)}
-        {#if item.kind === "turn"}
-          <div
-            class="flex items-center gap-2 py-1 text-[11px] uppercase tracking-wide text-muted-foreground"
-          >
-            <span class="h-px flex-1 bg-border"></span>
-            {item.label}
-            <span class="h-px flex-1 bg-border"></span>
-          </div>
-        {:else if item.kind === "mode"}
-          <div
-            class="flex items-center gap-2 py-1 text-[11px] text-muted-foreground"
-            role="separator"
-            aria-label={`Mode switched from ${item.from} to ${item.to}`}
-          >
-            <span class="h-px flex-1 bg-border"></span>
-            <span class="rounded bg-muted px-1 text-[10px] uppercase">mode</span>
-            {item.from} → {item.to}
-            <span class="h-px flex-1 bg-border"></span>
-          </div>
-        {:else if item.kind === "status"}
-          <div class="px-1 text-[11px] text-muted-foreground">{item.text}</div>
-        {:else if item.kind === "user"}
-          <div class="group/msg relative ml-auto max-w-[85%] space-y-1">
-            <div
-              class="absolute top-0 -left-1 z-10 flex -translate-x-full gap-0.5 rounded-md border border-border bg-popover px-1 py-1 opacity-0 shadow-md transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100"
-              role="toolbar"
-              aria-label="Message actions"
-            >
-              <button
-                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-                title="Copy"
-                aria-label="Copy message"
-                onclick={() => void copyText(item.text)}
-              >
-                <IconCopy class="h-3 w-3" />
-              </button>
-              <button
-                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-                title="Edit and resend"
-                aria-label="Edit message"
-                onclick={() => editIntoComposer(item.text)}
-              >
-                <IconPen class="h-3 w-3" />
-              </button>
-              <button
-                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-                title="Resend this prompt"
-                aria-label="Resend message"
-                disabled={agentSession.sending}
-                onclick={() => retryPrompt(item.text)}
-              >
-                <IconRefresh class="h-3 w-3" />
-              </button>
-            </div>
-            {#if item.images && item.images.length > 0}
-              <div class="flex flex-wrap justify-end gap-1">
-                {#each item.images as src, index (index)}
-                  <img
-                    {src}
-                    alt=""
-                    class="max-h-32 max-w-48 rounded-md border border-border object-contain"
-                  />
-                {/each}
-              </div>
-            {/if}
-            {#if item.files && item.files.length > 0}
-              <div class="flex flex-wrap justify-end gap-1">
-                {#each item.files as name, index (index)}
-                  <span
-                    class="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-[10px]"
-                  >
-                    📄 {name}
-                  </span>
-                {/each}
-              </div>
-            {/if}
-            {#if item.text.length > 0}
-              <div
-                class="max-h-40 overflow-y-auto rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs whitespace-pre-wrap"
-              >
-                {item.text}
-              </div>
-            {/if}
-          </div>
-        {:else if item.kind === "reasoning"}
-          <!-- thinking 折叠面：默认收起；流式时摘要带进行指示，终帧后可展开回看。 -->
-          <details
-            class="group rounded-md border border-border/70 bg-muted/20"
-            open={item.streaming}
-          >
-            <summary
-              class="flex cursor-pointer list-none items-center gap-1 px-2 py-1 text-[11px] text-muted-foreground select-none [&::-webkit-details-marker]:hidden"
-            >
-              <IconChevron class="h-3 w-3 transition-transform group-open:rotate-90" />
-              Thinking
-              {#if item.streaming}<span class="animate-pulse">…</span>{/if}
-            </summary>
-            <div
-              class="max-h-48 overflow-y-auto whitespace-pre-wrap px-2 pb-1.5 text-[11px] leading-relaxed text-muted-foreground"
-            >
-              {item.text}
-            </div>
-          </details>
-        {:else if item.kind === "todo"}
-          <!-- 差距-3：Todo 快照卡（latest-wins；pending/in_progress/completed 三态）。 -->
-          <div class="rounded-lg border border-border bg-muted/20 p-2" aria-label="Agent todo list">
-            <p class="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              Tasks
-            </p>
-            <ul class="space-y-0.5">
-              {#each item.todos as todo, index (index)}
-                <li
-                  class="flex items-start gap-1.5 text-[11px] {todo.status === 'completed'
-                    ? 'text-muted-foreground line-through'
-                    : ''}"
-                >
-                  <span
-                    class="mt-0.5 h-3 w-3 shrink-0 rounded-full border-2 {todo.status ===
-                    'completed'
-                      ? 'border-primary bg-primary/20'
-                      : todo.status === 'in_progress'
-                        ? 'border-primary'
-                        : 'border-muted-foreground/50'}"
-                    aria-hidden="true"
-                  ></span>
-                  <span class="min-w-0 break-words">{todo.content}</span>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {:else if item.kind === "assistant"}
-          <!-- markstream 增量渲染：内容增长只重解析尾部、不完整 fence/强调容错、
-               离屏节点延迟；htmlPolicy=escape 锁死模型输出的 HTML 直通（与既有
-               XSS 不变量一致）。流式态 final=false——增量期间不闭合的 markdown
-               结构按流式容错渲染；终帧到达后置 true 收敛。密度覆写在下方 scoped
-               style：库默认面向文档页（16px/IBM Plex/clamp 巨标题），且 Tailwind
-               preflight 会剥掉列表 marker，须收敛回 12px 面板排版。 -->
-          <div class="group/msg relative max-w-full">
-            <div
-              class="absolute top-0 -left-2 z-10 flex -translate-x-full gap-0.5 rounded-md border border-border bg-popover px-1 py-1 opacity-0 shadow-md transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100"
-              role="toolbar"
-              aria-label="Message actions"
-            >
-              <button
-                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-                title="Copy"
-                aria-label="Copy message"
-                onclick={() => void copyText(item.text)}
-              >
-                <IconCopy class="h-3 w-3" />
-              </button>
-            </div>
-            <div
-              class="ms-md rounded-lg border border-border px-2.5 py-1.5 text-xs [&_a]:text-primary"
-            >
-              <MarkdownRender content={item.text} htmlPolicy="escape" final={!item.streaming} />
-            </div>
-          </div>
-        {:else if item.kind === "tool"}
-          <AgentToolRow toolName={item.toolName} phase={item.phase} payload={item.payload} />
-        {:else if item.kind === "approval"}
-          <AgentApprovalCard seq={item.seq} questions={item.questions} resolved={item.resolved} />
-        {/if}
-      {/each}
-      {#if agentSession.status === "running"}
-        <div class="px-1 text-[11px] text-muted-foreground" role="status">working…</div>
-      {/if}
-    {/if}
-  </div>
+  <TranscriptView />
 
   {#if agentSession.promptError ?? agentSession.error}
     <div
@@ -545,189 +83,31 @@
     </div>
   {/if}
 
-  <footer class="border-t border-border p-2">
-    {#if pendingFiles.length > 0}
-      <div class="mb-1.5 flex flex-wrap gap-1.5" aria-label="Pending file attachments">
-        {#each pendingFiles as file, index (index)}
-          <span
-            class="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-[10px]"
-          >
-            📄 {file.name}
-            <button
-              class="text-muted-foreground hover:text-destructive"
-              aria-label="Remove file {file.name}"
-              onclick={() => (pendingFiles = pendingFiles.filter((_, i) => i !== index))}
-            >
-              ×
-            </button>
-          </span>
-        {/each}
-      </div>
-    {/if}
-    {#if attachments.length > 0}
-      <div class="mb-1.5 flex flex-wrap gap-1.5" aria-label="Pending attachments">
-        {#each attachments as attachment, index (index)}
-          <div class="group relative h-14 w-14 overflow-hidden rounded-md border border-border">
-            <img
-              src={attachment.preview}
-              alt={attachment.name ?? "image"}
-              class="h-full w-full object-cover"
-            />
-            <button
-              class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
-              aria-label="Remove attachment"
-              onclick={() => removeAttachment(index)}
-            >
-              <IconX class="h-2.5 w-2.5" />
-            </button>
-          </div>
-        {/each}
-      </div>
-    {/if}
-    <div class="flex items-end gap-1.5">
-      <input
-        bind:this={fileInput}
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
-        multiple
-        class="hidden"
-        aria-label="Attach images"
-        onchange={(event) => {
-          if (event.currentTarget.files) void addImageFiles(event.currentTarget.files);
-          event.currentTarget.value = "";
-        }}
-      />
+  {#if agentSession.sessionId && agentSession.todos.length > 0}
+    <TodoDock todos={agentSession.todos} />
+  {/if}
+
+  {#if agentComposer.editing !== null}
+    <!-- edit-mode 注记条（§3.4/§4.3）：amber tint；发送/取消退出。 -->
+    <div
+      class="mx-3 mb-1.5 flex h-7 shrink-0 items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-2.5 text-[11px] text-amber-700 dark:text-amber-400"
+      role="status"
+    >
+      <span class="truncate"> Editing — resending keeps your full history (append-only) </span>
       <button
-        class="relative mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-        title="Attach images (or paste / drop)"
-        aria-label="Attach images"
-        disabled={!agentSession.sessionId}
-        onclick={() => fileInput?.click()}
-      >
-        <IconPaperclip class="h-4 w-4" />
-      </button>
-      <input
-        bind:this={docInput}
-        type="file"
-        multiple
-        class="hidden"
-        aria-label="Attach files"
-        onchange={(event) => {
-          if (event.currentTarget.files) void addDocFiles(event.currentTarget.files);
-          event.currentTarget.value = "";
+        type="button"
+        class="shrink-0 rounded p-0.5 text-amber-700/80 hover:text-amber-700 dark:text-amber-400/80 dark:hover:text-amber-400"
+        title="Cancel edit"
+        aria-label="Cancel edit"
+        onclick={() => {
+          if (agentComposer.editing !== null) agentComposer.text = "";
+          agentComposer.editing = null;
         }}
-      />
-      <button
-        class="relative mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-        title="Attach a file (text, config, data — ≤512KiB)"
-        aria-label="Attach file"
-        disabled={!agentSession.sessionId}
-        onclick={() => docInput?.click()}
       >
-        <IconFile class="h-4 w-4" />
+        <IconX class="h-3 w-3" />
       </button>
-      <Textarea
-        rows={2}
-        maxlength={20000}
-        placeholder={agentSession.sessionId ? "Message the agent…" : "Create a session first"}
-        disabled={!agentSession.sessionId}
-        bind:value={composerText}
-        onkeydown={onComposerKeydown}
-        onpaste={onPaste}
-        class="min-h-0 flex-1 resize-none text-xs"
-      />
-      <div class="flex items-end gap-1 pb-0.5">
-        <Button
-          size="icon"
-          class="relative h-8 w-8 after:absolute after:-inset-1.5 after:content-['']"
-          aria-label="Send message"
-          title="Send (Enter)"
-          disabled={!agentSession.sessionId ||
-            composerText.trim().length === 0 ||
-            agentSession.sending}
-          onclick={submit}
-        >
-          <IconSend class="h-3.5 w-3.5" />
-        </Button>
-        {#if agentSession.status === "running"}
-          <Button
-            size="icon"
-            variant="outline"
-            class="relative h-8 w-8 after:absolute after:-inset-1.5 after:content-['']"
-            aria-label="Cancel current activity"
-            title="Cancel current activity"
-            onclick={() => void cancelAgentSession()}
-          >
-            <IconStop class="h-3 w-3" />
-          </Button>
-        {/if}
-      </div>
     </div>
-  </footer>
+  {/if}
+
+  <ComposerCard />
 </aside>
-
-<style>
-  /* markstream 密度收敛：库默认 16px/IBM Plex/clamp 文档级标题，且 Tailwind
-     preflight 将 ul/ol 重置为无 marker；scoped 双类选择器稳定压过库内单类规则。 */
-  .ms-md :global(.markstream-svelte) {
-    font-family: inherit;
-    font-size: inherit;
-    line-height: 1.6;
-  }
-
-  .ms-md :global(.markstream-svelte h1),
-  .ms-md :global(.markstream-svelte h2),
-  .ms-md :global(.markstream-svelte h3),
-  .ms-md :global(.markstream-svelte h4),
-  .ms-md :global(.markstream-svelte h5),
-  .ms-md :global(.markstream-svelte h6) {
-    margin: 0.75em 0 0.35em;
-    line-height: 1.3;
-    font-weight: 600;
-    letter-spacing: 0;
-  }
-
-  .ms-md :global(.markstream-svelte h1) {
-    font-size: 1.25em;
-  }
-
-  .ms-md :global(.markstream-svelte h2) {
-    font-size: 1.15em;
-  }
-
-  .ms-md :global(.markstream-svelte h3) {
-    font-size: 1.05em;
-  }
-
-  .ms-md :global(.markstream-svelte h4),
-  .ms-md :global(.markstream-svelte h5),
-  .ms-md :global(.markstream-svelte h6) {
-    font-size: 1em;
-  }
-
-  .ms-md :global(.markstream-svelte p) {
-    margin: 0.4em 0;
-  }
-
-  .ms-md :global(.markstream-svelte ul) {
-    list-style: disc;
-    padding-inline-start: 1.25em;
-    margin: 0.4em 0;
-  }
-
-  .ms-md :global(.markstream-svelte ol) {
-    list-style: decimal;
-    padding-inline-start: 1.35em;
-    margin: 0.4em 0;
-  }
-
-  .ms-md :global(.markstream-svelte li) {
-    margin: 0.15em 0;
-  }
-
-  /* task list：checkbox 即状态标记，去掉 bullet 避免双重标记。 */
-  .ms-md :global(.markstream-svelte ul:has(input[type="checkbox"])) {
-    list-style: none;
-    padding-inline-start: 0.5em;
-  }
-</style>
