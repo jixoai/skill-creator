@@ -228,6 +228,17 @@
           </div>
         {:else if item.kind === "status"}
           <div class="flow-item px-1 text-[11px] text-muted-foreground">{item.text}</div>
+        {:else if item.kind === "note"}
+          <!-- 系统动作注记（auto-compact）：与 mode 分隔行同语法，居中 + 两侧 hairline。 -->
+          <div
+            class="flow-item flex h-6 items-center gap-2 px-3 text-[10px] text-muted-foreground"
+            role="note"
+          >
+            <span class="h-px flex-1 bg-border"></span>
+            <span class="rounded bg-muted px-1 text-[10px] uppercase">compact</span>
+            <span class="truncate">{item.text}</span>
+            <span class="h-px flex-1 bg-border"></span>
+          </div>
         {:else if item.kind === "user"}
           <!-- UserMessage（§3.2）：附件行在气泡上方（justify-end）；气泡下方 hover
                操作行（copy/edit/resend），最新一条常显；copy → check 1s。 -->

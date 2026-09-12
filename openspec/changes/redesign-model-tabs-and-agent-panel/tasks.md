@@ -75,3 +75,23 @@
 - [x] 7.2 阻塞 2：网关真实内核集成测试（用户指定的 BASE_URL/MODEL_ID；探活
       失败自动 skip）——真实 LLM 完整工具回合六分支全投影 + 零 dropped-malformed
       断言。
+
+## 8. R7 修复（用户走查反馈 8 项）
+
+- [x] 8.8 输入框边框：composer textarea 显式 border-0（UA 默认 1px 未被
+      preflight 吃掉），live 计算样式验证 0px。
+- [x] 8.0 契约：DshModelRoute 富字段（models[].name/efforts/contextWindow/
+      maxOutputTokens/inputTypes/outputTypes；iconLetter/iconColor）+
+      DSH_ROUTE_API_PROTOCOLS + parseTokenShorthand（0.5M/253k，k=1024）+
+      连接测试 IO 契约。
+- [x] 8.1 图标去重（目录网格 dataURL 去重）。
+- [x] 8.2 颜色与 Letter 分离（iconColor 色板/hex + iconLetter 可编辑，默认
+      首字母）。
+- [x] 8.3 自定义图标上传修复。
+- [x] 8.4 Added 可重复添加 + `(N)` 累加（slug `-2/-3`，label `(1)/(2)`）。
+- [x] 8.5 模型补全源 = 全供应商并集去重。
+- [x] 8.6 API protocol 统一 Select（预设路径同字段）。
+- [x] 8.7 Models 重构为 ModelListItem（modelId 补全/自动 name 可改/efforts
+      tags+补全/上下文窗口与最大输出 token 简写解析/输入类型多选/输出类型勾选/
+      连接测试）+ Active 块 effort 数据源改模型配置（去硬编码）+ 桥接剥离与
+      testConnection RPC。

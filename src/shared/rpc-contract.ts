@@ -15,7 +15,11 @@ import {
   AcpSessionOpenInputSchema,
   AcpSessionOpenResultSchema,
 } from "./contracts/acp.js";
-import { DshSessionStreamFrameSchema } from "./contracts/dsh-runtime.js";
+import {
+  DshRouteConnectionTestInputSchema,
+  DshRouteConnectionTestResultSchema,
+  DshSessionStreamFrameSchema,
+} from "./contracts/dsh-runtime.js";
 import {
   AgentCredentialClearInputSchema,
   AgentCredentialSetInputSchema,
@@ -341,6 +345,14 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       get: oc.input(z.object({})).output(AgentSettingsViewSchema),
       /** 应用补丁；revision 只在真实变更时 +1；类型化 rejected 见契约 union。 */
       update: oc.input(AgentSettingsUpdateSchema).output(AgentSettingsUpdateResultSchema),
+      /**
+       * 路由连接测试（R7 2026-09-12）：用户显式触发的外呼探活（草案即可测）。
+       * 逐协议最小探测 + 10s 超时；结果 typed（ok{latencyMs}/failed{detail}），
+       * detail ≤200ch 且不含 key。UI 前置条件：路由已保存 key（configured）。
+       */
+      testConnection: oc
+        .input(DshRouteConnectionTestInputSchema)
+        .output(DshRouteConnectionTestResultSchema),
     },
     /** provider 凭据写入/清除（0600 私有文件；视图只回显 configured 状态）。 */
     credentials: {

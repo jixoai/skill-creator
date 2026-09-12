@@ -114,6 +114,14 @@ export function createDaemonDomain(
     kernel: () => kernelHostRef.handle,
     modelSelection: async () => (await dshSettings.getView()).settings.model,
     defaultMode: async () => (await dshSettings.getView()).settings.defaultMode,
+    // codex R7 B1：活动路由模型富字段驱动自动压缩阈值（缺字段 = 关闭不猜）。
+    modelLimits: async (provider, model) => {
+      const { settings } = await dshSettings.getView();
+      const route = settings.modelRoutes.find((item) => item.provider === provider);
+      const entry = route?.models.find((item) => item.id === model);
+      if (entry === undefined) return null;
+      return { contextWindow: entry.contextWindow, maxOutputTokens: entry.maxOutputTokens };
+    },
     transcripts: agentTranscripts,
   });
   const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();

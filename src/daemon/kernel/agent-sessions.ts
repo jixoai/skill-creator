@@ -51,6 +51,15 @@ export interface AgentSessionsDeps {
   modelSelection: () => Promise<{ provider: string; model: string; reasoningEffort?: string }>;
   /** 读取新会话默认模式（settings.defaultMode）。 */
   defaultMode: () => Promise<DshAgentMode>;
+  /**
+   * 模型容量事实（codex R7 B1：maxOutputTokens 决定自动压缩时机）：
+   * contextWindow - maxOutputTokens = 保留输出空间后的 in-token 阈值。
+   * 缺省（未接线/模型未配置）= 自动压缩关闭，不猜测。
+   */
+  modelLimits?: (
+    provider: string,
+    model: string,
+  ) => Promise<{ contextWindow?: number; maxOutputTokens?: number } | null>;
   /** 帧缓冲上限（缺省 200）。 */
   retention?: number;
   /** 面板转录存储（跨重启回放与续聊定位）。 */
@@ -315,6 +324,8 @@ interface LivePanelSession {
   toolArgBuffers: Map<string, { name?: string; parts: string[] }>;
   /** 上次 delta 帧冲刷时刻（ms）。 */
   deltaAt: number;
+  /** 最近一次 assistant usage 快照（inputTokens 驱动自动压缩阈值判断）。 */
+  lastUsage?: Record<string, number>;
 }
 
 const DEFAULT_RETENTION = 200;
@@ -409,15 +420,82 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       // 两帧）；每帧统一走 push + retention trim + 转录 append 提交，reasoning
       // 终帧由此获得 durable 持久化与 retention 约束（codex R2 阻塞 2）。
       const frames = projectEvent(entry, event);
-      for (const frame of frames) {
-        entry.frames.push(frame);
-        if (entry.frames.length > retention) {
-          entry.frames.splice(0, entry.frames.length - retention);
-        }
-        // write-through：转录落盘 best-effort（失败由存储层记日志，不打断 live）。
-        deps.transcripts.append(session.id, frame);
+      commitFrames(entry, frames);
+      // 自动压缩（codex R7 B1）：turn 结束后按 inputTokens + maxOutputTokens ≥
+      // contextWindow 判定，触发内核 /compact 并落 auto-compact 标记帧。
+      if (frames.some((frame) => frame.kind === "turn-end")) {
+        void maybeAutoCompact(entry);
       }
     });
+  }
+
+  /** 帧提交单点：push + retention trim + 转录 append（best-effort）。 */
+  function commitFrames(entry: LivePanelSession, frames: readonly DshSessionStreamFrame[]): void {
+    for (const frame of frames) {
+      entry.frames.push(frame);
+      if (entry.frames.length > retention) {
+        entry.frames.splice(0, entry.frames.length - retention);
+      }
+      deps.transcripts.append(entry.agent.session.id, frame);
+    }
+  }
+
+  /**
+   * 自动压缩（codex R7 B1）：用户语义「最大输出 Token 决定自动压缩的时机」。
+   * 阈值 = contextWindow - maxOutputTokens（两值齐备才启用，缺一不猜）；
+   * inputTokens ≥ 阈值 → 先落 auto-compact 标记帧（UI 居中注记 + 回放留痕），
+   * 再经内核 commands.execute("/compact") 执行（与 slash 路径同源）。
+   * 触发时机为 turn-end 之后（不与 running 转录竞争）；失败有界日志不重试。
+   * 模型取当前活动选择（settings.model）——会话存续期间热切模型按新配置判定。
+   */
+  async function maybeAutoCompact(entry: LivePanelSession): Promise<void> {
+    if (deps.modelLimits === undefined) return;
+    const inputTokens = entry.lastUsage?.inputTokens;
+    if (inputTokens === undefined) return;
+    try {
+      const selection = await deps.modelSelection();
+      const limits = await deps.modelLimits(selection.provider, selection.model);
+      if (limits === undefined || limits === null) return;
+      const { contextWindow, maxOutputTokens } = limits;
+      if (contextWindow === undefined || maxOutputTokens === undefined) return;
+      if (inputTokens < contextWindow - maxOutputTokens) return;
+      const note = `Auto-compact — ${inputTokens} in + ${maxOutputTokens} output reserve ≥ ${contextWindow} window`;
+      commitFrames(entry, [
+        {
+          at: new Date().toISOString(),
+          runId: entry.agent.session.id,
+          sessionId: entry.agent.session.id,
+          seq: entry.frameSeq++,
+          kind: "auto-compact",
+          text: note,
+        },
+      ]);
+      const commands = (
+        requireKernel().ctx as Context & {
+          commands?: {
+            execute: (
+              agent: unknown,
+              line: string,
+              attachments: readonly unknown[],
+              signal: AbortSignal,
+            ) => Promise<unknown>;
+          };
+        }
+      ).commands;
+      if (commands === undefined) return;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      try {
+        await commands.execute(entry.agent, "/compact", [], controller.signal);
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[agent-sessions] auto-compact failed for ${entry.agent.session.id}: ${detail.slice(0, 120)}`,
+      );
+    }
   }
 
   /**
@@ -617,6 +695,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         // 空消息按畸形丢弃，不消耗 seq）。reasoning-only 步骤不产空 text 帧
         //（usage 白名单挂到 reasoning 帧避免丢失）。
         const usage = usageSnapshotOf(data);
+        if (usage !== undefined) entry.lastUsage = usage;
         if (reasoning === undefined && (text === undefined || text.length === 0)) {
           return [];
         }

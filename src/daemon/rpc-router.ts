@@ -223,6 +223,10 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         update: rpc.agent.settings.update.handler(async ({ input }) =>
           domain.dshSettings.update(input),
         ),
+        // 路由连接测试（R7）：用户显式外呼；结果 typed，永不 throw。
+        testConnection: rpc.agent.settings.testConnection.handler(async ({ input }) =>
+          domain.dshSettings.testConnection(input),
+        ),
       },
       credentials: {
         set: rpc.agent.credentials.set.handler(async ({ input }) =>

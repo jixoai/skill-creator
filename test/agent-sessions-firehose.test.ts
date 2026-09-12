@@ -626,3 +626,87 @@ describe("assistant reasoning durability (codex R2 阻塞 2)", () => {
     expect(replay.frames[1]).toMatchObject({ kind: "assistant-text", text: "final answer" });
   });
 });
+
+describe("auto-compact driven by maxOutputTokens (codex R7 B1)", () => {
+  interface Harness {
+    emit: (type: string, data: unknown) => void;
+    sessionId: string;
+    compactCalls: string[];
+  }
+
+  async function makeCompactSession(
+    limits: { contextWindow?: number; maxOutputTokens?: number } | null,
+  ): Promise<Harness> {
+    const kernel = makeFakeKernel();
+    const compactCalls: string[] = [];
+    (kernel.ctx as { commands?: unknown }).commands = {
+      execute: async (_agent: unknown, line: string) => {
+        compactCalls.push(line);
+        return { ok: true };
+      },
+    };
+    service = createAgentSessionsService({
+      kernel: () => kernel,
+      modelSelection: async () => ({ provider: "local-gateway", model: "glm-5.3-flash" }),
+      defaultMode: async () => "free",
+      retention: 50,
+      ...(limits === null ? {} : { modelLimits: async () => limits }),
+      transcripts: createSessionTranscripts(path.join(sandbox, "transcripts")),
+    });
+    service.attach(kernel);
+    const session = await service.create({ cwd: sandbox });
+    return {
+      sessionId: session.sessionId,
+      compactCalls,
+      emit: (type: string, data: unknown) => {
+        for (const listener of listeners)
+          listener({ id: session.sessionId }, { seq: 0, type, data });
+      },
+    };
+  }
+
+  async function turnWithUsage(h: Harness, inputTokens: number): Promise<void> {
+    h.emit("assistant/message", {
+      message: { source: { kind: "model" }, content: [{ type: "text", text: "answer" }] },
+      usage: { inputTokens, outputTokens: 100 },
+    });
+    h.emit("turn/end", { turn: 1, reason: { kind: "completed" } });
+    // maybeAutoCompact 是 fire-and-forget：等待微任务/短窗落定。
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+
+  it("compacts automatically when inputTokens + maxOutputTokens >= contextWindow", async () => {
+    const h = await makeCompactSession({ contextWindow: 1000, maxOutputTokens: 200 });
+    await turnWithUsage(h, 850); // 850 + 200 >= 1000
+    const frames = service!.stream(h.sessionId, 0, 50).frames;
+    const marker = frames.find((frame) => frame.kind === "auto-compact");
+    expect(marker?.text).toContain("Auto-compact");
+    expect(marker?.text).toContain("850");
+    expect(h.compactCalls).toEqual(["/compact"]);
+    // 标记帧在 turn-end 之后、seq 连续递增。
+    const kinds = frames.map((frame) => frame.kind);
+    expect(kinds.indexOf("auto-compact")).toBeGreaterThan(kinds.indexOf("turn-end"));
+  });
+
+  it("does nothing below the threshold", async () => {
+    const h = await makeCompactSession({ contextWindow: 1000, maxOutputTokens: 200 });
+    await turnWithUsage(h, 500); // 500 + 200 < 1000
+    expect(service!.stream(h.sessionId, 0, 50).frames.some((f) => f.kind === "auto-compact")).toBe(
+      false,
+    );
+    expect(h.compactCalls).toEqual([]);
+  });
+
+  it("stays off when limits are missing or incomplete (no guessing)", async () => {
+    const noDep = await makeCompactSession(null);
+    await turnWithUsage(noDep, 999_999);
+    const partial = await makeCompactSession({ contextWindow: 1000 });
+    await turnWithUsage(partial, 999_999);
+    for (const h of [noDep, partial]) {
+      expect(
+        service!.stream(h.sessionId, 0, 50).frames.some((f) => f.kind === "auto-compact"),
+      ).toBe(false);
+      expect(h.compactCalls).toEqual([]);
+    }
+  });
+});

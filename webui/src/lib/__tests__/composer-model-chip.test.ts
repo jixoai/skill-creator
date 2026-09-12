@@ -211,7 +211,16 @@ describe("ComposerCard model chip dropdown (B2)", () => {
     const ctx = mountComposer();
     await ctx.openMenu();
 
-    expect(ctx.headings()).toEqual(["Z.ai", "xAI"]);
+    // R7 8.2：组头 = 字母 chip（iconLetter ?? 首字母）+ 目录 label。
+    expect(ctx.headings()).toEqual(["Z Z.ai", "X xAI"]);
+    const chips = [
+      ...document.querySelectorAll(
+        '[data-slot="dropdown-menu-group-heading"] span[style^="background"]',
+      ),
+    ];
+    expect(chips.length).toBe(2);
+    // jsdom 会把 hsl() 归一成 rgb()——断言确有确定性底色即可。
+    expect(chips[0]!.getAttribute("style")).toMatch(/^background: (hsl|rgb)/);
     const texts = ctx.items().map((item) => item.text);
     expect(texts).toContain("glm-4.7");
     expect(texts).toContain("glm-4.7-flash");

@@ -22,6 +22,7 @@
 -->
 <script module lang="ts">
   import { getRpc } from "$lib/stores/connection.svelte";
+  import { avatarHue } from "$lib/components/settings/route-icon.js";
 
   /**
    * 目录 label 缓存（模块级）：菜单组头显示名 = catalog label ?? provider id
@@ -161,9 +162,13 @@
       if (active.provider === route.provider && !ids.includes(active.model)) {
         ids.unshift(active.model);
       }
+      const label = catalogLabels[route.provider] ?? route.provider;
       return {
         provider: route.provider,
-        label: catalogLabels[route.provider] ?? route.provider,
+        label,
+        // R7 8.2：组头字母 chip 统一走 route.iconLetter ?? 首字母 + iconColor。
+        letter: route.iconLetter ?? label.slice(0, 1).toUpperCase(),
+        color: route.iconColor ?? `hsl(${avatarHue(route.provider)} 55% 45%)`,
         models: ids,
       };
     });
@@ -333,7 +338,7 @@
     onclick={syncCaret}
     onselect={syncCaret}
     onpaste={onPaste}
-    class="msg-body max-h-40 w-full resize-none bg-transparent px-3.5 py-2.5 outline-none placeholder:text-muted-foreground disabled:opacity-50"
+    class="msg-body max-h-40 w-full resize-none border-0 bg-transparent px-3.5 py-2.5 outline-none placeholder:text-muted-foreground disabled:opacity-50"
     aria-label="Message"></textarea>
   <div class="flex h-11 items-center gap-1 px-2.5">
     <!-- 左簇：模式 chip + 图片 + 文件 -->
@@ -490,8 +495,17 @@
           {/if}
           {#each routeGroups as group (group.provider)}
             <DropdownMenu.Group>
-              <DropdownMenu.GroupHeading class="px-2 py-1 text-[10px] font-medium">
-                {group.label}
+              <DropdownMenu.GroupHeading
+                class="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium"
+              >
+                <span
+                  class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-[8px] font-semibold text-white"
+                  style="background: {group.color}"
+                  aria-hidden="true"
+                >
+                  {group.letter}
+                </span>
+                <span class="truncate">{group.label}</span>
               </DropdownMenu.GroupHeading>
               {#each group.models as id (id)}
                 <DropdownMenu.Item

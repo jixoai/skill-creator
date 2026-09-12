@@ -19,7 +19,8 @@
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import NewRouteTab from "./NewRouteTab.svelte";
   import RouteTabContent from "./RouteTabContent.svelte";
-  import { avatarHue, isLetterAvatar, resolveRouteIcon } from "./route-icon.js";
+  import { isLetterAvatar, resolveRouteIcon, routeAvatarColor, routeLetter } from "./route-icon.js";
+  import { routeDisplayLabel } from "./route-naming.js";
   import { agentRuntimeConfig, updateAgentSettings } from "$lib/stores/agent.svelte";
   import { getConnectionGeneration, getRpc } from "$lib/stores/connection.svelte";
   import { createRequestGenerationGate } from "$lib/stores/request-generation.js";
@@ -250,6 +251,8 @@
           {#each routes as route, index (route.provider)}
             {@const entry = catalog?.providers.find((p) => p.provider === route.provider)}
             {@const icon = resolveRouteIcon(route, entry)}
+            {@const displayLabel = routeDisplayLabel(route, catalog)}
+            {@const letter = routeLetter(route, displayLabel)}
             {@const keyReady = view.providers.some(
               (p) => p.provider === route.provider && p.configured,
             )}
@@ -262,9 +265,7 @@
               selected === route.provider
                 ? 'text-foreground'
                 : 'text-muted-foreground hover:text-foreground'}"
-              title="{entry?.label ?? route.provider} ({route.provider}){ownsActive
-                ? ' · active route'
-                : ''}"
+              title="{displayLabel} ({route.provider}){ownsActive ? ' · active route' : ''}"
               bind:this={tabRefs[route.provider]}
               onclick={() => {
                 selected = route.provider;
@@ -274,11 +275,20 @@
             >
               {#if icon}
                 <span class="relative inline-flex shrink-0">
-                  <img
-                    src={icon}
-                    alt=""
-                    class="h-4 w-4 object-contain {isLetterAvatar(icon) ? '' : 'dark:invert'}"
-                  />
+                  <!-- 图标着色（codex R7 B3）：iconColor 以 color-mix 柔化底瓦作用于图片图标。 -->
+                  <span
+                    class="flex h-4 w-4 items-center justify-center rounded"
+                    style="background: color-mix(in srgb, {routeAvatarColor(
+                      route,
+                    )} 18%, transparent)"
+                    aria-hidden="true"
+                  >
+                    <img
+                      src={icon}
+                      alt=""
+                      class="h-3.5 w-3.5 object-contain {isLetterAvatar(icon) ? '' : 'dark:invert'}"
+                    />
+                  </span>
                   {#if !keyReady}
                     <span
                       class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
@@ -289,10 +299,10 @@
               {:else}
                 <span
                   class="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[8px] font-semibold text-white"
-                  style="background: hsl({avatarHue(route.provider)} 55% 45%)"
+                  style="background: {routeAvatarColor(route)}"
                   aria-hidden="true"
                 >
-                  {(entry?.label ?? route.provider).slice(0, 1).toUpperCase()}
+                  {letter}
                   {#if !keyReady}
                     <span
                       class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
@@ -301,7 +311,7 @@
                   {/if}
                 </span>
               {/if}
-              <span class="max-w-[120px] truncate">{entry?.label ?? route.provider}</span>
+              <span class="max-w-[120px] truncate">{displayLabel}</span>
               {#if ownsActive}
                 <span
                   class="absolute inset-x-1.5 bottom-0 h-0.5 rounded-full bg-primary"

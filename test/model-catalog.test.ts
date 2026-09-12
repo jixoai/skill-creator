@@ -62,4 +62,30 @@ describe("model provider catalog", () => {
     expect(providers[0]?.provider).toBe("zai-coding-cn");
     expect(providers.map((entry) => entry.provider)).not.toContain("faux");
   });
+
+  it("passes through pi-ai compat.supportsReasoningEffort verbatim (missing stays undefined)", () => {
+    const providers = listModelProviders();
+    // ant-ling Ling-2.6-1T 的 compat 显式声明 false（pi-ai 数据钉死事实）。
+    const antLing = providers.find((entry) => entry.provider === "ant-ling");
+    expect(
+      antLing?.models.find((model) => model.id === "Ling-2.6-1T")?.supportsReasoningEffort,
+    ).toBe(false);
+    // zai-coding-cn 存在声明 true 的模型（补全候选门只挡 false）。
+    const zai = providers.find((entry) => entry.provider === "zai-coding-cn");
+    expect(zai?.models.some((model) => model.supportsReasoningEffort === true)).toBe(true);
+    // 全集只可能是 boolean / undefined——缺失不伪造（大多数模型无 compat 声明）。
+    for (const entry of providers) {
+      for (const model of entry.models) {
+        expect(
+          model.supportsReasoningEffort === undefined ||
+            typeof model.supportsReasoningEffort === "boolean",
+        ).toBe(true);
+      }
+    }
+    // 大多数模型缺失 compat 声明 → 投影必须保留 undefined（不降级为 false）。
+    const all = providers.flatMap((entry) => entry.models);
+    expect(
+      all.filter((model) => model.supportsReasoningEffort === undefined).length,
+    ).toBeGreaterThan(all.length / 2);
+  });
 });

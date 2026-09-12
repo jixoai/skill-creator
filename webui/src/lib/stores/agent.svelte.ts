@@ -27,6 +27,8 @@ import {
   DshUserTextAttachmentSchema,
   type DshAgentMode,
   type DshSettingsUpdate,
+  type DshRouteConnectionTestInput,
+  type DshRouteConnectionTestResult,
   type DshSessionStreamFrame,
   type DshStewardSettingsView,
 } from "$shared/contracts/dsh-runtime.js";
@@ -59,6 +61,8 @@ export type PanelItem =
       elapsedMs?: number;
     }
   | { kind: "status"; seq: number; text: string }
+  /** 居中注记行（auto-compact 等系统动作留痕；text 为人话说明）。 */
+  | { kind: "note"; seq: number; text: string }
   | {
       kind: "user";
       seq: number;
@@ -602,6 +606,12 @@ function appendFrame(frame: DshSessionStreamFrame): void {
         text: JSON.stringify(frame.payload ?? {}),
       });
       break;
+    case "auto-compact":
+      // codex R7 B1：自动压缩留痕（daemon 在阈值触发时先落此帧再执行 /compact）。
+      if (typeof frame.text === "string" && frame.text.length > 0) {
+        agentSession.items.push({ kind: "note", seq: frame.seq, text: frame.text });
+      }
+      break;
     case "user-text": {
       // 直播路径：乐观气泡已展示同文本，帧只做出队确认；切换/重连路径（气泡已
       // 重置）队列必空，帧即唯一来源（attachments 元数据同时回填回显）。
@@ -923,5 +933,25 @@ export async function clearAgentCredential(provider: string): Promise<void> {
     agentRuntimeConfig.error = error instanceof Error ? error.message : String(error);
   } finally {
     if (request.isCurrent()) agentRuntimeConfig.updating = false;
+  }
+}
+
+/**
+ * 路由连接测试（R7 8.7；ModelListItem 消费）：路由草案即可测的只读外呼探活。
+ * apiKey 不进输入面——daemon 侧按 provider 从已存凭据注入（key 永不回显）；
+ * 未连接返回 null（调用方自行投影为不可用）。结果 typed，永不 throw。
+ */
+export async function testRouteConnection(
+  input: DshRouteConnectionTestInput,
+): Promise<DshRouteConnectionTestResult | null> {
+  const rpc = getRpc();
+  if (rpc === null) return null;
+  try {
+    return await rpc.agent.settings.testConnection(input);
+  } catch (error) {
+    return {
+      outcome: "failed",
+      detail: error instanceof Error ? error.message : String(error),
+    };
   }
 }

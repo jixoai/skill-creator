@@ -23,8 +23,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain } from "../src/daemon/domain.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
 import { createStewardAuditStore } from "../src/daemon/steward/audit-store.js";
-import { createDshSettingsService } from "../src/daemon/steward/dsh-settings.js";
+import {
+  createDshSettingsService,
+  dshBridgeModelEntry,
+} from "../src/daemon/steward/dsh-settings.js";
 import { runDshStewardToolRound } from "../src/daemon/steward/dsh-agent-runtime.js";
+import type { DshModelRoute } from "../src/shared/contracts/dsh-runtime.js";
 import { DSH_REDACTED, redactDshPayload } from "../src/shared/contracts/dsh-runtime.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
@@ -403,5 +407,138 @@ describe("DSH credentials bridge writes the kernel version-1 layout", () => {
     };
     expect(doc.refs?.ZAI_API_KEY).toBeUndefined();
     expect(doc.version).toBe(1);
+  });
+});
+
+describe("model route rich-field round-trip (R7)", () => {
+  /** 富字段路由 fixture：覆盖全部产品级字段（models 五新键 + 路由级三 UI 键）。 */
+  const richRoute: DshModelRoute = {
+    provider: "local-gateway",
+    api: "anthropic-messages",
+    baseURL: "http://localhost:20002/anthropic",
+    icon: "data:image/png;base64,AAAA",
+    iconLetter: "G",
+    iconColor: "#7c3aed",
+    models: [
+      {
+        id: "glm-5.3",
+        name: "GLM 5.3",
+        efforts: ["low", "medium", "high"],
+        contextWindow: 131072,
+        maxOutputTokens: 16384,
+        inputTypes: ["text", "image"],
+        outputTypes: ["text"],
+      },
+      { id: "glm-5.3-air", name: "GLM 5.3 Air" },
+    ],
+  };
+
+  it("dshBridgeModelEntry extracts only id + contextWindow (explicit whitelist)", () => {
+    expect(
+      dshBridgeModelEntry({
+        id: "m1",
+        name: "Model",
+        efforts: ["high"],
+        contextWindow: 1000,
+        maxOutputTokens: 512,
+        inputTypes: ["text"],
+        outputTypes: ["text"],
+      }),
+    ).toEqual({ id: "m1", contextWindow: 1000 });
+    expect(dshBridgeModelEntry({ id: "m2", name: "Bare" })).toEqual({ id: "m2" });
+  });
+
+  it("persists the full rich route in steward-store and reloads it intact", async () => {
+    const service = createDshSettingsService();
+    const result = await service.update({ modelRoutes: [richRoute] });
+    expect(result.outcome).toBe("updated");
+    if (result.outcome !== "updated") throw new Error("expected updated");
+    expect(result.changed).toBe(true);
+    // 新服务实例从盘读取：富字段经 DshStewardSettingsSchema safeParse 完整保留
+    //（持久化真源是 steward-store JSON，不是 DSH yaml）。
+    const reloaded = await createDshSettingsService().getView();
+    expect(reloaded.settings.modelRoutes).toEqual([richRoute]);
+    expect(reloaded.settings.modelRoutes[0]?.models[0]?.efforts).toEqual(["low", "medium", "high"]);
+    expect(reloaded.settings.modelRoutes[0]?.models[0]?.maxOutputTokens).toBe(16384);
+    expect(reloaded.settings.modelRoutes[0]?.models[0]?.inputTypes).toEqual(["text", "image"]);
+    expect(reloaded.settings.modelRoutes[0]?.iconLetter).toBe("G");
+    expect(reloaded.settings.modelRoutes[0]?.iconColor).toBe("#7c3aed");
+    // no-op：同路由整表替换不动 revision。
+    const noOp = await createDshSettingsService().update({ modelRoutes: [richRoute] });
+    if (noOp.outcome === "updated") expect(noOp.changed).toBe(false);
+    else throw new Error("expected updated");
+  });
+
+  it("writes only id/contextWindow model keys and no UI fields into the DSH yaml", async () => {
+    const service = createDshSettingsService();
+    await service.update({ modelRoutes: [richRoute] });
+    const file = path.join(process.env.DSH_HOME ?? "", "settings.yaml");
+    const raw = fs.readFileSync(file, "utf8");
+    const doc = parse(raw) as {
+      "llm-pi-ai"?: { providers?: Record<string, Record<string, unknown>> };
+    };
+    const provider = doc["llm-pi-ai"]?.providers?.["local-gateway"];
+    expect(provider).toBeDefined();
+    // 路由级：仅 apiKeyEnv/api/baseURL/models 四键；icon 一族不进 DSH profile。
+    expect(Object.keys(provider ?? {}).sort()).toEqual(
+      ["api", "apiKeyEnv", "baseURL", "models"].sort(),
+    );
+    // 模型级：keys ⊆ {id, contextWindow}（产品级富字段桥接层剥离）。
+    const models = (provider?.models ?? []) as Array<Record<string, unknown>>;
+    expect(models.length).toBe(2);
+    for (const model of models) {
+      expect(Object.keys(model).every((key) => key === "id" || key === "contextWindow")).toBe(true);
+    }
+    expect(models[0]).toEqual({ id: "glm-5.3", contextWindow: 131072 });
+    expect(models[1]).toEqual({ id: "glm-5.3-air" });
+    // yaml 全文不含任何产品级新键（pi-ai profile 未知键会被内核拒收）。
+    for (const banned of [
+      "iconLetter",
+      "iconColor",
+      "icon",
+      "name:",
+      "efforts",
+      "maxOutputTokens",
+      "inputTypes",
+      "outputTypes",
+      "GLM 5.3",
+      "#7c3aed",
+    ]) {
+      expect(raw).not.toContain(banned);
+    }
+  });
+
+  it("keeps legacy persisted routes (id-only models) loadable via safeParse", async () => {
+    // R7 之前的持久形状：models 只有 {id}（或 {id, contextWindow}）——新字段全部
+    // optional，旧数据必须原样通过（破坏性更新不迁移、不拒绝）。
+    const dir = path.join(sandbox, "state", "steward-store");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "dsh-settings.json"),
+      JSON.stringify({
+        configVersion: 1,
+        revision: 7,
+        model: { provider: "deepseek", model: "deepseek-chat" },
+        preset: "deterministic",
+        permissions: { approvalPolicy: "ask" },
+        session: { streamRetention: 100, streamProjection: "enabled" },
+        defaultMode: "free",
+        modelRoutes: [
+          {
+            provider: "zai",
+            api: "anthropic-messages",
+            baseURL: "https://api.z.ai/api/anthropic",
+            models: [{ id: "glm-4.7" }, { id: "glm-4.7-flash", contextWindow: 131072 }],
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const view = await createDshSettingsService().getView();
+    expect(view.settings.revision).toBe(7);
+    expect(view.settings.modelRoutes[0]?.models).toEqual([
+      { id: "glm-4.7" },
+      { id: "glm-4.7-flash", contextWindow: 131072 },
+    ]);
   });
 });

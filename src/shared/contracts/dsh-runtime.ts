@@ -228,6 +228,8 @@ export const ModelProviderCatalogEntrySchema = z.object({
         image: z.boolean(),
         /** 上下文窗口（pi-ai 目录 contextWindow，token 数；缺省由 UI 回退假值）。 */
         contextWindow: z.number().int().positive().optional(),
+        /** 目录声明是否支持 reasoning effort（缺省未知；effort 补全的候选门）。 */
+        supportsReasoningEffort: z.boolean().optional(),
       }),
     )
     .min(1),
@@ -239,6 +241,46 @@ export type ModelProviderCatalogEntry = z.infer<typeof ModelProviderCatalogEntry
  * LLM preset：deterministic = 脚本化 transport（CI/fixture）；live = 真实 provider。
  * 禁止自动 fallback：live 缺凭据时 resolve 失败，绝不静默回退 deterministic。
  */
+/** 模型路由的模型级输入类型（text 为缺省必含）。 */
+export const DshModelInputTypeSchema = z.enum(["text", "image", "video", "pdf"]);
+export type DshModelInputType = z.infer<typeof DshModelInputTypeSchema>;
+
+/** 模型路由的模型级输出类型（当前产品面仅 text）。 */
+export const DshModelOutputTypeSchema = z.enum(["text"]);
+export type DshModelOutputType = z.infer<typeof DshModelOutputTypeSchema>;
+
+/** pi-ai 装配目录实测的 wire 协议枚举（api 字段允许值；自定义路由必选其一）。 */
+export const DSH_ROUTE_API_PROTOCOLS = [
+  "anthropic-messages",
+  "azure-openai-responses",
+  "bedrock-converse-stream",
+  "google-generative-ai",
+  "google-vertex",
+  "mistral-conversations",
+  "openai-codex-responses",
+  "openai-completions",
+  "openai-responses",
+] as const;
+export type DshRouteApiProtocol = (typeof DSH_ROUTE_API_PROTOCOLS)[number];
+
+/**
+ * Token 简写解析（R7 用户需求 [2026-09-12]：「支持 `0.5M` `253k` 这样的写法」）。
+ * 二进制量级（k = 1024、M = 1024²），与 context window 惯例一致（128k = 131072、
+ * 200k = 204800）；纯数字原样通过；非法输入返回 null（不猜）。
+ */
+export function parseTokenShorthand(input: string): number | null {
+  const trimmed = input.trim();
+  if (!/^\d+(\.\d+)?\s*[kKmM]?$/.test(trimmed)) return null;
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([kKmM])?$/);
+  if (match === null) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const unit = match[2]?.toLowerCase();
+  const scaled = unit === "k" ? value * 1024 : unit === "m" ? value * 1024 * 1024 : value;
+  const rounded = Math.round(scaled);
+  return Number.isSafeInteger(rounded) && rounded > 0 ? rounded : null;
+}
+
 /**
  * 模型路由（add-agent-settings-modes 迭代三 2026-09-11）：持久化 provider 端点，
  * 经 daemon 桥接写入 DSH 官方热加载面（$DSH_HOME/settings.yaml 的 llm-pi-ai: 段
@@ -253,12 +295,31 @@ export const DshModelRouteSchema = z.object({
   /** 本地 UI 字段：图标覆盖（dataURL；缺省回退目录图标/字母头像）。不写 DSH
    * settings.yaml（桥接层剥离——pi-ai profile 未知键会被内核拒）。 */
   icon: z.string().min(1).optional(),
-  /** 该路由的模型目录（空缺字段继承 pi-ai 装配目录同名模型）。 */
+  /** 本地 UI 字段：字母头像文字（用户可编辑；缺省按 provider 名取首字母）。 */
+  iconLetter: z.string().min(1).max(2).optional(),
+  /** 本地 UI 字段：字母头像底色（CSS color；与 icon 独立可换）。 */
+  iconColor: z.string().min(1).optional(),
+  /** 本地 UI 字段：抑制目录图标（true = 显式无图标，走 Letter 头像；否则
+   * icon 缺省时回退目录图标）。解决目录 provider 无法选「无图标」的状态缺失。 */
+  iconSuppressed: z.boolean().optional(),
+  /** 该路由的模型目录（空缺字段继承 pi-ai 装配目录同名模型；name/efforts/
+   * maxOutputTokens/inputTypes/outputTypes 为产品级配置，桥接层只向 DSH 写
+   * id + contextWindow）。 */
   models: z
     .array(
       z.object({
         id: z.string().min(1),
+        /** 展示名：缺省由 id 自动生成（UI 可改）。 */
+        name: z.string().min(1).optional(),
+        /** 可用 reasoning effort 档（会话 effort 选择的数据源；不再硬编码）。 */
+        efforts: z.array(z.string().min(1)).optional(),
         contextWindow: z.number().int().positive().optional(),
+        /** 最大输出 token（自动压缩时机的规划输入）。 */
+        maxOutputTokens: z.number().int().positive().optional(),
+        /** 输入类型多选（text 为缺省必含语义由 UI 保证）。 */
+        inputTypes: z.array(DshModelInputTypeSchema).optional(),
+        /** 输出类型（当前仅 text，UI 勾选态）。 */
+        outputTypes: z.array(DshModelOutputTypeSchema).optional(),
       }),
     )
     .min(1),
@@ -426,6 +487,34 @@ export const DshCredentialClearInputSchema = z.object({ provider: z.string().min
 /** 凭据清除输入。 */
 export type DshCredentialClearInput = z.infer<typeof DshCredentialClearInputSchema>;
 
+/** 连接测试输入（路由草案即可测：未保存的表单也能探活）。 */
+export const DshRouteConnectionTestInputSchema = z.object({
+  api: z.string().min(1),
+  baseURL: z.string().min(1),
+  apiKey: z.string().min(1).optional(),
+  /** 路由 provider：apiKey 缺省时 daemon 从已存凭据注入（UI 不回显 key）。 */
+  provider: z.string().min(1).optional(),
+  modelId: z.string().min(1),
+});
+/** 连接测试输入。 */
+export type DshRouteConnectionTestInput = z.infer<typeof DshRouteConnectionTestInputSchema>;
+
+/** 连接测试结果（typed，绝不抛：失败也是值）。 */
+export const DshRouteConnectionTestResultSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("ok"),
+    /** 请求往返毫秒（最小 completion 的真实耗时）。 */
+    latencyMs: z.number().int().nonnegative(),
+  }),
+  z.object({
+    outcome: z.literal("failed"),
+    /** 有限诊断：HTTP 状态/网络错误首行，≤200ch，不含 key。 */
+    detail: z.string().min(1),
+  }),
+]);
+/** 连接测试结果。 */
+export type DshRouteConnectionTestResult = z.infer<typeof DshRouteConnectionTestResultSchema>;
+
 /** 运行时 preset 解析失败码。 */
 export const DshRuntimePresetFailureCodeSchema = z.enum([
   /** live preset 但所选 provider 无凭据（禁止回退 deterministic）。 */
@@ -483,6 +572,9 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   "session-title",
   /** Todo 列表快照（todo/write 事件投影；payload.todos = {content,status}[]）。 */
   "todo-snapshot",
+  /** 自动压缩标记（daemon 在 turn-end 后按 inputTokens + maxOutputTokens ≥
+   * contextWindow 阈值自动执行 compact；text = 触发说明，UI 以居中注记渲染）。 */
+  "auto-compact",
 ]);
 /** session stream 帧类别。 */
 export type DshSessionStreamFrameKind = z.infer<typeof DshSessionStreamFrameKindSchema>;

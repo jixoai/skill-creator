@@ -1,23 +1,29 @@
 <!--
-  统一建路由体验（redesign-model-tabs-and-agent-panel S1，design §2.4）。
+  统一建路由体验（redesign-model-tabs-and-agent-panel S1；R7 8.4/8.5/8.6/8.7 重写）。
   用户原始需求 [2026-09-12]：「NewTab = 预设选择页与空白表单是同一表单的两个
-  入口态。Provider 预设与 Custom 不是两种配置类型，而是同一份 Custom 表单的
-  『预填』与『空白』两种起始态。」
+  入口态」；「已添加的 provider 可继续添加：slug `${provider}-${n}`（n 从 2 起），
+  label `${目录label} (1)`、`(2)`…（apiKeyEnv 随新 slug 派生，凭据各自独立）」；
+  「api 从自由输入改为 Select（DSH_ROUTE_API_PROTOCOLS）」；「模型补全源 = 全部
+  已知供应商的模型并集（Set 去重、排序；手输仍允许任意 id）」；「Models 区重构为
+  模型 list-item 列表（含连接测试）」。
   正交意图：
   1. pick 态：搜索 + 2 列卡片网格（目录全量 + 「Your presets」本地分组置顶、
-     hover × 删除；已建路由的目录卡 Added ✓ 置灰）——旧画廊逻辑整体搬入。
-  2. form 态：与 RouteTabContent 同一字段集的新建语境（IconPicker / Route name /
-     Base URL / 自定义必填 api / Models tags），Add route 校验通过启用；
-     成功即 onadded（分区选中新 tab 并引导粘 key）。
-  3. 预填源三态：目录条目（top-4 image 优先模型）、本地 preset（全量）、seed
-     （env 注入的活动 provider 名——「active outside tabs」chip 的落点）。
+     hover × 删除）；已建路由的目录卡显示 Added ✓（×N 计数），不再 disabled——
+     再次点击走编号 slug 追加。
+  2. form 态：与 RouteTabContent 同一字段集的新建语境（IconPicker 三控制 /
+     Route name / Base URL / api Select / ModelListItem 列表），Add route 校验
+     通过启用；成功即 onadded（分区选中新 tab 并引导粘 key）。
+  3. 预填源三态：目录条目（编号 slug + top-4 image 优先模型 + contextWindow）、
+     本地 preset（全量）、seed（env 注入的活动 provider 名）。
 -->
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import IconPicker from "./IconPicker.svelte";
-  import ModelTagsInput from "./ModelTagsInput.svelte";
-  import { avatarHue } from "./route-icon.js";
+  import ModelListItem from "./ModelListItem.svelte";
+  import { hueAvatarColor, routeLetter } from "./route-icon.js";
+  import { nextRouteSlug, numberedSlugParts, routeDisplayLabel } from "./route-naming.js";
+  import { catalogModelCandidates, type RouteModelEntry } from "./model-fields.js";
   import {
     deleteProviderPreset,
     loadProviderPresets,
@@ -25,7 +31,11 @@
     type LocalProviderPreset,
   } from "$lib/stores/provider-presets.svelte";
   import { agentRuntimeConfig, updateAgentSettings } from "$lib/stores/agent.svelte";
-  import type { DshModelRoute, ModelProviderCatalogEntry } from "$shared/contracts/dsh-runtime.js";
+  import {
+    DSH_ROUTE_API_PROTOCOLS,
+    type DshModelRoute,
+    type ModelProviderCatalogEntry,
+  } from "$shared/contracts/dsh-runtime.js";
 
   interface Props {
     catalog: { providers: ModelProviderCatalogEntry[] } | null;
@@ -49,6 +59,8 @@
     onclose,
   }: Props = $props();
 
+  const DEFAULT_API = "anthropic-messages";
+
   // svelte-ignore state_referenced_locally
   let mode = $state<"pick" | "form">(initialMode);
   let filter = $state("");
@@ -58,13 +70,21 @@
   // svelte-ignore state_referenced_locally
   let draftProvider = $state(seed?.provider ?? "");
   let draftIcon = $state<string | undefined>(undefined);
+  let draftIconColor = $state<string | undefined>(undefined);
+  let draftIconLetter = $state<string | undefined>(undefined);
+  /** 显式无图标（preset 应用；codex R7 B3 的 iconSuppressed 草稿态）。 */
+  let draftIconSuppressed = $state<boolean | undefined>(undefined);
   let draftBaseURL = $state("");
-  let draftApi = $state("anthropic-messages");
   // svelte-ignore state_referenced_locally
-  let draftModels = $state<string[]>(seed?.models ? [...seed.models] : []);
+  let draftApi = $state(DEFAULT_API);
+  // svelte-ignore state_referenced_locally
+  let draftModels = $state<RouteModelEntry[]>(
+    seed?.models ? seed.models.map((id) => seedModelEntry(id)) : [],
+  );
+  // svelte-ignore state_referenced_locally
+  let draftModelsValid = $state<boolean[]>(seed?.models ? seed.models.map(() => true) : []);
   let urlTouched = $state(false);
   let nameTouched = $state(false);
-  let modelsTouched = $state(false);
   let rejection = $state<string | null>(null);
 
   const view = $derived(agentRuntimeConfig.view);
@@ -74,23 +94,41 @@
       entry.icon ? [{ provider: entry.provider, icon: entry.icon }] : [],
     ),
   );
+  const modelCandidates = $derived(catalogModelCandidates(catalog));
   const providerName = $derived(draftProvider.trim());
+  const displayName = $derived(routeDisplayLabel({ provider: providerName }, catalog));
+  const draftLetter = $derived(
+    routeLetter({ provider: providerName, iconLetter: draftIconLetter }, displayName),
+  );
+  const draftColor = $derived(draftIconColor ?? hueAvatarColor(providerName || "route"));
+  /** 图标草案回退：目录基础 provider 的图标（scratch 后手输既有 provider 名时对齐）；
+   * iconSuppressed = true 时抑制一切回退（显式无图标，走 Letter 头像）。 */
+  const draftIconEffective = $derived.by(() => {
+    if (draftIconSuppressed === true) return null;
+    if (draftIcon !== undefined) return draftIcon;
+    const base = numberedSlugParts(providerName)?.base ?? providerName;
+    return catalog?.providers.find((entry) => entry.provider === base)?.icon ?? null;
+  });
+  /** effort 补全数据源（codex R7 B2）：已存路由 + 当前草案的模型并集。 */
+  const allRouteModels = $derived([...routes.flatMap((route) => route.models), ...draftModels]);
   const duplicate = $derived(
     providerName.length > 0 && routes.some((route) => route.provider === providerName),
   );
-  const catalogMatch = $derived(
-    catalog?.providers.find((entry) => entry.provider === providerName),
-  );
-  const customCandidates = $derived(catalogMatch?.models ?? []);
   const urlValid = $derived(/^https?:\/\//.test(draftBaseURL.trim()));
-  const apiNeeded = $derived(catalogMatch === undefined);
+  const modelsAllValid = $derived(
+    draftModelsValid.length === draftModels.length && draftModelsValid.every((flag) => flag),
+  );
   const canSubmit = $derived(
     providerName.length > 0 &&
       !duplicate &&
       urlValid &&
       draftModels.length > 0 &&
-      (!apiNeeded || draftApi.trim().length > 0) &&
+      modelsAllValid &&
       !agentRuntimeConfig.updating,
+  );
+  /** 草案 provider 的已存凭据（首个副本未保存也能测连接；编号副本无 key 走提示）。 */
+  const apiKeyConfigured = $derived(
+    view?.providers.some((p) => p.provider === providerName && p.configured) ?? false,
   );
 
   const filteredProviders = $derived.by(() => {
@@ -116,11 +154,27 @@
     );
   });
 
+  /** 该目录 provider 的已建副本数（含编号 slug；Added ✓ ×N 徽标）。 */
+  function copyCount(provider: string): number {
+    return routes.filter(
+      (route) =>
+        route.provider === provider || numberedSlugParts(route.provider)?.base === provider,
+    ).length;
+  }
+
+  /** seed 模型条目：目录同 id 模型携带 contextWindow（B7 语义保持）。 */
+  function seedModelEntry(id: string): RouteModelEntry {
+    const base = numberedSlugParts(seed?.provider ?? "")?.base ?? seed?.provider ?? "";
+    const model = catalog?.providers
+      .find((entry) => entry.provider === base)
+      ?.models.find((entry) => entry.id === id);
+    return model?.contextWindow !== undefined ? { id, contextWindow: model.contextWindow } : { id };
+  }
+
   // 挂载：加载本地 presets + pick 态聚焦搜索框。
   // loadProviderPresets 同步写 + 读 providerPresets.list——放进 $effect 会构成
-  // 「effect 读写同一状态」死循环（effect_update_depth_exceeded，组件僵死：
-  // Enter 不提交、按钮不响应）。组件初始化体是非响应上下文，此处直调安全
-  // （B1 根因修复，回归见 __tests__/model-settings-b1.test.ts）。
+  // 「effect 读写同一状态」死循环（effect_update_depth_exceeded，组件僵死）。
+  // 组件初始化体是非响应上下文，此处直调安全（B1 根因修复）。
   loadProviderPresets();
   $effect(() => {
     if (mode === "pick") searchInput?.focus();
@@ -130,51 +184,77 @@
     mode = "form";
     urlTouched = false;
     nameTouched = false;
-    modelsTouched = false;
     rejection = null;
   }
 
   function startFromCatalog(entry: ModelProviderCatalogEntry): void {
-    draftProvider = entry.provider;
+    // R7 8.4：已添加的 provider 可再次添加——slug 走 `${provider}-${n}` 编号，
+    // apiKeyEnv 随新 slug 派生（zai-2 → ZAI_2_API_KEY），凭据各自独立。
+    draftProvider = nextRouteSlug(entry.provider, routes);
     draftIcon = entry.icon ?? undefined;
+    draftIconColor = undefined;
+    draftIconLetter = undefined;
+    draftIconSuppressed = undefined;
     draftBaseURL = entry.baseURL;
     draftApi = entry.api;
     draftModels = [...entry.models]
       .sort((a, b) => Number(b.image) - Number(a.image))
       .slice(0, 4)
-      .map((model) => model.id);
+      .map((model) =>
+        model.contextWindow !== undefined
+          ? { id: model.id, contextWindow: model.contextWindow }
+          : { id: model.id },
+      );
+    draftModelsValid = draftModels.map(() => true);
     enterForm();
   }
 
   function startFromPreset(preset: LocalProviderPreset): void {
-    draftProvider = preset.provider;
+    const slug = nextRouteSlug(preset.provider, routes);
+    draftProvider = slug;
     draftIcon = preset.icon;
+    draftIconColor = preset.iconColor;
+    draftIconLetter = preset.iconLetter;
+    // preset 的显式无图标同路应用（iconSuppressed: true 抑制目录回退）；
+    // 字段缺省 = 维持现状（不抑制）。
+    draftIconSuppressed = preset.iconSuppressed;
     draftBaseURL = preset.baseURL;
-    draftApi = preset.api ?? "anthropic-messages";
-    draftModels = [...preset.models];
+    draftApi = preset.api ?? DEFAULT_API;
+    draftModels = preset.models.map((id) => ({ id }));
+    draftModelsValid = preset.models.map(() => true);
     enterForm();
   }
 
   function startFromScratch(): void {
     draftProvider = "";
     draftIcon = undefined;
+    draftIconColor = undefined;
+    draftIconLetter = undefined;
+    draftIconSuppressed = undefined;
     draftBaseURL = "";
-    draftApi = "anthropic-messages";
+    draftApi = DEFAULT_API;
     draftModels = [];
+    draftModelsValid = [];
     enterForm();
   }
 
-  /**
-   * 目录条目的 contextWindow（B7）：catalog schema 的同名字段由并行任务补齐，
-   * 这里做 optional 读取（类型断言 + runtime 收窄），编译与运行都不依赖它存在；
-   * 手输路径（不在目录内）自然保持 undefined。
-   */
-  function catalogContextWindow(id: string): number | undefined {
-    const entry = catalogMatch?.models.find((model) => model.id === id) as
-      | { contextWindow?: unknown }
-      | undefined;
-    const value = entry?.contextWindow;
-    return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+  function setModelAt(index: number, next: RouteModelEntry): void {
+    draftModels = draftModels.map((entry, i) => (i === index ? next : entry));
+  }
+
+  function setModelValidity(index: number, valid: boolean): void {
+    if (draftModelsValid[index] === valid) return;
+    draftModelsValid = draftModelsValid.map((flag, i) => (i === index ? valid : flag));
+  }
+
+  function removeModel(index: number): void {
+    draftModels = draftModels.filter((_, i) => i !== index);
+    draftModelsValid = draftModelsValid.filter((_, i) => i !== index);
+  }
+
+  function addModel(): void {
+    draftModels = [...draftModels, { id: "" }];
+    draftModelsValid = [...draftModelsValid, false];
   }
 
   async function addRoute(): Promise<void> {
@@ -182,12 +262,12 @@
     const route: DshModelRoute = {
       provider: providerName,
       baseURL: draftBaseURL.trim(),
-      api: catalogMatch ? catalogMatch.api : draftApi.trim() || "anthropic-messages",
-      models: draftModels.map((id) => {
-        const contextWindow = catalogContextWindow(id);
-        return contextWindow === undefined ? { id } : { id, contextWindow };
-      }),
+      api: draftApi,
+      models: draftModels.map((entry) => ({ ...entry })),
       ...(draftIcon ? { icon: draftIcon } : {}),
+      ...(draftIconColor ? { iconColor: draftIconColor } : {}),
+      ...(draftIconLetter ? { iconLetter: draftIconLetter } : {}),
+      ...(draftIconSuppressed ? { iconSuppressed: true } : {}),
     };
     const result = await updateAgentSettings({ modelRoutes: [...routes, route] });
     if (!result) return;
@@ -262,10 +342,13 @@
                     {:else}
                       <span
                         class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"
-                        style="background: hsl({avatarHue(preset.provider)} 55% 45%)"
+                        style="background: {preset.iconColor ?? hueAvatarColor(preset.provider)}"
                         aria-hidden="true"
                       >
-                        {preset.label.slice(0, 1).toUpperCase()}
+                        {routeLetter(
+                          { provider: preset.provider, iconLetter: preset.iconLetter },
+                          preset.label,
+                        )}
                       </span>
                     {/if}
                     <span class="min-w-0 flex-1">
@@ -301,12 +384,15 @@
           </span>
           <div class="grid grid-cols-1 gap-1.5 min-[520px]:grid-cols-2">
             {#each filteredProviders as entry (entry.provider)}
-              {@const exists = routes.some((route) => route.provider === entry.provider)}
+              {@const copies = copyCount(entry.provider)}
+              {@const cardTitle =
+                copies > 0
+                  ? `${entry.baseURL} · ${entry.api} · ${copies} copies added — click to add another`
+                  : `${entry.baseURL} · ${entry.api}`}
               <button
                 type="button"
-                class="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:bg-transparent"
-                title={`${entry.baseURL} · ${entry.api}`}
-                disabled={exists}
+                class="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+                title={cardTitle}
                 onclick={() => startFromCatalog(entry)}
               >
                 {#if entry.icon}
@@ -318,7 +404,7 @@
                 {:else}
                   <span
                     class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"
-                    style="background: hsl({avatarHue(entry.provider)} 55% 45%)"
+                    style="background: {hueAvatarColor(entry.provider)}"
                     aria-hidden="true"
                   >
                     {entry.label.slice(0, 1).toUpperCase()}
@@ -331,9 +417,14 @@
                   </span>
                 </span>
                 <span class="mr-0.5 flex shrink-0 items-center gap-1">
-                  {#if exists}
-                    <span class="rounded bg-primary/10 px-1 text-[9px] text-primary">
-                      Added ✓
+                  {#if copies > 0}
+                    <span
+                      class="rounded bg-primary/10 px-1 text-[9px] text-primary"
+                      title="{copies} cop{copies === 1
+                        ? 'y'
+                        : 'ies'} of this provider already added — you can add another"
+                    >
+                      Added ✓{copies > 1 ? ` ×${copies}` : ""}
                     </span>
                   {/if}
                   <span
@@ -357,15 +448,24 @@
   </div>
 {:else}
   <div class="space-y-3">
-    <!-- 1 · Identity -->
+    <!-- 1 · Identity（图标三控制 + Route name） -->
     <div class="flex items-center gap-2">
       <IconPicker
-        icon={draftIcon ?? catalogMatch?.icon ?? null}
+        icon={draftIconEffective}
+        letter={draftLetter}
+        color={draftColor}
         provider={providerName || "route"}
-        label={catalogMatch?.label ?? providerName}
+        label={displayName}
         catalogIcons={catalogIconList}
         disabled={agentRuntimeConfig.updating}
-        onPick={(icon) => (draftIcon = icon)}
+        onPick={(icon) => {
+          draftIcon = icon;
+          // 选图标 = 解除抑制（与 RouteTabContent 的 applyIdentity 语义一致）。
+          draftIconSuppressed = undefined;
+        }}
+        onSuppress={() => (draftIconSuppressed = true)}
+        onColor={(iconColor) => (draftIconColor = iconColor)}
+        onLetter={(iconLetter) => (draftIconLetter = iconLetter)}
       />
       <label class="min-w-0 flex-1 space-y-0.5">
         <span class="text-[10px] text-muted-foreground">Route name</span>
@@ -387,7 +487,7 @@
       <p class="text-[10px] text-amber-700" role="alert">Custom route needs a name.</p>
     {/if}
 
-    <!-- 2 · Endpoint -->
+    <!-- 2 · Endpoint（baseURL + api Select 统一字段） -->
     <label class="block space-y-0.5">
       <span class="text-[10px] text-muted-foreground">Base URL</span>
       <Input
@@ -402,44 +502,59 @@
     {#if urlTouched && !urlValid}
       <p class="text-[10px] text-amber-700" role="alert">Custom route needs an http(s) base URL.</p>
     {/if}
-    {#if apiNeeded}
-      <label class="block space-y-0.5">
-        <span class="text-[10px] text-muted-foreground">
-          API protocol (custom route — not in catalog)
-        </span>
-        <Input
-          class="h-8 text-xs"
-          aria-label="API protocol"
-          placeholder="anthropic-messages"
-          list="new-route-api-candidates"
-          bind:value={draftApi}
-          disabled={agentRuntimeConfig.updating}
-        />
-        <datalist id="new-route-api-candidates">
-          {#each [...new Set((catalog?.providers ?? []).map((entry) => entry.api))] as candidate}
-            <option value={candidate}></option>
-          {/each}
-        </datalist>
-      </label>
-    {/if}
-
-    <!-- 3 · Models -->
     <label class="block space-y-0.5">
-      <span class="text-[10px] text-muted-foreground">Models</span>
-      <ModelTagsInput
-        selected={draftModels}
-        candidates={customCandidates}
-        placeholder="Add model id…"
+      <span class="text-[10px] text-muted-foreground">API protocol</span>
+      <select
+        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+        aria-label="API protocol"
+        bind:value={draftApi}
         disabled={agentRuntimeConfig.updating}
-        onchange={(next) => {
-          draftModels = next;
-          modelsTouched = true;
-        }}
-      />
+      >
+        {#each DSH_ROUTE_API_PROTOCOLS as protocol (protocol)}
+          <option value={protocol}>{protocol}</option>
+        {/each}
+      </select>
     </label>
-    {#if draftModels.length === 0 && modelsTouched}
-      <p class="text-[10px] text-amber-700" role="alert">Custom route needs model ids.</p>
-    {/if}
+
+    <!-- 3 · Models（ModelListItem 列表；R7 8.7） -->
+    <div class="space-y-1.5">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-medium text-muted-foreground">Models</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          class="h-6 px-2 text-[11px]"
+          disabled={agentRuntimeConfig.updating}
+          onclick={addModel}
+        >
+          + Add model
+        </Button>
+      </div>
+      {#if draftModels.length === 0}
+        <p
+          class="rounded-md border border-dashed p-2 text-center text-[10px] text-muted-foreground"
+        >
+          No models yet — add one to enable the route.
+        </p>
+      {/if}
+      <div class="space-y-1.5">
+        {#each draftModels as entry, index (index)}
+          <ModelListItem
+            model={entry}
+            candidates={modelCandidates}
+            routeModels={allRouteModels}
+            api={draftApi}
+            baseURL={draftBaseURL.trim()}
+            provider={providerName}
+            {apiKeyConfigured}
+            disabled={agentRuntimeConfig.updating}
+            onchange={(next) => setModelAt(index, next)}
+            onremove={() => removeModel(index)}
+            onvalidity={(valid) => setModelValidity(index, valid)}
+          />
+        {/each}
+      </div>
+    </div>
 
     {#if rejection}
       <p class="text-xs text-destructive" role="alert">{rejection}</p>

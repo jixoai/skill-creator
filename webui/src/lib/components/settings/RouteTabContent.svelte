@@ -1,27 +1,31 @@
 <!--
-  单路由完整编辑面（redesign-model-tabs-and-agent-panel S1，design §2.3）。
-  用户原始需求 [2026-09-12]：「RouteTab = 一份路由配置的完整自持单元。一个 tab
-  承载一条 DshModelRoute 的全部横向：图标、名字、key 状态、端点、模型清单、
-  活动切换、删除。用户在 tab A 里永远看不到也不操作 tab B 的任何字段。」
+  单路由完整编辑面（redesign-model-tabs-and-agent-panel S1；R7 8.2/8.6/8.7 重写）。
+  用户原始需求 [2026-09-12]：「一个 tab 承载一条 DshModelRoute 的全部横向」；
+  「颜色与 Letter 分离：图标（含无图标）、头像颜色（iconColor）、Letter 文字
+  （iconLetter）三个独立控制」；「api 从自由输入改为 Select（DSH_ROUTE_API_PROTOCOLS），
+  预设路径同字段预填可改」；「Models 区重构为模型 list-item 列表 + Add model，
+  每条目全字段 + 连接测试；effort 数据源 = 当前模型的 efforts ?? 自由输入」。
   正交意图：
-  1. 六块布局：Identity（图标 + 只读路由名 + key pill）/ Credential（折叠 pill ↔
-     展开写入盒，保存成功 800ms 自动折叠）/ Endpoint（baseURL/api 脏态显式 Save）/
-     Models（tag 增删即时全量补丁，updating 置灰）/ Active（活动路由全形态 vs
-     非活动紧凑形态）/ Danger+Preset（右对齐行）。
-  2. 写路径：icon/models 走 updateAgentSettings({modelRoutes}) 全量补丁（models
-     编辑保留既有 contextWindow 字段）；key 走 setAgentCredential/clear 旁路（值
-     永不回流）；活动模型走 settings.model 单例（tab 内一步 Set active）。
-  3. 引导态：新建后 autoFocusCredential 展开凭据盒并聚焦（「粘 key 完成连接」，
-     替代旧 routeAddedFor + scrollIntoView）。
+  1. 六块布局：Identity（图标三控制 + 只读路由名 + key pill）/ Credential（折叠
+     pill ↔ 展开写入盒）/ Endpoint（baseURL + api Select 脏态显式 Save）/ Models
+     （ModelListItem 列表 + dirty Save + validity 门）/ Active（活动路由全形态 vs
+     紧凑形态）/ Danger+Preset（右对齐行）。
+  2. 写路径：icon/iconColor/iconLetter/models 走 updateAgentSettings({modelRoutes})
+     全量补丁；key 走 setAgentCredential/clear 旁路（值永不回流）；活动模型走
+     settings.model 单例。
+  3. 数据源派生：Active effort 建议词 = 当前模型 efforts（无硬编码数组）；
+     ModelListItem 补全池 = 全供应商目录并集（model-fields.catalogModelCandidates）。
   妥协声明：路由名只读——provider 名 = 凭据 env 映射键（dshRouteApiKeyEnv），
-  改名等于换身份需重粘 key，本轮以「复制重建」覆盖改名需求（design §7）。
+  改名等于换身份需重粘 key，以「复制重建」覆盖改名需求（design §7）。
 -->
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import IconPicker from "./IconPicker.svelte";
-  import ModelTagsInput from "./ModelTagsInput.svelte";
-  import { resolveRouteIcon } from "./route-icon.js";
+  import ModelListItem from "./ModelListItem.svelte";
+  import { routeAvatarColor, routeLetter, resolveRouteIcon } from "./route-icon.js";
+  import { routeDisplayLabel } from "./route-naming.js";
+  import { catalogModelCandidates, type RouteModelEntry } from "./model-fields.js";
   import { saveProviderPreset } from "$lib/stores/provider-presets.svelte";
   import {
     agentRuntimeConfig,
@@ -30,7 +34,11 @@
     updateAgentSettings,
   } from "$lib/stores/agent.svelte";
   import { showToast } from "$lib/toast.svelte";
-  import type { DshModelRoute, ModelProviderCatalogEntry } from "$shared/contracts/dsh-runtime.js";
+  import {
+    DSH_ROUTE_API_PROTOCOLS,
+    type DshModelRoute,
+    type ModelProviderCatalogEntry,
+  } from "$shared/contracts/dsh-runtime.js";
 
   interface Props {
     route: DshModelRoute;
@@ -50,8 +58,16 @@
     onremove,
   }: Props = $props();
 
+  const DEFAULT_API = "anthropic-messages";
+
   const view = $derived(agentRuntimeConfig.view);
   const routes = $derived(view?.settings.modelRoutes ?? []);
+  /** 全路由模型并集（effort 候选自派生源：用户已配置 efforts 的并集，B2）。 */
+  const allRouteModels = $derived(
+    routes.flatMap((existing) =>
+      existing.models.map((model) => ({ id: model.id, efforts: model.efforts })),
+    ),
+  );
   const catalogEntry = $derived(
     catalog?.providers.find((entry) => entry.provider === route.provider),
   );
@@ -60,9 +76,11 @@
       entry.icon ? [{ provider: entry.provider, icon: entry.icon }] : [],
     ),
   );
-  const apiCandidates = $derived([...new Set((catalog?.providers ?? []).map((e) => e.api))]);
+  const modelCandidates = $derived(catalogModelCandidates(catalog));
   const routeIcon = $derived(resolveRouteIcon(route, catalogEntry));
-  const displayName = $derived(catalogEntry?.label ?? route.provider);
+  const displayName = $derived(routeDisplayLabel(route, catalog));
+  const avatarLetter = $derived(routeLetter(route, displayName));
+  const avatarColor = $derived(routeAvatarColor(route));
   const keyReady = $derived(
     view?.providers.some((p) => p.provider === route.provider && p.configured) ?? false,
   );
@@ -72,7 +90,12 @@
   // svelte-ignore state_referenced_locally
   let baseURLDraft = $state(route.baseURL);
   // svelte-ignore state_referenced_locally
-  let apiDraft = $state(route.api ?? "");
+  let apiDraft = $state(route.api ?? catalogEntry?.api ?? DEFAULT_API);
+  /** Models 草稿（dirty-gated Save；条目字段见 ModelListItem）。 */
+  // svelte-ignore state_referenced_locally
+  let modelsDraft = $state<RouteModelEntry[]>(route.models.map((entry) => ({ ...entry })));
+  // svelte-ignore state_referenced_locally
+  let modelsValid = $state<boolean[]>(route.models.map(() => true));
   /** 活动模型草稿（挂载时初始化一次；避免无关补丁回写打断编辑中草稿）。 */
   const initialSelection = agentRuntimeConfig.view?.settings.model;
   // svelte-ignore state_referenced_locally
@@ -94,7 +117,6 @@
   let addedHint = $state(autoFocusCredential);
   let credInput = $state<HTMLInputElement | null>(null);
   let rejection = $state<string | null>(null);
-  let modelsError = $state<string | null>(null);
   let presetSaved = $state(false);
   let endpointSaved = $state(false);
   let collapseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -102,17 +124,22 @@
   let endpointTimer: ReturnType<typeof setTimeout> | null = null;
 
   const modelOptions = $derived.by(() => {
-    const ids = route.models.map((entry) => entry.id);
+    const ids = modelsDraft.map((entry) => entry.id).filter((id) => id.length > 0);
     if (isActiveRoute && view !== null && !ids.includes(view.settings.model.model)) {
       ids.unshift(view.settings.model.model);
     }
     return ids;
   });
+  /** Active effort 建议词 = 当前模型的 efforts（数据源派生，无硬编码数组）。 */
+  const effortSuggestions = $derived(
+    modelsDraft.find((entry) => entry.id === modelDraft)?.efforts ?? [],
+  );
   const endpointDirty = $derived(
     baseURLDraft.trim() !== route.baseURL ||
-      (catalogEntry === undefined &&
-        (apiDraft.trim() || "anthropic-messages") !== (route.api ?? "")),
+      apiDraft !== (route.api ?? catalogEntry?.api ?? DEFAULT_API),
   );
+  const modelsDirty = $derived(JSON.stringify(modelsDraft) !== JSON.stringify(route.models));
+  const modelsAllValid = $derived(modelsValid.every((flag) => flag));
   const modelDirty = $derived(
     view !== null &&
       isActiveRoute &&
@@ -157,9 +184,16 @@
     return true;
   }
 
-  /** icon = undefined 表示清除覆盖（回退目录图标/字母头像）；显式置 undefined 盖掉旧值。 */
-  async function applyIcon(icon: string | undefined): Promise<void> {
-    await patchRoute({ ...route, icon });
+  /** icon/iconColor/iconLetter/iconSuppressed = undefined 表示清除覆盖（回退
+   * 目录图标/确定性色相/首字母/不抑制）。iconSuppressed = true 表示显式无图标
+   * （目录 provider 也能选 Letter 头像；codex R7 B3）。 */
+  async function applyIdentity(patch: {
+    icon?: string;
+    iconColor?: string;
+    iconLetter?: string;
+    iconSuppressed?: boolean;
+  }): Promise<void> {
+    await patchRoute({ ...route, ...patch });
   }
 
   async function saveEndpoint(): Promise<void> {
@@ -168,29 +202,37 @@
       rejection = "Custom route needs an http(s) base URL.";
       return;
     }
-    const ok = await patchRoute({
-      ...route,
-      baseURL,
-      ...(catalogEntry === undefined ? { api: apiDraft.trim() || "anthropic-messages" } : {}),
-    });
+    const ok = await patchRoute({ ...route, baseURL, api: apiDraft });
     if (!ok) return;
-    // 保存确认（PM 修复 6c）：1.5s 绿色 Saved ✓；组件卸载清 timer。
+    // 保存确认：1.5s 绿色 Saved ✓；组件卸载清 timer。
     endpointSaved = true;
     if (endpointTimer !== null) clearTimeout(endpointTimer);
     endpointTimer = setTimeout(() => (endpointSaved = false), 1500);
   }
 
-  /** tag 增删即时补丁；保留既有 contextWindow 等 per-model 字段。 */
-  async function applyModels(next: string[]): Promise<void> {
-    if (next.length === 0) {
-      modelsError = "A route needs at least one model id.";
-      return;
-    }
-    modelsError = null;
-    await patchRoute({
-      ...route,
-      models: next.map((id) => route.models.find((entry) => entry.id === id) ?? { id }),
-    });
+  /** Models dirty Save（R7 8.7：全量补丁，条目级编辑/校验在 ModelListItem）。 */
+  async function saveModels(): Promise<void> {
+    if (!modelsDirty || !modelsAllValid || modelsDraft.length === 0) return;
+    await patchRoute({ ...route, models: modelsDraft.map((entry) => ({ ...entry })) });
+  }
+
+  function setModelAt(index: number, next: RouteModelEntry): void {
+    modelsDraft = modelsDraft.map((entry, i) => (i === index ? next : entry));
+  }
+
+  function setModelValidity(index: number, valid: boolean): void {
+    if (modelsValid[index] === valid) return;
+    modelsValid = modelsValid.map((flag, i) => (i === index ? valid : flag));
+  }
+
+  function removeModel(index: number): void {
+    modelsDraft = modelsDraft.filter((_, i) => i !== index);
+    modelsValid = modelsValid.filter((_, i) => i !== index);
+  }
+
+  function addModel(): void {
+    modelsDraft = [...modelsDraft, { id: "" }];
+    modelsValid = [...modelsValid, false];
   }
 
   function toggleCredential(): void {
@@ -262,10 +304,13 @@
     saveProviderPreset({
       provider: route.provider,
       label: displayName,
-      ...(route.api ? { api: route.api } : {}),
+      api: apiDraft,
       baseURL: route.baseURL,
       models: route.models.map((entry) => entry.id),
       ...(route.icon ? { icon: route.icon } : {}),
+      ...(route.iconColor ? { iconColor: route.iconColor } : {}),
+      ...(route.iconLetter ? { iconLetter: route.iconLetter } : {}),
+      ...(route.iconSuppressed ? { iconSuppressed: true } : {}),
     });
     presetSaved = true;
     if (presetTimer !== null) clearTimeout(presetTimer);
@@ -274,15 +319,20 @@
 </script>
 
 <div class="space-y-3">
-  <!-- 块 1 · Identity -->
+  <!-- 块 1 · Identity（图标 + 颜色 + Letter 三控制） -->
   <div class="flex items-start gap-2">
     <IconPicker
       icon={routeIcon}
+      letter={avatarLetter}
+      color={avatarColor}
       provider={route.provider}
       label={displayName}
       catalogIcons={catalogIconList}
       disabled={agentRuntimeConfig.updating}
-      onPick={(icon) => void applyIcon(icon)}
+      onPick={(icon) => void applyIdentity({ icon, iconSuppressed: false })}
+      onSuppress={() => void applyIdentity({ icon: undefined, iconSuppressed: true })}
+      onColor={(iconColor) => void applyIdentity({ iconColor })}
+      onLetter={(iconLetter) => void applyIdentity({ iconLetter })}
     />
     <div class="min-w-0 flex-1">
       <p
@@ -356,7 +406,7 @@
     </section>
   {/if}
 
-  <!-- 块 3 · Endpoint -->
+  <!-- 块 3 · Endpoint（baseURL + api Select；脏态显式 Save） -->
   <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Endpoint">
     <div class="flex items-center justify-between">
       <span class="text-[11px] font-medium text-muted-foreground">Endpoint</span>
@@ -387,44 +437,68 @@
         Save
       </Button>
     </div>
-    {#if catalogEntry === undefined}
-      <label class="block space-y-0.5">
-        <span class="text-[10px] text-muted-foreground">
-          API protocol (custom route — not in catalog)
-        </span>
-        <Input
-          class="h-8 text-xs"
-          aria-label="API protocol"
-          placeholder="anthropic-messages"
-          list="route-api-candidates"
-          bind:value={apiDraft}
-          disabled={agentRuntimeConfig.updating}
-        />
-        <datalist id="route-api-candidates">
-          {#each apiCandidates as candidate (candidate)}
-            <option value={candidate}></option>
-          {/each}
-        </datalist>
-      </label>
-    {/if}
+    <label class="block space-y-0.5">
+      <span class="text-[10px] text-muted-foreground">API protocol</span>
+      <select
+        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+        aria-label="API protocol"
+        bind:value={apiDraft}
+        disabled={agentRuntimeConfig.updating}
+      >
+        {#each DSH_ROUTE_API_PROTOCOLS as protocol (protocol)}
+          <option value={protocol}>{protocol}</option>
+        {/each}
+      </select>
+    </label>
   </section>
 
-  <!-- 块 4 · Models（即时应用，无 Save） -->
+  <!-- 块 4 · Models（ModelListItem 列表 + dirty Save；R7 8.7） -->
   <section class="space-y-1.5" aria-label="Models">
     <div class="flex items-center justify-between">
       <span class="text-[11px] font-medium text-muted-foreground">Models</span>
-      <span class="text-[10px] text-muted-foreground">Edits apply immediately.</span>
+      <div class="flex items-center gap-1.5">
+        {#if modelsDraft.length === 0}
+          <span class="text-[10px] text-amber-700">A route needs at least one model id.</span>
+        {/if}
+        <Button
+          size="sm"
+          variant="ghost"
+          class="h-6 px-2 text-[11px]"
+          disabled={agentRuntimeConfig.updating}
+          onclick={addModel}
+        >
+          + Add model
+        </Button>
+        <Button
+          size="sm"
+          class="h-6 px-2.5 text-[11px]"
+          disabled={!modelsDirty ||
+            !modelsAllValid ||
+            modelsDraft.length === 0 ||
+            agentRuntimeConfig.updating}
+          onclick={() => void saveModels()}
+        >
+          Save
+        </Button>
+      </div>
     </div>
-    <ModelTagsInput
-      selected={route.models.map((entry) => entry.id)}
-      candidates={catalogEntry?.models ?? []}
-      placeholder={catalogEntry ? "Add model id…" : "Add model id (no catalog candidates)…"}
-      disabled={agentRuntimeConfig.updating}
-      onchange={(next) => void applyModels(next)}
-    />
-    {#if modelsError}
-      <p class="text-[10px] text-amber-700" role="alert">{modelsError}</p>
-    {/if}
+    <div class="space-y-1.5">
+      {#each modelsDraft as entry, index (index)}
+        <ModelListItem
+          model={entry}
+          candidates={modelCandidates}
+          routeModels={allRouteModels}
+          api={apiDraft}
+          baseURL={baseURLDraft.trim()}
+          provider={route.provider}
+          apiKeyConfigured={keyReady}
+          disabled={agentRuntimeConfig.updating}
+          onchange={(next) => setModelAt(index, next)}
+          onremove={() => removeModel(index)}
+          onvalidity={(valid) => setModelValidity(index, valid)}
+        />
+      {/each}
+    </div>
   </section>
 
   <!-- 块 5 · Active model -->
@@ -459,10 +533,16 @@
             <Input
               class="h-8 text-xs"
               aria-label="Reasoning effort"
-              placeholder="low / medium / high"
+              placeholder={effortSuggestions.length > 0 ? effortSuggestions.join(" / ") : "effort"}
+              list="active-effort-suggestions"
               bind:value={effortDraft}
               disabled={agentRuntimeConfig.updating}
             />
+            <datalist id="active-effort-suggestions">
+              {#each effortSuggestions as suggestion (suggestion)}
+                <option value={suggestion}></option>
+              {/each}
+            </datalist>
           </label>
         </div>
         <div class="flex justify-end">

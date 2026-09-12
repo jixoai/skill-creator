@@ -29,6 +29,12 @@ export const ProviderPresetSchema = z.object({
   baseURL: z.string().min(1),
   models: z.array(z.string().min(1)).min(1),
   icon: z.string().min(1).optional(),
+  /** 字母头像文字（R7 8.2 三控制分离；旧 blob 缺省回退首字母）。 */
+  iconLetter: z.string().min(1).max(2).optional(),
+  /** 字母头像底色（R7 8.2；旧 blob 缺省回退确定性色相）。 */
+  iconColor: z.string().min(1).optional(),
+  /** 显式无图标（codex R7 B3；抑制目录回退，走 Letter 头像）。 */
+  iconSuppressed: z.boolean().optional(),
 });
 /** 本地 provider 预设。 */
 export type LocalProviderPreset = z.infer<typeof ProviderPresetSchema>;

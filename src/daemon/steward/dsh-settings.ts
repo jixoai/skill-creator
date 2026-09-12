@@ -17,7 +17,9 @@
  *       返回类型化失败，绝不静默回退。
  *   [3] 脱敏 session stream 环形投影：给后续 DSH client plugin 的进程内实时帧；
  *       retention/projection 由 settings.session 控制。
- * 妥协声明：三意图同文件，因为 stream 投影的保留策略就是 settings.session 的执行面，
+ *   [4] 路由连接测试委托面（R7 2026-09-12）：协议探测逻辑已物理拆分到
+ *       dsh-route-connection.ts；本文件只保留 service 门面方法（RPC 面消费）。
+ * 妥协声明：[1][3] 同文件，因为 stream 投影的保留策略就是 settings.session 的执行面，
  * 物理拆分会造成双向依赖；帧缓冲只驻内存（durable 回放已由 session log + audit 承担）。
  */
 import { promises as fsp } from "node:fs";
@@ -41,7 +43,13 @@ import {
 } from "../../shared/contracts/dsh-runtime.js";
 import type { SkillToolCall } from "../../shared/contracts/skill-steward.js";
 import { DomainError } from "../domain-error.js";
-import { dshRouteApiKeyEnv, type DshModelRoute } from "../../shared/contracts/dsh-runtime.js";
+import {
+  dshRouteApiKeyEnv,
+  type DshModelRoute,
+  type DshRouteConnectionTestInput,
+  type DshRouteConnectionTestResult,
+} from "../../shared/contracts/dsh-runtime.js";
+import { testDshRouteConnection } from "./dsh-route-connection.js";
 import { homeDir } from "../../shared/paths.js";
 import { resolveDefaultDshHome } from "../dsh-host-lifecycle.js";
 import { atomicWriteUtf8 } from "../path-safety.js";
@@ -61,6 +69,23 @@ export function defaultDshStewardSettings(): DshStewardSettings {
     session: { streamRetention: 100, streamProjection: "enabled" },
     defaultMode: "free",
     modelRoutes: [],
+  };
+}
+
+/**
+ * 桥接模型条目（R7 显式白名单）：DSH settings.yaml 的 models 只接受 id +
+ * contextWindow。产品级富字段（name/efforts/maxOutputTokens/inputTypes/
+ * outputTypes）与路由级 UI 字段（icon/iconLetter/iconColor）一律在桥接层
+ * 剥离——pi-ai profile 未知键会被内核拒收。富字段的持久真源是 steward-store
+ * JSON（DshStewardSettingsSchema.modelRoutes，safeParse 完整保留）。
+ */
+export function dshBridgeModelEntry(model: DshModelRoute["models"][number]): {
+  id: string;
+  contextWindow?: number;
+} {
+  return {
+    id: model.id,
+    ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
   };
 }
 
@@ -86,11 +111,9 @@ async function syncDshModelRoutes(routes: readonly DshModelRoute[]): Promise<voi
       apiKeyEnv: dshRouteApiKeyEnv(route.provider),
       ...(route.api ? { api: route.api } : {}),
       baseURL: route.baseURL,
-      // icon 是本地 UI 字段，不进 DSH profile（未知键内核拒收）。
-      models: route.models.map((model) => ({
-        id: model.id,
-        ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
-      })),
+      // 模型条目走显式白名单（id + contextWindow）；icon/iconLetter/iconColor
+      // 等产品级字段不进 DSH profile（未知键内核拒收）。
+      models: route.models.map(dshBridgeModelEntry),
     };
   }
   doc["llm-pi-ai"] = { providers };
@@ -225,6 +248,17 @@ export interface DshSettingsService {
   listStreamFrames(input: DshSessionStreamsInput): Promise<DshSessionStreamFrame[]>;
   /** 构造 DSH round 用的帧收集器（创建时固化 projection/retention 快照）。 */
   createStreamCollector(runId: string, sessionId: string): Promise<DshStreamCollector>;
+  /**
+   * 路由连接测试（R7）：用户显式触发的外呼探活，草案即可测。apiKey 缺省即
+   * failed（UI 需先保存 key——configured 状态是前置条件）。失败也是值，永不 throw。
+   */
+  testConnection(input: DshRouteConnectionTestInput): Promise<DshRouteConnectionTestResult>;
+}
+
+/** 服务构造选项（测试注入连接测试的 fetch 面；缺省用调用时全局 fetch）。 */
+export interface DshSettingsServiceOptions {
+  routeConnectionFetch?: typeof fetch;
+  routeConnectionTimeoutMs?: number;
 }
 
 /** 服务端内部状态（每次调用从盘读取 settings/credentials；帧缓冲归实例）。 */
@@ -300,7 +334,9 @@ function settingsEqual(a: DshStewardSettings, b: DshStewardSettings): boolean {
 }
 
 /** 创建 settings 服务（home 由 setHomeOverride 隔离测试）。 */
-export function createDshSettingsService(): DshSettingsService {
+export function createDshSettingsService(
+  options: DshSettingsServiceOptions = {},
+): DshSettingsService {
   let frames: DshSessionStreamFrame[] = [];
   let seq = 0;
 
@@ -415,6 +451,26 @@ export function createDshSettingsService(): DshSettingsService {
         };
       }
       return { outcome: "live", model: settings.model, apiKey };
+    },
+
+    async testConnection(input) {
+      // 委托协议探针（dsh-route-connection.ts）；缺省 fetch 在调用时解析全局，
+      // vi.stubGlobal 亦可生效。apiKey 缺省且带 provider 时从已存凭据注入
+      // （UI 永不回显 key；仍无 key → typed no-key 失败）。
+      let probeInput = input;
+      if (input.apiKey === undefined && input.provider !== undefined) {
+        const { credentials } = await loadInternals();
+        const stored = credentials.get(input.provider);
+        if (stored !== undefined) {
+          probeInput = { ...input, apiKey: stored };
+        }
+      }
+      return testDshRouteConnection(probeInput, {
+        ...(options.routeConnectionFetch ? { fetchImpl: options.routeConnectionFetch } : {}),
+        ...(options.routeConnectionTimeoutMs !== undefined
+          ? { timeoutMs: options.routeConnectionTimeoutMs }
+          : {}),
+      });
     },
 
     async appendStreamFrame(frame) {

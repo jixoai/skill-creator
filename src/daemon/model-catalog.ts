@@ -9,8 +9,10 @@
  * exports 亦不暴露 models 子路径），fs 读 JSON —— 与内核运行时同一份目录事实。
  *
  * 正交意图：
- *   [1] 投影：provider → {label(known 覆写/美化), api, baseURL, models[{id,name,image}]}；
- *       重点 provider 置顶，其余字母序；排除内部 faux。
+ *   [1] 投影：provider → {label(known 覆写/美化), api, baseURL, models[{id,name,
+ *       image,supportsReasoningEffort}]}；重点 provider 置顶，其余字母序；排除
+ *       内部 faux。supportsReasoningEffort 只透传 pi-ai compat 布尔，缺失 =
+ *       undefined 不伪造（codex R7 B2：effort 补全的候选门数据源）。
  *   [2] 单次加载缓存（目录随包版本变化，进程内不变）。
  * 妥协声明：resolve 失败返回 typed UNAVAILABLE——不静默空目录。
  */
@@ -79,6 +81,7 @@ function parseCatalogFile(raw: unknown): Array<{
   baseUrl?: string;
   contextWindow?: number;
   input?: unknown;
+  supportsReasoningEffort?: boolean;
 }> {
   if (typeof raw !== "object" || raw === null) return [];
   const models: Array<{
@@ -88,6 +91,7 @@ function parseCatalogFile(raw: unknown): Array<{
     baseUrl?: string;
     contextWindow?: number;
     input?: unknown;
+    supportsReasoningEffort?: boolean;
   }> = [];
   for (const byApi of Object.values(raw as Record<string, unknown>)) {
     if (typeof byApi !== "object" || byApi === null) continue;
@@ -100,8 +104,13 @@ function parseCatalogFile(raw: unknown): Array<{
         baseUrl?: unknown;
         contextWindow?: unknown;
         input?: unknown;
+        compat?: unknown;
       };
       if (typeof m.id !== "string" || typeof m.api !== "string") continue;
+      const compat =
+        typeof m.compat === "object" && m.compat !== null
+          ? (m.compat as { supportsReasoningEffort?: unknown })
+          : {};
       models.push({
         id: m.id,
         name: typeof m.name === "string" ? m.name : undefined,
@@ -114,6 +123,10 @@ function parseCatalogFile(raw: unknown): Array<{
             ? m.contextWindow
             : undefined,
         input: m.input,
+        supportsReasoningEffort:
+          typeof compat.supportsReasoningEffort === "boolean"
+            ? compat.supportsReasoningEffort
+            : undefined,
       });
     }
   }
@@ -154,6 +167,9 @@ export function listModelProviders(): ModelProviderCatalogEntry[] {
         ...(model.name ? { name: model.name } : {}),
         image: Array.isArray(model.input) && model.input.includes("image"),
         ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+        ...(model.supportsReasoningEffort !== undefined
+          ? { supportsReasoningEffort: model.supportsReasoningEffort }
+          : {}),
       })),
     });
   }
