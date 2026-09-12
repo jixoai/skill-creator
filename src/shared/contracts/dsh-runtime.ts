@@ -226,6 +226,8 @@ export const ModelProviderCatalogEntrySchema = z.object({
         name: z.string().optional(),
         /** 模型声明接受图片输入。 */
         image: z.boolean(),
+        /** 上下文窗口（pi-ai 目录 contextWindow，token 数；缺省由 UI 回退假值）。 */
+        contextWindow: z.number().int().positive().optional(),
       }),
     )
     .min(1),
@@ -248,6 +250,9 @@ export const DshModelRouteSchema = z.object({
   /** wire 协议（目录路由可省略；自定义路由必填，如 anthropic-messages）。 */
   api: z.string().min(1).optional(),
   baseURL: z.string().min(1),
+  /** 本地 UI 字段：图标覆盖（dataURL；缺省回退目录图标/字母头像）。不写 DSH
+   * settings.yaml（桥接层剥离——pi-ai profile 未知键会被内核拒）。 */
+  icon: z.string().min(1).optional(),
   /** 该路由的模型目录（空缺字段继承 pi-ai 装配目录同名模型）。 */
   models: z
     .array(
@@ -459,6 +464,9 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   "status",
   "tool-call",
   "tool-result",
+  /** 工具参数流式增量（assistant/chunk tool-call-delta 的合并投影；store 按
+   * toolCallId 归并到 open 工具行，终帧 tool-call 以完整参数收敛）。 */
+  "tool-args-delta",
   "assistant-text",
   /** 流式文本增量（assistant/chunk text-delta 的合并投影；终帧 assistant-text 整段替换）。 */
   "assistant-delta",
@@ -491,12 +499,37 @@ export const DshSessionStreamFrameSchema = z.object({
   sessionId: z.string().min(1),
   kind: DshSessionStreamFrameKindSchema,
   toolName: z.string().min(1).optional(),
+  /** 工具调用关联键（tool-call / tool-args-delta / tool-result 共用；call+result
+   * 合并行匹配的第一优先级，缺省时 store 回退同 turn 同名最近未闭合项）。 */
+  toolCallId: z.string().min(1).optional(),
   text: z.string().optional(),
   /** 结构化附载（写入前已过 redactDshPayload）。 */
   payload: z.unknown().optional(),
 });
 /** session stream 帧。 */
 export type DshSessionStreamFrame = z.infer<typeof DshSessionStreamFrameSchema>;
+
+/**
+ * user-text 帧的附件回显元数据（redesign-model-tabs-and-agent-panel §4.2）：仅
+ * kind + 名字（+ 可选缩略 dataURL），不回传字节。UI 渲染优先级 = 乐观本地预览
+ * > payload.attachments（回放）> 文件名 chip。
+ */
+export const DshUserTextAttachmentSchema = z.object({
+  kind: z.enum(["image", "file"]),
+  name: z.string().min(1).optional(),
+  /** ≤96px 缩略 dataURL（仅 image；daemon 侧可选生成，缺省以名字 chip 回显）。
+   * 形状加界（2026-09-12 codex 阻塞 4）：必须是指定 image MIME 的 base64 dataURL
+   * 且总长 ≤256KiB；畸形 thumb 按领域投影为 undefined（条目存活，回退名字 chip），
+   * 不炸整条 safeParse、不写回。 */
+  thumb: z
+    .string()
+    .regex(/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/)
+    .max(256 * 1024)
+    .optional()
+    .catch(undefined),
+});
+/** user-text 附件回显元数据。 */
+export type DshUserTextAttachment = z.infer<typeof DshUserTextAttachmentSchema>;
 
 /** session stream 查询输入。 */
 export const DshSessionStreamsInputSchema = z.object({

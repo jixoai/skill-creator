@@ -1,60 +1,66 @@
 <!--
-  设置面 Model 分区（迭代四 2026-09-11 重写：全量目录画廊）。
-  用户原始需求 [2026-09-11]：「直接基于 models.generated.js 去提供可用提供商
-  （记住提供 filter）……每个小卡片显示 icon、title、url。选中后可以进一步配置
-  可用模型。Custom 档也非常重要。」
+  设置面 Model 分区（redesign-model-tabs-and-agent-panel S1 重写：tabs 化）。
+  用户原始需求 [2026-09-12]：「ModelSettingsSection 里不再有『画廊 / Routes 列表 /
+  Custom 表单』三块混排。画廊只活在 NewTab 的 pick 态里；Routes 列表被 tab 条取代；
+  Custom 表单与 tab 内容是同一组件的两个实例化（新建态 vs 编辑态）。」
   正交意图：
-  1. 全量 provider 画廊（agent.models.catalog = pi-ai 装配目录投影）：搜索过滤 +
-     卡片（字母头像/title/baseURL/模型数）。
-  2. 选中 provider → 模型 checkbox 配置 → 保存进 modelRoutes（桥接 DSH 热面）。
-  3. Custom/Local 保留为基础档；活动模型 + 只写 key 面不变。
+  1. tab 条：每条 settings.modelRoutes 一个 tab（16px 图标三级回退 + 12px 名 +
+     key 缺失 amber 点 + 活动路由 primary 下划线）；横滚（滚轮纵转横 + 两侧渐隐
+     mask），固定 + New；←/→ 焦点移动，Delete 触发删除确认。
+  2. 组件路由：RouteTabContent（选中路由）/ NewRouteTab（pick|form 两态）/
+  空态 onboarding；tab 选中是纯视图状态，永不写 settings。
+  3. 目录与警示：catalog RPC 代次门加载（沿旧逻辑，供 tabs/NewTab/IconPicker 共
+  享）；活动模型悬空于 Routes 外（env 注入）→ amber chip + 说明行，点击跳 NewTab
+  预填 provider 名。
 -->
 <script lang="ts">
+  import { tick } from "svelte";
   import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import ModelTagsInput from "./ModelTagsInput.svelte";
-  import type { DshModelRoute, ModelProviderCatalogEntry } from "$shared/contracts/dsh-runtime.js";
-  import {
-    agentRuntimeConfig,
-    clearAgentCredential,
-    setAgentCredential,
-    updateAgentSettings,
-  } from "$lib/stores/agent.svelte";
-  import { getRpc } from "$lib/stores/connection.svelte";
+  import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
+  import NewRouteTab from "./NewRouteTab.svelte";
+  import RouteTabContent from "./RouteTabContent.svelte";
+  import { avatarHue, isLetterAvatar, resolveRouteIcon } from "./route-icon.js";
+  import { agentRuntimeConfig, updateAgentSettings } from "$lib/stores/agent.svelte";
+  import { getConnectionGeneration, getRpc } from "$lib/stores/connection.svelte";
   import { createRequestGenerationGate } from "$lib/stores/request-generation.js";
-  import { getConnectionGeneration } from "$lib/stores/connection.svelte";
+  import type { ModelProviderCatalogEntry } from "$shared/contracts/dsh-runtime.js";
 
+  /** 选中 tab（null = NewTab 视图或空态）；纯视图状态。 */
+  let selected = $state<string | null>(null);
+  let newOpen = $state(false);
+  let newInitialMode = $state<"pick" | "form">("pick");
+  let newSeed = $state<{ provider: string; models?: string[] } | null>(null);
+  /** NewRouteTab 挂载代次（每次打开 +1，保证 seed/mode 重新实例化）。 */
+  let newTabSession = $state(0);
+  /** 新建成功后的粘 key 引导标记（RouteTabContent 消费后清除）。 */
+  let pendingKeyFocus = $state<string | null>(null);
+  let removeTarget = $state<string | null>(null);
+  let removeOpen = $state(false);
+  let removing = $state(false);
   let rejection = $state<string | null>(null);
-  /** 加路由成功提示（引导粘 key）。 */
-  let routeAddedFor = $state<string | null>(null);
-  let keySection = $state<HTMLElement | null>(null);
-  let model = $state("");
-  let reasoningEffort = $state("");
-  let apiKeyDraft = $state("");
 
-  /** 画廊：目录 + 过滤 + 选中 + 勾选模型。 */
+  /** 画廊目录（一次加载；失败可由下一轮 open 重试）。 */
   let catalog = $state<{ providers: ModelProviderCatalogEntry[] } | null>(null);
   let catalogError = $state<string | null>(null);
   let catalogLoading = $state(false);
-  let filter = $state("");
-  let selected = $state<ModelProviderCatalogEntry | null>(null);
-  let selectedModels = $state<Set<string>>(new Set());
-
-  /** Custom/Local 表单。 */
-  let routeFormOpen = $state(false);
-  let routeName = $state("");
-  let routeBaseURL = $state("");
-  let routeApi = $state("anthropic-messages");
-  let routeModels = $state<string[]>([]);
 
   const catalogGate = createRequestGenerationGate(getConnectionGeneration);
 
   const view = $derived(agentRuntimeConfig.view);
+  const routes = $derived(view?.settings.modelRoutes ?? []);
+  const selectedRoute = $derived(routes.find((route) => route.provider === selected));
+  /** 活动模型引用了 Routes 之外的 provider（env 注入）→ tab 条右端 amber 警示。 */
+  const activeOutsideRoutes = $derived(
+    view !== null && !routes.some((route) => route.provider === view.settings.model.provider),
+  );
+
+  // 选中态归一：路由消失回退首 tab；NewTab 打开时不动选中。
   $effect(() => {
-    const selection = view?.settings.model;
-    model = selection ? `${selection.provider}::${selection.model}` : "";
-    reasoningEffort = selection?.reasoningEffort ?? "";
-    apiKeyDraft = "";
+    if (newOpen) return;
+    if (selected !== null && !routes.some((route) => route.provider === selected)) {
+      selected = null;
+    }
+    if (selected === null && routes.length > 0) selected = routes[0]!.provider;
   });
 
   // 打开 Model 分区即拉目录（一次；失败可由下一轮 open 重试）。
@@ -83,79 +89,6 @@
     }
   }
 
-  /** Custom 表单的补全候选：routeName 命中目录 provider 时用该家模型，否则空。 */
-  const customCandidates = $derived.by(() => {
-    const name = routeName.trim();
-    const entry = catalog?.providers.find((provider) => provider.provider === name);
-    return entry?.models ?? [];
-  });
-
-  const filtered = $derived.by(() => {
-    const needle = filter.trim().toLowerCase();
-    const providers = catalog?.providers ?? [];
-    if (needle.length === 0) return providers;
-    return providers.filter(
-      (entry) =>
-        entry.label.toLowerCase().includes(needle) ||
-        entry.provider.toLowerCase().includes(needle) ||
-        entry.baseURL.toLowerCase().includes(needle),
-    );
-  });
-
-  const modelOptions = $derived.by(() => {
-    const options: Array<{ value: string; label: string }> = [];
-    for (const route of view?.settings.modelRoutes ?? []) {
-      for (const entry of route.models) {
-        options.push({
-          value: `${route.provider}::${entry.id}`,
-          label: `${route.provider} · ${entry.id}`,
-        });
-      }
-    }
-    const selection = view?.settings.model;
-    if (
-      selection &&
-      !options.some((option) => option.value === `${selection.provider}::${selection.model}`)
-    ) {
-      // 引用不在 Routes 表的路由（env 注入等）：如实标注来源，不伪装成可选路由。
-      options.unshift({
-        value: `${selection.provider}::${selection.model}`,
-        label: `${selection.provider} · ${selection.model} (outside Routes)`,
-      });
-    }
-    return options;
-  });
-
-  /** 活动模型引用了 Routes 之外的路由（env 注入）→ 下拉警示。 */
-  const activeOutsideRoutes = $derived.by(() => {
-    if (!view || !model.includes("::")) return false;
-    const [provider] = model.split("::");
-    return !(view.settings.modelRoutes ?? []).some((route) => route.provider === provider);
-  });
-
-  const modelDirty = $derived(
-    view !== null &&
-      ((model || "") !== `${view.settings.model.provider}::${view.settings.model.model}` ||
-        (reasoningEffort || "") !== (view.settings.model.reasoningEffort ?? "")),
-  );
-
-  const keyTarget = $derived.by(() => model.split("::")[0] ?? "");
-  const credentialConfigured = $derived(
-    view?.providers.find((item) => item.provider === keyTarget)?.configured ?? false,
-  );
-
-  /** 该 provider 已有路由（画廊卡片 Added 徽标 + route 行 key 状态用）。 */
-  function routeOf(provider: string): DshModelRoute | undefined {
-    return (view?.settings.modelRoutes ?? []).find((route) => route.provider === provider);
-  }
-
-  /** 卡片头像底色（provider id 确定性色相）。 */
-  function avatarHue(provider: string): number {
-    let hash = 0;
-    for (const ch of provider) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
-    return hash;
-  }
-
   async function apply(patch: Parameters<typeof updateAgentSettings>[0]): Promise<boolean> {
     const result = await updateAgentSettings(patch);
     if (!result) return false;
@@ -171,442 +104,285 @@
     return true;
   }
 
-  async function saveModel(): Promise<void> {
-    if (!modelDirty || !model.includes("::")) return;
-    const [provider, modelId] = model.split("::");
-    await apply({
-      model: {
-        provider,
-        model: modelId,
-        ...(reasoningEffort.trim().length > 0 ? { reasoningEffort: reasoningEffort.trim() } : {}),
-      },
+  function openNew(
+    mode: "pick" | "form",
+    seed: { provider: string; models?: string[] } | null = null,
+  ): void {
+    newSeed = seed;
+    newInitialMode = mode;
+    newTabSession += 1;
+    newOpen = true;
+    selected = null;
+  }
+
+  /** NewRouteTab 成功落库：选中新 tab 并挂起粘 key 引导。 */
+  async function onRouteAdded(provider: string): Promise<void> {
+    newOpen = false;
+    selected = provider;
+    pendingKeyFocus = provider;
+    // 新 tab 滚入视野（PM 修复 6b）：等 DOM 更新出 tab 按钮后，横滚容器内
+    // nearest 对齐 + smooth；tabRefs 已按 provider 建索引。
+    await tick();
+    tabRefs[provider]?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }
+
+  /** env 活动路由收编入口：NewTab form 态预填 provider 名 + 当前模型。 */
+  function addEnvActiveRoute(): void {
+    if (!view) return;
+    openNew("form", {
+      provider: view.settings.model.provider,
+      models: [view.settings.model.model],
     });
   }
 
-  function selectProvider(entry: ModelProviderCatalogEntry): void {
-    selected = entry;
-    const picks = [...entry.models]
-      .sort((a, b) => Number(b.image) - Number(a.image))
-      .slice(0, 4)
-      .map((m) => m.id);
-    selectedModels = new Set(picks);
+  /** 打开删除确认（tab 条 Delete 键与 RouteTabContent 的 Remove 按钮共用）。 */
+  function requestRemove(provider: string | null | undefined): void {
+    if (!provider) return;
+    removeTarget = provider;
+    removeOpen = true;
   }
 
-  async function saveSelectedRoute(): Promise<void> {
-    const entry = selected;
-    if (!entry || selectedModels.size === 0) {
-      rejection = "Pick at least one model for this route.";
+  async function confirmRemove(): Promise<void> {
+    const target = removeTarget;
+    if (target === null) return;
+    removing = true;
+    const ok = await apply({ modelRoutes: routes.filter((route) => route.provider !== target) });
+    removing = false;
+    if (ok) {
+      removeOpen = false;
+      removeTarget = null;
+    }
+  }
+
+  // ---- tab 条横滚（滚轮纵转横，non-passive 才能消费 deltaY）----
+  let stripEl = $state<HTMLElement | null>(null);
+  let canLeft = $state(false);
+  let canRight = $state(false);
+  let tabRefs = $state<Record<string, HTMLButtonElement | null>>({});
+
+  function refreshScrollState(): void {
+    const el = stripEl;
+    if (!el) {
+      canLeft = false;
+      canRight = false;
       return;
     }
-    const routes = view?.settings.modelRoutes ?? [];
-    if (routes.some((existing) => existing.provider === entry.provider)) {
-      rejection = `Route "${entry.provider}" already exists.`;
-      return;
-    }
-    const route: DshModelRoute = {
-      provider: entry.provider,
-      api: entry.api,
-      baseURL: entry.baseURL,
-      models: entry.models.filter((m) => selectedModels.has(m.id)).map((m) => ({ id: m.id })),
+    canLeft = el.scrollLeft > 0;
+    canRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+  }
+
+  $effect(() => {
+    const el = stripEl;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      el.scrollLeft += event.deltaY;
+      event.preventDefault();
     };
-    if (await apply({ modelRoutes: [...routes, route] })) {
-      model = `${entry.provider}::${[...selectedModels][0]}`;
-      selected = null;
-      routeAddedFor = entry.label;
-      keySection?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }
-
-  async function saveCustomRoute(): Promise<void> {
-    const provider = routeName.trim();
-    const baseURL = routeBaseURL.trim();
-    const ids = routeModels;
-    if (provider.length === 0 || !/^https?:\/\//.test(baseURL) || ids.length === 0) {
-      rejection = "Custom route needs a name, an http(s) base URL, and model ids.";
-      return;
-    }
-    const routes = view?.settings.modelRoutes ?? [];
-    if (routes.some((existing) => existing.provider === provider)) {
-      rejection = `Route "${provider}" already exists.`;
-      return;
-    }
-    const route: DshModelRoute = {
-      provider,
-      api: routeApi.trim() || "anthropic-messages",
-      baseURL,
-      models: ids.map((id) => ({ id })),
+    el.addEventListener("wheel", onWheel, { passive: false });
+    const observer = new ResizeObserver(() => refreshScrollState());
+    observer.observe(el);
+    refreshScrollState();
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      observer.disconnect();
     };
-    if (await apply({ modelRoutes: [...routes, route] })) {
-      routeFormOpen = false;
-      routeName = "";
-      routeBaseURL = "";
-      routeModels = [];
-    }
-  }
+  });
+  // 路由数量变化后重算渐隐 mask（effect 在 DOM 更新后运行）。
+  $effect(() => {
+    void routes.length;
+    void catalog;
+    refreshScrollState();
+  });
 
-  async function removeRoute(provider: string): Promise<void> {
-    const routes = (view?.settings.modelRoutes ?? []).filter(
-      (route) => route.provider !== provider,
-    );
-    await apply({ modelRoutes: routes });
-  }
-
-  async function saveCredential(): Promise<void> {
-    const key = apiKeyDraft.trim();
-    if (keyTarget.length === 0 || key.length === 0) return;
-    const result = await setAgentCredential(keyTarget, key);
-    if (!result) return;
-    if (result.outcome === "rejected") {
-      rejection = `${result.code}: ${result.detail}`;
-      return;
+  function onTabKeydown(event: KeyboardEvent, index: number): void {
+    if (routes.length === 0) return;
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const delta = event.key === "ArrowLeft" ? -1 : 1;
+      const next = (index + delta + routes.length) % routes.length;
+      tabRefs[routes[next]!.provider]?.focus();
+    } else if (event.key === "Delete") {
+      event.preventDefault();
+      requestRemove(routes[index]?.provider);
     }
-    apiKeyDraft = "";
-    rejection = null;
   }
 </script>
 
-<div class="space-y-4">
-  <div>
-    <h3 class="text-sm font-medium">Model</h3>
-    <p class="mt-0.5 text-[11px] text-muted-foreground">
-      Changes apply immediately to your agent sessions — no restart needed.
-    </p>
+<div class="space-y-3">
+  <div class="flex items-start justify-between gap-2">
+    <div>
+      <h3 class="text-sm font-medium">Model</h3>
+      <p class="mt-0.5 text-[11px] text-muted-foreground">
+        Changes apply immediately to your agent sessions — no restart needed.
+      </p>
+    </div>
+    {#if activeOutsideRoutes && view}
+      <button
+        type="button"
+        class="mt-0.5 shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 transition-colors hover:bg-amber-500/25"
+        title="The active model ({view.settings.model
+          .provider}) rides an env-provided route with no tab — click to add it as a route."
+        onclick={addEnvActiveRoute}
+      >
+        active outside tabs
+      </button>
+    {/if}
   </div>
+  {#if activeOutsideRoutes && view}
+    <p class="text-[10px] text-amber-700">
+      {view.settings.model.provider} · {view.settings.model.model} (outside Routes) — env-provided; add
+      it as a route to manage it here.
+    </p>
+  {/if}
 
   {#if view}
-    <section class="space-y-1.5" aria-label="Active model">
-      <span class="text-[11px] font-medium text-muted-foreground">Active model</span>
-      {#if (view.settings.modelRoutes ?? []).length === 0}
-        <p class="text-[10px] text-muted-foreground">
-          No routes yet — pick a provider under “Add a route” below, or use + Custom.
-        </p>
-      {/if}
-      {#if activeOutsideRoutes}
-        <p class="text-[10px] text-amber-600">
-          Current model rides a route outside this list (env-provided); pick a route below to move
-          it under management.
-        </p>
-      {/if}
-      <div class="grid grid-cols-[1fr_140px] gap-1.5">
-        <label class="space-y-0.5">
-          <span class="text-[10px] text-muted-foreground">Model</span>
-          <select
-            class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
-            aria-label="Model"
-            bind:value={model}
-            disabled={agentRuntimeConfig.updating}
-          >
-            {#each modelOptions as option (option.value)}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
-        </label>
-        <label
-          class="space-y-0.5"
-          title="Provider-specific reasoning effort (optional, e.g. low / medium / high)"
-        >
-          <span class="text-[10px] text-muted-foreground">Effort</span>
-          <Input
-            class="h-8 text-xs"
-            aria-label="Reasoning effort"
-            placeholder="default"
-            bind:value={reasoningEffort}
-            disabled={agentRuntimeConfig.updating}
-          />
-        </label>
-      </div>
-      <div class="flex justify-end">
-        <Button
-          size="sm"
-          class="h-7 px-2.5 text-xs"
-          disabled={!modelDirty || agentRuntimeConfig.updating}
-          onclick={() => void saveModel()}
-        >
-          Apply model
-        </Button>
-      </div>
-    </section>
-
-    <section class="space-y-1.5" aria-label="Model routes">
-      <div class="flex items-center justify-between">
-        <span class="text-[11px] font-medium text-muted-foreground">Routes</span>
-        <Button
-          size="sm"
-          variant="outline"
-          class="h-6 px-2 text-[10px]"
-          onclick={() => {
-            selected = null;
-            routeFormOpen = true;
-          }}
-        >
-          + Custom
-        </Button>
-      </div>
-      {#each view.settings.modelRoutes as route (route.provider)}
-        {@const routeIcon = catalog?.providers.find((p2) => p2.provider === route.provider)?.icon}
-        {@const keyReady = view.providers.some(
-          (p2) => p2.provider === route.provider && p2.configured,
-        )}
-        <div class="flex items-center gap-2 rounded-md border border-border p-2">
-          {#if routeIcon}
-            <img src={routeIcon} alt="" class="h-5 w-5 shrink-0 object-contain dark:invert" />
-          {/if}
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-xs font-medium">{route.provider}</p>
-            <p
-              class="truncate text-[10px] text-muted-foreground"
-              title={route.models.map((entry) => entry.id).join(", ")}
-            >
-              {route.baseURL.replace(/^https?:\/\//, "")} · {route.models
-                .slice(0, 2)
-                .map((entry) => entry.id)
-                .join(", ")}{route.models.length > 2 ? ` +${route.models.length - 2} more` : ""}
-            </p>
-          </div>
-          <button
-            class="shrink-0 rounded px-1 text-[9px] underline decoration-dotted underline-offset-2 transition-colors {keyReady
-              ? 'bg-primary/10 text-primary'
-              : 'bg-amber-500/15 text-amber-600 hover:bg-amber-500/25'}"
-            title={keyReady ? "API key configured" : "API key missing — click to add it below"}
-            aria-label="Key status for {route.provider}"
-            onclick={() => {
-              model = `${route.provider}::${route.models[0]?.id ?? ""}`;
-              keySection?.scrollIntoView({ behavior: "smooth", block: "center" });
-            }}
-          >
-            {keyReady ? "key ✓" : "add key →"}
-          </button>
-          <button
-            class="shrink-0 text-[10px] text-muted-foreground transition-colors hover:text-destructive"
-            aria-label="Remove route {route.provider}"
-            disabled={agentRuntimeConfig.updating}
-            onclick={() => void removeRoute(route.provider)}
-          >
-            Remove
-          </button>
-        </div>
-      {:else}
-        <p
-          class="rounded-md border border-dashed border-border p-2 text-center text-[10px] text-muted-foreground"
-        >
-          No routes yet — pick a provider below, or add a Local/Custom one.
-        </p>
-      {/each}
-    </section>
-
-    <section class="space-y-1.5" aria-label="Provider gallery">
-      <div class="flex items-center justify-between gap-2">
-        <div>
-          <span class="text-[11px] font-medium text-muted-foreground">Add a route</span>
-          <p class="text-[10px] text-muted-foreground">
-            Click a provider to add it with its catalog models ({catalog?.providers.length ?? 0}
-            providers, from models.dev).
-          </p>
-        </div>
-        <Input
-          class="h-7 w-44 shrink-0 text-xs"
-          aria-label="Filter providers"
-          placeholder="Filter providers…"
-          bind:value={filter}
-        />
-      </div>
-      {#if catalogError}
-        <p class="text-[10px] text-destructive" role="alert">{catalogError}</p>
-      {:else if catalog === null}
-        <p class="py-3 text-center text-[10px] text-muted-foreground">Loading catalog…</p>
-      {:else if selected}
+    <!-- tab 条：横滚区 + 固定 + New -->
+    <div class="flex items-stretch gap-1 border-b border-border">
+      <div class="relative min-w-0 flex-1">
         <div
-          class="flex max-h-[52vh] flex-col gap-1.5 rounded-md border border-border bg-muted/20 p-2"
+          class="tab-scroll flex h-9 items-stretch overflow-x-auto"
+          bind:this={stripEl}
+          onscroll={refreshScrollState}
+          role="tablist"
+          aria-label="Model routes"
         >
-          <div class="flex shrink-0 items-start justify-between gap-2">
-            <div class="min-w-0">
-              <p class="truncate text-xs font-medium">{selected.label}</p>
-              <p class="truncate text-[10px] text-muted-foreground">{selected.baseURL}</p>
-            </div>
+          {#each routes as route, index (route.provider)}
+            {@const entry = catalog?.providers.find((p) => p.provider === route.provider)}
+            {@const icon = resolveRouteIcon(route, entry)}
+            {@const keyReady = view.providers.some(
+              (p) => p.provider === route.provider && p.configured,
+            )}
+            {@const ownsActive = view.settings.model.provider === route.provider}
             <button
-              class="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
-              aria-label="Back to gallery"
-              onclick={() => (selected = null)}
+              type="button"
+              role="tab"
+              aria-selected={!newOpen && selected === route.provider}
+              class="relative flex h-9 shrink-0 items-center gap-1.5 px-2 text-xs font-medium transition-colors hover:bg-muted/50 {!newOpen &&
+              selected === route.provider
+                ? 'text-foreground'
+                : 'text-muted-foreground hover:text-foreground'}"
+              title="{entry?.label ?? route.provider} ({route.provider}){ownsActive
+                ? ' · active route'
+                : ''}"
+              bind:this={tabRefs[route.provider]}
+              onclick={() => {
+                selected = route.provider;
+                newOpen = false;
+              }}
+              onkeydown={(event) => onTabKeydown(event, index)}
             >
-              Back
-            </button>
-          </div>
-          <div class="min-h-0 flex-1 overflow-y-auto pr-1">
-            <ModelTagsInput
-              selected={[...selectedModels]}
-              candidates={selected.models}
-              placeholder="Pick models for this route…"
-              onchange={(next) => (selectedModels = new Set(next))}
-            />
-            {#if routeOf(selected.provider)}
-              <p class="mt-1.5 text-[10px] text-amber-600">
-                A route for this provider already exists — adding again will be rejected.
-              </p>
-            {/if}
-          </div>
-          <div class="flex shrink-0 items-center justify-between border-t border-border pt-1.5">
-            <span class="text-[10px] text-muted-foreground">{selectedModels.size} selected</span>
-            <Button
-              size="sm"
-              class="h-7 px-2.5 text-xs"
-              disabled={selectedModels.size === 0 || agentRuntimeConfig.updating}
-              onclick={() => void saveSelectedRoute()}
-            >
-              Add route
-            </Button>
-          </div>
-        </div>
-      {:else}
-        <div class="grid max-h-64 grid-cols-1 gap-1.5 overflow-y-auto pr-1 min-[520px]:grid-cols-2">
-          {#each filtered as entry (entry.provider)}
-            <button
-              class="flex items-center gap-2 rounded-md border border-border p-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
-              title={`${entry.baseURL} · ${entry.api}`}
-              onclick={() => selectProvider(entry)}
-            >
-              {#if entry.icon}
-                <img
-                  src={entry.icon}
-                  alt=""
-                  class="h-7 w-7 shrink-0 rounded-md bg-background object-contain p-0.5 dark:invert"
-                />
+              {#if icon}
+                <span class="relative inline-flex shrink-0">
+                  <img
+                    src={icon}
+                    alt=""
+                    class="h-4 w-4 object-contain {isLetterAvatar(icon) ? '' : 'dark:invert'}"
+                  />
+                  {#if !keyReady}
+                    <span
+                      class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
+                      title="API key missing"
+                    ></span>
+                  {/if}
+                </span>
               {:else}
                 <span
-                  class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"
-                  style="background: hsl({avatarHue(entry.provider)} 55% 45%)"
+                  class="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[8px] font-semibold text-white"
+                  style="background: hsl({avatarHue(route.provider)} 55% 45%)"
                   aria-hidden="true"
                 >
-                  {entry.label.slice(0, 1).toUpperCase()}
+                  {(entry?.label ?? route.provider).slice(0, 1).toUpperCase()}
+                  {#if !keyReady}
+                    <span
+                      class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
+                      title="API key missing"
+                    ></span>
+                  {/if}
                 </span>
               {/if}
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-xs font-medium">{entry.label}</span>
-                <span class="block truncate text-[10px] text-muted-foreground">
-                  {entry.baseURL.replace(/^https?:\/\//, "")}
-                </span>
-              </span>
-              <span class="mr-0.5 flex shrink-0 items-center gap-1">
-                {#if routeOf(entry.provider)}
-                  <span class="rounded bg-primary/10 px-1 text-[9px] text-primary">Added ✓</span>
-                {/if}
+              <span class="max-w-[120px] truncate">{entry?.label ?? route.provider}</span>
+              {#if ownsActive}
                 <span
-                  class="rounded bg-muted px-1 text-[9px] text-muted-foreground"
-                  title="{entry.models.length} models in catalog"
-                >
-                  {entry.models.length}
-                </span>
-              </span>
+                  class="absolute inset-x-1.5 bottom-0 h-0.5 rounded-full bg-primary"
+                  aria-hidden="true"
+                ></span>
+              {/if}
             </button>
           {/each}
-          {#if filtered.length === 0}
-            <p class="col-span-full py-3 text-center text-[10px] text-muted-foreground">
-              No providers match “{filter}”.
-            </p>
-          {/if}
         </div>
-      {/if}
-
-      {#if routeFormOpen}
-        <div class="space-y-1.5 rounded-md border border-border bg-muted/20 p-2">
-          <div class="grid grid-cols-2 gap-1.5">
-            <label class="space-y-0.5">
-              <span class="text-[10px] text-muted-foreground">Route name</span>
-              <Input class="h-7 text-xs" aria-label="Route name" bind:value={routeName} />
-            </label>
-            <label class="space-y-0.5">
-              <span class="text-[10px] text-muted-foreground">API protocol</span>
-              <Input class="h-7 text-xs" aria-label="Route api" bind:value={routeApi} />
-            </label>
-          </div>
-          <label class="block space-y-0.5">
-            <span class="text-[10px] text-muted-foreground">Base URL</span>
-            <Input class="h-7 text-xs" aria-label="Route base URL" bind:value={routeBaseURL} />
-          </label>
-          <label class="block space-y-0.5">
-            <span class="text-[10px] text-muted-foreground">Models</span>
-            <ModelTagsInput
-              selected={routeModels}
-              candidates={customCandidates}
-              placeholder="Add model id…"
-              onchange={(next) => (routeModels = next)}
-            />
-          </label>
-          <div class="flex justify-end gap-1.5">
-            <Button
-              size="sm"
-              variant="ghost"
-              class="h-7 px-2 text-xs"
-              onclick={() => (routeFormOpen = false)}
-            >
-              Cancel
-            </Button>
-            <Button size="sm" class="h-7 px-2.5 text-xs" onclick={() => void saveCustomRoute()}>
-              Save route
-            </Button>
-          </div>
-        </div>
-      {/if}
-    </section>
-
-    <section
-      class="space-y-1.5 rounded-md border p-2 {routeAddedFor
-        ? 'border-primary/50 bg-primary/5'
-        : 'border-transparent'}"
-      aria-label="Provider credential"
-      bind:this={keySection}
-    >
-      {#if routeAddedFor}
-        <p class="text-[11px] font-medium text-primary">
-          Route “{routeAddedFor}” added — paste its API key to finish connecting.
-        </p>
-      {/if}
-      <div class="flex items-center justify-between gap-2">
-        <span class="text-[11px] font-medium text-muted-foreground">
-          API key for {keyTarget || "provider"}
-        </span>
-        {#if credentialConfigured}
+        {#if canLeft}
           <span
-            class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
-            aria-label="Credential configured"
-          >
-            configured
-          </span>
+            class="pointer-events-none absolute inset-y-0 left-0 w-2 bg-gradient-to-r from-background to-transparent"
+            aria-hidden="true"
+          ></span>
+        {/if}
+        {#if canRight}
+          <span
+            class="pointer-events-none absolute inset-y-0 right-0 w-2 bg-gradient-to-l from-background to-transparent"
+            aria-hidden="true"
+          ></span>
         {/if}
       </div>
-      <div class="flex gap-1.5">
-        <Input
-          class="h-8 flex-1 text-xs"
-          type="password"
-          autocomplete="off"
-          aria-label="API key (write-only)"
-          placeholder={credentialConfigured ? "stored — enter to replace" : "not set"}
-          bind:value={apiKeyDraft}
-          disabled={agentRuntimeConfig.updating || keyTarget.length === 0}
+      <button
+        type="button"
+        class="h-7 shrink-0 self-center rounded px-2 text-[11px] font-medium transition-colors {newOpen
+          ? 'bg-primary/10 text-primary'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+        onclick={() => (routes.length === 0 ? openNew("form") : openNew("pick"))}
+      >
+        + New
+      </button>
+    </div>
+
+    <!-- tab 内容 -->
+    {#if newOpen}
+      {#key newTabSession}
+        <NewRouteTab
+          {catalog}
+          {catalogError}
+          {catalogLoading}
+          initialMode={newInitialMode}
+          seed={newSeed}
+          onadded={onRouteAdded}
+          onclose={() => (newOpen = false)}
         />
-        <Button
-          size="sm"
-          class="h-8 px-2.5 text-xs"
-          disabled={agentRuntimeConfig.updating || apiKeyDraft.trim().length === 0}
-          onclick={() => void saveCredential()}
-        >
-          Save key
-        </Button>
-        {#if credentialConfigured}
+      {/key}
+    {:else if selectedRoute}
+      {#key selectedRoute.provider}
+        <RouteTabContent
+          route={selectedRoute}
+          {catalog}
+          autoFocusCredential={pendingKeyFocus === selectedRoute.provider}
+          onCredentialFocused={() => (pendingKeyFocus = null)}
+          onremove={() => requestRemove(selectedRoute?.provider)}
+        />
+      {/key}
+    {:else}
+      <!-- 空态 onboarding（不是旧画廊） -->
+      <div
+        class="flex flex-col items-center gap-2.5 rounded-md border border-dashed p-6 text-center"
+      >
+        <p class="text-xs font-medium">Add your first model route</p>
+        <p class="max-w-[320px] text-[10px] leading-snug text-muted-foreground">
+          Pick a provider from the catalog (models.dev mirror) with its models, or point at any
+          custom OpenAI/Anthropic-compatible endpoint.
+        </p>
+        <div class="mt-1 flex gap-2">
           <Button
             size="sm"
             variant="outline"
-            class="h-8 px-2.5 text-xs"
-            disabled={agentRuntimeConfig.updating}
-            onclick={() => void clearAgentCredential(keyTarget)}
+            class="h-8 px-3 text-xs"
+            onclick={() => openNew("pick")}
           >
-            Clear
+            Browse providers
           </Button>
-        {/if}
+          <Button size="sm" class="h-8 px-3 text-xs" onclick={() => openNew("form")}>
+            Custom endpoint
+          </Button>
+        </div>
       </div>
-      <span class="text-[10px] text-muted-foreground">
-        Keys are stored locally (0600), never echoed back, and apply immediately.
-      </span>
-    </section>
+    {/if}
   {:else if agentRuntimeConfig.loading}
     <div class="text-xs text-muted-foreground">Loading…</div>
   {:else}
@@ -620,3 +396,22 @@
     <div class="text-xs text-destructive" role="alert">{rejection}</div>
   {/if}
 </div>
+
+<ConfirmDialog
+  bind:open={removeOpen}
+  title="Remove route"
+  description="Remove the “{removeTarget ??
+    ''}” route? Its stored key is kept; if it held the active model, that reference is left outside Routes."
+  busy={removing}
+  onConfirm={() => void confirmRemove()}
+/>
+
+<style>
+  /* 横滚区隐藏滚动条（tab 溢出策略：横滚 + 渐隐 mask，不换行不折叠）。 */
+  .tab-scroll {
+    scrollbar-width: none;
+  }
+  .tab-scroll::-webkit-scrollbar {
+    display: none;
+  }
+</style>

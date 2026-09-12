@@ -77,6 +77,7 @@ function parseCatalogFile(raw: unknown): Array<{
   name?: string;
   api: string;
   baseUrl?: string;
+  contextWindow?: number;
   input?: unknown;
 }> {
   if (typeof raw !== "object" || raw === null) return [];
@@ -85,6 +86,7 @@ function parseCatalogFile(raw: unknown): Array<{
     name?: string;
     api: string;
     baseUrl?: string;
+    contextWindow?: number;
     input?: unknown;
   }> = [];
   for (const byApi of Object.values(raw as Record<string, unknown>)) {
@@ -96,6 +98,7 @@ function parseCatalogFile(raw: unknown): Array<{
         name?: unknown;
         api?: unknown;
         baseUrl?: unknown;
+        contextWindow?: unknown;
         input?: unknown;
       };
       if (typeof m.id !== "string" || typeof m.api !== "string") continue;
@@ -104,6 +107,12 @@ function parseCatalogFile(raw: unknown): Array<{
         name: typeof m.name === "string" ? m.name : undefined,
         api: m.api,
         baseUrl: typeof m.baseUrl === "string" ? m.baseUrl : undefined,
+        contextWindow:
+          typeof m.contextWindow === "number" &&
+          Number.isInteger(m.contextWindow) &&
+          m.contextWindow > 0
+            ? m.contextWindow
+            : undefined,
         input: m.input,
       });
     }
@@ -144,6 +153,7 @@ export function listModelProviders(): ModelProviderCatalogEntry[] {
         id: model.id,
         ...(model.name ? { name: model.name } : {}),
         image: Array.isArray(model.input) && model.input.includes("image"),
+        ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
       })),
     });
   }
