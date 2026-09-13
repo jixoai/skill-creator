@@ -166,8 +166,10 @@ describe("DshSettingsService", () => {
     expect(stored.outcome).toBe("stored");
     if (stored.outcome === "stored") {
       // 视图只回显 configured 状态，永不包含凭据值。
-      expect(stored.view.providers).toEqual([{ provider: "deepseek", configured: true }]);
-      expect(JSON.stringify(stored.view)).not.toContain("sk-secret-1");
+      expect(stored.view.providers).toEqual([
+        { provider: "deepseek", configured: true, apiKey: "sk-secret-1" },
+      ]);
+      expect(JSON.stringify(stored.view)).toContain("sk-secret-1"); // R16 客观回显
     }
     const live = await service.update({ preset: "live" });
     expect(live.outcome).toBe("updated");
@@ -179,14 +181,15 @@ describe("DshSettingsService", () => {
     expect(rejected).toMatchObject({ outcome: "rejected", code: "INVALID_API_KEY" });
   });
 
-  it("stores credentials in a 0600 private file and never echoes them", async () => {
+  it("stores credentials in a 0600 private file and echoes the key per user decree (R16)", async () => {
     const service = createDshSettingsService();
     await service.setCredential({ provider: "deepseek", apiKey: "sk-secret-2" });
     const file = path.join(sandbox, "state", "steward-store", "dsh-credentials.json");
     const stat = fs.statSync(file);
     expect(stat.mode & 0o777).toBe(0o600);
     const view = await service.getView();
-    expect(JSON.stringify(view)).not.toContain("sk-secret-2");
+    // R16 用户裁决：key 客观回显（password 掩码展示）。
+    expect(JSON.stringify(view)).toContain("sk-secret-2");
   });
 
   it("resolves deterministic preset; live without credential fails with no fallback", async () => {
@@ -346,8 +349,10 @@ describe("dsh RPC surface", () => {
     expect(updated.outcome).toBe("updated");
     const view = await client.agent.settings.get({});
     expect(view.settings.preset).toBe("live");
-    expect(view.providers).toEqual([{ provider: "deepseek", configured: true }]);
-    expect(JSON.stringify(view)).not.toContain("sk-rpc-1");
+    expect(view.providers).toEqual([
+      { provider: "deepseek", configured: true, apiKey: "sk-rpc-1" },
+    ]);
+    expect(JSON.stringify(view)).toContain("sk-rpc-1"); // R16 客观回显
     const { frames } = await client.agent.sessions.streams({});
     expect(Array.isArray(frames)).toBe(true);
     await client.agent.credentials.clear({ provider: "deepseek" });

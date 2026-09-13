@@ -302,7 +302,12 @@ function viewOf(
 ): DshStewardSettingsView {
   return {
     settings,
-    providers: [...credentials.keys()].map((provider) => ({ provider, configured: true })),
+    providers: [...credentials.keys()].map((provider) => ({
+      provider,
+      configured: true,
+      // 用户裁决 [2026-09-13]：key 客观回显（password 掩码展示）。
+      apiKey: credentials.get(provider) ?? null,
+    })),
   };
 }
 
@@ -457,7 +462,7 @@ export function createDshSettingsService(
     async testConnection(input) {
       // 委托协议探针（dsh-route-connection.ts）；缺省 fetch 在调用时解析全局，
       // vi.stubGlobal 亦可生效。apiKey 缺省且带 provider 时从已存凭据注入
-      // （UI 永不回显 key；仍无 key → typed no-key 失败）。
+      // （key 经用户裁决客观回显 [2026-09-13]；仍无 key → typed no-key 失败）。
       let probeInput = input;
       if (input.apiKey === undefined && input.provider !== undefined) {
         const { credentials } = await loadInternals();

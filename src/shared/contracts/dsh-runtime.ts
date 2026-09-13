@@ -418,15 +418,20 @@ export const DshStewardSettingsSchema = z.object({
 /** steward DSH settings。 */
 export type DshStewardSettings = z.infer<typeof DshStewardSettingsSchema>;
 
-/** provider 凭据状态（无 key 材料）。 */
+/**
+ * provider 凭据状态 + key 材料。用户裁决 [2026-09-13]：「如果有 key，直接把
+ * key 客观地显示在 input 里面」——password 掩码即展示保护（eye 可揭示），
+ * 投影携带 apiKey（null = 未配置）。loopback + 启动 token 的单用户本地面。
+ */
 export const DshProviderCredentialStatusSchema = z.object({
   provider: z.string().min(1),
   configured: z.boolean(),
+  apiKey: z.string().nullable(),
 });
 /** provider 凭据状态。 */
 export type DshProviderCredentialStatus = z.infer<typeof DshProviderCredentialStatusSchema>;
 
-/** 客户端可见的 settings 投影（含凭据状态，永不包含凭据值）。 */
+/** 客户端可见的 settings 投影（凭据经用户裁决客观回显，见上）。 */
 export const DshStewardSettingsViewSchema = z.object({
   settings: DshStewardSettingsSchema,
   providers: z.array(DshProviderCredentialStatusSchema),

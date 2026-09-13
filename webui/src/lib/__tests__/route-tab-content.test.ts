@@ -80,7 +80,7 @@ const CATALOG = {
 function baseView(
   routes: unknown[],
   active: { provider: string; model: string } = { provider: "openai", model: "gpt-4o" },
-  providers: Array<{ provider: string; configured: boolean }> = [],
+  providers: Array<{ provider: string; configured: boolean; apiKey: string | null }> = [],
 ): DshStewardSettingsView {
   return {
     settings: {
@@ -547,8 +547,12 @@ describe("RouteTabContent persistent credential input (R12-A5)", () => {
     const input = ctx.keyInput();
     expect(input.type).toBe("password");
     expect(input.placeholder).toBe("API key");
-    // R13：key 状态并入 Credential 标签行（pill 已删；未配置 → key missing）。
-    expect(ctx.target.textContent).toContain("key missing");
+    // R16：状态 chip 已删（key 客观回显）；Credential 区位于 Endpoint 之后。
+    const sections = [...ctx.target.querySelectorAll("section[aria-label]")].map((el) =>
+      el.getAttribute("aria-label"),
+    );
+    expect(sections.indexOf("Endpoint")).toBeGreaterThan(-1);
+    expect(sections.indexOf("Credential")).toBeGreaterThan(sections.indexOf("Endpoint"));
 
     // eye 切 type（只控制新输入的可见性）。
     const eye = ctx.eyeButton();
@@ -633,14 +637,13 @@ describe("RouteTabContent persistent credential input (R12-A5)", () => {
       { provider: "my-relay", baseURL: "https://r.example/v1", models: [{ id: "m1" }] },
     ];
     agentStore.view = baseView(routes, { provider: "openai", model: "gpt-4o" }, [
-      { provider: "my-relay", configured: true },
+      { provider: "my-relay", configured: true, apiKey: "sk-stored-9" },
     ]);
     const ctx = mountTab(routes[0] as Record<string, unknown>, agentStore.view as never);
     const input = ctx.keyInput();
-    // 已配置：占位提示 replace 语义，值不回显；R13 状态在 Credential 标签行。
-    expect(input.placeholder).toBe("stored — enter to replace");
-    expect(input.value).toBe("");
-    expect(ctx.target.textContent).toContain("key ✓");
+    // R16 用户裁决：已存 key 客观回显（password 掩码）。
+    expect(input.type).toBe("password");
+    expect(input.value).toBe("sk-stored-9");
 
     // 输入新 key + Enter → 替换（同一 setAgentCredential 旁路）。
     agentStore.setAgentCredential.mockReset();
@@ -672,7 +675,9 @@ describe("credential save vs Clear ordering (codex R13 probe)", () => {
     const routes = [
       { provider: "my-relay", baseURL: "https://r.example/v1", models: [{ id: "m1" }] },
     ];
-    agentStore.view = baseView(routes, undefined, [{ provider: "my-relay", configured: true }]);
+    agentStore.view = baseView(routes, undefined, [
+      { provider: "my-relay", configured: true, apiKey: null },
+    ]);
     // 慢保存：blur 发起的 setAgentCredential 挂起期间点 Clear。
     let releaseSave: (() => void) | null = null;
     agentStore.setAgentCredential.mockReset();

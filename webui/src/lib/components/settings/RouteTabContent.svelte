@@ -116,8 +116,13 @@
   let modelsDraft = $state<RouteModelEntry[]>(route.models.map((entry) => ({ ...entry })));
   // svelte-ignore state_referenced_locally
   let modelsValid = $state<boolean[]>(route.models.map(() => true));
-  /** 常驻凭据输入（R12-A5）：只装新输入；已存 key 永不回显。 */
-  let apiKeyDraft = $state("");
+  /** 已存 key 客观回显（R16 用户裁决 [2026-09-13]：「直接把 key 客观地显示在
+   * input 里面」——password 掩码即展示保护，eye 可揭示）。 */
+  const storedApiKey = $derived(
+    view?.providers.find((p) => p.provider === route.provider)?.apiKey ?? null,
+  );
+  // svelte-ignore state_referenced_locally
+  let apiKeyDraft = $state(storedApiKey ?? "");
   let keyVisible = $state(false);
   // svelte-ignore state_referenced_locally
   let addedHint = $state(autoFocusCredential);
@@ -325,33 +330,48 @@
   <!-- 块 2 · Credential（R12-A5 + R13：常驻 password 输入 + eye-toggle；key 状态
        样式并入本区标签行（用户裁决：Identity 的 key pill 与 Save as preset 删除，
        标题行右端只留 [Remove][Save]）。 -->
+  <!-- 块 3 · Endpoint（baseURL + api Select；脏态由标题行全局 Save 持久化）。 -->
+  <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Endpoint">
+    <span class="text-[11px] font-medium text-muted-foreground">Endpoint</span>
+    <div class="flex gap-1.5">
+      <Input
+        class="h-8 flex-1 font-mono text-xs"
+        aria-label="Base URL"
+        placeholder="https://api.example.com/v1"
+        bind:value={baseURLDraft}
+        disabled={agentRuntimeConfig.updating}
+      />
+    </div>
+    <label class="block space-y-0.5">
+      <span class="text-[10px] text-muted-foreground">API protocol</span>
+      <select
+        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+        aria-label="API protocol"
+        bind:value={apiDraft}
+        disabled={agentRuntimeConfig.updating}
+      >
+        {#each DSH_ROUTE_API_PROTOCOLS as protocol (protocol)}
+          <option value={protocol}>{protocol}</option>
+        {/each}
+      </select>
+    </label>
+  </section>
+
+  <!-- 块 2 · Credential（R16：移至 Endpoint 下方；key 客观回显，无状态 chip）。 -->
   <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Credential">
     {#if addedHint}
       <p class="text-[11px] font-medium text-primary">
         Route “{route.provider}” added — paste its API key to finish connecting.
       </p>
     {/if}
-    <div class="flex items-center justify-between">
-      <span class="text-[10px] font-medium text-muted-foreground">API key</span>
-      <span
-        class="rounded px-1.5 py-0.5 text-[10px] {keyReady
-          ? 'bg-primary/10 text-primary'
-          : 'bg-amber-500/15 text-amber-700'}"
-        title={keyReady
-          ? "API key configured — enter a new one to replace it"
-          : "API key missing — connection test needs it"}
-      >
-        {keyReady ? "key ✓" : "key missing"}
-      </span>
-    </div>
     <div class="flex gap-1.5">
       <div class="relative min-w-0 flex-1">
         <Input
-          class="h-8 pr-9 text-xs"
+          class="h-8 pr-9 font-mono text-xs"
           type={keyVisible ? "text" : "password"}
           autocomplete="off"
           aria-label="API key"
-          placeholder={keyReady ? "stored — enter to replace" : "API key"}
+          placeholder="API key"
           bind:ref={credInput}
           bind:value={apiKeyDraft}
           disabled={agentRuntimeConfig.updating}
@@ -393,35 +413,8 @@
       {/if}
     </div>
     <span class="text-[10px] text-muted-foreground">
-      Keys are stored locally (0600), never echoed back, and apply immediately.
+      Stored locally (0600), shown as typed (password-masked), applies on blur/Enter.
     </span>
-  </section>
-
-  <!-- 块 3 · Endpoint（baseURL + api Select；脏态由标题行全局 Save 持久化）。 -->
-  <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Endpoint">
-    <span class="text-[11px] font-medium text-muted-foreground">Endpoint</span>
-    <div class="flex gap-1.5">
-      <Input
-        class="h-8 flex-1 font-mono text-xs"
-        aria-label="Base URL"
-        placeholder="https://api.example.com/v1"
-        bind:value={baseURLDraft}
-        disabled={agentRuntimeConfig.updating}
-      />
-    </div>
-    <label class="block space-y-0.5">
-      <span class="text-[10px] text-muted-foreground">API protocol</span>
-      <select
-        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
-        aria-label="API protocol"
-        bind:value={apiDraft}
-        disabled={agentRuntimeConfig.updating}
-      >
-        {#each DSH_ROUTE_API_PROTOCOLS as protocol (protocol)}
-          <option value={protocol}>{protocol}</option>
-        {/each}
-      </select>
-    </label>
   </section>
 
   <!-- 块 4 · Models（ModelListItem 列表 + Add model；R7 8.7 + R12-A3 滚入视野）。 -->

@@ -73,7 +73,11 @@
       {#if settingsUi.section === "general"}
         <GeneralSettingsSection />
       {:else if settingsUi.section === "model"}
-        <ModelSettingsSection />
+        <!-- R16 用户裁决：models 配置的滚动发生在 tab page 内部，外层不滚——
+             分区根改 flex 列布局，页面主体 min-h-0 自滚。 -->
+        <div class="flex h-full min-h-0 flex-col -m-4 p-4">
+          <ModelSettingsSection />
+        </div>
       {:else if settingsUi.section === "sessions"}
         <SessionsSettingsSection />
       {:else}
