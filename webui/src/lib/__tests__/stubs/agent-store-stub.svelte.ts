@@ -26,6 +26,13 @@ export const agentSession = $state({
   error: null as string | null,
 });
 
+/** 会话列表投影（R17-B：ComposerCard 的后端选择器起始目录来自当前会话 cwd）。 */
+export const agentSessionsList = $state({
+  loaded: false as boolean,
+  loading: false,
+  sessions: [] as Array<{ sessionId: string; cwd: string; mode: string }>,
+});
+
 export const updateAgentSettings = vi.fn();
 export const createAgentSession = vi.fn();
 export const sendAgentPrompt = vi.fn();
@@ -47,6 +54,9 @@ export function resetAgentStoreStub(view: DshStewardSettingsView | null): void {
   agentSession.todos = [];
   agentSession.turnStartedAt = null;
   agentSession.error = null;
+  agentSessionsList.loaded = false;
+  agentSessionsList.loading = false;
+  agentSessionsList.sessions = [];
   updateAgentSettings.mockReset();
   createAgentSession.mockReset();
   sendAgentPrompt.mockReset();

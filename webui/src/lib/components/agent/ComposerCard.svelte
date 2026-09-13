@@ -14,6 +14,12 @@
   outline 穿透，agent-flow.css `.msg-body` 作者源规则兜底）；附件按钮语义化
   （image/file-up 图标 + 语义 tooltip/aria-label，替代 paperclip/file 混淆）；
   `$` 前缀激发 skill 名补全（SkillMenu，与 SlashMenu 同 TriggerMenu 语法）。
+  修订 [2026-09-13]（R17-A）：提交点不再清草稿——草稿按 sessionId 分轨，
+  发送成功由 sendAgentPrompt 清当前轨（失败留在原轨可重试）；草稿随会话
+  切换换轨（store 侧），本组件对 bind 的 facade 不变。
+  修订 [2026-09-13]（R17-B）：附件按钮去 web 文件输入——image/file 按钮打开
+  后端文件浏览弹层（FilePickerDialog：真实路径 + daemon jSquash 缩略）；粘贴/
+  drop 的本地 File 通道保留（无真实路径，base64 wire）。
   正交意图：
   1. 输入卡：附件条（图片缩略/文件 chip，与 UserMessage 附件同视觉语言）、
      自动长高 textarea（1 行 44px → 4 行 160px 封顶内滚；Enter 发送 /
@@ -67,13 +73,15 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
   import {
     agentComposer,
-    addComposerDocs,
     addComposerImages,
+    addPickedComposerDocs,
+    addPickedComposerImages,
     clearComposerEdit,
   } from "$lib/stores/agent-composer.svelte";
   import {
     agentRuntimeConfig,
     agentSession,
+    agentSessionsList,
     cancelAgentSession,
     sendAgentPrompt,
     setAgentSessionMode,
@@ -83,12 +91,14 @@
   import { showToast } from "$lib/toast.svelte";
   import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import ContextMeter from "./ContextMeter.svelte";
+  import FilePickerDialog from "./FilePickerDialog.svelte";
   import SlashMenu from "./SlashMenu.svelte";
   import SkillMenu from "./SkillMenu.svelte";
 
-  let fileInput = $state<HTMLInputElement | null>(null);
-  let docInput = $state<HTMLInputElement | null>(null);
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
+  /** 后端文件选择器（R17-B）：open + 语义 mode 两态；起始目录取当前会话 cwd。 */
+  let pickerOpen = $state(false);
+  let pickerMode = $state<"image" | "file">("image");
   /** SlashMenu/SkillMenu 实例（textarea 键盘先占，两触发符互斥）；卡片根
    * relative，菜单锚定卡上方。 */
   let slashMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
@@ -228,19 +238,34 @@
       return;
     }
     if (agentSession.sending) return;
-    const images = agentComposer.images;
-    const files = agentComposer.files;
-    agentComposer.text = "";
-    agentComposer.images = [];
-    agentComposer.files = [];
-    clearComposerEdit();
-    void sendAgentPrompt(text, images, files);
+    // R17-A：提交点不清草稿——发送成功由 sendAgentPrompt 清当前轨（清轨点收窄）；
+    // 发送失败草稿留在当前会话轨，可直接修改重试。
+    void sendAgentPrompt(text, agentComposer.images, agentComposer.files);
   }
 
   /** 取消编辑：退出 editing 态并清空回填文本（append-only 语义下不撤回原消息）。 */
   function cancelEdit(): void {
     if (agentComposer.editing !== null) agentComposer.text = "";
     clearComposerEdit();
+  }
+
+  /** R17-B 后端选择器：起始目录 = 当前会话 cwd（列表缺项时 daemon 回退 home）。 */
+  const pickerStartDir = $derived(
+    agentSessionsList.sessions.find((item) => item.sessionId === agentSession.sessionId)?.cwd,
+  );
+
+  function openPicker(target: "image" | "file"): void {
+    pickerMode = target;
+    pickerOpen = true;
+  }
+
+  /** 选择器确认分流（R17-B）：真实路径进对应附件通道（数量守卫在 store）。 */
+  function onPickerConfirm(picks: Array<{ path: string; name: string; preview?: string }>): void {
+    if (pickerMode === "image") {
+      addPickedComposerImages(picks);
+    } else {
+      addPickedComposerDocs(picks);
+    }
   }
 
   /** 模式切换（R12-B 6/8）：无会话 = 预选待建模式（pendingMode，与空态卡同步），
@@ -324,15 +349,25 @@
     bind:this={skillMenu}
   />
   {#if agentComposer.files.length > 0 || agentComposer.images.length > 0}
-    <!-- 附件条：与转录 UserMessage 附件行同视觉语言（56×56 缩略 / 文件 chip）。 -->
+    <!-- 附件条：与转录 UserMessage 附件行同视觉语言（56×56 缩略 / 文件 chip）；
+         path 通道无缩略（webp/gif）时以图标 tile 占位（R17-B）。 -->
     <div class="flex flex-wrap gap-1.5 px-3 pt-3" aria-label="Pending attachments">
       {#each agentComposer.images as attachment, index (index)}
         <div class="group relative h-14 w-14 overflow-hidden rounded-lg border border-border">
-          <img
-            src={attachment.preview}
-            alt={attachment.name ?? "image"}
-            class="h-full w-full object-cover"
-          />
+          {#if attachment.preview}
+            <img
+              src={attachment.preview}
+              alt={attachment.name ?? "image"}
+              class="h-full w-full object-cover"
+            />
+          {:else}
+            <div
+              class="flex h-full w-full items-center justify-center bg-muted/40"
+              title={attachment.path ?? attachment.name ?? "image"}
+            >
+              <IconImage class="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+            </div>
+          {/if}
           <button
             type="button"
             class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
@@ -434,44 +469,21 @@
         </DropdownMenu.Content>
       {/if}
     </DropdownMenu.DropdownMenu>
-    <input
-      bind:this={fileInput}
-      type="file"
-      accept="image/png,image/jpeg,image/webp,image/gif"
-      multiple
-      class="hidden"
-      aria-label="Attach images"
-      onchange={(event) => {
-        if (event.currentTarget.files) void addComposerImages(event.currentTarget.files);
-        event.currentTarget.value = "";
-      }}
-    />
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
       title="Attach images (paste or pick, ≤4 MiB each)"
       aria-label="Attach images (paste or pick, ≤4 MiB each)"
-      onclick={() => fileInput?.click()}
+      onclick={() => openPicker("image")}
     >
       <IconImage class="h-4 w-4" />
     </button>
-    <input
-      bind:this={docInput}
-      type="file"
-      multiple
-      class="hidden"
-      aria-label="Attach files"
-      onchange={(event) => {
-        if (event.currentTarget.files) void addComposerDocs(event.currentTarget.files);
-        event.currentTarget.value = "";
-      }}
-    />
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
       title="Attach files (text inlined, binary as refs, ≤512 KiB each)"
       aria-label="Attach files (text inlined, binary as refs, ≤512 KiB each)"
-      onclick={() => docInput?.click()}
+      onclick={() => openPicker("file")}
     >
       <IconFileUp class="h-4 w-4" />
     </button>
@@ -591,3 +603,11 @@
     </button>
   </div>
 </div>
+
+<!-- R17-B 后端文件选择器：真实路径浏览（daemon fs RPC）+ daemon 缩略预览。 -->
+<FilePickerDialog
+  mode={pickerMode}
+  startDir={pickerStartDir}
+  onConfirm={onPickerConfirm}
+  bind:open={pickerOpen}
+/>

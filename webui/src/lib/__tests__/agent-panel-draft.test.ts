@@ -8,7 +8,8 @@
  * 分属两个 effect，配置更新不得触碰草稿。
  *
  * 正交意图：
- *   [1] 挂载语义：面板挂载（关闭再开）即空白草稿（一次性 reset）。
+ *   [1] 挂载语义（R17-A/R17-C 修订）：草稿按 sessionId 分轨，挂载/开合/收起
+ *       均不重置（清轨点在 store 侧收窄为显式新建与发送成功）。
  *   [2] 草稿连续性：settings.model 热切（view 替换）与 loading 翻转后，草稿
  *       文本与附件原样保留；配置投影只加载一次（无重放）。
  */
@@ -48,6 +49,11 @@ vi.mock("markstream-svelte", async () => {
 vi.mock("markstream-svelte/index.css", () => ({}));
 vi.mock("../components/agent/ContextMeter.svelte", async () => {
   const { default: stub } = await import("./stubs/context-meter-stub.svelte");
+  return { default: stub };
+});
+// R17-B：附件按钮改开 FilePickerDialog（ui/dialog → bits-ui 不可编译）——空壳替换。
+vi.mock("../components/agent/FilePickerDialog.svelte", async () => {
+  const { default: stub } = await import("./stubs/file-picker-stub.svelte");
   return { default: stub };
 });
 // AgentApprovalCard → ui/button|input → bits-ui（node_modules .svelte，不编译）。
@@ -125,14 +131,14 @@ vi.mock("$lib/components/ui/dropdown-menu", async () => {
 import AgentPanel from "../components/agent/AgentPanel.svelte";
 import { flushSync, mount, unmount } from "./svelte-client";
 // 真 store（runes .svelte.ts）：被测的正是真实 effect 依赖图（agentRuntimeConfig
-// 变化 → 不得重放 resetComposer）。
+// 变化 → 不得触碰 composer 草稿）。
 import {
   agentPanel,
   agentRuntimeConfig,
   agentSession,
   agentSessionsList,
 } from "../stores/agent.svelte";
-import { agentComposer, resetComposer } from "../stores/agent-composer.svelte";
+import { agentComposer, resetAllComposerTracks } from "../stores/agent-composer.svelte";
 import type { DshStewardSettingsView } from "$shared/contracts/dsh-runtime.js";
 
 const VIEW: DshStewardSettingsView = {
@@ -169,6 +175,9 @@ function hotSwitchedView(): DshStewardSettingsView {
 let settingsGet: ReturnType<typeof vi.fn>;
 
 function mountPanel() {
+  // R17-C：面板常驻挂载后配置惰性加载以 agentPanel.open 为闸——组件 mount 测试
+  // 代表「面板打开」场景。
+  agentPanel.open = true;
   const target = document.createElement("div");
   document.body.appendChild(target);
   const instance = mount(AgentPanel, { target });
@@ -222,7 +231,7 @@ beforeEach(() => {
   agentRuntimeConfig.loading = false;
   agentRuntimeConfig.updating = false;
   agentRuntimeConfig.error = null;
-  resetComposer();
+  resetAllComposerTracks();
 });
 
 afterAll(() => {
@@ -230,20 +239,20 @@ afterAll(() => {
 });
 
 describe("AgentPanel composer draft protection (codex R2 blocker 5)", () => {
-  it("resets the draft exactly once on mount (blank draft on panel reopen)", async () => {
+  it("keeps the draft across mount cycles (R17-A/R17-C: mount never resets)", async () => {
     agentComposer.text = "stale draft from a previous mount";
     const ctx = mountPanel();
     await vi.waitFor(() => expect(agentRuntimeConfig.view).not.toBeNull());
 
-    // 挂载一次性重置：进入面板即空白草稿。
-    expect(agentComposer.text).toBe("");
+    // 挂载不重置：草稿按 sessionId 分轨，清轨点收窄为显式新建/发送成功。
+    expect(agentComposer.text).toBe("stale draft from a previous mount");
 
-    // 卸载（面板关闭）后的残留不随组件存活；再次挂载再次重置。
+    // 组件卸载/重挂载（等效面板收起再展开的 DOM 生命周期）同样不清草稿。
     agentComposer.text = "left between mounts";
     ctx.cleanup();
     const second = mountPanel();
     flushSync();
-    expect(agentComposer.text).toBe("");
+    expect(agentComposer.text).toBe("left between mounts");
     second.cleanup();
   });
 

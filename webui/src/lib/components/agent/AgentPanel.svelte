@@ -2,11 +2,17 @@
   用户原始需求 [2026-09-08]：「我们可以简单理解成，我们在 skill creator 的右侧
   嵌入了一个聊天对话框。」——2026-09-12 redesign §3.3：面板拆分为 AgentHeader /
   TranscriptView / ComposerCard 后，AgentPanel 收敛为容器（drawer 编排 + 数据
-  接线），行渲染器与 header 语义见对应组件。
+  接线），行渲染器与 header 语义见对应组件。——2026-09-13 R17-C：面板常驻挂载
+  （开关=收起不销毁，开合不清草稿）；≥720px 宽度可拖拽（320–720px，左缘拖柄，
+  sessionStorage 持久）；<720px 抽屉全屏覆盖（收起 translate 退场）。
   正交意图：
-  1. shell 级右栏 drawer：≥720px 常驻侧栏（w-[440px]），<720px 单屏覆盖；
-     跨 tab 存活（挂载于 +layout，状态在 module store）。Esc 收起（模态打开时
-     让位）；面板级 drop 分流；挂载重置草稿 + 惰性加载配置；首屏种子注入。
+  1. shell 级右栏 drawer：≥720px 常驻侧栏（宽度 = agentPanel.width，inline CSS
+     var + 媒体断点消费），<720px 单屏覆盖；跨 tab 存活（挂载于 +layout，状态
+     在 module store）。Esc 收起（模态打开时让位）；面板级 drop 分流；首次打开
+     惰性加载配置；首屏种子注入；resize 拖拽（pointer 捕获
+     + window move/up，拖拽中禁 body 选择并关闭 width 过渡保跟手）。
+     R17-A：草稿按 sessionId 分轨，挂载/开合不重置（清轨点在 store 侧收窄为
+     显式新建与发送成功）。
   2. 面板纵向编排：TranscriptView → 错误条 → TodoDock → edit-mode 注记条 →
      ComposerCard（§3.1 骨架顺序）。
   妥协声明：无（各分片语义在子组件内自持）。
@@ -19,28 +25,22 @@
     loadAgentSettings,
     agentRuntimeConfig,
     setAgentPanelOpen,
+    setAgentPanelWidth,
   } from "$lib/stores/agent.svelte";
-  import {
-    agentComposer,
-    handleComposerDrop,
-    resetComposer,
-  } from "$lib/stores/agent-composer.svelte";
+  import { agentComposer, handleComposerDrop } from "$lib/stores/agent-composer.svelte";
   import AgentHeader from "./AgentHeader.svelte";
   import TranscriptView from "./TranscriptView.svelte";
   import TodoDock from "./TodoDock.svelte";
   import ComposerCard from "./ComposerCard.svelte";
 
-  // 挂载即重置草稿（一次性；对齐旧组件态生命周期）。resetComposer 不读任何响应
-  // 依赖，本 effect 只在挂载时运行——model 热切/凭据更新/settings reload 引起的
-  // view/loading 变化不得重放清空用户草稿（codex R2 阻塞 5）。
-  $effect(() => {
-    resetComposer();
-  });
+  // R17-A：不再有挂载重置 effect——草稿按 sessionId 分轨，清轨点收窄为显式新建
+  // 与发送成功（均在 store 侧：agent.svelte 挂接）；面板开合/重挂载不清草稿，
+  // 与 R17-C「开关=收起不销毁」语义对齐。
 
-  // 惰性加载配置投影（model chip 消费）：view 缺失且非加载中时补拉；与草稿重置
-  // 分属两个 effect，配置更新只重跑本 effect，不触碰 composer。
+  // 惰性加载配置投影（model chip 消费）：面板常驻挂载后以 open 为闸——首次
+  // 打开且 view 缺失时补拉（未打开不发 RPC；断线重连由 open 重开驱动）。
   $effect(() => {
-    if (agentRuntimeConfig.view === null && !agentRuntimeConfig.loading) {
+    if (agentPanel.open && agentRuntimeConfig.view === null && !agentRuntimeConfig.loading) {
       void loadAgentSettings();
     }
   });
@@ -55,6 +55,32 @@
       if (agentComposer.text.length === 0) agentComposer.text = seed;
     }
   });
+
+  // R17-C 宽屏 resize：左缘拖柄 pointer 序列。宽度经 setAgentPanelWidth clamp
+  // + 持久；拖拽中 body 禁选择 + col-resize 光标；resizing 态摘除 width 过渡
+  // （否则拖柄滞后跟手）。
+  let resizing = $state(false);
+  let resizeStartX = 0;
+  let resizeStartWidth = 0;
+
+  function startResize(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    resizing = true;
+    resizeStartX = event.clientX;
+    resizeStartWidth = agentPanel.width;
+    // 指针捕获：移出面板/窗口后 move/up 仍送达本元素（instanceof 兼作 null 收窄）。
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) target.setPointerCapture(event.pointerId);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }
+
+  function endResize(): void {
+    if (!resizing) return;
+    resizing = false;
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+  }
 </script>
 
 <svelte:window
@@ -64,14 +90,34 @@
       setAgentPanelOpen(false);
     }
   }}
+  onpointermove={(event) => {
+    if (resizing) setAgentPanelWidth(resizeStartWidth + (resizeStartX - event.clientX));
+  }}
+  onpointerup={endResize}
+  onpointercancel={endResize}
 />
 
 <aside
-  class="flex h-full w-full flex-col border-l border-border bg-background min-[720px]:w-[440px]"
+  class="relative flex h-full w-full flex-col bg-background min-[720px]:w-(--agent-panel-width) min-[720px]:overflow-hidden duration-150 ease-in-out {resizing
+    ? ''
+    : 'min-[720px]:transition-[width,border-color] max-[720px]:transition-[transform,visibility]'} {agentPanel.open
+    ? 'border-l border-border'
+    : 'border-l-0 max-[720px]:translate-x-full max-[720px]:invisible'}"
+  style="--agent-panel-width: {agentPanel.open ? agentPanel.width : 0}px"
   aria-label="Agent panel"
   ondragover={(event) => event.preventDefault()}
   ondrop={handleComposerDrop}
 >
+  <!-- 左缘拖柄（仅 ≥720px；窄屏抽屉无侧栏宽度语义）：6px col-resize 命中区，
+       hover 高亮。 -->
+  <div
+    class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none hover:bg-primary/30 min-[720px]:block"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize agent panel"
+    onpointerdown={startResize}
+  ></div>
+
   <AgentHeader />
 
   <TranscriptView />

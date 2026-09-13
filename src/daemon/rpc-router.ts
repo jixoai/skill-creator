@@ -200,7 +200,15 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           session: await domain.agentSessions.create(input),
         })),
         prompt: rpc.agent.session.prompt.handler(async ({ input }) => {
-          await domain.agentSessions.prompt(input.sessionId, input.text, input.images, input.files);
+          // R17-B：path 通道附件在 daemon 读盘（大小/magic 守卫）→ base64 交给
+          // 既有内核准入链；agentSessions.prompt 签名不变。
+          const resolved = await domain.agentFiles.resolvePromptAttachments(input);
+          await domain.agentSessions.prompt(
+            input.sessionId,
+            input.text,
+            resolved.images,
+            resolved.files,
+          );
           return { accepted: true as const };
         }),
         cancel: rpc.agent.session.cancel.handler(({ input }) => {
@@ -216,6 +224,13 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         setMode: rpc.agent.session.setMode.handler(async ({ input }) => ({
           session: await domain.agentSessions.setMode(input.sessionId, input.mode),
         })),
+      },
+      files: {
+        // R17-B 后端文件选择器：用户本机自由浏览（读面，无 containment）。
+        list: rpc.agent.files.list.handler(async ({ input }) => domain.agentFiles.list(input)),
+        preview: rpc.agent.files.preview.handler(async ({ input }) =>
+          domain.agentFiles.preview(input),
+        ),
       },
       models: {
         catalog: rpc.agent.models.catalog.handler(() => ({

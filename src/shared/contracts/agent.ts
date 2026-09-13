@@ -4,12 +4,17 @@
  * 用户原始需求 [2026-09-08]：「你可以简单理解成，我们在 skill creator 的右侧嵌入
  * 了一个聊天对话框。」——`agent.*` 是面板消费内核会话的唯一 RPC namespace；
  * 旧 `dsh.*`（settings/credentials/sessions）收敛并入此处，不保留双投影。
+ * 修订 [2026-09-13]（R17-B）：附件选择去 web 化——新增 `agent.files.*`（后端
+ * 文件浏览/预览：真实路径选择器）+ prompt 图片/文件附件双通道（base64 wire 或
+ * 后端真实路径，daemon 读盘替代浏览器上传）。
  *
  * 正交意图：
  *   [1] 会话生命周期投影：list/create/prompt/cancel/stream（内核 ctx.agents +
  *       ctx.sessions 的脱敏投影；durable 真相归 session event log）。
  *   [2] settings/credentials 平移：model/preset/permission/approval 与凭据状态
  *       （schema 复用 dsh-runtime 契约源，无第二份手写镜像）。
+ *   [3] 后端文件选择器 IO（R17-B）：目录浏览投影 + 单文件预览（图片缩略/
+ *       文本头/二进制名）——用户本机自由浏览是功能目的，无 Workspace containment。
  * 妥协声明：stream 帧复用 DshSessionStreamFrame（面板场景 runId 恒等于
  *   sessionId）——面板不是 MCP client，内核会话经 daemon 进程内消费。
  */
@@ -66,22 +71,43 @@ export const AgentSessionCreateResultSchema = z.object({
 /** 会话创建结果。 */
 export type AgentSessionCreateResult = z.infer<typeof AgentSessionCreateResultSchema>;
 
-/** prompt 的图片附件（wire 层 base64；daemon 经内核 attachment 准入升格 durable ref）。 */
-export const AgentPromptImageSchema = z.object({
-  mediaType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
-  /** canonical base64（≤4MiB 解码后；超限 schema 拒绝）。 */
-  data: z.string().min(1),
-  name: z.string().min(1).max(120).optional(),
-});
+/**
+ * prompt 图片附件（R17-B 双通道，strict 互斥）：
+ * - base64 通道：mediaType 必填（webui 粘贴/drop 的本地 File 对象）；
+ * - path 通道：后端文件选择器的真实路径——daemon 读盘 + magic 字节嗅探 mediaType，
+ *   浏览器不经手原始字节（前端更轻）。两条通路统一经内核 attachment 准入。
+ */
+export const AgentPromptImageSchema = z.union([
+  z.strictObject({
+    mediaType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+    /** canonical base64（≤4MiB 解码后；超限 schema 拒绝）。 */
+    data: z.string().min(1),
+    name: z.string().min(1).max(120).optional(),
+  }),
+  z.strictObject({
+    /** daemon 可读的绝对路径（源文件 ≤4MiB，daemon 读盘时校验）。 */
+    path: z.string().min(1),
+    name: z.string().min(1).max(120).optional(),
+  }),
+]);
 /** prompt 图片附件。 */
 export type AgentPromptImage = z.infer<typeof AgentPromptImageSchema>;
 
-/** prompt 文件附件（wire 层 base64；daemon 经内核 admitEncodedFile 升格 durable ref）。 */
-export const AgentPromptFileSchema = z.object({
-  name: z.string().min(1).max(200),
-  /** canonical base64（≤512KiB 解码后）。 */
-  data: z.string().min(1).max(710_000),
-});
+/**
+ * prompt 文件附件（R17-B 双通道，strict 互斥）：base64（≤512KiB）或后端真实
+ * 路径（daemon 读盘，源文件 ≤512KiB；name 取 basename）。
+ */
+export const AgentPromptFileSchema = z.union([
+  z.strictObject({
+    name: z.string().min(1).max(200),
+    /** canonical base64（≤512KiB 解码后）。 */
+    data: z.string().min(1).max(710_000),
+  }),
+  z.strictObject({
+    /** daemon 可读的绝对路径。 */
+    path: z.string().min(1),
+  }),
+]);
 /** prompt 文件附件。 */
 export type AgentPromptFile = z.infer<typeof AgentPromptFileSchema>;
 
@@ -93,12 +119,15 @@ export const AgentSessionPromptInputSchema = z
     images: z.array(AgentPromptImageSchema).max(4).default([]),
     files: z.array(AgentPromptFileSchema).max(2).default([]),
   })
-  .refine((input) => input.text.trim().length > 0 || input.images.length > 0, {
-    message: "prompt needs text or at least one image",
-  })
   .refine(
-    // 4MiB 解码后 = base64 长度上限 5,592,406（×4/3 向上取整；browser-safe 无 Buffer）。
-    (input) => input.images.every((image) => image.data.length <= 5_592_406),
+    // R17 codex P1：files-only 也是合法 prompt（后端文件选择器的主路径）。
+    (input) => input.text.trim().length > 0 || input.images.length > 0 || input.files.length > 0,
+    { message: "prompt needs text, an image, or a file attachment" },
+  )
+  .refine(
+    // 4MiB 解码后 = base64 长度上限 5,592,406（×4/3 向上取整；browser-safe 无
+    // Buffer）；path 通道不在此限（daemon 读盘时按源文件字节校验）。
+    (input) => input.images.every((image) => !("data" in image) || image.data.length <= 5_592_406),
     { message: "each image must decode to ≤4MiB" },
   );
 /** prompt 输入。 */
@@ -247,6 +276,82 @@ export type AgentMcpProposalView = z.infer<typeof AgentMcpProposalViewSchema>;
 export const AgentProposalDecisionInputSchema = z.object({
   proposalId: z.string().min(1),
 });
+
+/**
+ * 后端文件浏览输入（R17-B）：dir 缺省 = daemon 默认起始目录（home）；显式传入
+ * 必须是绝对路径（相对路径 typed INVALID_OPERATION，不做 cwd 相对解析）。
+ * 本浏览面是用户本机自由选择器（读面，无 Workspace containment——功能目的
+ * 就是拿到任意真实路径），不进 MCP/capability 面。
+ */
+export const AgentFilesListInputSchema = z.object({
+  dir: z.string().min(1).optional(),
+});
+/** 文件浏览输入。 */
+export type AgentFilesListInput = z.infer<typeof AgentFilesListInputSchema>;
+
+/** 单个目录条目（dir 无 size；file size = 字节）。 */
+export const AgentFilesEntrySchema = z.object({
+  name: z.string().min(1),
+  kind: z.enum(["file", "dir"]),
+  size: z.number().int().nonnegative().optional(),
+});
+/** 目录条目。 */
+export type AgentFilesEntry = z.infer<typeof AgentFilesEntrySchema>;
+
+/**
+ * 目录浏览结果：dir 为 canonical 绝对路径（realpath）；entries 目录优先、
+ * 字典序；超出上限截断并置 truncated（超大目录如 node_modules 的有界投影）。
+ */
+export const AgentFilesListResultSchema = z.object({
+  dir: z.string().min(1),
+  /** 上一级目录（文件系统根为 null）。 */
+  parent: z.string().min(1).nullable(),
+  entries: z.array(AgentFilesEntrySchema).max(2000),
+  truncated: z.boolean().optional(),
+});
+/** 目录浏览结果。 */
+export type AgentFilesListResult = z.infer<typeof AgentFilesListResultSchema>;
+
+/** 单文件预览输入（绝对路径；目录/缺失分别是 typed INVALID_OPERATION/NOT_FOUND）。 */
+export const AgentFilesPreviewInputSchema = z.object({
+  path: z.string().min(1),
+});
+/** 预览输入。 */
+export type AgentFilesPreviewInput = z.infer<typeof AgentFilesPreviewInputSchema>;
+
+/**
+ * 单文件预览结果（判别联合）：
+ * - image：png/jpeg 源（magic 字节判定）≤8MiB → jSquash 解码 → 长边 ≤256px 缩略
+ *   → png 源回编 png（保 alpha）/ jpeg 源回编 jpeg → dataURL（前端零解码负担）；
+ * - text：≤2MiB 源文件的前 4KiB UTF-8 头（首 4KiB 含 NUL → binary）；
+ * - binary：其余一切（gif/webp/超大/不可解码）——仅名字与大小，不伪装成功预览。
+ */
+export const AgentFilesPreviewResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("image"),
+    name: z.string().min(1),
+    size: z.number().int().nonnegative(),
+    mediaType: z.enum(["image/png", "image/jpeg"]),
+    /** data:image/(png|jpeg);base64,… 缩略图（≤256px 长边）。 */
+    dataUrl: z.string().min(1),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+  }),
+  z.strictObject({
+    kind: z.literal("text"),
+    name: z.string().min(1),
+    size: z.number().int().nonnegative(),
+    text: z.string(),
+    truncated: z.boolean(),
+  }),
+  z.strictObject({
+    kind: z.literal("binary"),
+    name: z.string().min(1),
+    size: z.number().int().nonnegative(),
+  }),
+]);
+/** 预览结果。 */
+export type AgentFilesPreviewResult = z.infer<typeof AgentFilesPreviewResultSchema>;
 
 export {
   DshStewardSettingsViewSchema as AgentSettingsViewSchema,

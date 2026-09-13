@@ -14,6 +14,7 @@
  *   [4] Own the ACP bridge subprocess pool for the daemon lifetime.
  */
 import { createAcpBridgeService, type AcpBridgeService } from "./acp-bridge-service.js";
+import { createAgentFilesService, type AgentFilesService } from "./agent-files.js";
 import { createCreatorService, type CreatorService } from "./creator-service.js";
 import { createRepositoryService, type RepositoryService } from "./repository-service.js";
 import { createSourceRegistry, type SourceRegistry } from "./source-registry.js";
@@ -84,6 +85,8 @@ export interface DaemonDomain {
   dshSettings: DshSettingsService;
   /** 内核 agent 会话服务（task 2.2；kernel 句柄由 daemon index boot 后注入）。 */
   agentSessions: AgentSessionsService;
+  /** 后端文件选择器服务（R17-B）：真实路径浏览/预览 + prompt 附件 path 通道读盘。 */
+  agentFiles: AgentFilesService;
   /** pi-ai 装配目录（models.dev 镜像）的 provider 画廊投影。 */
   modelCatalog: ModelCatalogService;
   /** 内核句柄注入（index 在 boot 成功后调用；降级时保持缺席 → typed UNAVAILABLE）。 */
@@ -145,6 +148,7 @@ export function createDaemonDomain(
     skillSteward: createSkillStewardPipelineService({ workspaces, skills, creator }),
     dshSettings,
     agentSessions,
+    agentFiles: createAgentFilesService(),
     modelCatalog,
     setKernelHost: (handle: DshKernelHandle): void => {
       kernelHostRef.handle = handle;

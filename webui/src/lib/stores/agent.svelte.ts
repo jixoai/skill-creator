@@ -20,6 +20,10 @@
  *   [4] New Session 态（R12-B 6/8）：pendingMode 是空态模式卡与 composer 模式
  *       chip 的唯一数据源（默认 free/General）；会话创建是惰性的——只发生在
  *       首条消息发出时（sendAgentPrompt 无会话先建），header 的 + 只回到空态。
+ * 修订 [2026-09-13]（R17-A）：composer 草稿按 sessionId 分轨，本模块是草稿生命
+ *       周期的挂接点——beginNewAgentSession 清 "__new__" 桶、resetSessionView
+ *       换轨、sendAgentPrompt 惰性建会话迁移在途草稿并在发送成功后清发送轨
+ *       （分轨真相见 agent-composer.svelte）。
  * 妥协声明：面板不是 MCP client——会话经 agent.* RPC 消费内核（design D2）；
  * 无 callId 的 tool-result 回退匹配在并行同名工具时可能错位（design §7）。
  */
@@ -41,6 +45,12 @@ import {
   type DshStewardSettingsView,
 } from "$shared/contracts/dsh-runtime.js";
 import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
+import {
+  NEW_SESSION_COMPOSER_TRACK,
+  migrateComposerDraft,
+  resetComposerTrack,
+  switchComposerTrack,
+} from "./agent-composer.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 
 /** 待答审批的视图投影（approval-request 帧的 questions 载荷）。 */
@@ -119,10 +129,36 @@ const credentialGate = createRequestGenerationGate(getConnectionGeneration);
 // 会话清理（R14-C）：成功后代次门失效旧响应并刷新列表；失效结果投影为 null。
 const cleanupGate = createRequestGenerationGate(getConnectionGeneration);
 
-/** drawer 开合（跨 tab 存活）；seedPrompt 为首屏行动塞进 composer 的一次性种子。 */
+/** 宽屏侧栏宽度语义（R17-C resize）：≥720px 可拖拽，320–720px，默认 440；
+ * 持久键 sessionStorage（会话级，随 tab 存活，不在 daemon/文件系统落地）。 */
+export const AGENT_PANEL_MIN_WIDTH = 320;
+export const AGENT_PANEL_MAX_WIDTH = 720;
+export const AGENT_PANEL_DEFAULT_WIDTH = 440;
+const AGENT_PANEL_WIDTH_STORAGE_KEY = "skill-creator.agentPanelWidth.v1";
+
+/** 宽度收窄：非有限数（持久值损坏/坐标派生 NaN）回默认，越界 clamp 到边界。 */
+export function clampAgentPanelWidth(width: number): number {
+  if (!Number.isFinite(width)) return AGENT_PANEL_DEFAULT_WIDTH;
+  return Math.min(AGENT_PANEL_MAX_WIDTH, Math.max(AGENT_PANEL_MIN_WIDTH, Math.round(width)));
+}
+
+/** 恢复持久宽度（外部输入：不可读/损坏一律回默认，不迁移、不写回）。 */
+function readStoredAgentPanelWidth(): number {
+  try {
+    const stored = sessionStorage.getItem(AGENT_PANEL_WIDTH_STORAGE_KEY);
+    if (stored === null) return AGENT_PANEL_DEFAULT_WIDTH;
+    return clampAgentPanelWidth(Number(stored));
+  } catch {
+    return AGENT_PANEL_DEFAULT_WIDTH;
+  }
+}
+
+/** drawer 开合（跨 tab 存活，开关=收起不销毁）；seedPrompt 为首屏行动塞进
+ * composer 的一次性种子；width 为 ≥720px 侧栏宽度（初始化自 sessionStorage）。 */
 export const agentPanel = $state({
   open: false,
   seedPrompt: null as string | null,
+  width: readStoredAgentPanelWidth(),
 });
 
 /** 当前会话与帧视图（跨 tab 存活；切会话清空重载）。 */
@@ -197,6 +233,16 @@ export function setAgentPanelOpen(open: boolean): void {
   }
   if (!open) {
     stopPolling();
+  }
+}
+
+/** 拖拽改宽（R17-C）：clamp 后写状态并持久；存储不可用只丢持久化，不阻塞拖拽。 */
+export function setAgentPanelWidth(width: number): void {
+  agentPanel.width = clampAgentPanelWidth(width);
+  try {
+    sessionStorage.setItem(AGENT_PANEL_WIDTH_STORAGE_KEY, String(agentPanel.width));
+  } catch {
+    // 隐私上下文等存储异常：本次会话内宽度仍生效。
   }
 }
 
@@ -326,6 +372,10 @@ export function beginNewAgentSession(): void {
   pendingUserEcho = [];
   pendingUsage = null;
   pendingToolArgs = new Map();
+  // R17-A：草稿分轨——显式新建清空 "__new__" 共享桶（换轨先暂存上一会话轨，
+  // 其草稿不受影响）。这是清轨收窄后的两个调用点之一。
+  switchComposerTrack(NEW_SESSION_COMPOSER_TRACK);
+  resetComposerTrack(NEW_SESSION_COMPOSER_TRACK);
 }
 
 /** 切换会话（重置视图并立即拉一轮）。 */
@@ -353,6 +403,9 @@ function resetSessionView(
   pendingUserEcho = [];
   pendingUsage = null;
   pendingToolArgs = new Map();
+  // R17-A：sessionId 变化即换轨到该会话的草稿（selectAgentSession 与惰性 create
+  // 两个向量共用本入口；双向暂存，切换不丢任何一轨）。
+  switchComposerTrack(sessionId);
 }
 
 /**
@@ -385,13 +438,23 @@ export async function setAgentSessionMode(mode: DshAgentMode): Promise<boolean> 
   }
 }
 
-/** 发送一轮用户输入（可选图片附件：base64 wire，daemon 经内核 attachment 准入）。
- * New Session 态的首条消息先以待建模式（pendingMode）惰性建会话——这是空态下
- * 唯一的会话创建向量（R12-B 8：模式卡/chip 只改选择，不 eager 建会话）。 */
+/**
+ * 发送一轮用户输入（可选附件双通道，R17-B）：本地 File 通道（mediaType+data
+ * base64 wire）或后端真实路径通道（path——daemon 读盘 + magic 嗅探，浏览器不经
+ * 手原始字节）；daemon 经内核 attachment 准入。New Session 态的首条消息先以待建
+ * 模式（pendingMode）惰性建会话——这是空态下唯一的会话创建向量（R12-B 8：
+ * 模式卡/chip 只改选择，不 eager 建会话）。
+ */
 export async function sendAgentPrompt(
   text: string,
-  images: Array<{ mediaType: string; data: string; name?: string; preview?: string }> = [],
-  files: Array<{ name: string; data: string }> = [],
+  images: Array<{
+    mediaType?: string;
+    data?: string;
+    path?: string;
+    name?: string;
+    preview?: string;
+  }> = [],
+  files: Array<{ name?: string; data?: string; path?: string }> = [],
 ): Promise<void> {
   if (text.trim().length === 0 && images.length === 0 && files.length === 0) {
     return;
@@ -400,38 +463,66 @@ export async function sendAgentPrompt(
     await createAgentSession(undefined, agentSession.pendingMode);
     // 创建失败（含被代次门取代）：sessionId 仍为 null，错误已进 error 面。
     if (!agentSession.sessionId) return;
+    // R17-A：惰性建会话换轨后，把 "__new__" 桶的在途草稿迁到新会话轨——草稿在
+    // 发送期间继续可见；成功清该轨，失败留在当前会话轨可重试。
+    migrateComposerDraft(NEW_SESSION_COMPOSER_TRACK, agentSession.sessionId);
   }
   const sessionId = agentSession.sessionId;
   const request = promptGate.issue();
   agentSession.sending = true;
   // 乐观追加用户消息（失败时由错误状态覆盖）；同文本 user-text 帧到达时出队去重。
+  // path 通道图片有缩略用缩略，无缩略（webp/gif）以名字进 files chip（回显语义
+  // 与转录 attachmentsOf 的 image/file 块投影一致）。
+  const thumblessImageNames = images
+    .filter((image) => image.preview === undefined)
+    .map((image) => image.name ?? "image");
   agentSession.items.push({
     kind: "user",
     seq: -Date.now(),
     text,
-    ...(images.length > 0
+    ...(images.some((image) => image.preview !== undefined)
       ? {
-          images: images.map(
-            (image) => image.preview ?? `data:${image.mediaType};base64,${image.data}`,
-          ),
+          images: images.flatMap((image) => (image.preview !== undefined ? [image.preview] : [])),
         }
       : {}),
-    ...(files.length > 0 ? { files: files.map((file) => file.name) } : {}),
+    ...(files.length > 0 || thumblessImageNames.length > 0
+      ? { files: [...files.map((file) => file.name ?? "file"), ...thumblessImageNames] }
+      : {}),
   });
   pendingUserEcho.push(text);
   try {
     await requireRpc().agent.session.prompt({
       sessionId,
       text,
-      images: images.map((image) => ({
-        mediaType: image.mediaType as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
-        data: image.data,
-        ...(image.name ? { name: image.name } : {}),
-      })),
-      files,
+      images: images.map((image) => {
+        // R17-B 双通道分流：path 通道 daemon 读盘（mediaType 由 magic 字节嗅探）。
+        if (image.path !== undefined) {
+          return { path: image.path, ...(image.name ? { name: image.name } : {}) };
+        }
+        if (image.mediaType === undefined || image.data === undefined) {
+          throw new Error("image attachment needs either path or mediaType+data");
+        }
+        return {
+          mediaType: image.mediaType as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+          data: image.data,
+          ...(image.name ? { name: image.name } : {}),
+        };
+      }),
+      files: files.map((file) => {
+        if (file.path !== undefined) {
+          return { path: file.path };
+        }
+        if (file.name === undefined || file.data === undefined) {
+          throw new Error("file attachment needs either path or name+data");
+        }
+        return { name: file.name, data: file.data };
+      }),
     });
     if (!request.isCurrent()) return;
     agentSession.promptError = null;
+    // R17-A：发送成功清发送轨（清轨收窄后的第二个调用点；提交点不清草稿——
+    // 失败留在原轨可重试）。发送中途切走的会话轨照常按发送目标清理。
+    resetComposerTrack(sessionId);
   } catch (error) {
     if (!request.isCurrent()) return;
     agentSession.promptError = error instanceof Error ? error.message : String(error);

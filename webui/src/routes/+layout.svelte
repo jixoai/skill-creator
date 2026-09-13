@@ -191,16 +191,20 @@
         </button>
       </nav>
 
-      <!-- 右侧：Shell 内容区 + Agent 面板 drawer（shell 级、跨 tab 存活） -->
+      <!-- 右侧：Shell 内容区 + Agent 面板 drawer（shell 级、跨 tab 存活）。R17-C：
+           常驻挂载——开关只是收起（宽屏 0 宽不占布局 / 窄屏 invisible 抽屉），
+           不做 DOM 销毁；收起态层挂 pointer-events-none，覆盖层不拦截主区交互。 -->
       <main class="min-w-0 flex-1 overflow-hidden">
         <TabOutlet />
         {@render children?.()}
       </main>
-      {#if agentPanel.open}
-        <div class="agent-panel-layer max-[720px]:absolute max-[720px]:inset-0 max-[720px]:z-40">
-          <AgentPanel />
-        </div>
-      {/if}
+      <div
+        class="agent-panel-layer shrink-0 max-[720px]:absolute max-[720px]:inset-0 max-[720px]:z-40 {agentPanel.open
+          ? ''
+          : 'pointer-events-none'}"
+      >
+        <AgentPanel />
+      </div>
     </div>
   </div>
 </TooltipProvider>

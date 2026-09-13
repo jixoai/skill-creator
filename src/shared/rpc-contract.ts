@@ -24,6 +24,10 @@ import {
   AgentCredentialClearInputSchema,
   AgentCredentialSetInputSchema,
   AgentCredentialSetResultSchema,
+  AgentFilesListInputSchema,
+  AgentFilesListResultSchema,
+  AgentFilesPreviewInputSchema,
+  AgentFilesPreviewResultSchema,
   AgentSessionCreateInputSchema,
   AgentSessionCreateResultSchema,
   AgentSessionCancelInputSchema,
@@ -339,6 +343,17 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       /** 切换会话模式（add-agent-settings-modes：running 拒绝；live 句柄释放，
        * 下一次 prompt 以新模式 setup 复活，历史由内核 session log 保留）。 */
       setMode: oc.input(AgentSessionSetModeInputSchema).output(AgentSessionSetModeResultSchema),
+    },
+    /**
+     * 后端文件选择器（R17-B）：真实路径浏览 + 单文件预览。用户本机自由浏览是
+     * 功能目的（读面，无 Workspace containment）；prompt 附件 path 通道在
+     * session.prompt 的 daemon 侧读盘。
+     */
+    files: {
+      /** 列目录（dir 缺省 = home；canonical realpath + 目录优先字典序 + 有界截断）。 */
+      list: oc.input(AgentFilesListInputSchema).output(AgentFilesListResultSchema),
+      /** 单文件预览：图片缩略（jSquash）/ 文本头 / 二进制名投影。 */
+      preview: oc.input(AgentFilesPreviewInputSchema).output(AgentFilesPreviewResultSchema),
     },
     /** pi-ai 装配目录（models.dev 镜像）投影：全量 provider 画廊（filter 在 UI）。 */
     models: {
