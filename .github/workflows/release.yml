@@ -95,7 +95,7 @@ jobs:
         run: |
           mv ccski-src ../ccski
           cd ../ccski
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
           pnpm build
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -158,7 +158,7 @@ jobs:
         run: |
           mv ccski-src ../ccski
           cd ../ccski
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
           pnpm build
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
