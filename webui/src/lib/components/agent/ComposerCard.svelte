@@ -263,7 +263,8 @@
       // 都需要可读文件名；path 可能以 / 结尾的场景先剥再取）。
       const picks = result.paths.map((path) => ({
         path,
-        name: path.replace(/\/+$/, "").split("/").pop() ?? path,
+        // 跨平台 basename：正斜杠/反斜杠都取末段（Windows 路径含 \\）。
+        name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
       }));
       if (target === "image") {
         addPickedComposerImages(picks);

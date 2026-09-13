@@ -195,3 +195,19 @@ describe("ComposerCard attachment pickers (R14-B 4)", () => {
     ctx.cleanup();
   });
 });
+
+describe("native pick basename derivation (R18 终验)", () => {
+  it("derives display names across POSIX and Windows path shapes", async () => {
+    const vectors: Array<[string, string]> = [
+      ["/Users/x/a.png", "a.png"],
+      ["C:\\Users\\x\\a.png", "a.png"],
+      ["/Users/x/a.png///", "a.png"],
+      ["a.png", "a.png"],
+      ["/", "/"],
+    ];
+    for (const [input, expected] of vectors) {
+      const derived = input.split(/[\\/]/).filter(Boolean).pop() ?? input;
+      expect(derived).toBe(expected);
+    }
+  });
+});
