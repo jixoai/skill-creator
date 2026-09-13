@@ -25,11 +25,16 @@ jobs:
           fetch-depth: 0 # Fetch full history for version comparison
           token: ${{ secrets.GITHUB_TOKEN }} # Use token with write permissions
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.22.0
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "22.14.0"
-          cache: "npm"
+          cache: "pnpm"
 
       - name: Check if package.json version changed
         id: check
