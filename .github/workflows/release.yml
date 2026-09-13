@@ -91,10 +91,12 @@ jobs:
           repository: jixoai/ccski
           path: ccski-src
 
-      - name: Link ccski as workspace sibling
+      - name: Build ccski sibling
         run: |
-          mkdir -p ..
-          cp -r ccski-src ../ccski
+          mv ccski-src ../ccski
+          cd ../ccski
+          pnpm install --frozen-lockfile
+          pnpm build
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -152,10 +154,12 @@ jobs:
           repository: jixoai/ccski
           path: ccski-src
 
-      - name: Link ccski as workspace sibling
+      - name: Build ccski sibling
         run: |
-          mkdir -p ..
-          cp -r ccski-src ../ccski
+          mv ccski-src ../ccski
+          cd ../ccski
+          pnpm install --frozen-lockfile
+          pnpm build
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
