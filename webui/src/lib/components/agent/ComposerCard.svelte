@@ -259,10 +259,16 @@
     try {
       const result = await pickAgentFiles(target);
       if (result === null || result.paths.length === 0) return;
+      // name 从真实路径派生 basename（codex R18 P1：UI chip/移除按钮/live 回显
+      // 都需要可读文件名；path 可能以 / 结尾的场景先剥再取）。
+      const picks = result.paths.map((path) => ({
+        path,
+        name: path.replace(/\/+$/, "").split("/").pop() ?? path,
+      }));
       if (target === "image") {
-        addPickedComposerImages(result.paths.map((path) => ({ path, name: "" })));
+        addPickedComposerImages(picks);
       } else {
-        addPickedComposerDocs(result.paths.map((path) => ({ path, name: "" })));
+        addPickedComposerDocs(picks);
       }
     } finally {
       picking = false;

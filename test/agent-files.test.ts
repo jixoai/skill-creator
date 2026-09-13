@@ -20,7 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { encode as encodeJpeg } from "@jsquash/jpeg";
 import encodePng from "@jsquash/png/encode.js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentFilesService } from "../src/daemon/agent-files.js";
 import { ensureImageCodecs } from "../src/daemon/image-codec.js";
 import { DomainError } from "../src/daemon/domain-error.js";
@@ -372,10 +372,50 @@ describe("files-only prompt is a valid contract shape (R17 codex P1)", () => {
   });
 });
 
+// rfd mock：模块级单一可配置（vi.mock 提升，同文件多次声明互相覆盖）。
+const rfdState = { handles: null as Array<{ path: () => string }> | null };
+vi.mock("@xmorse/rfd", () => ({
+  AsyncFileDialog: class {
+    setTitle() {
+      return this;
+    }
+    addFilter() {
+      return this;
+    }
+    pickFiles() {
+      return Promise.resolve(rfdState.handles);
+    }
+  },
+}));
+
 describe("pickFiles native picker (R18 @xmorse/rfd)", () => {
-  it("exposes a mode-parameterized pickFiles on the service", async () => {
+  it("returns real paths from the native dialog and empty on cancel", async () => {
+    vi.resetModules();
     const { createAgentFilesService } = await import("../src/daemon/agent-files.js");
     const service = createAgentFilesService();
-    expect(typeof service.pickFiles).toBe("function");
+    rfdState.handles = [{ path: () => "/Users/x/a.png" }, { path: () => "/Users/x/b.jpg" }];
+    await expect(service.pickFiles({ mode: "image" })).resolves.toEqual({
+      paths: ["/Users/x/a.png", "/Users/x/b.jpg"],
+    });
+    rfdState.handles = null;
+    await expect(service.pickFiles({ mode: "file" })).resolves.toEqual({ paths: [] });
+  });
+
+  it("skips dead handles without failing the batch", async () => {
+    vi.resetModules();
+    const { createAgentFilesService } = await import("../src/daemon/agent-files.js");
+    const service = createAgentFilesService();
+    rfdState.handles = [
+      { path: () => "/Users/x/ok.txt" },
+      {
+        path: () => {
+          throw new Error("gone");
+        },
+      },
+    ];
+    await expect(service.pickFiles({ mode: "file" })).resolves.toEqual({
+      paths: ["/Users/x/ok.txt"],
+    });
+    rfdState.handles = null;
   });
 });

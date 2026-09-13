@@ -1,15 +1,18 @@
 /**
- * 后端文件选择器服务（R17-B）。
+ * 后端文件选择器服务（R17-B → R18 修订）。
  *
  * 用户原始需求 [2026-09-13]：「文件选择器、图片选择器，不要基于 web，而是基于
- * 后端，这样能拿到真实的路径，前端也能更轻。」——OpenTray 0.24.0 无原生
- * open-file dialog API（JS 导出面 + darwin 二进制符号双重实证），「基于后端的
- * 选择器」= 前端弹层消费本服务的 fs 读 RPC 浏览并选定真实路径。
+ * 后端，这样能拿到真实的路径，前端也能更轻。」
+ * 修订 [2026-09-14]（R18 用户裁决）：「不是让你用 Web 做，而是在后端（nodejs）
+ * 这边，唤醒 native 级别的 file-picker」——**pickFiles** 经 @xmorse/rfd
+ * AsyncFileDialog 打开真原生对话框（OpenTray 本身无 dialog API 的结论不变，
+ * rfd 提供跨平台 native 层）；list/preview 两 RPC 保留，服务附件条缩略预览链。
  *
  * 正交意图：
- *   [1] 目录浏览投影：list（canonical realpath + 目录优先字典序 + 有界截断）。
+ *   [1] 原生文件选择：pickFiles（mode 预置 filter；取消=空数组；句柄失效跳过）。
  *   [2] 单文件预览：图片走 jSquash 缩略管线、文本取 4KiB UTF-8 头、其余二进制
- *       仅名/大小——守卫外的输入一律降级 binary 投影，不伪装成功预览。
+ *       仅名/大小——守卫外的输入一律降级 binary 投影，不伪装成功预览（list 的
+ *       目录浏览投影同归本意图：预览的入口面）。
  *   [3] prompt 附件路径解析：path 通道图片/文件在 daemon 读盘（大小守卫与
  *       base64 通道同限：图 4MiB / 文件 512KiB）→ base64 交给既有内核准入链。
  * 妥协声明：三个意图共享同一批 fs/stat/守卫 helper，且同属「浏览 → 预览 → 选定」
