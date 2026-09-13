@@ -168,3 +168,4 @@ minimumReleaseAgeExclude:
   - "@opentray/windows-arm64@0.24.0"
   - "@opentray/windows-x64@0.24.0"
   - opentray@0.24.0
+  - ccski@2.5.0

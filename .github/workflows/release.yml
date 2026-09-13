@@ -85,18 +85,6 @@ jobs:
           node-version: "24"
           cache: "pnpm"
 
-      - name: Checkout ccski (build-time bundle source)
-        uses: actions/checkout@v6
-        with:
-          repository: jixoai/ccski
-          path: ccski-src
-
-      - name: Build ccski sibling
-        run: |
-          mv ccski-src ../ccski
-          cd ../ccski
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm build
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -148,18 +136,6 @@ jobs:
           node --version
           npm --version
 
-      - name: Checkout ccski (build-time bundle source)
-        uses: actions/checkout@v6
-        with:
-          repository: jixoai/ccski
-          path: ccski-src
-
-      - name: Build ccski sibling
-        run: |
-          mv ccski-src ../ccski
-          cd ../ccski
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm build
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
