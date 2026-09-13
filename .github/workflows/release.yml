@@ -1,0 +1,255 @@
+name: Auto Release to NPM
+
+permissions:
+  contents: write # Allow pushing tags and creating releases
+  id-token: write # Required for npm trusted publishing
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should-publish: ${{ steps.check.outputs.should-publish }}
+      version: ${{ steps.check.outputs.version }}
+      is-new-version: ${{ steps.check.outputs.is-new-version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # Fetch full history for version comparison
+          token: ${{ secrets.GITHUB_TOKEN }} # Use token with write permissions
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.14.0"
+          cache: "npm"
+
+      - name: Check if package.json version changed
+        id: check
+        run: |
+          # Get current version from package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+
+          # Get the latest published version from npm
+          LATEST_PUBLISHED=$(npm view skill-creator version 2>/dev/null || echo "0.0.0")
+          echo "Latest published: $LATEST_PUBLISHED"
+
+          # Compare versions
+          if [ "$CURRENT_VERSION" = "$LATEST_PUBLISHED" ]; then
+            echo "should-publish=false" >> $GITHUB_OUTPUT
+            echo "is-new-version=false" >> $GITHUB_OUTPUT
+            echo "Version $CURRENT_VERSION is already published"
+          else
+            echo "should-publish=true" >> $GITHUB_OUTPUT
+            echo "is-new-version=true" >> $GITHUB_OUTPUT
+            echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            echo "New version $CURRENT_VERSION detected"
+          fi
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: check-version
+    if: needs.check-version.outputs.should-publish == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }} # Use token with write permissions
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.22.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.14.0"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm build
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Test CLI build
+        run: node dist/cli.js --version
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [check-version, build-and-test]
+    if: needs.check-version.outputs.should-publish == 'true'
+    environment: npm-release
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }} # Use token with write permissions
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.22.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.14.0"
+          cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
+          scope: "@jixoai"
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install --global npm@11.5.1
+
+      - name: Print publish runtime versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
+        run: pnpm build
+
+      - name: Verify publish tarball
+        run: npm pack --dry-run
+
+      - name: Publish to NPM
+        run: npm publish --provenance
+        # Trusted Publishing uses OIDC via id-token; no npm token secret is needed.
+
+      - name: Create Git tag
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          echo "Creating tag v$VERSION"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: Generate Release Notes
+        id: release-notes
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          echo "Generating release notes for v$VERSION"
+
+          # Get the previous tag (excluding the current version tag if it exists)
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "v$VERSION" | head -n 1)
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, using all commits"
+            COMMIT_RANGE="HEAD"
+          else
+            echo "Previous tag found: $PREV_TAG"
+            COMMIT_RANGE="$PREV_TAG..HEAD"
+          fi
+
+          # Generate release notes
+          echo "RELEASE_BODY<<EOF" >> $GITHUB_OUTPUT
+          echo "## Release v$VERSION" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "This is an automated release of skill-creator v$VERSION." >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+
+          # Installation instructions
+          echo "### 📦 Installation" >> $GITHUB_OUTPUT
+          echo '```bash' >> $GITHUB_OUTPUT
+          echo "npm install -g skill-creator@$VERSION" >> $GITHUB_OUTPUT
+          echo '```' >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+
+          # Generate changelog
+          echo "### 🚀 What's Changed" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+
+          if [ "$PREV_TAG" != "" ]; then
+            echo "**Changes since $PREV_TAG:**" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+
+            # Get commit messages and format them
+            git log $COMMIT_RANGE --pretty=format:"- %s (%h)" | head -50 >> $GITHUB_OUTPUT
+
+            # Get commit stats
+            echo "" >> $GITHUB_OUTPUT
+            echo "**📊 Statistics:**" >> $GITHUB_OUTPUT
+            echo "- $(git rev-list --count $COMMIT_RANGE) commits since $PREV_TAG" >> $GITHUB_OUTPUT
+            echo "- $(git diff --stat $COMMIT_RANGE | tail -n 1 | grep -o '[0-9]\+ insertion' | head -n 1 || echo '0') insertions, $(git diff --stat $COMMIT_RANGE | tail -n 1 | grep -o '[0-9]\+ deletion' | head -n 1 || echo '0') deletions" >> $GITHUB_OUTPUT
+          else
+            echo "**Initial release or first automated release**" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "**Recent commits:**" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            git log --oneline -10 >> $GITHUB_OUTPUT
+          fi
+
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 📖 Documentation" >> $GITHUB_OUTPUT
+          echo "View the [README.md](https://github.com/jixoai/skill-creator/blob/main/README.md) for usage instructions" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "---" >> $GITHUB_OUTPUT
+          echo "*Generated automatically on $(date '+%Y-%m-%d %H:%M:%S')*" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: Release v${{ needs.check-version.outputs.version }}
+          body: ${{ steps.release-notes.outputs.RELEASE_BODY }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Create a summary job to show the results
+  summary:
+    runs-on: ubuntu-latest
+    needs: [check-version, build-and-test, publish]
+    if: always()
+
+    steps:
+      - name: Release Summary
+        run: |
+          echo "## 📋 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.check-version.outputs.should-publish }}" == "true" ]; then
+            echo "✅ **New Version Detected**: v${{ needs.check-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ "${{ needs.build-and-test.result }}" == "success" ]; then
+              echo "✅ **Tests**: Passed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Tests**: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            if [ "${{ needs.publish.result }}" == "success" ]; then
+              echo "✅ **Published**: Successfully published to NPM" >> $GITHUB_STEP_SUMMARY
+              echo "📦 **Install**: \`npm install -g skill-creator@${{ needs.check-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Publish**: Failed to publish to NPM" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "ℹ️ **No new version**: Current version is already published" >> $GITHUB_STEP_SUMMARY
+            echo "📦 **Latest published**: v${{ needs.check-version.outputs.version || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+          fi
