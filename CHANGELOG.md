@@ -45,7 +45,7 @@ independent codex review rounds (final PASS 9.6/10).
   safeParse (data is not migrated or rewritten). Backup `~/.skill-creator`
   before upgrading if you need to roll back.
 - CLI and daemon versions must match; a version mismatch replaces the daemon.
-- Minimum Node.js is now `>=22.13.0`.
+- Minimum Node.js is now `>=24.0.0` (DSH kernel persistence uses `node:zlib` zstd).
 
 ### Security
 

@@ -35,7 +35,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "22.14.0"
+          node-version: "24"
           cache: "pnpm"
 
       - name: Check if package.json version changed
@@ -82,7 +82,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "22.14.0"
+          node-version: "24"
           cache: "pnpm"
 
       - name: Install dependencies
@@ -123,7 +123,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "22.14.0"
+          node-version: "24"
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
           scope: "@jixoai"
