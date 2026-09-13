@@ -101,7 +101,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
-    "ccski": "^2.4.0",
+    "ccski": "link:../ccski",
     "esbuild": "^0.28.1",
     "tsx": "^4.23.1",
     "typescript": "^5.7.2",
