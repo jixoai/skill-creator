@@ -348,7 +348,7 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     },
     /** model/preset/permission/approval 投影（原 dsh.settings 平移）。 */
     settings: {
-      /** 当前 settings 投影 + provider 凭据状态（永不包含凭据值）。 */
+      /** 当前 settings 投影 + provider 凭据（apiKey 按 R16 用户裁决回显）。 */
       get: oc.input(z.object({})).output(AgentSettingsViewSchema),
       /** 应用补丁；revision 只在真实变更时 +1；类型化 rejected 见契约 union。 */
       update: oc.input(AgentSettingsUpdateSchema).output(AgentSettingsUpdateResultSchema),
@@ -361,7 +361,7 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
         .input(DshRouteConnectionTestInputSchema)
         .output(DshRouteConnectionTestResultSchema),
     },
-    /** provider 凭据写入/清除（0600 私有文件；视图只回显 configured 状态）。 */
+    /** provider 凭据写入/清除（0600 私有文件；视图按 R16 回显 apiKey）。 */
     credentials: {
       set: oc.input(AgentCredentialSetInputSchema).output(AgentCredentialSetResultSchema),
       clear: oc.input(AgentCredentialClearInputSchema).output(AgentSettingsViewSchema),

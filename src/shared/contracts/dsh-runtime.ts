@@ -511,7 +511,7 @@ export const DshRouteConnectionTestInputSchema = z.object({
   api: z.string().min(1),
   baseURL: z.string().min(1),
   apiKey: z.string().min(1).optional(),
-  /** 路由 provider：apiKey 缺省时 daemon 从已存凭据注入（UI 不回显 key）。 */
+  /** 路由 provider：apiKey 缺省时 daemon 从已存凭据注入（key 已按 R16 回显）。 */
   provider: z.string().min(1).optional(),
   modelId: z.string().min(1),
 });

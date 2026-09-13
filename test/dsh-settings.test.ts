@@ -165,7 +165,7 @@ describe("DshSettingsService", () => {
     const stored = await service.setCredential({ provider: "deepseek", apiKey: "  sk-secret-1  " });
     expect(stored.outcome).toBe("stored");
     if (stored.outcome === "stored") {
-      // 视图只回显 configured 状态，永不包含凭据值。
+      // R16 用户裁决：视图客观回显 apiKey（password 掩码展示）。
       expect(stored.view.providers).toEqual([
         { provider: "deepseek", configured: true, apiKey: "sk-secret-1" },
       ]);

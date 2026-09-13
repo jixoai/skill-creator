@@ -22,7 +22,7 @@
      Add model；新增条目 scrollIntoView）。
   2. 写路径：全局 Save 把 endpoint + models 的全部脏改动合并为一次
      updateAgentSettings({modelRoutes}) 补丁；identity 三控制在 pick 时即时落库
-     （IconPicker 无草稿态）；key 走 setAgentCredential/clear 旁路（值永不回流）。
+     （IconPicker 无草稿态）；key 走 setAgentCredential/clear 旁路（R16 起客观回显）。
   3. 数据源派生：ModelListItem 补全池 = catalogModelCandidates（R10-1：当前
      provider（编号 slug 归一 base）置顶 + 跨 provider 净化并集）；新增条目
      efforts 默认三档（DEFAULT_MODEL_EFFORTS）；条目级 dirty 传给折叠行小圆点。

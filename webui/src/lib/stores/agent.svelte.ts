@@ -983,7 +983,7 @@ export function resetAgentPanelConnection(): void {
 }
 
 /**
- * 写入 provider 凭据（只写面；结果视图更新 agentRuntimeConfig，值永不回流）。
+ * 写入 provider 凭据（R16 起视图回显 apiKey；结果更新 agentRuntimeConfig）。
  * 类型化 rejected 原样返回给调用方投影。
  */
 export async function setAgentCredential(
@@ -1027,7 +1027,7 @@ export async function clearAgentCredential(provider: string): Promise<void> {
 
 /**
  * 路由连接测试（R7 8.7；ModelListItem 消费）：路由草案即可测的只读外呼探活。
- * apiKey 不进输入面——daemon 侧按 provider 从已存凭据注入（key 经 R16 裁决回显）；
+ * apiKey 不进此输入面——daemon 侧按 provider 从已存凭据注入（key 已按 R16 回显）；
  * 未连接返回 null（调用方自行投影为不可用）。结果 typed，永不 throw。
  */
 export async function testRouteConnection(

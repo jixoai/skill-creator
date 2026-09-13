@@ -12,7 +12,8 @@
  *
  * 正交意图：
  *   [1] settings/credentials 持久化与 revision：atomicWriteUtf8、safeParse 不兼容→默认值、
- *       I/O 故障→typed UNAVAILABLE；凭据只落 0600 私有文件，任何视图不回显。
+ *       I/O 故障→typed UNAVAILABLE；凭据只落 0600 私有文件；视图按 R16 用户裁决 [2026-09-13] 客观回显 key
+ *       （password 掩码展示）。
  *   [2] 无 fallback 的运行时 preset 解析：deterministic 走脚本 adapter；live 缺凭据
  *       返回类型化失败，绝不静默回退。
  *   [3] 脱敏 session stream 环形投影：给后续 DSH client plugin 的进程内实时帧；
@@ -232,11 +233,11 @@ export interface DshStreamCollector {
 
 /** Steward DSH settings 服务。 */
 export interface DshSettingsService {
-  /** 客户端 settings 投影（含 provider 凭据状态；永不包含凭据值）。 */
+  /** 客户端 settings 投影（providers[].apiKey 客观回显——R16 用户裁决）。 */
   getView(): Promise<DshStewardSettingsView>;
   /** 应用补丁；no-op 接受但不动 revision；跨字段校验失败返回类型化 rejected。 */
   update(patch: DshSettingsUpdate): Promise<DshSettingsUpdateResult>;
-  /** 写入 provider 凭据（DSH normalizeApiKey 校验；0600 私有文件；视图不回显）。 */
+  /** 写入 provider 凭据（DSH normalizeApiKey 校验；0600 私有文件；回显见 getView）。 */
   setCredential(input: DshCredentialSetInput): Promise<DshCredentialSetResult>;
   /** 清除 provider 凭据（允许清掉 live preset 依赖项；resolve 会类型化失败，不 fallback）。 */
   clearCredential(input: DshCredentialClearInput): Promise<DshStewardSettingsView>;

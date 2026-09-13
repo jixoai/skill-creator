@@ -5,7 +5,7 @@
   Custom 表单与 tab 内容是同一组件的两个实例化（新建态 vs 编辑态）。」
   正交意图：
   1. tab 条：每条 settings.modelRoutes 一个 tab（16px 图标三级回退 + 12px 名 +
-     key 缺失 amber 点 + 活动路由 primary 下划线）；横滚（滚轮纵转横 + 两侧渐隐
+     key 缺失 amber 点 + 活动路由 active badge[R16 起替代下划线]）；横滚（滚轮纵转横 + 两侧渐隐
      mask），固定 + New；←/→ 焦点移动，Delete 触发删除确认。
   2. 组件路由：RouteTabContent（选中路由）/ NewRouteTab（pick|form 两态）/
   空态 onboarding；tab 选中是纯视图状态，永不写 settings。

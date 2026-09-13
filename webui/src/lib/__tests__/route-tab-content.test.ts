@@ -20,7 +20,7 @@
  *   [3] Add model（R12-A3）：新增条目 scrollIntoView({nearest, smooth})。
  *   [4] Active model 块删除（R12-A4）：相关 select/按钮不再渲染。
  *   [5] 常驻凭据输入（R12-A5）：password 输入 + eye 切 type；失焦/Enter 保存；
- *       已配置显示 stored 占位不回显；Clear 旁路保留。
+ *       已配置客观回显 key 值（R16 用户裁决）；Clear 旁路保留。
  *   [6] 标题行布局（R14-A2）：Remove/Save 与 displayName/meta 同一容器行
  *       （data-route-titlebar），标题行位于首块、无独立动作行。
  */
