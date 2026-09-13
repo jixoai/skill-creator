@@ -52,11 +52,6 @@ vi.mock("../components/agent/ContextMeter.svelte", async () => {
   const { default: stub } = await import("./stubs/context-meter-stub.svelte");
   return { default: stub };
 });
-// R17-B：附件按钮改开 FilePickerDialog（ui/dialog → bits-ui 不可编译）——空壳替换。
-vi.mock("../components/agent/FilePickerDialog.svelte", async () => {
-  const { default: stub } = await import("./stubs/file-picker-stub.svelte");
-  return { default: stub };
-});
 // AgentApprovalCard → ui/button|input → bits-ui（node_modules .svelte，不编译）。
 vi.mock("../components/agent/AgentApprovalCard.svelte", async () => {
   const { default: stub } = await import("./stubs/markdown-render-stub.svelte");

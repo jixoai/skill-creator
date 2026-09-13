@@ -51,6 +51,11 @@ export interface ResolvedPromptAttachments {
 export interface AgentFilesService {
   list(input: AgentFilesListInput): Promise<AgentFilesListResult>;
   preview(input: AgentFilesPreviewInput): Promise<AgentFilesPreviewResult>;
+  /**
+   * 原生文件选择（R18 用户裁决：后端唤醒 native file-picker，@xmorse/rfd）。
+   * filter 按 image/file 模式预置；返回真实路径列表（空 = 用户取消）。
+   */
+  pickFiles(input: { mode: "image" | "file" }): Promise<{ paths: string[] }>;
   /** path 通道附件读盘为 base64 形状（agentSessions.prompt 既有签名不变）。 */
   resolvePromptAttachments(input: {
     images: Array<{ mediaType?: string; data?: string; name?: string; path?: string }>;
@@ -115,6 +120,26 @@ function compareEntries(a: AgentFilesEntry, b: AgentFilesEntry): number {
 
 export function createAgentFilesService(deps: AgentFilesDeps = {}): AgentFilesService {
   const defaultDir = deps.defaultDir ?? (() => os.homedir());
+
+  async function pickFiles(input: { mode: "image" | "file" }): Promise<{ paths: string[] }> {
+    const { AsyncFileDialog } = await import("@xmorse/rfd");
+    let builder = new AsyncFileDialog();
+    builder = builder.setTitle(input.mode === "image" ? "Select images" : "Select files");
+    if (input.mode === "image") {
+      builder = builder.addFilter("Images", ["png", "jpg", "jpeg", "webp", "gif"]);
+    }
+    const handles = await builder.pickFiles();
+    if (handles === null) return { paths: [] };
+    const paths: string[] = [];
+    for (const handle of handles) {
+      try {
+        paths.push(handle.path());
+      } catch {
+        // 句柄失效（选后即删等）：跳过，不炸整次选择。
+      }
+    }
+    return { paths };
+  }
 
   async function list(input: AgentFilesListInput): Promise<AgentFilesListResult> {
     const target = input.dir === undefined ? defaultDir() : input.dir;
@@ -273,5 +298,5 @@ export function createAgentFilesService(deps: AgentFilesDeps = {}): AgentFilesSe
     return { images, files };
   }
 
-  return { list, preview, resolvePromptAttachments };
+  return { pickFiles, list, preview, resolvePromptAttachments };
 }

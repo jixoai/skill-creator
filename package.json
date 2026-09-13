@@ -89,6 +89,7 @@
     "@opentray/vite-plugin": "0.24.0",
     "@orpc/contract": "1.14.6",
     "@orpc/server": "1.14.6",
+    "@xmorse/rfd": "^2.3.0",
     "execa": "^9.6.1",
     "gray-matter": "^4.0.3",
     "opentray": "0.24.0",

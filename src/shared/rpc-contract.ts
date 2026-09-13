@@ -354,6 +354,10 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       list: oc.input(AgentFilesListInputSchema).output(AgentFilesListResultSchema),
       /** 单文件预览：图片缩略（jSquash）/ 文本头 / 二进制名投影。 */
       preview: oc.input(AgentFilesPreviewInputSchema).output(AgentFilesPreviewResultSchema),
+      /** 原生文件选择（R18 @xmorse/rfd）：mode 预置 filter；空 = 取消。 */
+      pickFiles: oc
+        .input(z.object({ mode: z.enum(["image", "file"]) }))
+        .output(z.object({ paths: z.array(z.string().min(1)) })),
     },
     /** pi-ai 装配目录（models.dev 镜像）投影：全量 provider 画廊（filter 在 UI）。 */
     models: {

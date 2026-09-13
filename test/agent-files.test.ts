@@ -371,3 +371,11 @@ describe("files-only prompt is a valid contract shape (R17 codex P1)", () => {
     expect(parsed.success).toBe(false);
   });
 });
+
+describe("pickFiles native picker (R18 @xmorse/rfd)", () => {
+  it("exposes a mode-parameterized pickFiles on the service", async () => {
+    const { createAgentFilesService } = await import("../src/daemon/agent-files.js");
+    const service = createAgentFilesService();
+    expect(typeof service.pickFiles).toBe("function");
+  });
+});

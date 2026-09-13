@@ -10,7 +10,7 @@
  * （Map<sessionId, Draft>），无会话（New Session 态）共享 "__new__" 桶；换轨
  * 双向暂存/恢复，切换不丢任何一轨；清轨点收窄为显式新建（beginNewAgentSession）
  * 与发送成功（sendAgentPrompt），面板开合不再重置（R17-C 面板常驻挂载同语义）。
- * 修订 [2026-09-13]（R17-B）：附件新增「后端真实路径」通道（FilePickerDialog
+ * 修订 [2026-09-14]（R18）：附件真实路径通道改由 **native** pickFiles 提供（@xmorse/rfd；原 web 弹层（FilePickerDialog
  * 选定）——本地 File 通道（粘贴/drop，base64 wire）原样保留；path 通道大小守卫
  * 在 daemon 读盘时执行（同文案），数量守卫沿用本模块。
  *

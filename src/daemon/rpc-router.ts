@@ -228,6 +228,9 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       files: {
         // R17-B 后端文件选择器：用户本机自由浏览（读面，无 containment）。
         list: rpc.agent.files.list.handler(async ({ input }) => domain.agentFiles.list(input)),
+        pickFiles: rpc.agent.files.pickFiles.handler(async ({ input }) =>
+          domain.agentFiles.pickFiles(input),
+        ),
         preview: rpc.agent.files.preview.handler(async ({ input }) =>
           domain.agentFiles.preview(input),
         ),

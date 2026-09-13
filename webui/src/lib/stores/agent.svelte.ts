@@ -1077,6 +1077,17 @@ export function resetAgentPanelConnection(): void {
  * 写入 provider 凭据（R16 起视图回显 apiKey；结果更新 agentRuntimeConfig）。
  * 类型化 rejected 原样返回给调用方投影。
  */
+/** 原生文件选择（R18）：daemon @xmorse/rfd AsyncFileDialog；null = RPC 失败。 */
+export async function pickAgentFiles(mode: "image" | "file"): Promise<{ paths: string[] } | null> {
+  try {
+    const rpc = getRpc();
+    if (rpc === null) return null;
+    return await rpc.agent.files.pickFiles({ mode });
+  } catch {
+    return null;
+  }
+}
+
 export async function setAgentCredential(
   provider: string,
   apiKey: string,

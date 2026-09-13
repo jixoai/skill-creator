@@ -205,6 +205,9 @@ importers:
       '@orpc/server':
         specifier: 1.14.6
         version: 1.14.6(@opentelemetry/api@1.9.1)(ws@8.21.3)
+      '@xmorse/rfd':
+        specifier: ^2.3.0
+        version: 2.3.0
       execa:
         specifier: ^9.6.1
         version: 9.6.1
@@ -3440,6 +3443,9 @@ packages:
   '@xmldom/xmldom@0.9.12':
     resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
     engines: {node: '>=14.6'}
+
+  '@xmorse/rfd@2.3.0':
+    resolution: {integrity: sha512-XeUp/JT6Em5TjpB1gRaSR914W2oSap9jm8uBipSpgrHGaXtsdVMDuXVkL65y10oRunBg0BxIMYNb0sII9+wK/g==}
 
   '@yuku-codegen/binding-darwin-arm64@0.5.48':
     resolution: {integrity: sha512-yo96Oef12WzqnphInfz/eexVse3+kWgfGS5g2S3rFS3dcGn1ENW9xLFDZUP9rh+yP76DOq38wBoFi1+I9+6qBg==}
@@ -8162,6 +8168,8 @@ snapshots:
       '@vscode/ripgrep-win32-x64': 1.18.0
 
   '@xmldom/xmldom@0.9.12': {}
+
+  '@xmorse/rfd@2.3.0': {}
 
   '@yuku-codegen/binding-darwin-arm64@0.5.48':
     optional: true

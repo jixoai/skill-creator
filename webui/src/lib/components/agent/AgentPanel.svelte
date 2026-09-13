@@ -111,7 +111,7 @@
   <!-- 左缘拖柄（仅 ≥720px；窄屏抽屉无侧栏宽度语义）：6px col-resize 命中区，
        hover 高亮。 -->
   <div
-    class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none hover:bg-primary/30 min-[720px]:block"
+    class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 min-[720px]:block"
     role="separator"
     aria-orientation="vertical"
     aria-label="Resize agent panel"

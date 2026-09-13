@@ -17,9 +17,9 @@
   修订 [2026-09-13]（R17-A）：提交点不再清草稿——草稿按 sessionId 分轨，
   发送成功由 sendAgentPrompt 清当前轨（失败留在原轨可重试）；草稿随会话
   切换换轨（store 侧），本组件对 bind 的 facade 不变。
-  修订 [2026-09-13]（R17-B）：附件按钮去 web 文件输入——image/file 按钮打开
-  后端文件浏览弹层（FilePickerDialog：真实路径 + daemon jSquash 缩略）；粘贴/
-  drop 的本地 File 通道保留（无真实路径，base64 wire）。
+  修订 [2026-09-14]（R18 用户裁决）：附件按钮唤醒 **native** file-picker——
+  daemon @xmorse/rfd AsyncFileDialog.pickFiles（真实路径直返，无 web 弹层）；
+  粘贴/drop 的本地 File 通道保留（无真实路径，base64 wire）。
   正交意图：
   1. 输入卡：附件条（图片缩略/文件 chip，与 UserMessage 附件同视觉语言）、
      自动长高 textarea（1 行 44px → 4 行 160px 封顶内滚；Enter 发送 /
@@ -86,19 +86,16 @@
     sendAgentPrompt,
     setAgentSessionMode,
     updateAgentSettings,
+    pickAgentFiles,
   } from "$lib/stores/agent.svelte";
   import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { showToast } from "$lib/toast.svelte";
   import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import ContextMeter from "./ContextMeter.svelte";
-  import FilePickerDialog from "./FilePickerDialog.svelte";
   import SlashMenu from "./SlashMenu.svelte";
   import SkillMenu from "./SkillMenu.svelte";
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
-  /** 后端文件选择器（R17-B）：open + 语义 mode 两态；起始目录取当前会话 cwd。 */
-  let pickerOpen = $state(false);
-  let pickerMode = $state<"image" | "file">("image");
   /** SlashMenu/SkillMenu 实例（textarea 键盘先占，两触发符互斥）；卡片根
    * relative，菜单锚定卡上方。 */
   let slashMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
@@ -249,22 +246,26 @@
     clearComposerEdit();
   }
 
-  /** R17-B 后端选择器：起始目录 = 当前会话 cwd（列表缺项时 daemon 回退 home）。 */
-  const pickerStartDir = $derived(
-    agentSessionsList.sessions.find((item) => item.sessionId === agentSession.sessionId)?.cwd,
-  );
+  let picking = $state(false);
 
-  function openPicker(target: "image" | "file"): void {
-    pickerMode = target;
-    pickerOpen = true;
-  }
-
-  /** 选择器确认分流（R17-B）：真实路径进对应附件通道（数量守卫在 store）。 */
-  function onPickerConfirm(picks: Array<{ path: string; name: string; preview?: string }>): void {
-    if (pickerMode === "image") {
-      addPickedComposerImages(picks);
-    } else {
-      addPickedComposerDocs(picks);
+  /**
+   * R18 用户裁决：「在后端（nodejs）这边，唤醒 native 级别的 file-picker」——
+   * 附件按钮直调 agent.files.pickFiles（daemon @xmorse/rfd AsyncFileDialog），
+   * 返回真实路径后进对应附件通道（数量守卫在 store）。取消/失败静默（toast 错误面）。
+   */
+  async function openPicker(target: "image" | "file"): Promise<void> {
+    if (picking) return;
+    picking = true;
+    try {
+      const result = await pickAgentFiles(target);
+      if (result === null || result.paths.length === 0) return;
+      if (target === "image") {
+        addPickedComposerImages(result.paths.map((path) => ({ path, name: "" })));
+      } else {
+        addPickedComposerDocs(result.paths.map((path) => ({ path, name: "" })));
+      }
+    } finally {
+      picking = false;
     }
   }
 
@@ -474,7 +475,7 @@
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
       title="Attach images (paste or pick, ≤4 MiB each)"
       aria-label="Attach images (paste or pick, ≤4 MiB each)"
-      onclick={() => openPicker("image")}
+      onclick={() => void openPicker("image")}
     >
       <IconImage class="h-4 w-4" />
     </button>
@@ -483,7 +484,7 @@
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
       title="Attach files (text inlined, binary as refs, ≤512 KiB each)"
       aria-label="Attach files (text inlined, binary as refs, ≤512 KiB each)"
-      onclick={() => openPicker("file")}
+      onclick={() => void openPicker("file")}
     >
       <IconFileUp class="h-4 w-4" />
     </button>
@@ -603,11 +604,3 @@
     </button>
   </div>
 </div>
-
-<!-- R17-B 后端文件选择器：真实路径浏览（daemon fs RPC）+ daemon 缩略预览。 -->
-<FilePickerDialog
-  mode={pickerMode}
-  startDir={pickerStartDir}
-  onConfirm={onPickerConfirm}
-  bind:open={pickerOpen}
-/>
