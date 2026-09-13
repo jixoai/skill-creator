@@ -190,6 +190,10 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         streams: rpc.agent.sessions.streams.handler(async ({ input }) => ({
           frames: await domain.dshSettings.listStreamFrames(input),
         })),
+        // R14-C：清理产品转录层（不触碰内核会话日志；running 会话跳过）。
+        cleanup: rpc.agent.sessions.cleanup.handler(async ({ input }) =>
+          domain.agentSessions.cleanup(input),
+        ),
       },
       session: {
         create: rpc.agent.session.create.handler(async ({ input }) => ({

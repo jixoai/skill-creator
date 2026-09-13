@@ -392,6 +392,12 @@ export const DshStewardSessionControlsSchema = z.object({
   streamRetention: z.number().int().min(10).max(500),
   /** disabled 时投影入口拒绝新帧（回放事实仍归 session/audit 持久层）。 */
   streamProjection: z.enum(["enabled", "disabled"]),
+  /**
+   * 会话转录清理策略（R14-C 2026-09-12）：daemon 启动时自动删除目录日期早于
+   * N 天的面板转录（产品转录层 sessions/YYYY/MM/DD；不触碰 $DSH_HOME 内核
+   * 会话日志）。旧持久化缺字段经 default 读 30；running 会话跳过。
+   */
+  sessionCleanupDays: z.number().int().min(1).max(365).default(30),
 });
 /** 会话控制。 */
 export type DshStewardSessionControls = z.infer<typeof DshStewardSessionControlsSchema>;

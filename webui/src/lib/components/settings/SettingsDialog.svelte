@@ -12,11 +12,13 @@
   import IconSettings2 from "@lucide/svelte/icons/settings-2";
   import IconCpu from "@lucide/svelte/icons/cpu";
   import IconBot from "@lucide/svelte/icons/bot";
+  import IconHistory from "@lucide/svelte/icons/history";
   import { loadAgentSettings } from "$lib/stores/agent.svelte";
   import { settingsUi, type SettingsSectionId } from "$lib/stores/settings-ui.svelte";
   import AgentSettingsSection from "./AgentSettingsSection.svelte";
   import GeneralSettingsSection from "./GeneralSettingsSection.svelte";
   import ModelSettingsSection from "./ModelSettingsSection.svelte";
+  import SessionsSettingsSection from "./SessionsSettingsSection.svelte";
 
   const sections: ReadonlyArray<{
     id: SettingsSectionId;
@@ -26,6 +28,7 @@
     { id: "general", label: "General", icon: IconSettings2 },
     { id: "model", label: "Model", icon: IconCpu },
     { id: "agent", label: "Agent", icon: IconBot },
+    { id: "sessions", label: "Sessions", icon: IconHistory },
   ];
 
   let open = $state(false);
@@ -71,6 +74,8 @@
         <GeneralSettingsSection />
       {:else if settingsUi.section === "model"}
         <ModelSettingsSection />
+      {:else if settingsUi.section === "sessions"}
+        <SessionsSettingsSection />
       {:else}
         <AgentSettingsSection />
       {/if}

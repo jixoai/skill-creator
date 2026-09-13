@@ -11,6 +11,10 @@
  *       事实源，本层只存面板转录）。
  *   [2] 读面：listAll/readFrames 以 meta.json + 逐行 safeParse 投影；损坏行按
  *       集合读取法则丢弃，单会话故障不拖垮列表。
+ *   [3] 删除面（R14-C 2026-09-12）：listDayBuckets 按目录段投影日期桶；
+ *       remove 删除会话目录并撤索引（空日期目录顺带修剪）。保留在本存储是
+ *       因为 YYYY/MM/DD 布局与 sessionId→dir 索引都由它唯一持有，外层删除
+ *       会留下 ghost 索引。
  * 妥协声明：写入 best-effort——追加失败只记日志不打断 live 会话（转录是投影，
  * 不是 authority）；磁盘无淘汰，转录体积由会话规模自然约束。
  */
@@ -34,6 +38,14 @@ export interface SessionTranscriptMeta {
   mode: DshAgentMode;
 }
 
+/** 日期桶（目录段 YYYY/MM/DD 的投影；R14-C 清理消费）。 */
+export interface SessionDayBucket {
+  /** 目录日期（段解释为本地时区当日午夜的时间戳）。 */
+  dateMs: number;
+  /** 该日期目录下的会话 ID。 */
+  sessionIds: string[];
+}
+
 /** 存储接口（agent-sessions 依赖；测试可注入任意根目录）。 */
 export interface SessionTranscripts {
   /** 记录会话起点（建目录 + meta.json 原子写）。 */
@@ -48,6 +60,10 @@ export interface SessionTranscripts {
   listAll(): SessionTranscriptMeta[];
   /** 单会话帧回放（seq 升序；损坏行丢弃）。 */
   readFrames(sessionId: string): DshSessionStreamFrame[];
+  /** 按目录段列出日期桶（索引视图；畸形段已在 hydrate/建目录时排除）。 */
+  listDayBuckets(): SessionDayBucket[];
+  /** 删除一个会话目录（撤索引 + 递归删 + 修剪空日期目录；未知返回 false）。 */
+  remove(sessionId: string): boolean;
 }
 
 /** meta.json 的 runtime 收窄（外部输入；mode 缺失/非法 → free 的事实投影）。 */
@@ -123,6 +139,40 @@ export function createSessionTranscripts(rootDir: string): SessionTranscripts {
         .map((entry) => entry.name);
     } catch {
       return [];
+    }
+  }
+
+  /** 删除后修剪空的 YYYY/MM/DD 目录链（best-effort；非空/异常跳过）。 */
+  function pruneEmptyDateDirs(): void {
+    for (const year of safeDirs(rootDir)) {
+      const yearDir = path.join(rootDir, year);
+      for (const month of safeDirs(yearDir)) {
+        const monthDir = path.join(yearDir, month);
+        for (const day of safeDirs(monthDir)) {
+          const dayDir = path.join(monthDir, day);
+          if (safeDirs(dayDir).length === 0) {
+            try {
+              fs.rmdirSync(dayDir);
+            } catch {
+              // 非空或并发写入：保留。
+            }
+          }
+        }
+        if (safeDirs(monthDir).length === 0) {
+          try {
+            fs.rmdirSync(monthDir);
+          } catch {
+            // 同上。
+          }
+        }
+      }
+      if (safeDirs(yearDir).length === 0) {
+        try {
+          fs.rmdirSync(yearDir);
+        } catch {
+          // 同上。
+        }
+      }
     }
   }
 
@@ -223,6 +273,39 @@ export function createSessionTranscripts(rootDir: string): SessionTranscripts {
       }
       frames.sort((a, b) => a.seq - b.seq);
       return frames;
+    },
+    listDayBuckets() {
+      hydrate();
+      const buckets = new Map<string, SessionDayBucket>();
+      for (const [sessionId, dir] of dirs) {
+        // 目录段 = rootDir/YYYY/MM/DD/<sessionId>；畸形段跳过（hydrate/建目录已
+        // 保证常规形状，这里防御并发改名等异常布局）。
+        const segments = path.relative(rootDir, dir).split(path.sep);
+        if (segments.length !== 4) continue;
+        const [year, month, day] = segments;
+        if (!/^\d{4}$/.test(year) || !/^\d{2}$/.test(month) || !/^\d{2}$/.test(day)) continue;
+        const dateMs = new Date(Number(year), Number(month) - 1, Number(day)).getTime();
+        if (Number.isNaN(dateMs)) continue;
+        const key = `${year}/${month}/${day}`;
+        const bucket = buckets.get(key) ?? { dateMs, sessionIds: [] };
+        bucket.sessionIds.push(sessionId);
+        buckets.set(key, bucket);
+      }
+      return [...buckets.values()].sort((a, b) => b.dateMs - a.dateMs);
+    },
+    remove(sessionId) {
+      hydrate();
+      const dir = dirs.get(sessionId);
+      if (dir === undefined) return false;
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch (error) {
+        console.error(`[session-transcripts] remove failed for ${sessionId}:`, error);
+        return false; // 索引保留：目录可能仍在。
+      }
+      dirs.delete(sessionId);
+      pruneEmptyDateDirs();
+      return true;
     },
   };
 }

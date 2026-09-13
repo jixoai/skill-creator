@@ -22,7 +22,8 @@
  *       帧，下一次 prompt 以新模式复活（历史归内核 session log）。
  * 妥协声明：跨 cordis 服务访问按结构化 unknown 收窄（宿主服务形状无公开 TS 面，
  * 与 dsh-session-binder 同法则）；LLM 历史事实归内核 session log，本层转录只是
- * 面板投影。
+ * 面板投影。R14-C 清理是薄委托面（cleanup/liveStatusOf/disposeLiveSession 转发
+ * session-cleanup.ts，逻辑不在本文件生长——意图数已满）。
  */
 import { randomUUID } from "node:crypto";
 import type { Context } from "@deepseek-ai/cordis";
@@ -33,12 +34,18 @@ import {
   type DshAgentMode,
   type DshSessionStreamFrame,
 } from "../../shared/contracts/dsh-runtime.js";
-import type { AgentSessionStatus, AgentSessionSummary } from "../../shared/contracts/agent.js";
+import type {
+  AgentSessionStatus,
+  AgentSessionSummary,
+  AgentSessionsCleanupInput,
+  AgentSessionsCleanupResult,
+} from "../../shared/contracts/agent.js";
 import { DomainError } from "../domain-error.js";
 import type { DshKernelHandle } from "./dsh-kernel.js";
 import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
 import { applyAgentMode } from "./agent-modes.js";
 import { registerProductPromptSections } from "./product-prompt.js";
+import { runSessionCleanup } from "./session-cleanup.js";
 import { summaryOfMeta, type SessionTranscripts } from "./session-transcripts.js";
 
 /** 内核句柄访问器（daemon boot 后注入；未挂载返回 null）。 */
@@ -338,6 +345,28 @@ const DELTA_FLUSH_MS = 120;
 export function createAgentSessionsService(deps: AgentSessionsDeps) {
   const retention = deps.retention ?? DEFAULT_RETENTION;
   const live = new Map<string, LivePanelSession>();
+  /** 清理处置中标记（R15：门内 reviveSession 被拒）。 */
+  const disposingIds = new Set<string>();
+  /**
+   * 已清理墓碑（R15 终验 P1-2 终闭）：transcript 被 cleanup 删除的会话在**本
+   * 进程生命周期内**永久拒绝复活——瞬态门（disposingIds）会在清理完成后解除，
+   * 无法覆盖「恢复链仍在飞行、清理已完成」的交错；墓碑补齐该窗口。软上限
+   * 5000 FIFO 防无界（超出后最早的墓碑让位——复活将走转录缺失的 NOT_FOUND
+   * 常规路径，语义等价）。
+   */
+  const cleanedTombstones = new Set<string>();
+  const tombstoneOrder: string[] = [];
+  const TOMBSTONE_SOFT_CAP = 5000;
+
+  function tombstoneCleaned(sessionId: string): void {
+    if (cleanedTombstones.has(sessionId)) return;
+    cleanedTombstones.add(sessionId);
+    tombstoneOrder.push(sessionId);
+    if (tombstoneOrder.length > TOMBSTONE_SOFT_CAP) {
+      const evicted = tombstoneOrder.shift();
+      if (evicted !== undefined) cleanedTombstones.delete(evicted);
+    }
+  }
   let firehoseBound = false;
 
   function requireKernel(): DshKernelHandle {
@@ -839,9 +868,17 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
    * 复活持久会话：内核 agents.resume 重建 agent（LLM 历史来自内核 session log），
    * 环以转录末尾 seed（seq 连续），新帧继续追加到同一转录目录。
    * setup 按转录 meta 的 mode 组合（专有 section + 工具 guard）。
+   * R15（codex R14 P1-2）：清理处置中的会话拒绝复活——dispose 与删除转录之间
+   * 的 await 间隙不得被 prompt 走 revive 抢回（否则"已运行但历史被删"）。
    */
   async function reviveSession(sessionId: string): Promise<LivePanelSession> {
     const kernel = requireKernel();
+    if (disposingIds.has(sessionId)) {
+      throw new DomainError("NOT_FOUND", `agent session is being cleaned up: ${sessionId}`);
+    }
+    if (cleanedTombstones.has(sessionId)) {
+      throw new DomainError("NOT_FOUND", `agent session was cleaned up: ${sessionId}`);
+    }
     const meta = deps.transcripts.listAll().find((item) => item.sessionId === sessionId);
     if (meta === undefined) {
       throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
@@ -866,6 +903,17 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       );
     }
     const diskFrames = deps.transcripts.readFrames(sessionId);
+    // R15 终验 P1-2：恢复链的 await 间隙（modelSelection/resume/readFrames）可能
+    // 与清理门交错——清理已删转录时，这里在 live.set 前做**二次准入检查**：门内
+    // id 的恢复就地释放句柄并按 NOT_FOUND 拒绝，绝不复活已清理会话。
+    if (
+      disposingIds.has(sessionId) ||
+      cleanedTombstones.has(sessionId) ||
+      !deps.transcripts.listAll().some((item) => item.sessionId === sessionId)
+    ) {
+      await handle.dispose().catch(() => undefined);
+      throw new DomainError("NOT_FOUND", `agent session is being cleaned up: ${sessionId}`);
+    }
     const seeded = diskFrames.slice(-retention);
     const entry: LivePanelSession = {
       agent: handle.agent,
@@ -988,6 +1036,37 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     return entry.agent.status === "running" ? "running" : "idle";
   }
 
+  /** live 面板状态（R14-C 清理消费；无 live 句柄 = persisted）。 */
+  function liveStatusOf(sessionId: string): "running" | "live" | "persisted" {
+    const entry = live.get(sessionId);
+    if (!entry) return "persisted";
+    return entry.agent.status === "running" ? "running" : "live";
+  }
+
+  /** 释放并移除非 running 的 live 条目（与 setMode 的释放块同法则；幂等）。 */
+  async function disposeLiveSession(sessionId: string): Promise<void> {
+    const entry = live.get(sessionId);
+    if (!entry) return;
+    for (const pending of entry.pending.values()) pending.resolve({ answers: [] });
+    entry.pending.clear();
+    live.delete(sessionId);
+    await entry.dispose();
+  }
+
+  /**
+   * 清理门（R15 codex R14 P1-2）：标记处置中 → 执行 fn（释放 + 删转录全程在门
+   * 内）→ 移除标记（finally 不泄漏）。期间 reviveSession 对该 id 抛 NOT_FOUND，
+   * 消除「dispose 与删除之间的 await 间隙被 prompt 复活」的交错。
+   */
+  async function runUnderCleanupGate(sessionId: string, fn: () => Promise<void>): Promise<void> {
+    disposingIds.add(sessionId);
+    try {
+      await fn();
+    } finally {
+      disposingIds.delete(sessionId);
+    }
+  }
+
   /** 会话模式 → agent setup（全局工具收窄 + 模式 section/guard + 基础最佳实践）。 */
   function setupFor(mode: DshAgentMode): (agentCtx: Context) => void {
     return (agentCtx) => {
@@ -1023,6 +1102,41 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     attach(kernel: DshKernelHandle): void {
       bindFirehose(kernel);
     },
+    /** live 面板状态（R14-C 清理消费；内核无关）。 */
+    liveStatusOf(sessionId: string): "running" | "live" | "persisted" {
+      return liveStatusOf(sessionId);
+    },
+    /** 释放并移除非 running 的 live 条目（R14-C 清理消费；幂等）。 */
+    async disposeLiveSession(sessionId: string): Promise<void> {
+      await disposeLiveSession(sessionId);
+    },
+    /** 清理门（R15 codex P1-2）：fn 全程阻断该 id 的 reviveSession。 */
+    async runUnderCleanupGate(sessionId: string, fn: () => Promise<void>): Promise<void> {
+      await runUnderCleanupGate(sessionId, fn);
+    },
+    /** 墓碑（R15 终验 P1-2 终闭）：transcript 删除成功后永久拒绝复活。 */
+    markCleaned(sessionId: string): void {
+      tombstoneCleaned(sessionId);
+    },
+    /**
+     * 清理面板会话转录（R14-C）：委托 session-cleanup.ts——只动产品转录层
+     * （sessions/YYYY/MM/DD）与 live 句柄，绝不触碰 $DSH_HOME 内核会话日志；
+     * 内核未挂载也可用（转录层独立于内核）。
+     */
+    async cleanup(input: AgentSessionsCleanupInput): Promise<AgentSessionsCleanupResult> {
+      return runSessionCleanup(
+        {
+          transcripts: deps.transcripts,
+          control: {
+            liveStatusOf,
+            disposeLiveSession,
+            runUnderCleanupGate,
+            markCleaned: tombstoneCleaned,
+          },
+        },
+        input,
+      );
+    },
     /** 会话摘要列表（转录存储优先；内核 sessions store 补充非面板会话可见性）。 */
     list(): AgentSessionSummary[] {
       const kernel = requireKernel();
@@ -1032,7 +1146,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       for (const meta of deps.transcripts.listAll()) {
         known.add(meta.sessionId);
         const entry = live.get(meta.sessionId);
-        summaries.push(entry ? summaryOf(entry) : summaryOfMeta(meta));
+        const summary = entry ? summaryOf(entry) : summaryOfMeta(meta);
+        summaries.push({ ...summary, hasTranscript: true });
       }
       for (const session of sessions.list()) {
         if (known.has(session.id)) continue;
@@ -1050,6 +1165,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           cwd: session.header.cwd ?? process.cwd(),
           createdAt: isoCreatedAt(session.header),
           mode: "free",
+          hasTranscript: false,
         });
       }
       return summaries;
@@ -1267,10 +1383,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       let seq: number;
       if (entry) {
         seq = entry.frameSeq++;
-        for (const pending of entry.pending.values()) pending.resolve({ answers: [] });
-        entry.pending.clear();
-        live.delete(sessionId);
-        await entry.dispose();
+        await disposeLiveSession(sessionId);
       } else {
         seq = (deps.transcripts.readFrames(sessionId).at(-1)?.seq ?? 0) + 1;
       }

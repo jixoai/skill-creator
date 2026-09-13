@@ -13,11 +13,13 @@
   save 和 remove 都放到右上角」；「AddModel，新增的 Model，要 scrollInToView」；
   「Active model 这个配置没有意义，删掉」（活动模型切换唯一入口 = composer 下拉）；
   「key 直接通过一个 input-password 直接显示出来，提供 eye-toggle 即可」。
+  用户原始需求 [2026-09-12 R14-A]：「删除和保存应该和 title/subtitle 处于同一栏」。
   正交意图：
-  1. 布局：右上角全局动作行（Save + Remove icon-button）/ Identity（图标三控制 +
-     只读路由名 + preset 次级文字按钮 + key 状态 pill）/ Credential（常驻
-     password 输入 + eye-toggle + Clear）/ Endpoint（baseURL + api Select）/
-     Models（ModelListItem 列表 + Add model；新增条目 scrollIntoView）。
+  1. 布局：Identity 标题行（图标三控制 + 只读路由名/meta；右端同栏全局动作
+     Remove icon-button + Save——与 title/subtitle 同一水平线，R12 的 44px
+     命中区几何原样保留）/ Credential（常驻 password 输入 + eye-toggle +
+     Clear）/ Endpoint（baseURL + api Select）/ Models（ModelListItem 列表 +
+     Add model；新增条目 scrollIntoView）。
   2. 写路径：全局 Save 把 endpoint + models 的全部脏改动合并为一次
      updateAgentSettings({modelRoutes}) 补丁；identity 三控制在 pick 时即时落库
      （IconPicker 无草稿态）；key 走 setAgentCredential/clear 旁路（值永不回流）。
@@ -262,31 +264,10 @@
 </script>
 
 <div class="space-y-3">
-  <!-- 块 0 · 全局动作行（R12-A2：唯一 Save + Remove 都在右上角；gap-2.5 保证
-       Remove 的 44px after 外扩命中区与 Save 不相交）。 -->
-  <div class="flex items-center justify-end gap-2.5">
-    <button
-      type="button"
-      class="relative flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors after:absolute after:-inset-2 after:content-[''] hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
-      aria-label="Remove route"
-      title="Remove route"
-      disabled={agentRuntimeConfig.updating}
-      onclick={() => onremove?.()}
-    >
-      <IconTrash class="h-4 w-4" aria-hidden="true" />
-    </button>
-    <Button
-      size="sm"
-      class="relative h-9 px-3 text-xs after:absolute after:-top-1 after:-bottom-1 after:left-0 after:right-0 after:content-['']"
-      data-route-save="true"
-      disabled={saveDisabled}
-      onclick={() => void saveAll()}
-    >
-      {savedFlash ? "Saved ✓" : "Save"}
-    </Button>
-  </div>
-
-  <!-- 块 1 · Identity（图标 + 颜色 + Letter 三控制；preset 次级文字按钮）。 -->
+  <!-- 块 1 · Identity（图标三控制 + 标题行）。R14-A2：全局动作（Remove + Save）
+       并入标题行右端——与 displayName/meta 同一水平线；R12 codex 核算的 44px
+       命中区几何原样保留（Remove after:-inset-2 纵横外扩 44px、Save 纵向外扩
+       44px、gap-2.5 互不相交）。 -->
   <div class="flex items-start gap-2">
     <IconPicker
       icon={routeIcon}
@@ -301,23 +282,49 @@
       onColor={(iconColor) => void applyIdentity({ iconColor })}
       onLetter={(iconLetter) => void applyIdentity({ iconLetter })}
     />
-    <div class="min-w-0 flex-1">
-      <p
-        class="truncate text-sm font-semibold"
-        title="{displayName} ({route.provider}) — route name keys the credential mapping; duplicate this route to rename it."
-      >
-        {displayName}
-      </p>
-      <p class="mt-0.5 truncate text-[10px] text-muted-foreground" title={route.baseURL}>
-        {route.provider} · {route.baseURL.replace(/^https?:\/\//, "")} · {route.models.length}
-        {route.models.length === 1 ? "model" : "models"}
-      </p>
+    <div
+      class="flex min-w-0 flex-1 items-center justify-between gap-2.5"
+      data-route-titlebar="true"
+    >
+      <div class="min-w-0">
+        <p
+          class="truncate text-sm font-semibold"
+          title="{displayName} ({route.provider}) — route name keys the credential mapping; duplicate this route to rename it."
+        >
+          {displayName}
+        </p>
+        <p class="mt-0.5 truncate text-[10px] text-muted-foreground" title={route.baseURL}>
+          {route.provider} · {route.baseURL.replace(/^https?:\/\//, "")} · {route.models.length}
+          {route.models.length === 1 ? "model" : "models"}
+        </p>
+      </div>
+      <div class="flex shrink-0 items-center gap-2.5">
+        <button
+          type="button"
+          class="relative flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors after:absolute after:-inset-2 after:content-[''] hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
+          aria-label="Remove route"
+          title="Remove route"
+          disabled={agentRuntimeConfig.updating}
+          onclick={() => onremove?.()}
+        >
+          <IconTrash class="h-4 w-4" aria-hidden="true" />
+        </button>
+        <Button
+          size="sm"
+          class="relative h-9 px-3 text-xs after:absolute after:-top-1 after:-bottom-1 after:left-0 after:right-0 after:content-['']"
+          data-route-save="true"
+          disabled={saveDisabled}
+          onclick={() => void saveAll()}
+        >
+          {savedFlash ? "Saved ✓" : "Save"}
+        </Button>
+      </div>
     </div>
   </div>
 
   <!-- 块 2 · Credential（R12-A5 + R13：常驻 password 输入 + eye-toggle；key 状态
        样式并入本区标签行（用户裁决：Identity 的 key pill 与 Save as preset 删除，
-       右上角只留 [Remove][Save]）。 -->
+       标题行右端只留 [Remove][Save]）。 -->
   <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Credential">
     {#if addedHint}
       <p class="text-[11px] font-medium text-primary">
@@ -390,7 +397,7 @@
     </span>
   </section>
 
-  <!-- 块 3 · Endpoint（baseURL + api Select；脏态由右上角全局 Save 持久化）。 -->
+  <!-- 块 3 · Endpoint（baseURL + api Select；脏态由标题行全局 Save 持久化）。 -->
   <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Endpoint">
     <span class="text-[11px] font-medium text-muted-foreground">Endpoint</span>
     <div class="flex gap-1.5">

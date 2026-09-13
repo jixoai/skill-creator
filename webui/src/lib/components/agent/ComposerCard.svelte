@@ -10,10 +10,15 @@
   修订 [2026-09-12]（R12-B 6/8）：New Session 态的显示模式 = agentSession.pendingMode
   （与空态模式卡同一数据源，双向同步，默认 General）；chip 在无会话时只改选择，
   不再 eager 建会话——首条消息发出时才创建（textarea/附件/发送在空态可用）。
+  修订 [2026-09-12]（R14-B 3/4/5）：textarea focus 轮廓显式 reset（UA :focus
+  outline 穿透，agent-flow.css `.msg-body` 作者源规则兜底）；附件按钮语义化
+  （image/file-up 图标 + 语义 tooltip/aria-label，替代 paperclip/file 混淆）；
+  `$` 前缀激发 skill 名补全（SkillMenu，与 SlashMenu 同 TriggerMenu 语法）。
   正交意图：
   1. 输入卡：附件条（图片缩略/文件 chip，与 UserMessage 附件同视觉语言）、
      自动长高 textarea（1 行 44px → 4 行 160px 封顶内滚；Enter 发送 /
-     Shift+Enter 换行 / paste 图片沿用）+ SlashMenu 键盘先占与首行光标判定。
+     Shift+Enter 换行 / paste 图片沿用）+ SlashMenu/SkillMenu 键盘先占与
+     首行光标判定（`$name ` 补全插入 = 替换光标前 token + 尾随空格）。
   2. 工具行：模式 chip（DropdownMenu 列 DSH_AGENT_MODES、当前项打勾；running
      置灰 + title「Switch after the current turn ends」；无会话 = 只更新
      pendingMode（R12：首条消息惰性建会话））、model chip（agentRuntimeConfig 投影 + effort 点 + 悬空 amber；
@@ -52,8 +57,8 @@
 </script>
 
 <script lang="ts">
-  import IconPaperclip from "@lucide/svelte/icons/paperclip";
-  import IconFile from "@lucide/svelte/icons/file";
+  import IconImage from "@lucide/svelte/icons/image";
+  import IconFileUp from "@lucide/svelte/icons/file-up";
   import IconSend from "@lucide/svelte/icons/arrow-up";
   import IconStop from "@lucide/svelte/icons/square";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -79,12 +84,15 @@
   import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import ContextMeter from "./ContextMeter.svelte";
   import SlashMenu from "./SlashMenu.svelte";
+  import SkillMenu from "./SkillMenu.svelte";
 
   let fileInput = $state<HTMLInputElement | null>(null);
   let docInput = $state<HTMLInputElement | null>(null);
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
-  /** SlashMenu 实例（textarea 键盘先占）；卡片根 relative，菜单锚定卡上方。 */
+  /** SlashMenu/SkillMenu 实例（textarea 键盘先占，两触发符互斥）；卡片根
+   * relative，菜单锚定卡上方。 */
   let slashMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
+  let skillMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
   /** 光标是否在首行（SlashMenu 锚定条件）。 */
   let caretOnFirstLine = $state(true);
 
@@ -255,10 +263,29 @@
     void sendAgentPrompt(command);
   }
 
+  /** SkillMenu 选中（R14-B 5）：`$name ` 替换稿文 [0, 光标) 的未完成 token；
+   *  尾随空格让 query（首行前缀匹配）脱离所有候选，菜单自然收起。 */
+  function insertSkillToken(token: string): void {
+    const el = textareaEl;
+    const caret = Math.min(
+      el?.selectionStart ?? agentComposer.text.length,
+      agentComposer.text.length,
+    );
+    agentComposer.text = `${token} ${agentComposer.text.slice(caret)}`;
+    const next = Math.min(token.length + 1, agentComposer.text.length);
+    // bind:value 的 DOM 写入在 flush 后生效，光标在下一帧对齐 token + 空格之后。
+    requestAnimationFrame(() => {
+      el?.setSelectionRange(next, next);
+      caretOnFirstLine = caretOnFirstLineNow();
+    });
+  }
+
   function onKeydown(event: KeyboardEvent): void {
-    // SlashMenu 先占导航/执行/驳回键（打开时）；其 handleKeydown 内部已
-    // stopPropagation，Esc 不会冒泡到 AgentPanel 的 window 级面板收起。
+    // SlashMenu/SkillMenu 先占导航/执行/驳回键（打开时；两触发符互斥）；其
+    // handleKeydown 内部已 stopPropagation，Esc 不会冒泡到 AgentPanel 的
+    // window 级面板收起。
     if (slashMenu?.handleKeydown(event)) return;
+    if (skillMenu?.handleKeydown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -289,6 +316,12 @@
     {caretOnFirstLine}
     onExecute={executeSlashCommand}
     bind:this={slashMenu}
+  />
+  <SkillMenu
+    text={agentComposer.text}
+    {caretOnFirstLine}
+    onInsert={insertSkillToken}
+    bind:this={skillMenu}
   />
   {#if agentComposer.files.length > 0 || agentComposer.images.length > 0}
     <!-- 附件条：与转录 UserMessage 附件行同视觉语言（56×56 缩略 / 文件 chip）。 -->
@@ -342,7 +375,7 @@
     onclick={syncCaret}
     onselect={syncCaret}
     onpaste={onPaste}
-    class="msg-body max-h-40 w-full resize-none border-0 bg-transparent px-3.5 py-2.5 outline-none placeholder:text-muted-foreground disabled:opacity-50"
+    class="msg-body max-h-40 w-full resize-none border-0 bg-transparent px-3.5 py-2.5 outline-none focus:outline-none focus-visible:ring-0 placeholder:text-muted-foreground disabled:opacity-50"
     aria-label="Message"></textarea>
   <div class="flex h-11 items-center gap-1 px-2.5">
     <!-- 左簇：模式 chip + 图片 + 文件 -->
@@ -416,11 +449,11 @@
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-      title="Attach images (or paste / drop)"
-      aria-label="Attach images"
+      title="Attach images (paste or pick, ≤4 MiB each)"
+      aria-label="Attach images (paste or pick, ≤4 MiB each)"
       onclick={() => fileInput?.click()}
     >
-      <IconPaperclip class="h-4 w-4" />
+      <IconImage class="h-4 w-4" />
     </button>
     <input
       bind:this={docInput}
@@ -436,11 +469,11 @@
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-      title="Attach a file (text, config, data — ≤512KiB)"
-      aria-label="Attach file"
+      title="Attach files (text inlined, binary as refs, ≤512 KiB each)"
+      aria-label="Attach files (text inlined, binary as refs, ≤512 KiB each)"
       onclick={() => docInput?.click()}
     >
-      <IconFile class="h-4 w-4" />
+      <IconFileUp class="h-4 w-4" />
     </button>
     <div class="flex-1"></div>
     <!-- 右簇：model chip + ContextMeter + 主按钮 -->

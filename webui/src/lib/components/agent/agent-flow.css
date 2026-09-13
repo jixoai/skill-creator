@@ -4,7 +4,8 @@
  * import，只放跨行共用的结构原子，其余样式留在组件 Tailwind utilities）。
  * 正交意图：
  *   [1] DisclosureRow 24px 语法 + 扫光运行态（唯一运行 affordance，无 spinner）。
- *   [2] 转录节奏原子：flow-item 16px 节奏 / turn 药丸 / user 气泡 / 正文排版。
+ *   [2] 转录节奏原子：flow-item 16px 节奏 / turn 药丸 / user 气泡 / 正文排版
+ *       （含 composer textarea 焦点轮廓 reset）。
  * 妥协声明：主题色经 layout.css 的 oklch 变量 + color-mix 表达透明度（无 Tailwind
  * @apply——CSS 文件不进 utility 管线）。
  */
@@ -138,6 +139,17 @@
 .msg-body {
   font-size: 13px;
   line-height: 20px;
+}
+
+/* composer textarea 焦点轮廓 reset（R14-B 3）：UA :focus 轮廓（蓝色）与
+   @tailwindcss/forms 基线在 WebView 内可穿透 utilities 层的 outline-none；
+   本文件是作者源且无层叠层，强于 @layer utilities。无条件 reset（非 focus 态
+   轮廓本就不可见）+ :focus 态显式重申；不引入替代 focus 指示——composer 卡
+   整体已有可见边界（§7.2 无障碍取舍）。 */
+.msg-body,
+.msg-body:focus {
+  outline-width: 0;
+  outline-style: none;
 }
 
 /* 工具分型展开卡基类：mono 11px + muted 底；max-h 由分型修饰。 */

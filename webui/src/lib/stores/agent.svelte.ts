@@ -24,7 +24,12 @@
  * 无 callId 的 tool-result 回退匹配在并行同名工具时可能错位（design §7）。
  */
 import { z } from "zod";
-import { AgentApprovalQuestionSchema, type AgentSessionSummary } from "$shared/contracts/agent.js";
+import {
+  AgentApprovalQuestionSchema,
+  type AgentSessionsCleanupInput,
+  type AgentSessionsCleanupResult,
+  type AgentSessionSummary,
+} from "$shared/contracts/agent.js";
 import {
   DshAgentModeSchema,
   DshUserTextAttachmentSchema,
@@ -111,6 +116,8 @@ const settingsGate = createRequestGenerationGate(getConnectionGeneration);
 const updateSettingsGate = createRequestGenerationGate(getConnectionGeneration);
 const setModeGate = createRequestGenerationGate(getConnectionGeneration);
 const credentialGate = createRequestGenerationGate(getConnectionGeneration);
+// 会话清理（R14-C）：成功后代次门失效旧响应并刷新列表；失效结果投影为 null。
+const cleanupGate = createRequestGenerationGate(getConnectionGeneration);
 
 /** drawer 开合（跨 tab 存活）；seedPrompt 为首屏行动塞进 composer 的一次性种子。 */
 export const agentPanel = $state({
@@ -220,6 +227,47 @@ export async function loadAgentSessions(): Promise<void> {
     agentSessionsList.error = error instanceof Error ? error.message : String(error);
   } finally {
     if (request.isCurrent()) agentSessionsList.loading = false;
+  }
+}
+
+/**
+ * 清理面板会话（R14-C，Settings → Sessions 消费）：beforeDays / all / 显式
+ * sessionIds 三种范围；成功后标记列表失效并重拉。失效响应投影为 null；失败
+ * 以 { error } 返回（调用方自行呈现）。
+ */
+export async function cleanupAgentSessions(
+  input: AgentSessionsCleanupInput,
+): Promise<AgentSessionsCleanupResult | { error: string } | null> {
+  const request = cleanupGate.issue();
+  try {
+    const result = await requireRpc().agent.sessions.cleanup(input);
+    if (!request.isCurrent()) return null;
+    // R15 codex P1-4：当前会话被删 → 回 New Session 空态（不得向已删 ID 发
+    // prompt 或 resume 不存在的转录）。deletedIds 截断时以刷新后的列表复核。
+    if (result.kind === "summary" && agentSession.sessionId !== null) {
+      const currentId = agentSession.sessionId;
+      if ((result.deletedIds ?? []).includes(currentId)) {
+        beginNewAgentSession();
+      } else if (result.deletedIdsTruncated === true) {
+        await loadAgentSessions();
+        if (
+          request.isCurrent() &&
+          !agentSessionsList.sessions.some(
+            // hasTranscript:false = 转录已删、仅内核投影回填——对该 id 发 prompt
+            // 必命中墓碑/NOT_FOUND，视同已删（codex R15 追加 P1-5）。
+            (item) => item.sessionId === currentId && item.hasTranscript !== false,
+          )
+        ) {
+          beginNewAgentSession();
+        }
+      }
+    }
+    agentSessionsList.loaded = false;
+    void loadAgentSessions();
+    return result;
+  } catch (error) {
+    if (!request.isCurrent()) return null;
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 

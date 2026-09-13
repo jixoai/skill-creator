@@ -119,3 +119,16 @@
 - [x] 10.6 New Session 模式卡与 composer chip 双向同步（默认 General）。
 - [x] 10.7 New Session 态隐藏顶部 + 按钮。
 - [x] 10.8 Session 态 + 跳转 New Session 态（不即建会话；首消息惰性创建）。
+
+## 11. R14 修复（用户走查第五轮 + Role 提案）
+
+- [x] 11.1 New/Edit 统一：pick 选中预设卡 = 立即建路由进编辑态（Create route
+      仅存于 scratch）；失败留 pick 内联报错。
+- [x] 11.2 [Remove][Save] 并入 Identity 标题栏（44px 几何保留）。
+- [x] 11.3 composer focus outline reset（agent-flow.css 作者源双档 + 类级）。
+- [x] 11.4 附件按钮语义化：image/file-up 图标 + 语义 tooltip/aria。
+- [x] 11.5 `$` skill 补全（TriggerMenu 通用引擎 + SkillMenu 实例）。
+- [x] 11.6 Sessions 管理分区：列表/逐行删除/清理策略 sessionCleanupDays(30)
+      /Clean now + cleanup RPC（三形状）+ boot 自动清理（不触 $DSH_HOME）。
+- [x] 11.7 Role/@召唤 提案稿（docs/research/2026-09-12-roles-as-subagents.md，
+      用户裁示：先讨论后实现——三决策点待拍板）。

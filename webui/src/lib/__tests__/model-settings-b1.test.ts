@@ -53,7 +53,7 @@ function baseView(): DshStewardSettingsView {
       model: { provider: "openai", model: "gpt-4o" },
       preset: "live",
       permissions: { approvalPolicy: "ask" },
-      session: { streamRetention: 50, streamProjection: "enabled" },
+      session: { streamRetention: 50, streamProjection: "enabled", sessionCleanupDays: 30 },
       defaultMode: "free",
       modelRoutes: [],
     },

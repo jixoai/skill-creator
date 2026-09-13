@@ -18,6 +18,7 @@ import { WEB_TOKEN_PLACEHOLDER } from "../shared/index.js";
 import { openUrlInBrowser } from "../shared/browser-launch.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
 import { createDaemonDomain, type DaemonDomain } from "./domain.js";
+import { runBootSessionCleanup } from "./kernel/session-cleanup.js";
 import { IpcServer } from "./ipc-server.js";
 import { WebServer } from "./web-server.js";
 import { mountDshKernelHost, type ProductionDshKernelHost } from "./dsh-host-lifecycle.js";
@@ -188,6 +189,15 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
     await ipc.stop();
     throw error;
   }
+  // R14-C：启动即按 settings.session.sessionCleanupDays 扫一遍过期面板转录
+  // （fire-and-forget；有界 try/catch 在 runBootSessionCleanup 内，不打断启动，
+  // 也不触碰 $DSH_HOME 内核会话日志）。
+  void runBootSessionCleanup({
+    cleanupDays: async () =>
+      (await domain.dshSettings.getView()).settings.session.sessionCleanupDays,
+    cleanup: (beforeDays) => domain.agentSessions.cleanup({ beforeDays }),
+    log,
+  });
 
   let web: WebServer;
   let port: number;

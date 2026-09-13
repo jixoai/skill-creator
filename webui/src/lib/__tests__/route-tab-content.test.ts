@@ -9,6 +9,9 @@
  * 3 个，save 和 remove 都放到右上角」；「AddModel，新增的 Model，要
  * scrollInToView」；「Active model 这个配置没有意义，删掉」；「key 直接通过
  * 一个 input-password 直接显示出来，提供 eye-toggle 即可」。
+ * 用户原始需求 [2026-09-12 R14-A]：「删除和保存应该和 title/subtitle 处于
+ * 同一栏」——Remove/Save 并入 Identity 标题行（data-route-titlebar），与
+ * displayName/meta 同一容器行；独立动作行不复存在；功能断言沿用。
  * 正交意图：
  *   [1] Identity 投影：字母/颜色/展示名经 IconPicker stub 的 data-* 断言
  *       （编号 slug 的 (N) 展示名 + iconLetter/iconColor 覆盖）。
@@ -18,6 +21,8 @@
  *   [4] Active model 块删除（R12-A4）：相关 select/按钮不再渲染。
  *   [5] 常驻凭据输入（R12-A5）：password 输入 + eye 切 type；失焦/Enter 保存；
  *       已配置显示 stored 占位不回显；Clear 旁路保留。
+ *   [6] 标题行布局（R14-A2）：Remove/Save 与 displayName/meta 同一容器行
+ *       （data-route-titlebar），标题行位于首块、无独立动作行。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -84,7 +89,7 @@ function baseView(
       model: active,
       preset: "live",
       permissions: { approvalPolicy: "ask" },
-      session: { streamRetention: 50, streamProjection: "enabled" },
+      session: { streamRetention: 50, streamProjection: "enabled", sessionCleanupDays: 30 },
       defaultMode: "free",
       modelRoutes: routes as DshStewardSettingsView["settings"]["modelRoutes"],
     },
@@ -419,6 +424,41 @@ describe("RouteTabContent single top-right Save/Remove (R12-A2)", () => {
     });
     expect(ctx.buttonByText("Save as preset")).toBeUndefined();
     expect(ctx.target.textContent).not.toContain("Save as preset");
+    ctx.cleanup();
+  });
+});
+
+describe("RouteTabContent title-row actions (R14-A2)", () => {
+  it("renders Remove and Save inside the identity title row, on the same line as name/meta", () => {
+    agentStore.view = baseView([
+      { provider: "my-relay", baseURL: "https://r.example/v1", models: [{ id: "m1" }] },
+    ]);
+    const ctx = mountTab({
+      provider: "my-relay",
+      baseURL: "https://r.example/v1",
+      models: [{ id: "m1" }],
+    });
+    const titlebar = ctx.target.querySelector<HTMLElement>("[data-route-titlebar]")!;
+    expect(titlebar).not.toBeNull();
+    // 动作按钮与 displayName/meta 同一容器行（R14-A2 核心断言）。
+    expect(ctx.saveButton().closest("[data-route-titlebar]")).toBe(titlebar);
+    expect(ctx.removeRouteButton().closest("[data-route-titlebar]")).toBe(titlebar);
+    const nameP = [...titlebar.querySelectorAll("p")].find(
+      (p) => p.textContent?.trim() === "my-relay",
+    )!;
+    expect(nameP).toBeTruthy();
+    expect(nameP.closest("[data-route-titlebar]")).toBe(titlebar);
+    // 独立动作行不复存在：标题行位于首块（与 IconPicker 同块），其上没有仅含
+    // 动作按钮的行。
+    const root = ctx.target.firstElementChild!;
+    const firstBlock = root.firstElementChild!;
+    expect(firstBlock.contains(titlebar)).toBe(true);
+    expect(firstBlock.querySelector('button[aria-label^="Icon picker stub"]')).not.toBeNull();
+    // 命中区几何沿用 R12：Remove 的 after:-inset-2 与 Save 的纵向外扩 +
+    // gap-2.5 互不相交（这里以类名存在性钉住，防止回归时被顺手删掉）。
+    expect(ctx.removeRouteButton().className).toContain("after:-inset-2");
+    expect(ctx.saveButton().className).toContain("after:-top-1");
+    expect(ctx.saveButton().closest(".gap-2\\.5")).not.toBeNull();
     ctx.cleanup();
   });
 });

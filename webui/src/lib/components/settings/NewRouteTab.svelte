@@ -9,16 +9,23 @@
   用户原始需求 [2026-09-12 R10]：「@cf/... 这明显是无效的」（补全池当前草案
   provider 置顶、跨 provider 剔命名空间 id）；「Add model 默认 efforts 三档
   Low/High/Max」。
+  用户原始需求 [2026-09-12 R14-A]：「你现在 New 和 Edit 还是两个独立的。两个
+  应该是一样的。在 New 选中某个预设后，等于立刻添加了这个预设。这时候就已经
+  可以删除和保存了。」
   正交意图：
   1. pick 态：搜索 + 2 列卡片网格（目录全量 + 「Your presets」本地分组置顶、
-     hover × 删除）；已建路由的目录卡显示 Added ✓（×N 计数），不再 disabled——
-     再次点击走编号 slug 追加。
-  2. form 态：与 RouteTabContent 同一字段集的新建语境（IconPicker 三控制 /
-     Route name / Base URL / api Select / ModelListItem 列表），Add route 校验
-     通过启用；成功即 onadded（分区选中新 tab 并引导粘 key）。
-  3. 预填源三态：目录条目（编号 slug + top-4 image 优先模型，catalogEntryDefaults
+     hover × 删除）；已建路由的目录卡显示 Added ✓（×N 计数）。卡片点击 =
+     立即建路由（编号 slug；目录卡带 top-4 image 优先模型 catalogEntryDefaults
+     富预填，preset 卡全量 + 默认三档 efforts），成功即 onadded 进编辑态；
+     rejected/error 留在 pick 态内联报错。不再有「pick → form → Add」三段流。
+  2. form 态（仅 Start from scratch 与 env seed 两个入口）：与 RouteTabContent
+     同一字段集的新建语境（IconPicker 三控制 / Route name / Base URL / api
+     Select / key 输入 / ModelListItem 列表），Create route 校验通过启用；
+     R13 key 先落存失败治理沿用；成功即 onadded（分区选中新 tab 并引导粘 key）。
+  3. 建路由源三态：目录条目（编号 slug + top-4 image 优先模型，catalogEntryDefaults
      富预填：name/contextWindow/inputTypes/maxOutputTokens/outputTypes/efforts 三档）、
-     本地 preset（全量 + 默认三档）、seed（env 注入的活动 provider 名）。
+     本地 preset（全量 + 默认三档 + icon 三控制/iconSuppressed 原样）、seed（env
+     注入的活动 provider 名——唯一仍走 form 预填的目录外路径）。
 -->
 <script lang="ts">
   import IconEye from "@lucide/svelte/icons/eye";
@@ -206,47 +213,7 @@
     if (mode === "pick") searchInput?.focus();
   });
 
-  function enterForm(): void {
-    mode = "form";
-    urlTouched = false;
-    nameTouched = false;
-    rejection = null;
-  }
-
-  function startFromCatalog(entry: ModelProviderCatalogEntry): void {
-    // R7 8.4：已添加的 provider 可再次添加——slug 走 `${provider}-${n}` 编号，
-    // apiKeyEnv 随新 slug 派生（zai-2 → ZAI_2_API_KEY），凭据各自独立。
-    draftProvider = nextRouteSlug(entry.provider, routes);
-    draftIcon = entry.icon ?? undefined;
-    draftIconColor = undefined;
-    draftIconLetter = undefined;
-    draftIconSuppressed = undefined;
-    draftBaseURL = entry.baseURL;
-    draftApi = entry.api;
-    draftModels = [...entry.models]
-      .sort((a, b) => Number(b.image) - Number(a.image))
-      .slice(0, 4)
-      .map((model) => catalogEntryDefaults(model));
-    draftModelsValid = draftModels.map(() => true);
-    enterForm();
-  }
-
-  function startFromPreset(preset: LocalProviderPreset): void {
-    const slug = nextRouteSlug(preset.provider, routes);
-    draftProvider = slug;
-    draftIcon = preset.icon;
-    draftIconColor = preset.iconColor;
-    draftIconLetter = preset.iconLetter;
-    // preset 的显式无图标同路应用（iconSuppressed: true 抑制目录回退）；
-    // 字段缺省 = 维持现状（不抑制）。
-    draftIconSuppressed = preset.iconSuppressed;
-    draftBaseURL = preset.baseURL;
-    draftApi = preset.api ?? DEFAULT_API;
-    draftModels = preset.models.map((id) => ({ id, efforts: [...DEFAULT_MODEL_EFFORTS] }));
-    draftModelsValid = preset.models.map(() => true);
-    enterForm();
-  }
-
+  /** scratch 进入 form 态（R14-A 后 form 的唯一入口之一；env seed 走 initialMode）。 */
   function startFromScratch(): void {
     draftProvider = "";
     draftIcon = undefined;
@@ -257,7 +224,61 @@
     draftApi = DEFAULT_API;
     draftModels = [];
     draftModelsValid = [];
-    enterForm();
+    mode = "form";
+    urlTouched = false;
+    nameTouched = false;
+    rejection = null;
+  }
+
+  /** 立即建路由尾段（R14-A：pick 卡与 form Create route 共用）：null（断线/
+   * 代次失效）静默返回；rejected/error 投影 rejection 并留在当前态；成功
+   * onadded（分区选中新 tab 进编辑态）。 */
+  async function createRoute(route: DshModelRoute): Promise<void> {
+    const result = await updateAgentSettings({ modelRoutes: [...routes, route] });
+    if (!result) return;
+    if (result.outcome === "rejected") {
+      rejection = `${result.code}: ${result.detail}`;
+      return;
+    }
+    if (result.outcome === "error") {
+      rejection = result.message;
+      return;
+    }
+    onadded(route.provider);
+  }
+
+  /** 目录卡点击 = 立即添加（R14-A）：编号 slug（R7 8.4：已添加可再加，zai →
+   * zai-2）+ 目录 baseURL/api/icon + top-4 image 优先模型富预填。 */
+  async function createFromCatalog(entry: ModelProviderCatalogEntry): Promise<void> {
+    if (agentRuntimeConfig.updating) return;
+    const route: DshModelRoute = {
+      provider: nextRouteSlug(entry.provider, routes),
+      baseURL: entry.baseURL,
+      api: entry.api,
+      models: [...entry.models]
+        .sort((a, b) => Number(b.image) - Number(a.image))
+        .slice(0, 4)
+        .map((model) => catalogEntryDefaults(model)),
+      ...(entry.icon ? { icon: entry.icon } : {}),
+    };
+    await createRoute(route);
+  }
+
+  /** 本地 preset 卡点击 = 立即添加（R14-A）：全量模型 + 默认三档 efforts；
+   * icon 三控制与显式无图标（iconSuppressed）原样进路由。 */
+  async function createFromPreset(preset: LocalProviderPreset): Promise<void> {
+    if (agentRuntimeConfig.updating) return;
+    const route: DshModelRoute = {
+      provider: nextRouteSlug(preset.provider, routes),
+      baseURL: preset.baseURL,
+      api: preset.api ?? DEFAULT_API,
+      models: preset.models.map((id) => ({ id, efforts: [...DEFAULT_MODEL_EFFORTS] })),
+      ...(preset.icon ? { icon: preset.icon } : {}),
+      ...(preset.iconColor ? { iconColor: preset.iconColor } : {}),
+      ...(preset.iconLetter ? { iconLetter: preset.iconLetter } : {}),
+      ...(preset.iconSuppressed ? { iconSuppressed: true } : {}),
+    };
+    await createRoute(route);
   }
 
   function setModelAt(index: number, next: RouteModelEntry): void {
@@ -274,7 +295,7 @@
     draftModelsValid = draftModelsValid.filter((_, i) => i !== index);
   }
 
-  /** 新增条目（R10-5）：efforts 默认三档写入草稿（Add route 持久化）；空 id 展开态。 */
+  /** 新增条目（R10-5）：efforts 默认三档写入草稿（Create route 持久化）；空 id 展开态。 */
   function addModel(): void {
     draftModels = [...draftModels, { id: "", efforts: [...DEFAULT_MODEL_EFFORTS] }];
     draftModelsValid = [...draftModelsValid, false];
@@ -306,17 +327,7 @@
       ...(draftIconLetter ? { iconLetter: draftIconLetter } : {}),
       ...(draftIconSuppressed ? { iconSuppressed: true } : {}),
     };
-    const result = await updateAgentSettings({ modelRoutes: [...routes, route] });
-    if (!result) return;
-    if (result.outcome === "rejected") {
-      rejection = `${result.code}: ${result.detail}`;
-      return;
-    }
-    if (result.outcome === "error") {
-      rejection = result.message;
-      return;
-    }
-    onadded(route.provider);
+    await createRoute(route);
   }
 </script>
 
@@ -350,6 +361,11 @@
       </Button>
     </div>
 
+    {#if rejection}
+      <!-- R14-A：pick 卡立即建路由失败（rejected/error）留在 pick 态内联报错。 -->
+      <p class="text-xs text-destructive" role="alert">{rejection}</p>
+    {/if}
+
     {#if catalogError}
       <p class="text-[10px] text-destructive" role="alert">{catalogError}</p>
     {:else if catalog === null}
@@ -368,7 +384,8 @@
                     type="button"
                     class="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
                     title={preset.baseURL}
-                    onclick={() => startFromPreset(preset)}
+                    disabled={agentRuntimeConfig.updating}
+                    onclick={() => void createFromPreset(preset)}
                   >
                     {#if preset.icon}
                       <img
@@ -430,7 +447,8 @@
                 type="button"
                 class="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
                 title={cardTitle}
-                onclick={() => startFromCatalog(entry)}
+                disabled={agentRuntimeConfig.updating}
+                onclick={() => void createFromCatalog(entry)}
               >
                 {#if entry.icon}
                   <img
@@ -554,7 +572,7 @@
     </label>
 
     <!-- R13：路由级 API key 从表单起点即可填写（用户：「一开始就要能填写，否则
-         无法做 api-test」）——password + eye；连接测试优先直传此值；Add route
+         无法做 api-test」）——password + eye；连接测试优先直传此值；Create route
          成功后写入凭据存储。 -->
     <div class="block space-y-0.5">
       <span class="text-[10px] text-muted-foreground">API key</span>
@@ -644,7 +662,7 @@
         disabled={!canSubmit}
         onclick={() => void addRoute()}
       >
-        Add route
+        Create route
       </Button>
     </div>
   </div>

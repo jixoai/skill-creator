@@ -51,8 +51,8 @@ vi.mock("../components/agent/ContextMeter.svelte", async () => {
 });
 
 // @lucide/svelte 图标 = node_modules 的 .svelte（root vitest 管线不编译）——空壳替换。
-vi.mock("@lucide/svelte/icons/paperclip", async () => await import("./stubs/lucide-icon-mocks.js"));
-vi.mock("@lucide/svelte/icons/file", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/image", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/file-up", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/arrow-up", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/square", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock(
@@ -113,7 +113,7 @@ function view(
       },
       preset: "live",
       permissions: { approvalPolicy: "ask" },
-      session: { streamRetention: 50, streamProjection: "enabled" },
+      session: { streamRetention: 50, streamProjection: "enabled", sessionCleanupDays: 30 },
       defaultMode: "free",
       modelRoutes: routes,
     },

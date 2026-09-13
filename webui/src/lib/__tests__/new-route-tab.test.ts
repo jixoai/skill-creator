@@ -5,14 +5,20 @@
  * chip，Add route 持续 disabled」；「catalog 卡片选取路径持久化 models 时带上
  * contextWindow」；「已添加的 provider 可继续添加：slug zai → zai-2，label (1)」；
  * 「api 是 Select（DSH_ROUTE_API_PROTOCOLS）」；「模型补全 = 全供应商并集」。
+ * 用户原始需求 [2026-09-12 R14-A]：「在 New 选中某个预设后，等于立刻添加了这个
+ * 预设。这时候就已经可以删除和保存了。」——pick 卡点击 = updateAgentSettings
+ * 立即调用 + onadded（不再有 pick → form → Add 三段流）；scratch 表单提交按钮
+ * 文案改「Create route」，成功后同样进编辑态。
  * 正交意图：
  *   [1] B1 端到端：form 态填 name/baseURL 后，Add model + Model id 输入
- *       gpt-test → Add route 解禁并提交。
+ *       gpt-test → Create route 解禁并提交 + onadded。
  *   [2] B7：seed 路径 models 携带目录 contextWindow；手输路径保持裸 {id}。
- *   [3] R7 8.4：目录卡 Added 后不 disabled；连续两次添加 slug 序列为
- *       zai → zai-2（apiKeyEnv 由 daemon 侧按 slug 派生，不在此断言）。
- *   [4] preset 应用（codex R7 B3 追加）：iconSuppressed: true 的 preset 同路
- *       进新建路由；字段缺省不写入该键。
+ *   [3] R7 8.4 + R14-A：目录卡 Added 后不 disabled；点击 = 立即建路由，
+ *       连续两次添加 slug 序列为 zai → zai-2（apiKeyEnv 由 daemon 侧按 slug
+ *       派生，不在此断言）。
+ *   [4] preset 卡点击 = 立即建路由（codex R7 B3 追加）：iconSuppressed: true
+ *       的 preset 同路进新路由；字段缺省不写入该键。
+ *   [5] R14-A 失败治理：立即建路由 rejected → 留在 pick 态内联报错，不 onadded。
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -66,7 +72,7 @@ function baseView(routes: unknown[] = []): DshStewardSettingsView {
       model: { provider: "openai", model: "gpt-4o" },
       preset: "live",
       permissions: { approvalPolicy: "ask" },
-      session: { streamRetention: 50, streamProjection: "enabled" },
+      session: { streamRetention: 50, streamProjection: "enabled", sessionCleanupDays: 30 },
       defaultMode: "free",
       modelRoutes: routes as DshStewardSettingsView["settings"]["modelRoutes"],
     },
@@ -101,6 +107,7 @@ function mountTab(options: {
   initialMode?: "pick" | "form";
   seed?: { provider: string; models?: string[] } | null;
 }) {
+  const onadded = vi.fn();
   const target = document.createElement("div");
   document.body.appendChild(target);
   const instance = mount(NewRouteTab, {
@@ -111,12 +118,13 @@ function mountTab(options: {
       catalogLoading: false,
       initialMode: options.initialMode ?? "form",
       seed: options.seed ?? null,
-      onadded: vi.fn(),
+      onadded,
     },
   });
   flushSync();
   return {
     target,
+    onadded,
     inputByLabel: (label: string) =>
       target.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!,
     selectByLabel: (label: string) =>
@@ -148,34 +156,37 @@ function pressKey(el: HTMLElement, key: string): void {
 }
 
 describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
-  it("hand-typed model via ModelListItem enables Add route (B1)", async () => {
+  it("hand-typed model via ModelListItem enables Create route (B1)", async () => {
     agentStore.view = baseView();
     agentStore.updating = false;
     agentStore.updateAgentSettings.mockReset();
+    agentStore.updateAgentSettings.mockResolvedValue({ outcome: "updated" });
     const ctx = mountTab({});
 
     typeValue(ctx.inputByLabel("Route name"), "my-relay");
     typeValue(ctx.inputByLabel("Base URL"), "https://api.example.com/v1");
     ctx.inputByLabel("Base URL").dispatchEvent(new Event("blur", { bubbles: true }));
     flushSync();
-    expect(ctx.buttonByText("Add route").disabled).toBe(true);
+    expect(ctx.buttonByText("Create route").disabled).toBe(true);
 
     ctx.buttonByText("+ Add model").click();
     flushSync();
     typeValue(ctx.inputByLabel("Model id"), "gpt-test");
-    expect(ctx.buttonByText("Add route").disabled).toBe(false);
+    expect(ctx.buttonByText("Create route").disabled).toBe(false);
 
-    ctx.buttonByText("Add route").click();
+    ctx.buttonByText("Create route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
     const patch = agentStore.updateAgentSettings.mock.calls[0]![0] as {
       modelRoutes: Array<{ provider: string; models: Array<{ id: string }> }>;
     };
     expect(patch.modelRoutes[0]!.provider).toBe("my-relay");
-    // R10-5：+ Add model 的新条目携带默认三档 efforts（Save 持久化）。
+    // R10-5：+ Add model 的新条目携带默认三档 efforts（Create route 持久化）。
     expect(patch.modelRoutes[0]!.models).toEqual([
       { id: "gpt-test", efforts: ["low", "high", "max"] },
     ]);
+    // R14-A create→edit 语义：成功即 onadded（分区选中新 tab 进编辑态）。
+    await vi.waitFor(() => expect(ctx.onadded).toHaveBeenCalledWith("my-relay"));
     ctx.cleanup();
   });
 
@@ -199,7 +210,7 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
     ];
     expect(idInputs.length).toBe(1);
     typeValue(idInputs[0]!, "glm-4.7-flash");
-    ctx.buttonByText("Add route").click();
+    ctx.buttonByText("Create route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
     const patch = agentStore.updateAgentSettings.mock.calls[0]![0] as {
@@ -315,10 +326,11 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
     ctx.cleanup();
   });
 
-  it("re-adding an added provider numbers the slug: zai → zai-2 (R7 8.4)", async () => {
+  it("clicking a catalog card creates the route immediately; re-add numbers the slug zai → zai-2 (R7 8.4 + R14-A)", async () => {
     agentStore.view = baseView();
     agentStore.updating = false;
     agentStore.updateAgentSettings.mockReset();
+    agentStore.updateAgentSettings.mockResolvedValue({ outcome: "updated" });
     const ctx = mountTab({ catalog: CATALOG, initialMode: "pick" });
 
     const card = ctx.cardByLabel("Z.ai");
@@ -326,20 +338,20 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
     card.click();
     flushSync();
 
-    // 第一次：slug 原名，预填目录 api/baseURL/top-4 模型（含 contextWindow）。
-    expect(ctx.inputByLabel("Route name").value).toBe("zai");
-    expect(ctx.selectByLabel("API protocol").value).toBe("openai-completions");
-    ctx.buttonByText("Add route").click();
-    flushSync();
+    // R14-A 选中即添加：updateAgentSettings 立即调用 + onadded 进编辑态；
+    // 不再进入 form（无 Route name 输入的三段流）。
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
     const first = agentStore.updateAgentSettings.mock.calls[0]![0] as {
       modelRoutes: Array<{
         provider: string;
+        api: string;
         models: Array<{ id: string; contextWindow?: number }>;
       }>;
     };
     expect(first.modelRoutes[0]!.provider).toBe("zai");
-    // top-4 模型走 catalogEntryDefaults（R10 富预填 + 默认三档 efforts）。
+    // 首建即带目录 baseURL/api 语义（api 经路由补丁持久化）与 top-4 模型
+    // catalogEntryDefaults 富预填（R10 + 默认三档 efforts）。
+    expect(first.modelRoutes[0]!.api).toBe("openai-completions");
     expect(first.modelRoutes[0]!.models).toEqual([
       {
         id: "glm-4.7",
@@ -357,6 +369,8 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
         efforts: ["low", "high", "max"],
       },
     ]);
+    await vi.waitFor(() => expect(ctx.onadded).toHaveBeenCalledWith("zai"));
+    expect(ctx.target.querySelector('input[aria-label="Route name"]')).toBeNull();
 
     // 模拟 daemon 落库（mock store 非响应式——重挂载拾取新 view）。
     const firstRoutes = first.modelRoutes;
@@ -368,18 +382,16 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
     expect(cardAgain.textContent).toContain("Added ✓");
     cardAgain.click();
     flushSync();
-    expect(ctx2.inputByLabel("Route name").value).toBe("zai-2");
-    ctx2.buttonByText("Add route").click();
-    flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(2));
     const second = agentStore.updateAgentSettings.mock.calls[1]![0] as {
       modelRoutes: Array<{ provider: string }>;
     };
     expect(second.modelRoutes.map((route) => route.provider)).toEqual(["zai", "zai-2"]);
+    await vi.waitFor(() => expect(ctx2.onadded).toHaveBeenCalledWith("zai-2"));
     ctx2.cleanup();
   });
 
-  it("applies a preset's iconSuppressed through the new route (and omits it when absent)", async () => {
+  it("clicking a preset card creates the route immediately, applying iconSuppressed (and omitting it when absent)", async () => {
     presetStore.list = [
       {
         provider: "my-relay",
@@ -392,18 +404,18 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
     agentStore.view = baseView();
     agentStore.updating = false;
     agentStore.updateAgentSettings.mockReset();
+    agentStore.updateAgentSettings.mockResolvedValue({ outcome: "updated" });
     // catalog 非 null 才会渲染 pick 态画廊（Your presets 分组在内）。
     const ctx = mountTab({ catalog: [], initialMode: "pick" });
     ctx.cardByLabel("My Relay").click();
-    flushSync();
-    expect(ctx.inputByLabel("Route name").value).toBe("my-relay");
-    ctx.buttonByText("Add route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
     const suppressed = agentStore.updateAgentSettings.mock.calls[0]![0] as {
       modelRoutes: Array<Record<string, unknown>>;
     };
+    expect(suppressed.modelRoutes[0]!.provider).toBe("my-relay");
     expect(suppressed.modelRoutes[0]!.iconSuppressed).toBe(true);
+    await vi.waitFor(() => expect(ctx.onadded).toHaveBeenCalledWith("my-relay"));
     ctx.cleanup();
 
     // 无该字段的 preset 维持现状：不写入 iconSuppressed 键。
@@ -416,18 +428,43 @@ describe("NewRouteTab (B1 e2e + B7 + R7)", () => {
       },
     ];
     agentStore.updateAgentSettings.mockReset();
+    agentStore.updateAgentSettings.mockResolvedValue({ outcome: "updated" });
     const ctx2 = mountTab({ catalog: [], initialMode: "pick" });
     ctx2.cardByLabel("Plain Preset").click();
-    flushSync();
-    ctx2.buttonByText("Add route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
     const plain = agentStore.updateAgentSettings.mock.calls[0]![0] as {
       modelRoutes: Array<Record<string, unknown>>;
     };
     expect("iconSuppressed" in plain.modelRoutes[0]!).toBe(false);
+    await vi.waitFor(() => expect(ctx2.onadded).toHaveBeenCalledWith("plain-preset"));
     ctx2.cleanup();
     presetStore.list = [];
+  });
+});
+
+describe("NewRouteTab pick-card immediate creation (R14-A)", () => {
+  it("stays in pick mode with an inline error when immediate creation is rejected", async () => {
+    agentStore.view = baseView();
+    agentStore.updating = false;
+    agentStore.updateAgentSettings.mockReset();
+    agentStore.updateAgentSettings.mockResolvedValue({
+      outcome: "rejected",
+      code: "INVALID_ROUTE",
+      detail: "provider not allowed",
+    });
+    const ctx = mountTab({ catalog: CATALOG, initialMode: "pick" });
+    ctx.cardByLabel("Z.ai").click();
+    flushSync();
+    await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync(); // createRoute 的 rejection 赋值在 await 微任务后——补一次渲染 flush
+    expect(ctx.onadded).not.toHaveBeenCalled();
+    expect(ctx.target.textContent).toContain("INVALID_ROUTE");
+    // 留在 pick 态（搜索框仍在，未进入 form）。
+    expect(ctx.target.querySelector('input[aria-label="Search providers"]')).not.toBeNull();
+    expect(ctx.target.querySelector('input[aria-label="Route name"]')).toBeNull();
+    ctx.cleanup();
   });
 });
 
@@ -442,7 +479,7 @@ describe("NewRouteTab route-level API key (R13)", () => {
     ctx.cleanup();
   });
 
-  it("stores the form key as a credential when Add route succeeds", async () => {
+  it("stores the form key as a credential when Create route succeeds", async () => {
     agentStore.view = baseView();
     agentStore.updating = false;
     agentStore.updateAgentSettings.mockReset();
@@ -458,8 +495,8 @@ describe("NewRouteTab route-level API key (R13)", () => {
     flushSync();
     typeValue(ctx.inputByLabel("Model id"), "m-1");
     typeValue(ctx.inputByLabel("API key"), "sk-form-1");
-    expect(ctx.buttonByText("Add route").disabled).toBe(false);
-    ctx.buttonByText("Add route").click();
+    expect(ctx.buttonByText("Create route").disabled).toBe(false);
+    ctx.buttonByText("Create route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalledTimes(1));
     await vi.waitFor(() =>
@@ -494,7 +531,7 @@ describe("addRoute credential failure closure (codex R13 P1)", () => {
       code: "INVALID_API_KEY",
       detail: "whitespace only",
     });
-    ctx.buttonByText("Add route").click();
+    ctx.buttonByText("Create route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.setAgentCredential).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -508,7 +545,7 @@ describe("addRoute credential failure closure (codex R13 P1)", () => {
   it("stays in the form with an inline error when the credential save disconnects (null)", async () => {
     const ctx = readyCtx();
     agentStore.setAgentCredential.mockResolvedValue(null);
-    ctx.buttonByText("Add route").click();
+    ctx.buttonByText("Create route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.setAgentCredential).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -522,7 +559,7 @@ describe("addRoute credential failure closure (codex R13 P1)", () => {
     const ctx = readyCtx();
     agentStore.setAgentCredential.mockResolvedValue({ outcome: "stored" });
     agentStore.updateAgentSettings.mockResolvedValue({ outcome: "updated" });
-    ctx.buttonByText("Add route").click();
+    ctx.buttonByText("Create route").click();
     flushSync();
     await vi.waitFor(() => expect(agentStore.updateAgentSettings).toHaveBeenCalled());
     expect(agentStore.setAgentCredential).toHaveBeenCalledWith("key-relay", "sk-bad-1");

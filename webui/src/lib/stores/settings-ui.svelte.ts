@@ -7,7 +7,7 @@
  * 正交意图：
  *   [1] 全局开合与当前分区（跨 App/tab 存活；入口 = 侧栏底部齿轮）。
  */
-export type SettingsSectionId = "general" | "model" | "agent";
+export type SettingsSectionId = "general" | "model" | "agent" | "sessions";
 
 export const settingsUi = $state({
   open: false,

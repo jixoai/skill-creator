@@ -40,6 +40,9 @@ export const AgentSessionSummarySchema = z.object({
   createdAt: z.string().min(1),
   /** 会话模式（旧转录缺失读 free——其创建时即全工具面的事实投影）。 */
   mode: DshAgentModeSchema,
+  /** 产品转录归属（R15 codex P1-3）：false = kernel/steward-only 会话——清理
+   * RPC 只管产品转录层，这类行 UI 禁删并以 kernel-only 标记呈现。 */
+  hasTranscript: z.boolean().optional(),
 });
 /** 会话摘要。 */
 export type AgentSessionSummary = z.infer<typeof AgentSessionSummarySchema>;
@@ -148,6 +151,38 @@ export const AgentSessionsStreamsInputSchema = z.object({
 });
 /** 跨会话帧查询输入。 */
 export type AgentSessionsStreamsInput = z.infer<typeof AgentSessionsStreamsInputSchema>;
+
+/**
+ * 会话清理输入（R14-C 2026-09-12；R15 codex P1 收紧）：三种**互斥**形状——
+ * 按保留天数（目录日期早于 now - beforeDays 的转录删除）、全量（running 跳
+ * 过）、显式 ID 列表（Settings 会话列表的逐行删除）。三形状均 strict：任何
+ * 多键组合（如 {all:true, sessionIds:[…]}）直接 parse 失败，杜绝删除范围静
+ * 默扩大；all 只接受字面量 true。
+ */
+export const AgentSessionsCleanupInputSchema = z.union([
+  z.strictObject({ beforeDays: z.number().int().min(0).max(365) }),
+  z.strictObject({ all: z.literal(true) }),
+  z.strictObject({ sessionIds: z.array(z.string().min(1)).min(1).max(200) }),
+]);
+/** 会话清理输入。 */
+export type AgentSessionsCleanupInput = z.infer<typeof AgentSessionsCleanupInputSchema>;
+
+/**
+ * 会话清理结果：kept = 清理后仍留存的持久会话数（太新 / running 被跳过 /
+ * 删除失败都在内）；errors 有界（≤20 条）且出现时表示部分条目删除失败。
+ * deletedIds（R15）：实际删除的会话 ID 有界清单——客户端据此失效当前会话。
+ */
+export const AgentSessionsCleanupResultSchema = z.object({
+  kind: z.literal("summary"),
+  deleted: z.number().int().nonnegative(),
+  kept: z.number().int().nonnegative(),
+  deletedIds: z.array(z.string().min(1)).max(1000).optional(),
+  /** deletedIds 达到 1000 上限被截断（客户端需以列表复核失效当前会话）。 */
+  deletedIdsTruncated: z.boolean().optional(),
+  errors: z.array(z.string().min(1)).optional(),
+});
+/** 会话清理结果。 */
+export type AgentSessionsCleanupResult = z.infer<typeof AgentSessionsCleanupResultSchema>;
 
 /** ask_user_question 的单个问题（dsh-user-questions 结构的浏览器安全投影）。 */
 export const AgentApprovalQuestionSchema = z.object({

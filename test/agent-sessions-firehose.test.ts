@@ -710,3 +710,128 @@ describe("auto-compact driven by maxOutputTokens (codex R7 B1)", () => {
     }
   });
 });
+
+describe("revive vs cleanup interleaving (R15 终验 P1-2 终闭)", () => {
+  it("rejects an in-flight revive whose transcript was deleted mid-flight (durable tombstone)", async () => {
+    const kernel = makeFakeKernel();
+    (kernel.ctx as { agents?: unknown }).agents = {
+      create: async (options: { sessionId: string }) => ({
+        agent: {
+          id: options.sessionId,
+          status: "idle",
+          session: { id: options.sessionId, header: {} },
+          ctx: { on: () => () => undefined },
+          followup: () => undefined,
+          cancel: () => undefined,
+        },
+        dispose: async () => undefined,
+      }),
+      resume: async (input: { resumeSessionId: string }) => ({
+        agent: {
+          id: input.resumeSessionId,
+          status: "idle",
+          session: { id: input.resumeSessionId, header: {} },
+          ctx: { on: () => () => undefined },
+          followup: () => undefined,
+          cancel: () => undefined,
+        },
+        dispose: async () => undefined,
+      }),
+    };
+    const transcripts = createSessionTranscripts(path.join(sandbox, "transcripts"));
+    const plainSelection = async () => ({
+      provider: "deepseek-official",
+      model: "deepseek-v4-flash",
+    });
+    // Service A（无门）：建立会话 + 转录。
+    const serviceA = createAgentSessionsService({
+      kernel: () => kernel,
+      modelSelection: plainSelection,
+      defaultMode: async () => "free",
+      retention: 50,
+      transcripts,
+    });
+    serviceA.attach(kernel);
+    const created = await serviceA.create({ cwd: sandbox, prompt: "seed" });
+    const id = created.sessionId;
+    // Service B（带门）：复用同一转录目录——prompt 走 revive（B 的 live Map 为空）。
+    let releaseModelSelection: (() => void) | null = null;
+    service = createAgentSessionsService({
+      kernel: () => kernel,
+      modelSelection: () =>
+        new Promise((resolve) => {
+          releaseModelSelection = () => resolve({ provider: "x", model: "y" });
+        }),
+      defaultMode: async () => "free",
+      retention: 50,
+      transcripts,
+    });
+    service.attach(kernel);
+    const revivePromise = service.prompt(id, "continue");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // 清理在 B 上完整执行（门起落 + 删除 + 墓碑；A 的 live 条目被释放）。
+    const summary = await service.cleanup({ sessionIds: [id] });
+    expect(summary.deleted).toBe(1);
+    // 释放 modelSelection：恢复链继续，必须在持久墓碑处被拒（瞬态门已解除）。
+    releaseModelSelection?.();
+    await expect(revivePromise).rejects.toThrow(/cleaned up/);
+    await serviceA.dispose().catch(() => undefined);
+  });
+});
+
+describe("same-service revive vs cleanup interleaving (R15 追加 P1-2)", () => {
+  it("rejects an in-flight revive on the same service after cleanup completes", async () => {
+    const kernel = makeFakeKernel();
+    (kernel.ctx as { agents?: unknown }).agents = {
+      create: async (options: { sessionId: string }) => ({
+        agent: {
+          id: options.sessionId,
+          status: "idle",
+          session: { id: options.sessionId, header: {} },
+          ctx: { on: () => () => undefined },
+          followup: () => undefined,
+          cancel: () => undefined,
+        },
+        dispose: async () => undefined,
+      }),
+      resume: async (input: { resumeSessionId: string }) => ({
+        agent: {
+          id: input.resumeSessionId,
+          status: "idle",
+          session: { id: input.resumeSessionId, header: {} },
+          ctx: { on: () => () => undefined },
+          followup: () => undefined,
+          cancel: () => undefined,
+        },
+        dispose: async () => undefined,
+      }),
+    };
+    let gateModel = false;
+    let releaseModelSelection: (() => void) | null = null;
+    const transcripts = createSessionTranscripts(path.join(sandbox, "transcripts"));
+    service = createAgentSessionsService({
+      kernel: () => kernel,
+      modelSelection: async () => {
+        if (!gateModel) return { provider: "p", model: "m" };
+        return new Promise((resolve) => {
+          releaseModelSelection = () => resolve({ provider: "p", model: "m" });
+        });
+      },
+      defaultMode: async () => "free",
+      retention: 50,
+      transcripts,
+    });
+    service.attach(kernel);
+    // 同服务：建会话（live）→ setMode 释放 live 但保留转录 → prompt 走 revive。
+    const created = await service.create({ cwd: sandbox, prompt: "seed" });
+    const id = created.sessionId;
+    await service.setMode(id, "create");
+    gateModel = true;
+    const revivePromise = service.prompt(id, "continue");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const summary = await service.cleanup({ sessionIds: [id] });
+    expect(summary.deleted).toBe(1);
+    releaseModelSelection?.();
+    await expect(revivePromise).rejects.toThrow(/cleaned up|not found/i);
+  });
+});

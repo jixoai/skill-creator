@@ -40,6 +40,8 @@ import {
   AgentSessionSetModeResultSchema,
   AgentSessionStreamInputSchema,
   AgentSessionStreamResultSchema,
+  AgentSessionsCleanupInputSchema,
+  AgentSessionsCleanupResultSchema,
   AgentSessionsStreamsInputSchema,
   AgentSessionSummarySchema,
   AgentSettingsUpdateResultSchema,
@@ -317,6 +319,11 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       streams: oc
         .input(AgentSessionsStreamsInputSchema)
         .output(z.object({ frames: z.array(DshSessionStreamFrameSchema) })),
+      /**
+       * 清理面板会话转录（R14-C）：按保留天数 / 全量 / 显式 ID 删除产品转录层
+       * （sessions/YYYY/MM/DD），running 会话跳过；不触碰 $DSH_HOME 内核日志。
+       */
+      cleanup: oc.input(AgentSessionsCleanupInputSchema).output(AgentSessionsCleanupResultSchema),
     },
     session: {
       /** 创建产品会话（产品 preset + 工具面收窄；可选首 prompt）。 */

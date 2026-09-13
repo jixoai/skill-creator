@@ -35,7 +35,7 @@ function view(overrides?: Partial<DshStewardSettingsView["settings"]>): DshStewa
       model: { provider: "zai", model: "glm-5.3" },
       preset: "live",
       permissions: { approvalPolicy: "ask" },
-      session: { streamRetention: 200, streamProjection: "enabled" },
+      session: { streamRetention: 200, streamProjection: "enabled", sessionCleanupDays: 30 },
       defaultMode: "free",
       modelRoutes: [
         {

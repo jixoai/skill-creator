@@ -27,6 +27,7 @@ const settingsUi = vi.hoisted(() => ({
 const toast = vi.hoisted(() => ({
   showToast: vi.fn(),
 }));
+const sessionsCleanup = vi.hoisted(() => vi.fn());
 
 vi.mock("../stores/connection.svelte", () => ({
   getConnectionGeneration: () => connection.generation,
@@ -78,6 +79,7 @@ vi.mock(
 );
 vi.mock("@lucide/svelte/icons/sparkles", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/file", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/file-up", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/image", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock(
   "@lucide/svelte/icons/arrow-down",
@@ -94,7 +96,6 @@ vi.mock(
   "@lucide/svelte/icons/chevron-right",
   async () => await import("./stubs/lucide-icon-mocks.js"),
 );
-vi.mock("@lucide/svelte/icons/paperclip", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/arrow-up", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/square", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock(
@@ -147,7 +148,7 @@ const VIEW: DshStewardSettingsView = {
     model: { provider: "zai", model: "glm-4.7" },
     preset: "live",
     permissions: { approvalPolicy: "ask" },
-    session: { streamRetention: 50, streamProjection: "enabled" },
+    session: { streamRetention: 50, streamProjection: "enabled", sessionCleanupDays: 30 },
     defaultMode: "free",
     modelRoutes: [],
   },
@@ -173,7 +174,10 @@ function agentRpc(): unknown {
     agent: {
       settings: { get: async () => VIEW },
       models: { catalog: async () => ({ providers: [] }) },
-      sessions: { list: async () => ({ sessions: [] }) },
+      sessions: {
+        list: async () => ({ sessions: [] }),
+        cleanup: async (input: unknown) => sessionsCleanup(input),
+      },
       session: {
         create: sessionCreate,
         prompt: sessionPrompt,
@@ -419,6 +423,67 @@ describe("R12-B 7/8: two-state rendering and the + entry", () => {
     expect(agentSession.sessionId).toBeNull();
     expect(sessionCreate).toHaveBeenCalledTimes(1);
     expect(modeCard("General").getAttribute("aria-pressed")).toBe("true");
+    ctx.cleanup();
+  });
+});
+
+describe("cleanup invalidates the current session (R15 codex P1-4)", () => {
+  it("returns to the New Session state when the deletedIds include the active session", async () => {
+    const { agentSession, cleanupAgentSessions } = await import("../stores/agent.svelte");
+    sessionCreate.mockResolvedValue({ session: sessionSummary("agent-s9", "free") });
+    sessionPrompt.mockResolvedValue({ accepted: true });
+    const ctx = mountPanel();
+    submitDraft("hello");
+    await vi.waitFor(() => expect(agentSession.sessionId).toBe("agent-s9"));
+    // 清理结果包含当前会话 → 必须回空态（不向已删 ID 发 prompt）。
+    sessionsCleanup.mockResolvedValue({
+      kind: "summary",
+      deleted: 1,
+      kept: 0,
+      deletedIds: ["agent-s9"],
+    });
+    await cleanupAgentSessions({ sessionIds: ["agent-s9"] });
+    await flushSync();
+    expect(agentSession.sessionId).toBeNull();
+    expect(ctx.target.textContent).toContain("Pick a way to work");
+    ctx.cleanup();
+  });
+
+  it("keeps the current session when deletedIds does not include it", async () => {
+    const { agentSession, cleanupAgentSessions } = await import("../stores/agent.svelte");
+    sessionCreate.mockResolvedValue({ session: sessionSummary("agent-s10", "free") });
+    sessionPrompt.mockResolvedValue({ accepted: true });
+    const ctx = mountPanel();
+    submitDraft("hello");
+    await vi.waitFor(() => expect(agentSession.sessionId).toBe("agent-s10"));
+    sessionsCleanup.mockResolvedValue({ kind: "summary", deleted: 1, kept: 3 });
+    await cleanupAgentSessions({ beforeDays: 30 });
+    await flushSync();
+    expect(agentSession.sessionId).toBe("agent-s10");
+    ctx.cleanup();
+  });
+});
+
+describe("truncated cleanup with kernel-only re-projection (R15 追加 P1-5)", () => {
+  it("returns to the empty state when the refreshed list only has a kernel-only row for the current id", async () => {
+    const { agentSession, cleanupAgentSessions } = await import("../stores/agent.svelte");
+    sessionCreate.mockResolvedValue({ session: sessionSummary("agent-k9", "free") });
+    sessionPrompt.mockResolvedValue({ accepted: true });
+    const ctx = mountPanel();
+    submitDraft("hello");
+    await vi.waitFor(() => expect(agentSession.sessionId).toBe("agent-k9"));
+    sessionsCleanup.mockResolvedValue({
+      kind: "summary",
+      deleted: 1200,
+      kept: 0,
+      deletedIds: Array.from({ length: 1000 }, (_, i) => `agent-bulk-${i}`),
+      deletedIdsTruncated: true,
+    });
+    // 刷新后的列表：同 id 仅剩 hasTranscript:false 的 kernel-only 行（转录已删）。
+    agentSessionsList.loaded = true;
+    agentSessionsList.sessions = [{ ...sessionSummary("agent-k9", "free"), hasTranscript: false }];
+    await cleanupAgentSessions({ beforeDays: 30 });
+    await vi.waitFor(() => expect(agentSession.sessionId).toBeNull());
     ctx.cleanup();
   });
 });

@@ -75,6 +75,7 @@ vi.mock(
 );
 vi.mock("@lucide/svelte/icons/sparkles", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/file", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/file-up", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/image", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock(
   "@lucide/svelte/icons/arrow-down",
@@ -91,7 +92,6 @@ vi.mock(
   "@lucide/svelte/icons/chevron-right",
   async () => await import("./stubs/lucide-icon-mocks.js"),
 );
-vi.mock("@lucide/svelte/icons/paperclip", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/arrow-up", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/square", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock(
@@ -142,7 +142,7 @@ const VIEW: DshStewardSettingsView = {
     model: { provider: "zai", model: "glm-4.7" },
     preset: "live",
     permissions: { approvalPolicy: "ask" },
-    session: { streamRetention: 50, streamProjection: "enabled" },
+    session: { streamRetention: 50, streamProjection: "enabled", sessionCleanupDays: 30 },
     defaultMode: "free",
     modelRoutes: [
       {

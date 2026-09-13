@@ -66,7 +66,7 @@ export function defaultDshStewardSettings(): DshStewardSettings {
     model: { provider: STEWARD_DETERMINISTIC_PROVIDER, model: STEWARD_DETERMINISTIC_MODEL },
     preset: "deterministic",
     permissions: { approvalPolicy: "ask" },
-    session: { streamRetention: 100, streamProjection: "enabled" },
+    session: { streamRetention: 100, streamProjection: "enabled", sessionCleanupDays: 30 },
     defaultMode: "free",
     modelRoutes: [],
   };
@@ -328,6 +328,7 @@ function settingsEqual(a: DshStewardSettings, b: DshStewardSettings): boolean {
     a.permissions.approvalPolicy === b.permissions.approvalPolicy &&
     a.session.streamRetention === b.session.streamRetention &&
     a.session.streamProjection === b.session.streamProjection &&
+    a.session.sessionCleanupDays === b.session.sessionCleanupDays &&
     a.defaultMode === b.defaultMode &&
     JSON.stringify(a.modelRoutes) === JSON.stringify(b.modelRoutes)
   );

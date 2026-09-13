@@ -3,13 +3,12 @@
   且光标在首行时，于 composer 上方锚定浮现（绝对定位列表，非新依赖）：当前命令
   `/compact`（执行并发送）；↑↓ 导航 + Enter 执行 + Esc 关闭；结构开放供后续命令
   注册」——codex R2 解除 defer，本轮落地。
+  修订 [2026-09-12]（R14-B 5）：浮现/键盘语法通用化为 TriggerMenu（`$` skill
+  引用补全同语法并排实例）；本组件收敛为 "/" 实例的外壳——命令注册表 +
+  TriggerMenu 装配，无独立交互逻辑。
   正交意图：
-    [1] 命令注册表（module 级数组，开放扩展）：以稿文首行做前缀匹配。
-    [2] 键盘导航：↑↓ 循环移动、Enter 执行（onExecute 回调命令文本）、Esc 对当前
-        稿文一次性驳回；经 bind:this 暴露 handleKeydown 供 composer textarea
-        先行消费（返回 true = 已消费，含 stopPropagation，Esc 不冒泡收起面板）。
-  妥协声明：无独立焦点管理（键盘留在 textarea；条目为原生 button 点击执行，
-  hover 仅 CSS 高亮不改变键盘选中）。
+    [1] 斜杠命令注册表（module 级数组，开放扩展：后续命令在此追加即可）。
+  妥协声明：无（交互语法与渲染见 TriggerMenu 模块）。
 -->
 <script module lang="ts">
   /** 斜杠命令条目（后续命令在 SLASH_COMMANDS 注册表追加即可）。 */
@@ -24,6 +23,8 @@
 </script>
 
 <script lang="ts">
+  import TriggerMenu, { type MenuEntry } from "./TriggerMenu.svelte";
+
   let {
     text,
     caretOnFirstLine,
@@ -37,78 +38,26 @@
     onExecute: (command: string) => void;
   } = $props();
 
-  /** Esc 驳回的稿文快照：稿文再变化即重新浮现。 */
-  let dismissedText = $state<string | null>(null);
-  let selectedIndex = $state(0);
+  const entries: readonly MenuEntry[] = SLASH_COMMANDS.map((entry) => ({
+    value: entry.command,
+    ...(entry.description.length > 0 ? { description: entry.description } : {}),
+  }));
 
-  const query = $derived(text.startsWith("/") ? (text.split("\n", 1)[0] ?? "") : "");
-  const matches = $derived(
-    query.length > 0 ? SLASH_COMMANDS.filter((entry) => entry.command.startsWith(query)) : [],
-  );
-  /** 选中索引（matches 收缩时收敛到上界内）。 */
-  const selected = $derived(Math.min(selectedIndex, Math.max(0, matches.length - 1)));
-  const open = $derived(matches.length > 0 && caretOnFirstLine && dismissedText !== text);
+  let menu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
 
-  function consume(event: KeyboardEvent): void {
-    event.preventDefault();
-    // 已消费的键不再冒泡：Esc 不得再触发 AgentPanel 的 window 级面板收起。
-    event.stopPropagation();
-  }
-
-  /**
-   * 键盘先占（composer textarea 的 onkeydown 最先调用）：返回 true = 已消费，
-   * 调用方必须跳过后续处理（Enter 普通提交等）。
-   */
+  /** 键盘先占透传（composer 经 bind:this 调用；语义见 TriggerMenu）。 */
   export function handleKeydown(event: KeyboardEvent): boolean {
-    if (!open || matches.length === 0) return false;
-    if (event.key === "ArrowDown") {
-      consume(event);
-      selectedIndex = (selected + 1) % matches.length;
-      return true;
-    }
-    if (event.key === "ArrowUp") {
-      consume(event);
-      selectedIndex = (selected - 1 + matches.length) % matches.length;
-      return true;
-    }
-    if (event.key === "Enter") {
-      consume(event);
-      const entry = matches[selected];
-      if (entry) onExecute(entry.command);
-      return true;
-    }
-    if (event.key === "Escape") {
-      consume(event);
-      dismissedText = text;
-      return true;
-    }
-    return false;
+    return menu?.handleKeydown(event) ?? false;
   }
 </script>
 
-{#if open}
-  <!-- 绝对定位列表（§0 护栏：不引入新的菜单原语），锚定 composer 卡上方；
-       键盘留在 textarea（handleKeydown 先占），条目本身是原生 button 可点执行。 -->
-  <ul
-    data-slot="slash-menu"
-    class="absolute bottom-full left-3 z-20 mb-1.5 w-72 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-md"
-    aria-label="Slash commands"
-  >
-    {#each matches as entry, index (entry.command)}
-      <li>
-        <button
-          type="button"
-          class="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[11px] {index ===
-          selected
-            ? 'bg-accent text-accent-foreground'
-            : 'text-foreground'} hover:bg-accent/50"
-          aria-current={index === selected ? "true" : undefined}
-          onclick={() => onExecute(entry.command)}
-        >
-          <span class="shrink-0 font-medium">{entry.command}</span>
-          <span class="truncate text-muted-foreground">{entry.description}</span>
-        </button>
-      </li>
-    {/each}
-  </ul>
-{/if}
+<TriggerMenu
+  trigger="/"
+  {entries}
+  {text}
+  {caretOnFirstLine}
+  menuLabel="Slash commands"
+  dataSlot="slash-menu"
+  onSelect={onExecute}
+  bind:this={menu}
+/>
