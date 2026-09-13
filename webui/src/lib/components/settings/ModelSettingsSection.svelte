@@ -230,183 +230,185 @@
       </button>
     {/if}
   </div>
-</div>
-{#if activeOutsideRoutes && view}
-  <p class="text-[10px] text-amber-700">
-    {view.settings.model.provider} · {view.settings.model.model} (outside Routes) — env-provided; add
-    it as a route to manage it here.
-  </p>
-{/if}
+  {#if activeOutsideRoutes && view}
+    <p class="text-[10px] text-amber-700">
+      {view.settings.model.provider} · {view.settings.model.model} (outside Routes) — env-provided; add
+      it as a route to manage it here.
+    </p>
+  {/if}
 
-{#if view}
-  <!-- tab 条：横滚区 + 固定 + New -->
-  <div class="flex items-stretch gap-1 border-b border-border">
-    <div class="relative min-w-0 flex-1">
-      <div
-        class="tab-scroll flex h-9 items-stretch overflow-x-auto"
-        bind:this={stripEl}
-        onscroll={refreshScrollState}
-        role="tablist"
-        aria-label="Model routes"
-      >
-        {#each routes as route, index (route.provider)}
-          {@const entry = catalog?.providers.find((p) => p.provider === route.provider)}
-          {@const icon = resolveRouteIcon(route, entry)}
-          {@const displayLabel = routeDisplayLabel(route, catalog)}
-          {@const letter = routeLetter(route, displayLabel)}
-          {@const keyReady = view.providers.some(
-            (p) => p.provider === route.provider && p.configured,
-          )}
-          {@const ownsActive = view.settings.model.provider === route.provider}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!newOpen && selected === route.provider}
-            class="relative flex h-9 shrink-0 items-center gap-1.5 px-2 text-xs font-medium transition-colors hover:bg-muted/50 {!newOpen &&
-            selected === route.provider
-              ? 'text-foreground'
-              : 'text-muted-foreground hover:text-foreground'}"
-            title="{displayLabel} ({route.provider}){ownsActive ? ' · active route' : ''}"
-            bind:this={tabRefs[route.provider]}
-            onclick={() => {
-              selected = route.provider;
-              newOpen = false;
-            }}
-            onkeydown={(event) => onTabKeydown(event, index)}
-          >
-            {#if icon}
-              <span class="relative inline-flex shrink-0">
-                <!-- 图标着色（codex R7 B3）：iconColor 以 color-mix 柔化底瓦作用于图片图标。 -->
+  {#if view}
+    <!-- tab 条：横滚区 + 固定 + New -->
+    <div class="flex items-stretch gap-1 border-b border-border">
+      <div class="relative min-w-0 flex-1">
+        <div
+          class="tab-scroll flex h-9 items-stretch overflow-x-auto"
+          bind:this={stripEl}
+          onscroll={refreshScrollState}
+          role="tablist"
+          aria-label="Model routes"
+        >
+          {#each routes as route, index (route.provider)}
+            {@const entry = catalog?.providers.find((p) => p.provider === route.provider)}
+            {@const icon = resolveRouteIcon(route, entry)}
+            {@const displayLabel = routeDisplayLabel(route, catalog)}
+            {@const letter = routeLetter(route, displayLabel)}
+            {@const keyReady = view.providers.some(
+              (p) => p.provider === route.provider && p.configured,
+            )}
+            {@const ownsActive = view.settings.model.provider === route.provider}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!newOpen && selected === route.provider}
+              class="relative flex h-9 shrink-0 items-center gap-1.5 px-2 text-xs font-medium transition-colors hover:bg-muted/50 {!newOpen &&
+              selected === route.provider
+                ? 'text-foreground'
+                : 'text-muted-foreground hover:text-foreground'}"
+              title="{displayLabel} ({route.provider}){ownsActive ? ' · active route' : ''}"
+              bind:this={tabRefs[route.provider]}
+              onclick={() => {
+                selected = route.provider;
+                newOpen = false;
+              }}
+              onkeydown={(event) => onTabKeydown(event, index)}
+            >
+              {#if icon}
+                <span class="relative inline-flex shrink-0">
+                  <!-- 图标着色（codex R7 B3）：iconColor 以 color-mix 柔化底瓦作用于图片图标。 -->
+                  <span
+                    class="flex h-4 w-4 items-center justify-center rounded"
+                    style="background: color-mix(in srgb, {routeAvatarColor(
+                      route,
+                    )} 18%, transparent)"
+                    aria-hidden="true"
+                  >
+                    <img
+                      src={icon}
+                      alt=""
+                      class="h-3.5 w-3.5 object-contain {isLetterAvatar(icon) ? '' : 'dark:invert'}"
+                    />
+                  </span>
+                  {#if !keyReady}
+                    <span
+                      class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
+                      title="API key missing"
+                    ></span>
+                  {/if}
+                </span>
+              {:else}
                 <span
-                  class="flex h-4 w-4 items-center justify-center rounded"
-                  style="background: color-mix(in srgb, {routeAvatarColor(route)} 18%, transparent)"
+                  class="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[8px] font-semibold text-white"
+                  style="background: {routeAvatarColor(route)}"
                   aria-hidden="true"
                 >
-                  <img
-                    src={icon}
-                    alt=""
-                    class="h-3.5 w-3.5 object-contain {isLetterAvatar(icon) ? '' : 'dark:invert'}"
-                  />
+                  {letter}
+                  {#if !keyReady}
+                    <span
+                      class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
+                      title="API key missing"
+                    ></span>
+                  {/if}
                 </span>
-                {#if !keyReady}
-                  <span
-                    class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
-                    title="API key missing"
-                  ></span>
-                {/if}
-              </span>
-            {:else}
-              <span
-                class="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[8px] font-semibold text-white"
-                style="background: {routeAvatarColor(route)}"
-                aria-hidden="true"
-              >
-                {letter}
-                {#if !keyReady}
-                  <span
-                    class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
-                    title="API key missing"
-                  ></span>
-                {/if}
-              </span>
-            {/if}
-            <span class="max-w-[120px] truncate">{displayLabel}</span>
-            <!-- R16 用户裁决：活动路由标记从下划线改为 badge。 -->
-            {#if ownsActive}
-              <span
-                class="rounded bg-primary/10 px-1 py-px text-[9px] font-medium leading-tight text-primary"
-                title="Active model's route">active</span
-              >
-            {/if}
-          </button>
-        {/each}
+              {/if}
+              <span class="max-w-[120px] truncate">{displayLabel}</span>
+              <!-- R16 用户裁决：活动路由标记从下划线改为 badge。 -->
+              {#if ownsActive}
+                <span
+                  class="rounded bg-primary/10 px-1 py-px text-[9px] font-medium leading-tight text-primary"
+                  title="Active model's route">active</span
+                >
+              {/if}
+            </button>
+          {/each}
+        </div>
+        {#if canLeft}
+          <span
+            class="pointer-events-none absolute inset-y-0 left-0 w-2 bg-gradient-to-r from-background to-transparent"
+            aria-hidden="true"
+          ></span>
+        {/if}
+        {#if canRight}
+          <span
+            class="pointer-events-none absolute inset-y-0 right-0 w-2 bg-gradient-to-l from-background to-transparent"
+            aria-hidden="true"
+          ></span>
+        {/if}
       </div>
-      {#if canLeft}
-        <span
-          class="pointer-events-none absolute inset-y-0 left-0 w-2 bg-gradient-to-r from-background to-transparent"
-          aria-hidden="true"
-        ></span>
-      {/if}
-      {#if canRight}
-        <span
-          class="pointer-events-none absolute inset-y-0 right-0 w-2 bg-gradient-to-l from-background to-transparent"
-          aria-hidden="true"
-        ></span>
+      <button
+        type="button"
+        class="h-7 shrink-0 self-center rounded px-2 text-[11px] font-medium transition-colors {newOpen
+          ? 'bg-primary/10 text-primary'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+        onclick={() => (routes.length === 0 ? openNew("form") : openNew("pick"))}
+      >
+        + New
+      </button>
+    </div>
+
+    <!-- tab 内容（R16：页面主体自滚——tab 条固定在外，滚动只发生在此容器内）。 -->
+    <div class="min-h-0 flex-1 overflow-y-auto pr-0.5">
+      {#if newOpen}
+        {#key newTabSession}
+          <NewRouteTab
+            {catalog}
+            {catalogError}
+            {catalogLoading}
+            initialMode={newInitialMode}
+            seed={newSeed}
+            onadded={onRouteAdded}
+            onclose={() => (newOpen = false)}
+          />
+        {/key}
+      {:else if selectedRoute}
+        {#key selectedRoute.provider}
+          <RouteTabContent
+            route={selectedRoute}
+            {catalog}
+            autoFocusCredential={pendingKeyFocus === selectedRoute.provider}
+            onCredentialFocused={() => (pendingKeyFocus = null)}
+            onremove={() => requestRemove(selectedRoute?.provider)}
+          />
+        {/key}
+      {:else}
+        <!-- 空态 onboarding（不是旧画廊） -->
+        <div
+          class="flex flex-col items-center gap-2.5 rounded-md border border-dashed p-6 text-center"
+        >
+          <p class="text-xs font-medium">Add your first model route</p>
+          <p class="max-w-[320px] text-[10px] leading-snug text-muted-foreground">
+            Pick a provider from the catalog (models.dev mirror) with its models, or point at any
+            custom OpenAI/Anthropic-compatible endpoint.
+          </p>
+          <div class="mt-1 flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              class="h-8 px-3 text-xs"
+              onclick={() => openNew("pick")}
+            >
+              Browse providers
+            </Button>
+            <Button size="sm" class="h-8 px-3 text-xs" onclick={() => openNew("form")}>
+              Custom endpoint
+            </Button>
+          </div>
+        </div>
       {/if}
     </div>
-    <button
-      type="button"
-      class="h-7 shrink-0 self-center rounded px-2 text-[11px] font-medium transition-colors {newOpen
-        ? 'bg-primary/10 text-primary'
-        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-      onclick={() => (routes.length === 0 ? openNew("form") : openNew("pick"))}
-    >
-      + New
-    </button>
-  </div>
+  {:else if agentRuntimeConfig.loading}
+    <div class="text-xs text-muted-foreground">Loading…</div>
+  {:else}
+    <div class="text-xs text-muted-foreground">Model settings unavailable</div>
+  {/if}
 
-  <!-- tab 内容（R16：页面主体自滚——tab 条固定在外，滚动只发生在此容器内）。 -->
-  <div class="min-h-0 flex-1 overflow-y-auto pr-0.5">
-    {#if newOpen}
-      {#key newTabSession}
-        <NewRouteTab
-          {catalog}
-          {catalogError}
-          {catalogLoading}
-          initialMode={newInitialMode}
-          seed={newSeed}
-          onadded={onRouteAdded}
-          onclose={() => (newOpen = false)}
-        />
-      {/key}
-    {:else if selectedRoute}
-      {#key selectedRoute.provider}
-        <RouteTabContent
-          route={selectedRoute}
-          {catalog}
-          autoFocusCredential={pendingKeyFocus === selectedRoute.provider}
-          onCredentialFocused={() => (pendingKeyFocus = null)}
-          onremove={() => requestRemove(selectedRoute?.provider)}
-        />
-      {/key}
-    {:else}
-      <!-- 空态 onboarding（不是旧画廊） -->
-      <div
-        class="flex flex-col items-center gap-2.5 rounded-md border border-dashed p-6 text-center"
-      >
-        <p class="text-xs font-medium">Add your first model route</p>
-        <p class="max-w-[320px] text-[10px] leading-snug text-muted-foreground">
-          Pick a provider from the catalog (models.dev mirror) with its models, or point at any
-          custom OpenAI/Anthropic-compatible endpoint.
-        </p>
-        <div class="mt-1 flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            class="h-8 px-3 text-xs"
-            onclick={() => openNew("pick")}
-          >
-            Browse providers
-          </Button>
-          <Button size="sm" class="h-8 px-3 text-xs" onclick={() => openNew("form")}>
-            Custom endpoint
-          </Button>
-        </div>
-      </div>
-    {/if}
-  </div>
-{:else if agentRuntimeConfig.loading}
-  <div class="text-xs text-muted-foreground">Loading…</div>
-{:else}
-  <div class="text-xs text-muted-foreground">Model settings unavailable</div>
-{/if}
-
-{#if agentRuntimeConfig.error}
-  <div class="text-xs text-destructive" role="alert">{agentRuntimeConfig.error}</div>
-{/if}
-{#if rejection}
-  <div class="text-xs text-destructive" role="alert">{rejection}</div>
-{/if}
+  {#if agentRuntimeConfig.error}
+    <div class="text-xs text-destructive" role="alert">{agentRuntimeConfig.error}</div>
+  {/if}
+  {#if rejection}
+    <div class="text-xs text-destructive" role="alert">{rejection}</div>
+  {/if}
+</div>
 
 <ConfirmDialog
   bind:open={removeOpen}

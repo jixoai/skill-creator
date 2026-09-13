@@ -481,7 +481,7 @@ export const DshSettingsUpdateResultSchema = z.discriminatedUnion("outcome", [
 /** settings 更新结果。 */
 export type DshSettingsUpdateResult = z.infer<typeof DshSettingsUpdateResultSchema>;
 
-/** 写入 provider 凭据（仅在 daemon 内存/私有文件中出现，永不回显）。 */
+/** 写入 provider 凭据（客观回显：R16 用户裁决，view.providers[].apiKey）。 */
 export const DshCredentialSetInputSchema = z.object({
   provider: z.string().min(1),
   apiKey: z.string().min(1),

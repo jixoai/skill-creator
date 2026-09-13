@@ -248,7 +248,7 @@
 
   /** 常驻凭据输入（R12-A5 + R13 用户修正）：失焦/Enter 保存但**不清空已输入值**
    * （password 掩码展示，blur 清空曾被用户判为数据丢失；替换语义 = 改写后再次
-   * 失焦即覆盖保存）。空输入 no-op；已存 key 以占位提示，值永不回显。 */
+   * 失焦即覆盖保存）。空输入 no-op；已存 key 客观回显（R16 用户裁决）。 */
   async function saveCredential(): Promise<void> {
     const key = apiKeyDraft.trim();
     if (key.length === 0) return;

@@ -1027,7 +1027,7 @@ export async function clearAgentCredential(provider: string): Promise<void> {
 
 /**
  * 路由连接测试（R7 8.7；ModelListItem 消费）：路由草案即可测的只读外呼探活。
- * apiKey 不进输入面——daemon 侧按 provider 从已存凭据注入（key 永不回显）；
+ * apiKey 不进输入面——daemon 侧按 provider 从已存凭据注入（key 经 R16 裁决回显）；
  * 未连接返回 null（调用方自行投影为不可用）。结果 typed，永不 throw。
  */
 export async function testRouteConnection(

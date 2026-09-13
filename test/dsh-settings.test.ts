@@ -8,7 +8,7 @@
  * Orthogonal intents:
  *   [1] Settings lifecycle: defaults, revision increments, persisted reload,
  *       typed rejections for cross-field violations.
- *   [2] Credential safety: 0600 private storage, never echoed in views or
+ *   [2] Credential safety: 0600 private storage, echoed per user decree (R16)
  *       run/audit payloads (structural redaction invariant), no-fallback preset
  *       resolution.
  *   [3] Session stream projection through the public RPC router: redacted,
