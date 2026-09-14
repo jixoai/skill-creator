@@ -72,7 +72,7 @@ Repository install
 
 ## 环境要求
 
-- Node.js `>=20`
+- Node.js `>=24`（内核持久化使用 `node:zlib` 的 zstd；`package.json` engines 同源）
 - Bun `>=1.3`（开发与构建脚本）
 - pnpm `>=10`
 - Git，可被当前进程通过 `git` 命令调用
@@ -140,7 +140,7 @@ pnpm skill-creator openinbrowser
 pnpm skill-creator stop
 ```
 
-以上命令在构建产物（`dist/`，与发布包同内容）上实测：`start` headless 输出恢复提示并以退出码 0 返回；`status` 输出 pid/版本/端口/tray 终态、DSH 宿主健康行（`--json` 输出完整状态）与带 token 的 WebUI URL；`open` 在 headless 态不可用并提示 `openinbrowser`；`openinbrowser` 打印并调用系统浏览器；`stop` 后 HTTP endpoint 立即释放，再次 `status` 报 ENOENT 并给出 `start` 恢复入口。发布包在仓库外空目录 `npm install <tarball>` 后同样以黑盒方式完成 start/status/stop/restart 实测（ccski 已打入产物，无 `link:` 依赖；复现：`bun scripts/clean-install-check.sh.ts`，证据见 `docs/release/skill-steward.md`）。运行要求 Node `>=22.13.0`（DSH code-runtime 依赖 `node:module` 的 `stripTypeScriptTypes`）。
+以上命令在构建产物（`dist/`，与发布包同内容）上实测：`start` headless 输出恢复提示并以退出码 0 返回；`status` 输出 pid/版本/端口/tray 终态、DSH 宿主健康行（`--json` 输出完整状态）与带 token 的 WebUI URL；`open` 在 headless 态不可用并提示 `openinbrowser`；`openinbrowser` 打印并调用系统浏览器；`stop` 后 HTTP endpoint 立即释放，再次 `status` 报 ENOENT 并给出 `start` 恢复入口。发布包在仓库外空目录 `npm install <tarball>` 后同样以黑盒方式完成 start/status/stop/restart 实测（ccski 已打入产物，无 `link:` 依赖；复现：`bun scripts/clean-install-check.sh.ts`，证据见 `docs/release/skill-steward.md`）。运行要求 Node `>=24.0.0`（内核持久化使用 `node:zlib` 的 zstd；DSH code-runtime 依赖的 `node:module` `stripTypeScriptTypes` 需 `>=22.13`，已被 24 覆盖）。
 
 ## 技能管家（Skill Steward）
 

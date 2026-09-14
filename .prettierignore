@@ -1,0 +1,13 @@
+# oxfmt respects this by default; registry-locked files keep their verbatim
+# formatting so the jixoai-ui.lock hashes stay stable (unipty precedent).
+www/src/lib/context-plugin.svelte.ts
+www/src/lib/defaults.svelte.ts
+www/src/lib/density.svelte.ts
+www/src/lib/icon-set.gen.ts
+www/src/lib/jixoai.css
+www/src/lib/paint.svelte.ts
+www/src/lib/scrollbar-measure.ts
+www/src/lib/surface-motion.ts
+www/src/lib/ui/
+www/src/lib/utils.ts
+www/vite-plugins/llms-txt.mjs

@@ -154,7 +154,7 @@
     <span>three apps · one shell</span>
     <span>DSH headless kernel</span>
     <span>MCP capability surface</span>
-    <span>Node ≥ 22.13</span>
+    <span>Node ≥ 24</span>
   {/snippet}
   {#snippet secondary()}
     <PressButton variant="outline" href={GITHUB_URL}>GitHub ↗</PressButton>
@@ -222,7 +222,11 @@
   <div class="mt-6 grid gap-6 min-[900px]:grid-cols-2">
     <figure data-reveal="">
       <div class="shot-frame">
-        <ResponsivePicture set={creatorShot as PictureSet} alt="Skill Creator editor screen" />
+        <ResponsivePicture
+          set={creatorShot as PictureSet}
+          alt="Skill Creator editor screen"
+          eager
+        />
       </div>
       <figcaption class="shot-caption mt-2">
         Creator — template drafts and revision-checked SKILL.md editing with a change log.
@@ -233,6 +237,7 @@
         <ResponsivePicture
           set={repositoryShot as PictureSet}
           alt="Skill Creator repository screen"
+          eager
         />
       </div>
       <figcaption class="shot-caption mt-2">
@@ -267,7 +272,11 @@
     </SectionCard>
     <figure data-reveal="" style="--reveal-delay: 90ms">
       <div class="shot-frame">
-        <ResponsivePicture set={agentPanelShot as PictureSet} alt="Skill Creator agent panel" />
+        <ResponsivePicture
+          set={agentPanelShot as PictureSet}
+          alt="Skill Creator agent panel"
+          eager
+        />
       </div>
       <figcaption class="shot-caption mt-2">
         Agent panel — session selector, focus-mode cards, transcript, and composer (light theme).
@@ -339,7 +348,9 @@ skill-creator stop</code
         <tbody>
           <tr>
             <td class="dim">Node.js</td>
-            <td>≥ 22.13.0 at runtime (DSH code-runtime uses node:module stripTypeScriptTypes)</td>
+            <td
+              >≥ 24.0.0 (node:zlib zstd for kernel persistence; matches the package engines field)</td
+            >
           </tr>
           <tr>
             <td class="dim">Git</td>
