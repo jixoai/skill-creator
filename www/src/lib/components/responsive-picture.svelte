@@ -11,10 +11,12 @@
         格式的 srcset 与内在宽高。
   妥协声明：与 opentray/unipty 站点同构的站点自有组件（registry 不提供
   图像渲染面）；为保持家族一致性按同契约实现。
+  教训（2026-09-15 CI 实证）：绝不在渲染层重写资产 URL——vite 在 subpath
+  构建（SITE_BASE）下已为 srcset 打上 base 前缀，root 构建产相对形态，
+  两者皆正确；本地 preview 会对 /_app 做根路径别名，只有带 SITE_BASE 的
+  真实构建产物才是判据（曾据 preview 误判并引入双前缀 404，已回退）。
 -->
 <script lang="ts">
-  import { base } from "$app/paths";
-
   export interface PictureSet {
     img: { src: string; w: number; h: number };
     sources: Record<string, string>;
@@ -29,44 +31,17 @@
 
   /** format of the fallback entry (extension of img.src, e.g. "png") */
   const fallbackFormat = $derived(set.img.src.match(/\.([a-z]+)$/)?.[1] ?? "");
-
-  // vite-imagetools emits root-absolute /_app/... URLs that ignore kit's
-  // paths.base — on a subpath deploy (GitHub Pages /skill-creator/) the
-  // browser would request them outside the site scope and 404. dev/preview
-  // servers alias /_app at the origin root, which hides the bug; only the
-  // rendered URL shape matters in production. Prefix every URL with base
-  // ('' in root builds — URLs pass through unchanged).
-  function withBase(url: string): string {
-    return url.startsWith("/") ? `${base}${url}` : url;
-  }
-
-  function withBaseSrcset(srcset: string): string {
-    return srcset
-      .split(",")
-      .map((part) => {
-        const token = part.trim().match(/^(\S+)(.*)$/);
-        return token ? `${withBase(token[1])}${token[2]}` : part.trim();
-      })
-      .join(", ");
-  }
-
-  const sources = $derived(
-    Object.fromEntries(
-      Object.entries(set.sources).map(([format, srcset]) => [format, withBaseSrcset(srcset)]),
-    ),
-  );
-  const imgSrc = $derived(withBase(set.img.src));
 </script>
 
 <picture>
-  {#each Object.entries(sources) as [format, srcset] (format)}
+  {#each Object.entries(set.sources) as [format, srcset] (format)}
     {#if format !== fallbackFormat}
       <source type={`image/${format}`} {srcset} />
     {/if}
   {/each}
   <img
-    src={imgSrc}
-    srcset={sources[fallbackFormat]}
+    src={set.img.src}
+    srcset={set.sources[fallbackFormat]}
     width={set.img.w}
     height={set.img.h}
     {alt}

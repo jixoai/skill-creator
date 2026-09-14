@@ -67,15 +67,16 @@ The cutover is a workflow-env change only (documented in
    (copied from the v2.0.0 Release body); the enforced truth is the
    package `engines` field (`>=24.0.0`, zstd). README's two stale mentions
    (>=20, >=22.13.0) were fixed in the same pass.
-9. **Screenshot URLs must not be root-absolute** (subpath trap): the first
-   build emitted `/_app/immutable/...` srcsets — on GitHub Pages the
-   browser would request them outside `/skill-creator/` and 404.
-   `vite preview` ALIASES `/_app` at the origin root, so both curl and
-   the check:site gate passed while production would break;
-   `responsive-picture.svelte` now rewrites every PictureSet URL through
-   `$app/paths` base (no-op for root builds). The rendered shape ended up
-   relative (`./_app/...`), which is mount-path-agnostic — the aliasing
-   trap is the reason a preview-only check can never prove this class.
+9. **Never rewrite asset URLs in the render layer** (CI-proven 2026-09-15):
+   vite already prefixes srcset/asset URLs with the configured base in
+   subpath builds (`SITE_BASE=/skill-creator` → `/skill-creator/_app/...`,
+   single prefix, verified in dist HTML) and emits root/relative shapes in
+   root builds. An orchestrator-pass "fix" that re-based PictureSet URLs
+   through `$app/paths` doubled the prefix and 404'd the Pages deploy
+   (`/skill-creator/skill-creator/_app/...`); it was reverted. The trap
+   that misled the diagnosis: `vite preview` aliases `/_app` at the origin
+   root AND a build without SITE_BASE emits relative URLs — only a real
+   `SITE_BASE` build's dist output is evidence for deployment behavior.
 10. **All four screenshots load eager** (not lazy): native
     `loading="lazy"` never fired in the CDP-driven verification browser
     (headless quirk); the screenshots ARE the page content on a landing
