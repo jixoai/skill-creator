@@ -6,11 +6,13 @@ Orthogonal intents (maintained 2026-09-15; original user request: 新增 www/
    derived from the project icon's dominant saturated colors).
 2. Supplement ONLY what the registry sheet leaves open: the Tailwind
    token→utility mappings it does not own (the radius reset — without it
-   rounded-* silently falls back to Tailwind's soft default scale) and
-   site surfaces (data tables, readonly code, screenshot frames) the
-   registry does not ship. The registry sheet already maps colors, fonts,
-   shadows, popover/destructive/input/ring and owns the scrollbar + press
-   + reveal laws.
+   rounded-* silently falls back to Tailwind's soft default scale), site
+   surfaces (data tables, readonly code, screenshot frames) the registry
+   does not ship, and the site's scroll-reveal cadence modifiers (tall
+   bands + same-row stagger, still inside the theme's reveal law). The
+   registry sheet already maps colors, fonts, shadows,
+   popover/destructive/input/ring and owns the scrollbar + press + reveal
+   laws.
 */
 @import "tailwindcss";
 @import "./lib/jixoai.css";
@@ -162,6 +164,50 @@ Orthogonal intents (maintained 2026-09-15; original user request: 新增 www/
   font-size: 12px;
   letter-spacing: 0.04em;
   line-height: 1.55;
+}
+
+/* -------------------------------------------------------------------------
+ * Scroll-reveal cadence (R3, 2026-09-15): the theme's scroll-driven
+ * [data-reveal] law maps `entry X%` to X% of the element's OWN height
+ * (the entry sub-range spans elementHeight, browser-verified — not
+ * elementHeight+viewport). Two measured defects on this page:
+ * (a) with the theme's fixed `entry 75%`, a card taller than the
+ *     viewport (they reach ~1300px once text reflows at 390px) stays at
+ *     partial opacity while its middle is already being read — the
+ *     entrance must complete after a fraction of own height, not most
+ *     of it;
+ * (b) the IO-era `--reveal-delay` stagger is inert under
+ *     `animation-timeline: view()` (time delays don't map to scroll
+ *     timelines), so same-row pairs rose in exact lockstep.
+ * Two site modifiers close both, still inside the family's ONE
+ * scroll-reveal pattern (same keyframes, same entry-0% start):
+ *   data-reveal="tall"  entrance completes at --reveal-tall-end of the
+ *                       element's own height — solid before the reading
+ *                       zone on every viewport width.
+ *   data-reveal-lag=""  phase-staggers a same-row sibling by
+ *                       --reveal-lag of the entry span (the
+ *                       scroll-driven translation of the retired
+ *                       70–90ms delays; 20% of a 452px figure ≈ 90px
+ *                       of scroll — a clear second step).
+ * Values are tokens declared once, right here. The theme's
+ * reduced-motion law (`animation: none`) already covers these: the
+ * modifiers only re-point animation-range on the theme's keyframes,
+ * and `animation: none` resets the whole animation shorthand.
+ * ---------------------------------------------------------------------- */
+@supports (animation-timeline: view()) {
+  :root {
+    --reveal-lag: 20%;
+    --reveal-tall-end: 35%;
+  }
+  [data-reveal="tall"] {
+    animation-range: entry 0% entry var(--reveal-tall-end);
+  }
+  [data-reveal-lag] {
+    animation-range: entry var(--reveal-lag) entry calc(75% + var(--reveal-lag));
+  }
+  [data-reveal="tall"][data-reveal-lag] {
+    animation-range: entry var(--reveal-lag) entry calc(var(--reveal-tall-end) + var(--reveal-lag));
+  }
 }
 
 /* -------------------------------------------------------------------------

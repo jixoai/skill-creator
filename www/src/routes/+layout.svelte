@@ -8,6 +8,10 @@
      anchors carry no path at all.
   3. Scrollbar law hook: <jx-scrollbar-measure> registers once here so the
      per-OS scrollbar widths feed the padding-compensation tokens.
+  4. Mobile drawer anchor behavior: an in-page anchor click inside the
+     drawer closes it first — the jump happens under the open drawer
+     otherwise (the registry header owns the drawer; we only bind its
+     open state and reset it on our own links).
 -->
 <script lang="ts">
   import "$lib/scrollbar-measure";
@@ -28,6 +32,12 @@
   // Base-path law: the brand link resolves through `base` in subpath builds
   // ('' in root builds — plain '/' stays canonical).
   const homeHref = base === "" ? "/" : `${base}/`;
+
+  // The mobile drawer's open state, bound to the registry header; every
+  // in-drawer navigation link closes it on click (the fragment jump or
+  // navigation happens under the open drawer otherwise). The external
+  // links navigate the tab away — no close needed.
+  let drawerOpen = $state(false);
 </script>
 
 <WebsiteScaffold>
@@ -38,6 +48,7 @@
       subtitle={SITE_SUBTITLE}
       {homeHref}
       switcherFrame={false}
+      bind:open={drawerOpen}
     >
       {#snippet logo()}
         <!-- Flat Symbol（resources/README 法则：中等尺寸 UI 面用扁平纯色版） -->
@@ -55,11 +66,21 @@
       {/snippet}
       {#snippet drawer()}
         <div class="flex flex-col items-stretch gap-1 py-2">
-          <NavigationMenuLink href={homeHref} current>Overview</NavigationMenuLink>
-          <NavigationMenuLink href="#apps">Three apps</NavigationMenuLink>
-          <NavigationMenuLink href="#agent-panel">Agent panel</NavigationMenuLink>
-          <NavigationMenuLink href="#security">Security</NavigationMenuLink>
-          <NavigationMenuLink href="#get-started">Get started</NavigationMenuLink>
+          <NavigationMenuLink href={homeHref} current onclick={() => (drawerOpen = false)}>
+            Overview
+          </NavigationMenuLink>
+          <NavigationMenuLink href="#apps" onclick={() => (drawerOpen = false)}
+            >Three apps</NavigationMenuLink
+          >
+          <NavigationMenuLink href="#agent-panel" onclick={() => (drawerOpen = false)}>
+            Agent panel
+          </NavigationMenuLink>
+          <NavigationMenuLink href="#security" onclick={() => (drawerOpen = false)}>
+            Security
+          </NavigationMenuLink>
+          <NavigationMenuLink href="#get-started" onclick={() => (drawerOpen = false)}>
+            Get started
+          </NavigationMenuLink>
           <NavigationMenuLink href={GITHUB_URL}>GitHub ↗</NavigationMenuLink>
           <NavigationMenuLink href={NPM_URL}>npm ↗</NavigationMenuLink>
         </div>

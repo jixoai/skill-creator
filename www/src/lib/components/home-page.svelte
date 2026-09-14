@@ -9,7 +9,12 @@
      data-table + 截图网格，产品事实全部来自仓库 README 边界表与
      CHANGELOG。
   4. Motion law: hero 自有 cascade，card-grid 拥有子卡入场；其余区块
-     走主题 scroll-driven [data-reveal]。
+     走主题 scroll-driven [data-reveal]。R3 节奏系统（时序值见
+     app.css tokens）：小元素（h2、logo 带）用主题默认 entry 0–75%；
+     高元素（截图、整卡）用站内 data-reveal="tall"（entry 0–35%，
+     窄视口下也必须在读区前落定）；同排第二列加 data-reveal-lag
+     （相位错后 20%）。锚点目标（section 本身）不携带 reveal——
+     原生 fragment 对齐会被入场 transform 偏移 26px。
 -->
 <script lang="ts">
   import HeroSection from "$lib/ui/hero-section/hero-section.svelte";
@@ -260,7 +265,7 @@
     <span class="bg-border h-px flex-1" aria-hidden="true"></span>
   </h2>
   <div class="mt-6 grid gap-6 min-[900px]:grid-cols-2">
-    <figure data-reveal="">
+    <figure data-reveal="tall">
       <div class="shot-frame">
         <ResponsivePicture
           set={creatorShot as PictureSet}
@@ -272,7 +277,7 @@
         Creator — template drafts and revision-checked SKILL.md editing with a change log.
       </figcaption>
     </figure>
-    <figure data-reveal="" style="--reveal-delay: 70ms">
+    <figure data-reveal="tall" data-reveal-lag="">
       <div class="shot-frame">
         <ResponsivePicture
           set={repositoryShot as PictureSet}
@@ -294,25 +299,29 @@
     <span class="bg-border h-px flex-1" aria-hidden="true"></span>
   </h2>
   <div class="mt-6 grid items-start gap-8 min-[900px]:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
-    <SectionCard
-      eyebrow="shell-level drawer"
-      title="DSH kernel sessions beside your work"
-      summary="The right-hand panel hosts agent sessions on a headless DSH kernel (agent / session / llm / approval). Sessions stream frames, ask questions through approval cards, and survive tab switches; the panel resizes from 320 to 720 px and collapses without destroying the session."
-    >
-      <ul class="flex flex-col gap-2.5">
-        {#each agentPanel.points as point (point.title)}
-          <li class="border-b border-border/60 pb-2.5">
-            <p class="font-nav text-primary text-[12px] uppercase tracking-[0.14em]">
-              {point.title}
-            </p>
-            <p class="text-muted-foreground mt-1 max-w-[68ch] text-pretty text-[13px] leading-6">
-              {point.body}
-            </p>
-          </li>
-        {/each}
-      </ul>
-    </SectionCard>
-    <figure data-reveal="" style="--reveal-delay: 90ms">
+    <!-- The card joins the band entrance (data-reveal="tall" — it is not a
+         card-grid child, so the grid's own cascade law does not apply). -->
+    <div data-reveal="tall">
+      <SectionCard
+        eyebrow="shell-level drawer"
+        title="DSH kernel sessions beside your work"
+        summary="The right-hand panel hosts agent sessions on a headless DSH kernel (agent / session / llm / approval). Sessions stream frames, ask questions through approval cards, and survive tab switches; the panel resizes from 320 to 720 px and collapses without destroying the session."
+      >
+        <ul class="flex flex-col gap-2.5">
+          {#each agentPanel.points as point (point.title)}
+            <li class="border-b border-border/60 pb-2.5">
+              <p class="font-nav text-primary text-[12px] uppercase tracking-[0.14em]">
+                {point.title}
+              </p>
+              <p class="text-muted-foreground mt-1 max-w-[68ch] text-pretty text-[13px] leading-6">
+                {point.body}
+              </p>
+            </li>
+          {/each}
+        </ul>
+      </SectionCard>
+    </div>
+    <figure data-reveal="tall" data-reveal-lag="">
       <div class="shot-frame">
         <ResponsivePicture
           set={agentPanelShot as PictureSet}
@@ -327,120 +336,122 @@
   </div>
 </section>
 
-<!-- Security model: the README boundary rows. -->
-<section
-  id="security"
-  class="mx-auto w-full max-w-[90rem] px-4 pt-12 sm:px-6 lg:px-8"
-  data-reveal=""
->
-  <SectionCard
-    eyebrow="security model"
-    title="Local by construction, not by configuration"
-    summary="Every trusting boundary in the product, listed; these rows restate the README's security section without change."
-  >
-    <div class="table-scroll">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Surface</th>
-            <th>Rule</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each securityRows as row (row.surface)}
+<!-- Security model: the README boundary rows. Reveal rides the inner card,
+     never the section: the section is an anchor target, and a target still
+     carrying its reveal transform makes the native fragment scroll land
+     26px off the scroll-padding line. -->
+<section id="security" class="mx-auto w-full max-w-[90rem] px-4 pt-12 sm:px-6 lg:px-8">
+  <div data-reveal="tall">
+    <SectionCard
+      eyebrow="security model"
+      title="Local by construction, not by configuration"
+      summary="Every trusting boundary in the product, listed; these rows restate the README's security section without change."
+    >
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
             <tr>
-              <td class="dim">{row.surface}</td>
-              <td class="wide"><span class="measure">{row.rule}</span></td>
+              <th>Surface</th>
+              <th>Rule</th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  </SectionCard>
+          </thead>
+          <tbody>
+            {#each securityRows as row (row.surface)}
+              <tr>
+                <td class="dim">{row.surface}</td>
+                <td class="wide"><span class="measure">{row.rule}</span></td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
+  </div>
 </section>
 
-<!-- Get started: install + requirements + links. -->
-<section
-  id="get-started"
-  class="mx-auto w-full max-w-[90rem] px-4 pb-4 pt-12 sm:px-6 lg:px-8"
-  data-reveal=""
->
-  <SectionCard
-    eyebrow="get started"
-    title="Install globally, start once"
-    summary="One CLI, one daemon. start waits for the WebUI and tray to mount, then shows the native window; web mode opens the system browser, headless prints the recovery hint."
-  >
-    <div class="readonly-code">
-      <div class="readonly-code-meta"><span class="prompt">$</span><span>terminal</span></div>
-      <pre><code
-          >npm install -g skill-creator
+<!-- Get started: install + requirements + links. Reveal rides the inner
+     card for the same anchor-target reason as #security. -->
+<section id="get-started" class="mx-auto w-full max-w-[90rem] px-4 pb-4 pt-12 sm:px-6 lg:px-8">
+  <div data-reveal="tall">
+    <SectionCard
+      eyebrow="get started"
+      title="Install globally, start once"
+      summary="One CLI, one daemon. start waits for the WebUI and tray to mount, then shows the native window; web mode opens the system browser, headless prints the recovery hint."
+    >
+      <div class="readonly-code">
+        <div class="readonly-code-meta"><span class="prompt">$</span><span>terminal</span></div>
+        <pre><code
+            >npm install -g skill-creator
 skill-creator start
 skill-creator status   # pid · version · port · tray state
 skill-creator stop</code
-        ></pre>
-    </div>
-    <div class="table-scroll mt-6">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Requirement</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="dim">Node.js</td>
-            <td class="wide"
-              ><span class="measure"
-                >≥ 24.0.0 (node:zlib zstd for kernel persistence; matches the package engines field)</span
-              ></td
+          ></pre>
+      </div>
+      <div class="table-scroll mt-6">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Requirement</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="dim">Node.js</td>
+              <td class="wide"
+                ><span class="measure"
+                  >≥ 24.0.0 (node:zlib zstd for kernel persistence; matches the package engines
+                  field)</span
+                ></td
+              >
+            </tr>
+            <tr>
+              <td class="dim">Git</td>
+              <td class="wide"
+                ><span class="measure">callable as <code>git</code> by the daemon process</span></td
+              >
+            </tr>
+            <tr>
+              <td class="dim">macOS / Windows</td>
+              <td class="wide"
+                ><span class="measure"
+                  >arm64 and x64 — native app window via OpenTray ext-webview (<code
+                    >appMode: true</code
+                  >)</span
+                ></td
+              >
+            </tr>
+            <tr>
+              <td class="dim">Linux</td>
+              <td class="wide">
+                <span class="measure">
+                  web mode by default: tray icon + system browser; <code>--web</code> /
+                  <code>--no-web</code>
+                  override on any platform
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="mt-6 flex flex-col gap-3">
+        {#each links as link (link.href)}
+          <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border/60 pb-3">
+            <a
+              href={link.href}
+              class="text-primary font-nav text-[13px] uppercase tracking-[0.14em] underline underline-offset-2"
             >
-          </tr>
-          <tr>
-            <td class="dim">Git</td>
-            <td class="wide"
-              ><span class="measure">callable as <code>git</code> by the daemon process</span></td
-            >
-          </tr>
-          <tr>
-            <td class="dim">macOS / Windows</td>
-            <td class="wide"
-              ><span class="measure"
-                >arm64 and x64 — native app window via OpenTray ext-webview (<code
-                  >appMode: true</code
-                >)</span
-              ></td
-            >
-          </tr>
-          <tr>
-            <td class="dim">Linux</td>
-            <td class="wide">
-              <span class="measure">
-                web mode by default: tray icon + system browser; <code>--web</code> /
-                <code>--no-web</code>
-                override on any platform
-              </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <ul class="mt-6 flex flex-col gap-3">
-      {#each links as link (link.href)}
-        <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border/60 pb-3">
-          <a
-            href={link.href}
-            class="text-primary font-nav text-[13px] uppercase tracking-[0.14em] underline underline-offset-2"
-          >
-            {link.label} ↗
-          </a>
-          <span class="text-muted-foreground text-[13px] leading-5">{link.note}</span>
-        </li>
-      {/each}
-    </ul>
-    <p class="text-muted-foreground mt-6 max-w-[68ch] text-pretty text-[13px] leading-6">
-      Development happens in the open: clone the repository and run <code>pnpm install</code>, then
-      <code>pnpm dev</code>.
-    </p>
-  </SectionCard>
+              {link.label} ↗
+            </a>
+            <span class="text-muted-foreground text-[13px] leading-5">{link.note}</span>
+          </li>
+        {/each}
+      </ul>
+      <p class="text-muted-foreground mt-6 max-w-[68ch] text-pretty text-[13px] leading-6">
+        Development happens in the open: clone the repository and run <code>pnpm install</code>,
+        then
+        <code>pnpm dev</code>.
+      </p>
+    </SectionCard>
+  </div>
 </section>

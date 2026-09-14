@@ -109,7 +109,7 @@ The cutover is a workflow-env change only (documented in
 14. **The composition baseline is the registry site's own home page**
     (`ui/apps/www/src/routes/+page.svelte`), which the references do not
     spell out: the section band is exactly `font-nav text-lg uppercase
-    tracking-[0.3em]` + baseline rule (so 0.3em is family law here, not
+tracking-[0.3em]` + baseline rule (so 0.3em is family law here, not
     sprawl — do not "fix" it to the 0.24em eyebrow scale), card body copy
     is `text-[13px] leading-6 text-pretty`, and `.data-table` paddings in
     app.css are byte-identical to `docs-tables.css`. R2 therefore aligned
@@ -136,3 +136,50 @@ The cutover is a workflow-env change only (documented in
     `AGENT_BROWSER_SESSION` name. Careful when other agent-browser
     sessions are live on the machine — a surviving daemon running an
     in-flight `click` belongs to the parallel workflow; leave it.
+
+## R3 motion & interaction pass (2026-09-15)
+
+17. **`--reveal-delay` is dead in the scroll-driven era** — a time-based
+    `animation-delay` does not map to `animation-timeline: view()`, so
+    the two inherited inline delays (70/90ms) never played; the registry
+    reference site uses none. Same-row stagger must be expressed as an
+    `animation-range` phase offset (site `data-reveal-lag` = 20% of the
+    entry span, tokens in app.css).
+18. **The entry sub-range spans the element's OWN height, not
+    elementHeight+viewport** (browser-verified via
+    `Animation.currentTime` calibration; easy to get wrong analytically —
+    the first R3 draft assumed the wider span). Consequences: the theme
+    default `entry 75%` is fine on desktop but a card taller than the
+    viewport (≈1300px once text reflows at 390px) lingers at partial
+    opacity while being read; the site `data-reveal="tall"` modifier
+    (entry 35% of own height) makes every band solid before the reading
+    zone at any viewport width.
+19. **Anchor targets must not carry `data-reveal`**: the browser's
+    native fragment scroll aligns the target while its pre-reveal
+    transform (translateY 26px) is still active, then the transform
+    releases and the section lands 26px above the scroll-padding line
+    (measured, deterministic). #security/#get-started now reveal an
+    inner wrapper; all four anchors land at delta 0. The registry site
+    solves the same problem with a JS re-jump ladder (their ToC line
+    precision); the wrapper move needs no JS.
+20. **The agent-browser CLI's `media` command exists in help text but
+    not in the installed binary** ("Unknown command: media"), and the
+    daemon Chrome runs `--remote-debugging-port=0`. For
+    prefers-reduced-motion evidence, launch the machine-cached Chrome
+    for Testing binary yourself with a debugging port and drive CDP from
+    Node's built-in WebSocket (Emulation.setEmulatedMedia +
+    Runtime.evaluate) — audit script pattern preserved in this session's
+    report; all entrance/press/table-row motion verified killed under
+    reduce.
+21. **`vite preview` dies when dist is rebuilt underneath it** (ENOENT
+    on a hashed immutable asset on the next request). Restart the
+    preview on a fresh port after every rebuild instead of trusting a
+    surviving server — a stale preview serves cached HTML that quietly
+    mismatches the sources.
+22. **Theme switch stays instant by family law**: no global color
+    transition was added for light/dark/system swaps (press-law
+    components already transition their own surfaces 150ms; the canvas
+    flips). A crossfade would be a third motion pattern outside the
+    two-pattern law. Verified: toggle cycles, persists to
+    localStorage, applies `.dark` + colorScheme, no-flash bootstrap
+    intact.
