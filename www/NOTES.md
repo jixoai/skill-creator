@@ -103,3 +103,36 @@ The cutover is a workflow-env change only (documented in
 13. **`__SITE_URL__` define was never wired** — constants.ts declared it but
     vite.config computed `siteUrl` without a define, so canonical/og/llms
     silently used the github.io fallback; wired at the domain cutover.
+
+## R2 typography & layout pass (2026-09-15)
+
+14. **The composition baseline is the registry site's own home page**
+    (`ui/apps/www/src/routes/+page.svelte`), which the references do not
+    spell out: the section band is exactly `font-nav text-lg uppercase
+    tracking-[0.3em]` + baseline rule (so 0.3em is family law here, not
+    sprawl — do not "fix" it to the 0.24em eyebrow scale), card body copy
+    is `text-[13px] leading-6 text-pretty`, and `.data-table` paddings in
+    app.css are byte-identical to `docs-tables.css`. R2 therefore aligned
+    body copy to 13/24 + `text-pretty`, collapsed in-content labels to
+    12px/0.14em (tracking scale: 0.24 eyebrow · 0.14 in-body label),
+    moved all four shot captions below their frames at a uniform
+    mt-2.5/12px, bottom-aligned the three app-card foot labels through
+    the card-grid subgrid (`h-full` flex column + `mt-auto`), and left
+    bands/tables at family values.
+15. **Table measure caps must ride an inner block, never the cell**
+    (browser-measured on this build): on a `width:100%` auto-layout
+    table, `td { max-width }` is silently un-capped by surplus-width
+    distribution (declared 510px, used 1044–1079px), and a specified
+    cell `width` would floor the column minimum (breaking narrow wrap).
+    `width: fit-content` on the table stops the stretch but abandons the
+    full-width bordered-row grammar. Shipped mechanism:
+    `td.wide > .measure { display:block; max-width: 68ch }` — rows stay
+    full-width, prose holds the band, narrow cells just wrap (verified:
+    no `.table-scroll` engagement at 390px; the only managed scroller is
+    the readonly-code `pre`).
+16. **agent-browser daemon can wedge mid-session** (even `eval "1+1"`
+    hangs; commands never return). Fix that worked: kill the daemon +
+    its Chrome (`pkill -f agent-browser`), reopen under a FRESH
+    `AGENT_BROWSER_SESSION` name. Careful when other agent-browser
+    sessions are live on the machine — a surviving daemon running an
+    in-flight `click` belongs to the parallel workflow; leave it.

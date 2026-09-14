@@ -207,13 +207,15 @@
 
 <!-- Screenshot strip: the real UI under the hero narrative. -->
 <div class="mx-auto w-full max-w-[90rem] px-4 pt-6 sm:px-6 lg:px-8" data-reveal="">
-  <figure class="shot-frame mx-auto w-full max-w-[72rem]">
-    <ResponsivePicture
-      set={workspacesShot as PictureSet}
-      alt="Skill Creator Workspaces home screen"
-      eager
-    />
-    <figcaption class="shot-caption border-t border-border/60 px-3 py-2">
+  <figure class="mx-auto w-full max-w-[72rem]">
+    <div class="shot-frame">
+      <ResponsivePicture
+        set={workspacesShot as PictureSet}
+        alt="Skill Creator Workspaces home screen"
+        eager
+      />
+    </div>
+    <figcaption class="shot-caption mt-2.5">
       Workspaces home — quick actions across the Global Workspace and imported workspaces (dark
       theme).
     </figcaption>
@@ -229,17 +231,23 @@
   <CardGrid class="mt-6" min="340px">
     {#each apps as app (app.id)}
       <SectionCard id={app.id} eyebrow={app.eyebrow} title={app.title} summary={app.summary}>
-        <ul class="flex flex-col gap-2">
-          {#each app.points as point (point)}
-            <li class="text-muted-foreground flex gap-2 text-[13px] leading-5">
-              <span class="text-primary flex-none" aria-hidden="true">→</span>
-              <span>{point}</span>
-            </li>
-          {/each}
-        </ul>
-        <p class="text-muted-foreground font-nav mt-4 text-[11px] uppercase tracking-[0.14em]">
-          {app.detail}
-        </p>
+        <!-- h-full + mt-auto: the card-grid subgrid equalizes body extents, so
+             the three foot labels bottom-align across the band. -->
+        <div class="flex h-full flex-col">
+          <ul class="flex flex-col gap-2">
+            {#each app.points as point (point)}
+              <li class="text-muted-foreground flex gap-2 text-pretty text-[13px] leading-6">
+                <span class="text-primary flex-none" aria-hidden="true">→</span>
+                <span>{point}</span>
+              </li>
+            {/each}
+          </ul>
+          <p
+            class="text-muted-foreground font-nav mt-auto pt-4 text-[12px] uppercase tracking-[0.14em]"
+          >
+            {app.detail}
+          </p>
+        </div>
       </SectionCard>
     {/each}
   </CardGrid>
@@ -260,7 +268,7 @@
           eager
         />
       </div>
-      <figcaption class="shot-caption mt-2">
+      <figcaption class="shot-caption mt-2.5">
         Creator — template drafts and revision-checked SKILL.md editing with a change log.
       </figcaption>
     </figure>
@@ -272,7 +280,7 @@
           eager
         />
       </div>
-      <figcaption class="shot-caption mt-2">
+      <figcaption class="shot-caption mt-2.5">
         Repository — pinned-commit scan, preview, dry-run, and multi-target install.
       </figcaption>
     </figure>
@@ -297,7 +305,9 @@
             <p class="font-nav text-primary text-[12px] uppercase tracking-[0.14em]">
               {point.title}
             </p>
-            <p class="text-muted-foreground mt-1 text-[13px] leading-5">{point.body}</p>
+            <p class="text-muted-foreground mt-1 max-w-[68ch] text-pretty text-[13px] leading-6">
+              {point.body}
+            </p>
           </li>
         {/each}
       </ul>
@@ -310,7 +320,7 @@
           eager
         />
       </div>
-      <figcaption class="shot-caption mt-2">
+      <figcaption class="shot-caption mt-2.5">
         Agent panel — session selector, focus-mode cards, transcript, and composer (light theme).
       </figcaption>
     </figure>
@@ -340,7 +350,7 @@
           {#each securityRows as row (row.surface)}
             <tr>
               <td class="dim">{row.surface}</td>
-              <td>{row.rule}</td>
+              <td class="wide"><span class="measure">{row.rule}</span></td>
             </tr>
           {/each}
         </tbody>
@@ -380,27 +390,36 @@ skill-creator stop</code
         <tbody>
           <tr>
             <td class="dim">Node.js</td>
-            <td
-              >≥ 24.0.0 (node:zlib zstd for kernel persistence; matches the package engines field)</td
+            <td class="wide"
+              ><span class="measure"
+                >≥ 24.0.0 (node:zlib zstd for kernel persistence; matches the package engines field)</span
+              ></td
             >
           </tr>
           <tr>
             <td class="dim">Git</td>
-            <td>callable as <code>git</code> by the daemon process</td>
+            <td class="wide"
+              ><span class="measure">callable as <code>git</code> by the daemon process</span></td
+            >
           </tr>
           <tr>
             <td class="dim">macOS / Windows</td>
-            <td
-              >arm64 and x64 — native app window via OpenTray ext-webview (<code>appMode: true</code
-              >)</td
+            <td class="wide"
+              ><span class="measure"
+                >arm64 and x64 — native app window via OpenTray ext-webview (<code
+                  >appMode: true</code
+                >)</span
+              ></td
             >
           </tr>
           <tr>
             <td class="dim">Linux</td>
-            <td>
-              web mode by default: tray icon + system browser; <code>--web</code> /
-              <code>--no-web</code>
-              override on any platform
+            <td class="wide">
+              <span class="measure">
+                web mode by default: tray icon + system browser; <code>--web</code> /
+                <code>--no-web</code>
+                override on any platform
+              </span>
             </td>
           </tr>
         </tbody>
@@ -411,7 +430,7 @@ skill-creator stop</code
         <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border/60 pb-3">
           <a
             href={link.href}
-            class="text-primary font-nav text-[13px] uppercase tracking-[0.1em] underline underline-offset-2"
+            class="text-primary font-nav text-[13px] uppercase tracking-[0.14em] underline underline-offset-2"
           >
             {link.label} ↗
           </a>
@@ -419,7 +438,7 @@ skill-creator stop</code
         </li>
       {/each}
     </ul>
-    <p class="text-muted-foreground mt-4 text-[13px] leading-5">
+    <p class="text-muted-foreground mt-6 max-w-[68ch] text-pretty text-[13px] leading-6">
       Development happens in the open: clone the repository and run <code>pnpm install</code>, then
       <code>pnpm dev</code>.
     </p>

@@ -83,6 +83,17 @@ Orthogonal intents (maintained 2026-09-15; original user request: 新增 www/
   color: var(--muted-foreground);
   white-space: nowrap;
 }
+/* Prose measure cap (security Rule, requirements Detail cells). The cap
+ * rides an INNER block, never the cell: an auto-layout table ignores
+ * cell max-width when distributing surplus width (measured: 510px
+ * declared, 1079px used), and a specified cell width would floor the
+ * column minimum and break narrow wrap. Full-width bordered rows stay
+ * (family table grammar); the text holds the readable band and simply
+ * wraps when the cell narrows below it. */
+.data-table td.wide > .measure {
+  display: block;
+  max-width: 68ch;
+}
 .data-table tbody tr {
   transition: background-color 150ms ease-out;
 }
@@ -148,7 +159,7 @@ Orthogonal intents (maintained 2026-09-15; original user request: 新增 www/
 }
 .shot-caption {
   color: var(--muted-foreground);
-  font-size: 11.5px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   line-height: 1.55;
 }
