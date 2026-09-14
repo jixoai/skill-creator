@@ -47,6 +47,7 @@ import {
 import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
 import {
   NEW_SESSION_COMPOSER_TRACK,
+  agentComposer,
   migrateComposerDraft,
   resetComposerTrack,
   switchComposerTrack,
@@ -1092,6 +1093,41 @@ export async function pickAgentFiles(mode: "image" | "file"): Promise<{ paths: s
     showToast(`File picker failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
+}
+
+/**
+ * 附件缩略预览（R17-B daemon jSquash 管线；2026-09-15 修复重新接回——R18 换
+ * 原生选择器时丢了回填，chip 永远落图标占位）。非图片/失败/无连接 → null。
+ */
+export async function previewAgentImage(path: string): Promise<string | null> {
+  try {
+    const rpc = getRpc();
+    if (rpc === null) return null;
+    const result = await rpc.agent.files.preview({ path });
+    return result.kind === "image" ? result.dataUrl : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 选中图片的缩略回填：preview RPC 到达即写回对应附件（chip 从图标占位升级为
+ * 缩略图）；用户已移除或已另行设置 preview 的条目跳过——不复活、不覆盖。
+ */
+export async function hydratePickedImagePreviews(
+  picks: Array<{ path: string; name: string }>,
+): Promise<void> {
+  await Promise.all(
+    picks.map(async (pick) => {
+      const dataUrl = await previewAgentImage(pick.path);
+      if (dataUrl === null) return;
+      const target = agentComposer.images.find(
+        (image) =>
+          image.path === pick.path && image.name === pick.name && image.preview === undefined,
+      );
+      if (target !== undefined) target.preview = dataUrl;
+    }),
+  );
 }
 
 export async function setAgentCredential(

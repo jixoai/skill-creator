@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.2 (2026-09-15)
+
+Hotfix for picked-image thumbnails.
+
+### Fixed
+
+- **Picked images showed a generic icon instead of a thumbnail** — the R18
+  native-picker rewrite carried only `{path, name}` into the composer draft,
+  leaving the `preview` field a dead channel: the daemon's jSquash thumbnail
+  pipeline (`agent.files.preview`) was unreachable from the composer and
+  attachment chips always fell back to the icon tile. Picked images now
+  hydrate their thumbnails asynchronously (chips upgrade in place when the
+  daemon thumbnail arrives; user-removed entries are never resurrected).
+  Verified live against a real photo: 1152×812 jpeg → 256×180 thumbnail.
+
 ## 2.0.1 (2026-09-15)
 
 Hotfix for the native file picker shipped in 2.0.0.

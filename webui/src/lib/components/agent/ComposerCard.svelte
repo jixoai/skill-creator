@@ -87,6 +87,7 @@
     setAgentSessionMode,
     updateAgentSettings,
     pickAgentFiles,
+    hydratePickedImagePreviews,
   } from "$lib/stores/agent.svelte";
   import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { showToast } from "$lib/toast.svelte";
@@ -269,6 +270,9 @@
       }));
       if (target === "image") {
         addPickedComposerImages(picks);
+        // 缩略回填（2026-09-15 修复）：不阻塞选择返回——chip 先落图标占位，
+        // daemon jSquash 缩略到达后逐条升级为真实缩略图。
+        void hydratePickedImagePreviews(picks);
       } else {
         addPickedComposerDocs(picks);
       }
