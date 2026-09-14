@@ -1,0 +1,347 @@
+@layer theme, base, components, utilities;
+
+/* jixoai press-button — effect loops (tw4, 2026-08-24; recipes re-ruled
+ * r4 2026-09-10 and re-ruled AGAIN r5 the same day — the Owner's
+ * effects-page walkthrough, design §12 of effect-attachments): moved
+ * verbatim from the scoped <style>, then REWORKED. Everything here is
+ * D1-exempt machinery — @keyframes, @property registrations, the
+ * registered-property keyframes that repaint gradients per frame, and
+ * the reduced-motion kill. The hosts' stacking pose (relative z-0)
+ * rides the runtime's HOST_CLASSES stamp; the button body and the
+ * --jx-press* pose wiring were already utility-authored (the press
+ * law's wiring is untouched).
+ *
+ * Static layer rules ride @layer components behind :where() — zero
+ * specificity, so consumer utilities still win (the layer law). */
+
+/* THE RIM PAINT LAWS — one per rim effect, split at r9, re-split at
+   r11: shimmer paints the HOST ITSELF (the Owner's core ruling — no
+   child element, no inset): the host's border IS the ring geometry
+   (forced transparent + image hidden), the double background (fill
+   layer + conic) clips through --shimmer-clip — border-area where
+   Chrome 139+ answers (the TRUE cutout), border-box elsewhere (the
+   Afif form + the blend emulation for null fills). rainbow keeps the
+   RING-MASK LAW (r5, the
+   Owner findings 「样式污染到 background」 and 「顶部没有效果」): ONE
+   mask-banded span, never touching the host — paint the gradient over
+   the WHOLE inset-0 span, take the ring's thickness as padding, then
+   subtract the padding box from the border box (mask-composite:
+   exclude; Safari's legacy dual-write -webkit-mask-composite: xor).
+   Why not border-image for either (the Owner's r5 directional hint):
+   border-image IGNORES border-radius (CSS law — the image slices into
+   the corners as-is, a round rim would render square). */
+
+@layer components {
+/* The effect scenery sits at NEGATIVE z-index under the in-flow label
+   (the host carries relative z-0 — its own stacking context, stamped by
+   the runtime), so nothing escapes and the label is never occluded. */
+
+/* shimmer — THE HOST CHANNEL, r11 final (the Owner's core ruling
+   2026-09-11: 「直接改成在宿主元素上去做」— no child element, no inset;
+   the host carries the ring exactly like the reference css): the
+   border IS the ring's geometry — width from --shimmer-ring-w, style
+   solid, color FORCED transparent, image FORCED hidden (the 强制 pair;
+   important is intentional — the band belongs to the conic, consumer
+   border ink must never cover it). The double background: a FILL
+   layer clipped to the padding box over the rotating CONIC clipped
+   to --shimmer-clip — `padding-box, border-area` where Chrome 139+
+   answers (the TRUE cutout: a transparent fill layer paints nothing,
+   the conic owns only the band), `padding-box, border-box` elsewhere
+   (the Afif form; a null fill there rides the runtime's blend
+   emulation — white + darken in light contexts, black + lighten in
+   dark, stamped on the host inline). The spin is the reference's own
+   uniform cadence on the registered angle. Inheritable knobs beyond
+   the params: --shimmer-base (the ring's rest color, default
+   currentColor), --shimmer-shine-start (the arc's head angle, default
+   280deg). */
+:where(.jx-shimmer-host) {
+  border-width: var(--shimmer-ring-w, 1px) !important;
+  border-style: solid !important;
+  border-color: transparent !important;
+  border-image: none !important;
+  background-image:
+    linear-gradient(var(--shimmer-fill, transparent), var(--shimmer-fill, transparent)),
+    conic-gradient(
+      from var(--jx-shimmer-angle),
+      var(--shimmer-base, currentColor) 0deg,
+      var(--shimmer-base, currentColor) var(--shimmer-shine-start, 280deg),
+      var(--shimmer-shine) calc(var(--shimmer-shine-start, 280deg) + var(--shimmer-shine-width, 30deg) / 2),
+      var(--shimmer-base, currentColor) calc(var(--shimmer-shine-start, 280deg) + var(--shimmer-shine-width, 30deg)),
+      var(--shimmer-base, currentColor) 360deg
+    ) !important;
+  /* the paint set carries the same 强制 as the border (measured in the
+     Owner's engine: a consumer's background SHORTHAND resets image+clip
+     and, unlayered, beats this layered zero-specificity rule — while
+     shimmer is mounted these channels are the effect's) */
+  background-clip: var(--shimmer-clip, padding-box, border-box) !important;
+  background-origin: padding-box, border-box !important;
+  background-repeat: no-repeat !important;
+  animation: jx-shimmer-spin var(--shimmer-speed, 3000ms) linear infinite;
+}
+
+/* pulse — sonar rings cast by a silhouette copy of the body. r4 ruling
+   4: opacity fades DURING the expansion — box-shadow spread and opacity
+   at MATCHED percentages inside ONE keyframe set per variant (see the
+   keyframes below); the sequential fade phase is dead */
+:where(.jx-pulse-layer) {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: inherit;
+  border-radius: inherit;
+  corner-shape: inherit;
+  pointer-events: none;
+}
+:where(.jx-pulse-slow) {
+  animation: jx-pulse-slow var(--pulse-duration) ease-out infinite;
+}
+:where(.jx-pulse-ring) {
+  /* Owner tuning 2026-08-23, re-ruled r4: the S-curve stays; the ring
+     now breathes out and back with its opacity crossing zero exactly
+     at the extent (matched 50%) — dissolving AS it expands and
+     re-condensing on the way home, every crossing eased */
+  animation: jx-pulse-ring var(--pulse-duration) cubic-bezier(0.75, 0, 0.25, 1) infinite;
+}
+:where(.jx-pulse-ripple) {
+  animation: jx-pulse-ripple var(--pulse-duration) cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+
+/* rainbow — THE HOST CHANNEL + THE MARQUEE TRAIN, r13/r14 (the
+   Owner's rulings: rainbow is shimmer's sibling on the same
+   host-channel technique; then 「动画配置好像有点问题…会出现一整个都
+   是绿色」 — the registered --jx-rainbow-shift panning calc stops was
+   evaluation-fragile (an @property-timing miss or a failed per-frame
+   re-raster could freeze the whole ring on one stop's hue). The r14
+   config is the CLASSIC SEAMLESS MARQUEE: a STATIC two-period tile —
+   first and last stops MATCH (c1…c1) so the repeat seam carries no
+   cap — painted at background-size 200%, panned by ANIMATING
+   BACKGROUND-POSITION exactly one tile per cycle. No registered
+   property, no calc stops, nothing to mis-evaluate; the loop is
+   seamless by construction (position 200% ≡ position 0 for a tile
+   twice the box). The fill layer, the border-area gate, and the fill
+   channel ride shimmer's exact laws; the under-glow bar (unchanged by
+   the ruling 「blur 的彩虹光影不用改」) keeps its own span and runs
+   the same marquee on its own single-layer keyframes. */
+:where(.jx-rainbow-host) {
+  border-width: var(--rainbow-ring-w, 1px) !important;
+  border-style: solid !important;
+  border-color: transparent !important;
+  border-image: none !important;
+  background-image:
+    linear-gradient(var(--rainbow-fill, Canvas), var(--rainbow-fill, Canvas)),
+    linear-gradient(
+      90deg,
+      var(--c1) 0%,
+      var(--c2) 20%,
+      var(--c3) 40%,
+      var(--c4) 60%,
+      var(--c5) 80%,
+      var(--c1) 100%
+    ) !important;
+  background-clip: var(--rainbow-clip, padding-box, border-box) !important;
+  background-origin: padding-box, border-box !important;
+  background-size: auto, 200% 100% !important;
+  background-repeat: no-repeat, repeat-x !important;
+  /* NO !important here — the cascade puts author !important ABOVE the
+     animation origin, which would freeze the pan at 0 0 (the frozen-
+     ring bug the engine walk caught on this very line) */
+  background-position: 0 0, 0 0;
+  animation: jx-rainbow-flow var(--rainbow-speed, 2s) linear infinite;
+}
+:where(.jx-rainbow-glow) {
+  position: absolute;
+  bottom: -20%;
+  left: 50%;
+  translate: -50% 0;
+  height: 20%;
+  width: 60%;
+  z-index: -1;
+  filter: blur(0.8rem);
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    var(--c1) 0%,
+    var(--c2) 20%,
+    var(--c3) 40%,
+    var(--c4) 60%,
+    var(--c5) 80%,
+    var(--c1) 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: repeat-x;
+  animation: jx-rainbow-glow-flow var(--rainbow-speed, 2s) linear infinite;
+}
+
+/* ripple — SVG ink from the activation point (r4 ruling 6; r5: css-on-
+   svg + the silhouette clip + the soft edge): the layer is ONE
+   viewBox-free <svg> seat (inset-0 = the host's padding box — user
+   units are CSS px in exactly the pointer event's offsetX/Y frame).
+   The ink node (a <circle>, or the bevel <path> diamond) runs its
+   expand+fade as a CSS animation — jx-ripple-ink below: scale and
+   opacity on ONE timeline, the same coupling the WAAPI engine had,
+   minus the script (r5, Owner ruling 「改成 svg-animation」; the settle
+   engine listens animationend/animationcancel and removes the node).
+   The runtime stamps ONE defs pair per layer — a clipPath rect sized
+   to the host's padding box and computed corner radius, so the ink
+   can never escape the rounded silhouette whatever the host's
+   positioning (Owner finding 「波纹都溢出按钮了」), and an
+   feGaussianBlur filter for the soft ink edge (Owner ruling 「用 svg
+   滤镜来改进动画」) — the ink <g>roup carries both references. shape:
+   round pins against the site-wide bevel law; bevel is the shape
+   law's 50% chamfer drawn as the diamond path (.jx-ripple-flat stays
+   as the support marker the runtime stamps where corner-shape is
+   unknown — the path needs no platform help) */
+:where(.jx-ripple-layer) {
+  position: absolute;
+  inset: 0;
+  /* width/height are LOAD-BEARING: an svg is a REPLACED element —
+     inset:0 alone resolves to its 300×150 intrinsic box (the IAB
+     catch, 2026-09-10: the ink rode a misplaced default-sized seat) */
+  width: 100%;
+  height: 100%;
+  /* the silhouette is INHERITED, never re-derived (Owner 2026-09-10):
+     the host's own corners clip the ink for free — a clipPath's rx/ry
+     chased the radius and lost */
+  border-radius: inherit;
+  overflow: hidden;
+  z-index: -1;
+  pointer-events: none;
+}
+:where(.jx-ripple-ink) {
+  /* the site-wide bevel law must not reach the ink — round is round */
+  corner-shape: round;
+  fill: var(--ripple-color);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: jx-ripple-ink var(--ripple-duration, 600ms) ease-out both;
+}
+}
+
+/* the registered-property laws: a custom property MUST be registered
+   (@property) before keyframes can animate it — the interpolation
+   needs the syntax, unregistered properties flip discretely at 50%.
+   shimmer's angle does NOT inherit (the host is the only consumer —
+   its own conic reads it). rainbow rides NO registered property at
+   all since r14 — the marquee pans background-position, a plain
+   animatable property with nothing to mis-evaluate. Top-level by law
+   (not allowed inside @layer) */
+@property --jx-shimmer-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* the shimmer cadence, r9: ONE uniform revolution — the reference's
+   own spin (`to { --angle: 360deg }`, linear). The registered angle
+   rotates the WHOLE conic, so the shine arc walks the band once per
+   --shimmer-speed; the dwell holds of r5-r8 retired with the mask */
+@keyframes jx-shimmer-spin {
+  to {
+    --jx-shimmer-angle: 360deg;
+  }
+}
+
+/* pulse keyframes — r4 ruling 4: every percentage block carries BOTH
+   channels (spread + opacity at matched percentages); there is no
+   fade-only phase anywhere in the family */
+@keyframes jx-pulse-slow {
+  0% {
+    box-shadow: 0 0 0 0 var(--pulse-color);
+    opacity: 1;
+  }
+  100% {
+    box-shadow: 0 0 0 var(--pulse-distance) var(--pulse-color);
+    opacity: 0;
+  }
+}
+@keyframes jx-pulse-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--pulse-color);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 var(--pulse-distance) var(--pulse-color);
+    opacity: 0;
+  }
+}
+@keyframes jx-pulse-ripple {
+  0% {
+    box-shadow: 0 0 0 0 var(--pulse-color);
+    opacity: 1;
+  }
+  100% {
+    box-shadow: 0 0 0 var(--pulse-distance) var(--pulse-color);
+    opacity: 0;
+  }
+}
+
+/* the rainbow flow: the REGISTERED shift pans the whole stop train one
+   full period (0→200%) — calc stops cannot ride background-position;
+   the registered-property keyframe repaints the gradient per frame */
+@keyframes jx-rainbow-flow {
+  to {
+    background-position: 0 0, 200% 0;
+  }
+}
+@keyframes jx-rainbow-glow-flow {
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* ripple keyframes — the ink's single timeline (r5): scale 0→1 and
+   opacity 1→0 on ONE progress (the ink fades as it expands — the node
+   is drawn at its full geometry and grows INTO it); fill-mode both so
+   the pre-start frame is scale(0)/opacity 1 and the settled frame
+   holds opacity 0 until animationend removes the node */
+@keyframes jx-ripple-ink {
+  from {
+    transform: scale(0);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* the loading idiom's spinner (enhance-picker-feedback, 2026-08-30):
+   the leading-lane bracket cursor — the spin family's glyph, inlined
+   so the registry item stays dependency-free. ONLY the frame keyframes
+   are D1-exempt residue here (the frames' visibility rests in the
+   markup: frame 1 visible, the rest invisible → killing the animation
+   under reduced motion lands on the static first frame, exactly the
+   spin.css precedent). The kill overrides the markup's animate
+   utility, so it rides the unlayered :where carve-out. */
+@keyframes jx-press-spin-frame {
+  0%,
+  24% {
+    visibility: visible;
+  }
+  25%,
+  100% {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.jx-press-spin-frames i) {
+    animation: none;
+  }
+}
+
+/* effect loops under reduced motion: every loop freezes on its
+   first frame (animation: none — the r8 law; hiding read as a defect
+   on hosts that kept their own face); the ripple is skipped in JS too
+   (the ink never spawns) */
+@media (prefers-reduced-motion: reduce) {
+  :where(.jx-pulse-slow),
+  :where(.jx-pulse-ring),
+  :where(.jx-pulse-ripple),
+  :where(.jx-rainbow-host),
+  :where(.jx-shimmer-host) {
+    animation: none;
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@skill-creator/www",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Private static official site for Skill Creator; deploys to GitHub Pages (project pages path until the Owner sets custom-domain DNS). Zero runtime dependencies; devDependencies are the site toolchain only.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 13260",
+    "build": "node scripts/build.mjs",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:site": "node scripts/check-site.mjs"
+  },
+  "devDependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource/share-tech-mono": "^5.2.7",
+    "@jixoai/ui-vite-plugin": "0.5.1",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.59.1",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tailwindcss/vite": "^4.2.1",
+    "clsx": "^2.1.1",
+    "svelte": "^5.55.5",
+    "svelte-check": "^4.3.2",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0",
+    "vite-imagetools": "^12.0.1"
+  }
+}

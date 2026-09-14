@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  Orthogonal intents (maintained 2026-09-15; original user request: 新增 www/
+  产品官网，jixoai 家族风格，英文单语言站点):
+  1. No-flash theme bootstrap before first paint: read localStorage `theme`
+     (light|dark|system), set the `.dark` class + colorScheme on <html>.
+  2. JS liveness flag (`html.js`): reveal/card-grid entrance hidden states
+     key on it, so prerendered and no-JS output stays fully visible.
+  3. favicon + theme-color: theme-color carries the shared dark canvas
+     (#000000, the token sheet law); the favicon mark carries the rendered
+     light primary of --brand-hue 150 (#00b32d).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" href="%sveltekit.assets%/icon.svg" />
+    <script>
+      (() => {
+        // No-flash theme bootstrap + JS liveness flag (reveal/card-grid
+        // styles key off html.js so prerendered and no-JS output stays
+        // fully visible).
+        const root = document.documentElement;
+        root.classList.add("js");
+        const isTheme = (value) => value === "light" || value === "dark" || value === "system";
+        let theme = "system";
+        try {
+          const stored = window.localStorage.getItem("theme");
+          if (isTheme(stored)) theme = stored;
+        } catch {
+          theme = "system";
+        }
+        const prefersDark =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        root.classList.toggle("dark", theme === "dark" || (theme === "system" && prefersDark));
+        root.style.colorScheme = root.classList.contains("dark") ? "dark" : "light";
+      })();
+    </script>
+    %sveltekit.head%
+  </head>
+  <body>
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>

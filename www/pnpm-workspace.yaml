@@ -1,0 +1,5 @@
+# Standalone site workspace (2026-09-15): www installs with its own lockfile,
+# isolated from the repo-root pnpm workspace. Root membership is intentionally
+# absent — the root workspace (webui + packages/*) and its lockfile stay
+# untouched by the site toolchain.
+packages: []

@@ -1,0 +1,168 @@
+/*
+Orthogonal intents (maintained 2026-09-15; original user request: 新增 www/
+产品官网，视觉身份全部来自官方 jixoai registry):
+1. Import tailwindcss + the registry jixoai-theme token sheet (installed by
+   `npx jixoai-ui init --hue 150` as src/lib/jixoai.css — hue 15x emerald,
+   derived from the project icon's dominant saturated colors).
+2. Supplement ONLY what the registry sheet leaves open: the Tailwind
+   token→utility mappings it does not own (the radius reset — without it
+   rounded-* silently falls back to Tailwind's soft default scale) and
+   site surfaces (data tables, readonly code, screenshot frames) the
+   registry does not ship. The registry sheet already maps colors, fonts,
+   shadows, popover/destructive/input/ring and owns the scrollbar + press
+   + reveal laws.
+*/
+@import "tailwindcss";
+@import "./lib/jixoai.css";
+
+@theme inline {
+  /* Kill Tailwind's default radius scale: the identity is radius 0 with a
+   * corner-shape bevel (the registry law); only `rounded` itself stays,
+   * resolving to the theme's --radius token. */
+  --radius-*: initial;
+  --radius: var(--radius);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    corner-shape: bevel;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-mono);
+  }
+  .font-nav {
+    font-family: var(--font-nav);
+  }
+  button {
+    cursor: pointer;
+  }
+  :where(a, button):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 30%, transparent);
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Data tables (security boundary matrix, platform matrix).
+ * ---------------------------------------------------------------------- */
+.table-scroll {
+  overflow-x: auto;
+  /* real scrollport law: reserve the gutter and compensate the padding */
+  scrollbar-gutter: stable both-edges;
+  padding-inline: max(0.6rem - var(--jx-scrollbar-thin, 0px), 0px);
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.data-table th {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-weight: 600;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.data-table td {
+  border: 1px solid color-mix(in oklab, var(--border) 32%, transparent);
+  padding: 0.45rem 0.6rem;
+  vertical-align: top;
+}
+.data-table td.dim {
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.data-table tbody tr {
+  transition: background-color 150ms ease-out;
+}
+.data-table tbody tr:hover {
+  background: color-mix(in oklab, var(--muted) 26%, transparent);
+}
+.data-table code {
+  color: var(--accent);
+}
+
+/* -------------------------------------------------------------------------
+ * Readonly code surfaces (install/start command block).
+ * ---------------------------------------------------------------------- */
+.readonly-code {
+  background: color-mix(in oklab, var(--muted) 42%, var(--background));
+  border: 1px solid color-mix(in oklab, var(--border) 18%, transparent);
+}
+.dark .readonly-code {
+  background: color-mix(in oklab, var(--muted) 78%, var(--background));
+}
+.readonly-code pre {
+  margin: 0;
+  overflow-x: auto;
+  /* real scrollport law */
+  scrollbar-gutter: stable both-edges;
+  padding: 0.875rem max(0.875rem - var(--jx-scrollbar-thin, 0px), 0px) 0.875rem
+    max(0.875rem - var(--jx-scrollbar-thin, 0px), 0px);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.readonly-code-meta {
+  background: color-mix(in oklab, var(--accent) 12%, var(--background));
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 18%, transparent);
+  color: color-mix(in oklab, var(--accent) 58%, var(--foreground));
+  display: flex;
+  font-size: 11px;
+  gap: 0.5rem;
+  letter-spacing: 0.08em;
+  padding: 0.32rem 0.75rem;
+}
+.dark .readonly-code-meta {
+  background: color-mix(in oklab, var(--accent) 18%, var(--background));
+  color: color-mix(in oklab, var(--accent) 60%, oklch(1 0 0));
+}
+.readonly-code-meta .prompt {
+  color: var(--primary);
+}
+
+/* -------------------------------------------------------------------------
+ * Screenshot frames: real UI captures on a bordered, shadowed surface.
+ * Light-theme captures stay legible on the dark canvas via the card bg.
+ * ---------------------------------------------------------------------- */
+.shot-frame {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.shot-frame img {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+.shot-caption {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  line-height: 1.55;
+}
+
+/* -------------------------------------------------------------------------
+ * Reduced-motion law: the registry sheet already neutralizes reveal,
+ * chrome-transition and press motion; these cover the site's own
+ * transitions.
+ * ---------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .data-table tbody tr {
+    transition: none;
+  }
+}

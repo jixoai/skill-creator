@@ -1,0 +1,67 @@
+name: Deploy site
+
+# Orthogonal intents (maintained 2026-09-15; original user request: 新增
+# www/ 产品官网，GitHub Pages 部署、不加 CNAME):
+# 1. Deploy the official static site to GitHub Pages on every push to main
+#    (plus manual dispatch) — serving from the project pages path
+#    (jixoai.github.io/skill-creator) until the Owner configures the
+#    custom-domain DNS.
+# 2. Install only the site package: www/ carries its own pnpm workspace
+#    marker + lockfile (the repo-root workspace and lockfile stay
+#    untouched), so the install scopes to www alone.
+# 3. CNAME/DNS cutover is Owner-managed external configuration: when DNS
+#    exists, switch the build step env to SITE_CNAME=1 + SITE_DOMAIN +
+#    SITE_URL — no other code change (documented in www/NOTES.md).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.20.0"
+          cache: pnpm
+          cache-dependency-path: www/pnpm-lock.yaml
+      - name: Install the site build toolchain (www only)
+        run: pnpm --dir www install --frozen-lockfile
+      - name: Build the static site (project pages base path)
+        run: pnpm --dir www run build
+        env:
+          SITE_BASE: /skill-creator
+          SITE_URL: https://jixoai.github.io/skill-creator
+      - name: Type-check the site sources
+        run: pnpm --dir www run check
+      - name: Run the automated static checks
+        run: pnpm --dir www run check:site
+        env:
+          SITE_BASE: /skill-creator
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: www/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
