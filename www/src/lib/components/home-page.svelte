@@ -6,8 +6,9 @@
      终端卡（一次性 typing 入场）。
   2. 截图带：hero 之下的全宽 workspaces 截图（暗色真实 UI）。
   3. 三 App / Agent 面板 / 安全模型 / 环境与链接：SectionCard +
-     data-table + 截图网格，产品事实全部来自仓库 README 边界表与
-     CHANGELOG。
+     data-table（sr-only caption + th scope）+ 截图网格，产品事实全部
+     来自仓库 README 边界表与 CHANGELOG；svelte:head 携带 canonical/
+     og/twitter 与 SoftwareApplication JSON-LD（README 可验证字段）。
   4. Motion law: hero 自有 cascade，card-grid 拥有子卡入场；其余区块
      走主题 scroll-driven [data-reveal]。R3 节奏系统（时序值见
      app.css tokens）：小元素（h2、logo 带）用主题默认 entry 0–75%；
@@ -32,13 +33,15 @@
 
   // Content facts sourced from the repository README (产品边界 / 安全模型 /
   // 环境要求), CHANGELOG 2.0.x and the v2 release notes — no invented claims.
+  // Screenshot captions and alts describe what each capture actually shows
+  // (verified against webui sources; all four captures are light-theme).
   const apps = [
     {
       id: "app-workspaces",
       eyebrow: "/workspaces",
       title: "Workspaces",
       summary:
-        "Index the Global Workspace and imported workspaces. Inside each provider, discover, filter, inspect, validate, and enable or disable skills; compare them against upstream lock hashes and reinstall what drifted.",
+        "Index the Global Workspace and imported workspaces. Inside each provider, discover, filter, inspect, validate, and enable or disable skills.",
       points: [
         "Global Workspace (~) aggregates agent global roots; read and manage, never a write target",
         "Every operation carries an explicit Workspace + Provider identity",
@@ -53,7 +56,7 @@
       summary:
         "Create, load, edit, and delete SKILL.md documents inside imported Workspace.Providers, with a change log per document.",
       points: [
-        "Frontmatter round-trips through gray-matter; unknown valid fields pass through",
+        "Frontmatter round-trips through gray-matter with unknown valid fields preserved",
         "Updates and deletes carry a SHA-256 content revision — concurrent edits are rejected, never last-write-wins",
         "Documents land as direct children of the provider root through atomic writes",
       ],
@@ -78,11 +81,11 @@
     points: [
       {
         title: "model routes",
-        body: "Provider endpoints as tabs — nine wire protocols across CN and international providers, per-model context window, effort, and I/O types, with one-click connection testing.",
+        body: "Provider endpoints as tabs with per-model context window, reasoning effort, and input/output types; connection testing covers all nine wire protocols in one click.",
       },
       {
         title: "focus modes",
-        body: "create / manage / explore / general sessions; focused modes narrow the kernel tool surface to the product allowlist, general keeps the full surface with native bash.",
+        body: "Create, Manage, Explore, and General sessions; focused modes narrow the kernel tool surface to the product allowlist, and General keeps the full surface with native bash.",
       },
       {
         title: "approvals",
@@ -160,6 +163,25 @@
     content="Workspaces, Creator, and Repository in one shell, an agent panel on a headless DSH kernel, and an MCP surface where every mutation is a human-approved proposal."
   />
   <meta name="twitter:image" content={`${SITE_URL}/og-image.png`} />
+  <!-- SoftwareApplication JSON-LD: fields limited to README-verifiable facts
+       (free/MIT CLI tool, macOS/Windows/Linux, canonical product URL). The
+       URL is literal because <script> content is raw text to the Svelte
+       parser — expressions do not interpolate here; the deploy workflow is
+       cut over to this canonical domain (deploy-www.yml), same source as
+       SITE_URL's production env. -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Skill Creator",
+      "description": "Local-first workbench for Agent skills: workspaces with discovery and validation, revision-checked skill editing, pinned-commit Git installs, a DSH-kernel agent panel, and an MCP surface where every mutation is a human-approved proposal.",
+      "url": "https://skill-creator.jixoai.com/",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS, Windows, Linux",
+      "license": "https://spdx.org/licenses/MIT.html",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    }
+  </script>
 </svelte:head>
 
 <!-- Color Symbol 门面记号（resources/README：官网门面优先全彩渐变版）。 -->
@@ -216,13 +238,12 @@
     <div class="shot-frame">
       <ResponsivePicture
         set={workspacesShot as PictureSet}
-        alt="Skill Creator Workspaces home screen"
+        alt="Workspaces home screen with quick actions to create a skill, health-check the library, explore skill sources, and browse the library."
         eager
       />
     </div>
     <figcaption class="shot-caption mt-2.5">
-      Workspaces home — quick actions across the Global Workspace and imported workspaces (dark
-      theme).
+      Workspaces home — quick actions over the skill library and its agent locations (light theme).
     </figcaption>
   </figure>
 </div>
@@ -269,24 +290,24 @@
       <div class="shot-frame">
         <ResponsivePicture
           set={creatorShot as PictureSet}
-          alt="Skill Creator editor screen"
+          alt="Creator screen with skill template cards grouped into coding, writing, data, design, and DevOps categories."
           eager
         />
       </div>
       <figcaption class="shot-caption mt-2.5">
-        Creator — template drafts and revision-checked SKILL.md editing with a change log.
+        Creator — skill template drafts by category, with new-skill and open-existing entry points.
       </figcaption>
     </figure>
     <figure data-reveal="tall" data-reveal-lag="">
       <div class="shot-frame">
         <ResponsivePicture
           set={repositoryShot as PictureSet}
-          alt="Skill Creator repository screen"
+          alt="Repository screen with source cards, a search field, and a grid of skill cards."
           eager
         />
       </div>
       <figcaption class="shot-caption mt-2.5">
-        Repository — pinned-commit scan, preview, dry-run, and multi-target install.
+        Repository — Discover sources, search, and skill preview ahead of a pinned-commit install.
       </figcaption>
     </figure>
   </div>
@@ -325,12 +346,12 @@
       <div class="shot-frame">
         <ResponsivePicture
           set={agentPanelShot as PictureSet}
-          alt="Skill Creator agent panel"
+          alt="Agent panel with Create, Manage, Explore, and General mode cards and a message composer."
           eager
         />
       </div>
       <figcaption class="shot-caption mt-2.5">
-        Agent panel — session selector, focus-mode cards, transcript, and composer (light theme).
+        Agent panel — a new session choosing a focus mode above the composer (light theme).
       </figcaption>
     </figure>
   </div>
@@ -344,15 +365,16 @@
   <div data-reveal="tall">
     <SectionCard
       eyebrow="security model"
-      title="Local by construction, not by configuration"
-      summary="Every trusting boundary in the product, listed; these rows restate the README's security section without change."
+      title="Local by construction"
+      summary="The trust boundaries of the product, one row per surface; each row restates the README's security section."
     >
       <div class="table-scroll">
         <table class="data-table">
+          <caption class="sr-only">Security model by surface</caption>
           <thead>
             <tr>
-              <th>Surface</th>
-              <th>Rule</th>
+              <th scope="col">Surface</th>
+              <th scope="col">Rule</th>
             </tr>
           </thead>
           <tbody>
@@ -389,10 +411,11 @@ skill-creator stop</code
       </div>
       <div class="table-scroll mt-6">
         <table class="data-table">
+          <caption class="sr-only">Environment requirements</caption>
           <thead>
             <tr>
-              <th>Requirement</th>
-              <th>Detail</th>
+              <th scope="col">Requirement</th>
+              <th scope="col">Detail</th>
             </tr>
           </thead>
           <tbody>

@@ -105,6 +105,19 @@ Orthogonal intents (maintained 2026-09-15; original user request: 新增 www/
 .data-table code {
   color: var(--accent);
 }
+/* Dark-theme AA fix (R4, programmatic audit): the dark accent token
+ * (oklch 0.6755 0.1765 252.26 → #3399ff) on the dark card (#333) is
+ * 4.30:1 — below AA for the 12.5px table code. Lighten ONLY the dark
+ * code paint, derived from the same token (no second hue): 85% accent +
+ * 15% white ≈ #59aaff → 5.19:1. Light theme passes as-is (4.83:1). */
+.dark .data-table code {
+  color: color-mix(in oklab, var(--accent) 85%, oklch(1 0 0));
+}
+/* Table captions are authored as class="sr-only" (screen-reader names for
+ * the security/requirements matrices); keep them out of the visual grid. */
+.data-table caption {
+  text-align: left;
+}
 
 /* -------------------------------------------------------------------------
  * Readonly code surfaces (install/start command block).

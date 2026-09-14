@@ -183,3 +183,47 @@ tracking-[0.3em]` + baseline rule (so 0.3em is family law here, not
     two-pattern law. Verified: toggle cycles, persists to
     localStorage, applies `.dark` + colorScheme, no-flash bootstrap
     intact.
+
+## R4 content & closeout pass (2026-09-15)
+
+23. **All four captures are light-theme; one caption said dark**. The
+    Workspaces caption claimed "(dark theme)" and the Creator/Agent
+    panel captions described UI not in the crop (change log, transcript,
+    session selector). Captions/alts now describe the actual pixels,
+    cross-checked against webui sources (`WorkspacesHome.svelte` quick
+    actions, `templates.ts` categories, `DSH_AGENT_MODES` labels) —
+    programmatic pixel audit (94-99% near-white) before trusting any
+    visual read.
+24. **Light-theme brand green is AA-below on white — family token,
+    Owner decision**. Programmatic audit (oklch→sRGB→WCAG): light
+    `--primary` = #5fa600 exactly; on white 3.03:1 (AA needs 4.5 for
+    the 11-13px eyebrow/label/link text; the fill CTA's white ink is
+    the same 3.03). The failing surfaces (hero/section eyebrows, fill
+    button) are rendered by registry-locked components; darkening
+    per-site would fork the family token (R1 hue law). Dark theme
+    passes everywhere (5.03-8.37). Remediation math for a family-level
+    fix: oklch L≈0.55 at hue 129 / C 0.237 clears 4.5:1 on white.
+    Filed here for the Owner; NOT changed.
+25. **Dark table inline code fixed in-app.css** (site-owned surface):
+    dark `--accent` on card was 4.30:1; `.dark .data-table code` now
+    mixes the same token 85/15 with white → 5.19:1. No second hue, no
+    token edits.
+26. **`<script>` content in a Svelte template is raw text** —
+    `{SITE_URL}` does not interpolate inside `type="application/ld+json"`
+    (build-verified). The JSON-LD block carries the canonical domain
+    literally; the deploy workflow is cut over to that same domain
+    (deploy-www.yml env), so the single hardcode is the production
+    truth.
+27. **agent-browser is dead on this machine** (`bad interpreter:
+/opt/homebrew/opt/node/bin/node`) — R4 evidence fell back to direct
+    CDP (Chrome for Testing + Node WebSocket, the R3 #20 pattern).
+    Also: `vite preview` binds `[::1]` only (use `localhost`, not
+    127.0.0.1) and ignores `-- --port` forwarding (landed on 4173).
+28. **Light-theme full-page screenshots defeat blank-band heuristics**
+    (white canvas + white cards + light UI captures read as "empty"):
+    verify via `naturalWidth` audits, full-width border-line detection,
+    and the dark-theme twin instead of brightness stats. The readonly-code
+    `pre` is CDP-Tab-focusable — Chrome gives scrollable containers
+    implicit keyboard focus (no tabindex anywhere); native, kept.
+    Drawer keyboard path verified: aria-expanded toggles, Escape closes
+    and returns focus to the hamburger.

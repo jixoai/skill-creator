@@ -6,8 +6,9 @@
      (light|dark|system), set the `.dark` class + colorScheme on <html>.
   2. JS liveness flag (`html.js`): reveal/card-grid entrance hidden states
      key on it, so prerendered and no-JS output stays fully visible.
-  3. favicon + theme-color + share cards: theme-color carries the shared
-     dark canvas (#000000, the token sheet law); the favicon set is the
+  3. favicon + theme-color + share cards: theme-color is media-split
+     (light #ffffff / dark #000000 — the dark canvas is the family law,
+     OS-light visitors get matching chrome); the favicon set is the
      brand Monochrome Mini recolored to the documented brand primary
      (oklch 0.841 0.238 128.85 → #5fa600, resources/README.md law);
      og/twitter cards carry the generated og-image.png.
@@ -16,7 +17,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
+    <!-- theme-color follows the OS scheme by default (the dark canvas is the
+         family law; OS-light visitors get a white browser chrome instead of a
+         black band over a light page). A localStorage theme override cannot
+         reach meta tags without JS — the media split covers the system
+         default, which is also the first-paint default below. -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/png" sizes="48x48" href="%sveltekit.assets%/favicon-48.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="%sveltekit.assets%/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="%sveltekit.assets%/favicon-16.png" />

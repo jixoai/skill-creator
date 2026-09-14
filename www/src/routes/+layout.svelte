@@ -85,7 +85,10 @@
           <NavigationMenuLink href={NPM_URL}>npm ↗</NavigationMenuLink>
         </div>
       {/snippet}
-      <NavigationMenu label="site">
+      <!-- aria-label on the nav landmark: "Primary" names the header nav
+           (the drawer below is its mobile form, reached through the
+           hamburger's aria-expanded control, and needs no second label). -->
+      <NavigationMenu label="Primary">
         <NavigationMenuLink href={homeHref} current>Overview</NavigationMenuLink>
         <NavigationMenuLink href="#apps">Three apps</NavigationMenuLink>
         <NavigationMenuLink href="#agent-panel">Agent panel</NavigationMenuLink>
