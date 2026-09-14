@@ -83,3 +83,23 @@ The cutover is a workflow-env change only (documented in
     page, so eager removes both the quirk and the verification gap.
     Root `.prettierignore` exempts the registry-locked files (unipty
     precedent) so the root `pnpm check` stays green.
+
+## R1 brand pass (2026-09-15, owner feedback: 「图标你没搞对，我给了一整套配套图标」)
+
+11. **The brand set is four variants with a usage law** (resources/README.md):
+    Color Symbol = storefront surfaces, Flat Symbol = mid-size UI,
+    Monochrome = single-color premium texture, Monochrome Mini = tiny
+    containers. The site previously used a hand-drawn `>_` SVG and hue 150
+    sampled from the color symbol; the documented brand primary is
+    oklch(0.841 0.238 128.85) → `--brand-hue: 129` (note: the on-disk
+    flat-symbol.png renders #006048 / hue 168 — older render, README is
+    the authority; owner may want to regenerate the PNG).
+12. **Favicon = Monochrome Mini recolored brand green** (#5fa600, the hue-129
+    light primary): the monochrome variants exist to be single-colored per
+    context, and pure black would vanish on dark tabs. Apple-touch uses
+    Flat on white (iOS blacks out transparency). Header logo (28px) = Flat;
+    hero carries the Color Symbol as the storefront mark; og-image is
+    generated from the Color Symbol + Menlo wordmark.
+13. **`__SITE_URL__` define was never wired** — constants.ts declared it but
+    vite.config computed `siteUrl` without a define, so canonical/og/llms
+    silently used the github.io fallback; wired at the domain cutover.

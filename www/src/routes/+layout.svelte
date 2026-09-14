@@ -40,26 +40,15 @@
       switcherFrame={false}
     >
       {#snippet logo()}
-        <!-- the site favicon's `>_` terminal mark, verbatim (static/icon.svg) -->
-        <svg viewBox="0 0 32 32" class="h-7 w-7" aria-hidden="true">
-          <rect
-            x="2"
-            y="2"
-            width="28"
-            height="28"
-            fill="#000000"
-            stroke="#00b32d"
-            stroke-width="3"
-          />
-          <text
-            x="7"
-            y="22"
-            font-family="Menlo, Consolas, monospace"
-            font-size="13"
-            font-weight="bold"
-            fill="#00b32d">&gt;_</text
-          >
-        </svg>
+        <!-- Flat Symbol（resources/README 法则：中等尺寸 UI 面用扁平纯色版） -->
+        <img
+          src={`${base}/logo-flat.png`}
+          alt=""
+          class="h-7 w-7"
+          width="28"
+          height="28"
+          decoding="async"
+        />
       {/snippet}
       {#snippet switcher()}
         <ThemeToggle variant="compact" />

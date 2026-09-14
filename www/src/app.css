@@ -2,7 +2,7 @@
 Orthogonal intents (maintained 2026-09-15; original user request: 新增 www/
 产品官网，视觉身份全部来自官方 jixoai registry):
 1. Import tailwindcss + the registry jixoai-theme token sheet (installed by
-   `npx jixoai-ui init --hue 150` as src/lib/jixoai.css — hue 15x emerald,
+   `npx jixoai-ui init --hue 150` as src/lib/jixoai.css — hue 129 brand green (resources/README primary),
    derived from the project icon's dominant saturated colors).
 2. Supplement ONLY what the registry sheet leaves open: the Tailwind
    token→utility mappings it does not own (the radius reset — without it

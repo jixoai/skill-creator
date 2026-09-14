@@ -22,6 +22,6 @@
     "@jixoai": "https://ui.jixoai.com/r/{name}.json"
   },
   "jixoai": {
-    "brandHue": 150
+    "brandHue": 129
   }
 }

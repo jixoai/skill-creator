@@ -31,7 +31,7 @@
 
 :root,
 .jx-light {
-  --brand-hue: 150; /* the registry's own default (ui.jixoai.com pink) — for REGISTRY CONSUMERS this static value is the live one (jixoai-ui init --hue rewrites it); the wall-clock hue rotation is ui.jixoai.com's site-local hue-runtime script, never shipped to consumers. per-project values: unipty=165 幽绿, openspecui=27 */
+  --brand-hue: 129; /* the registry's own default (ui.jixoai.com pink) — for REGISTRY CONSUMERS this static value is the live one (jixoai-ui init --hue rewrites it); the wall-clock hue rotation is ui.jixoai.com's site-local hue-runtime script, never shipped to consumers. per-project values: unipty=165 幽绿, openspecui=27, skill-creator=129 (resources/README.md 品牌主色调 oklch 0.841 0.238 128.85) */
 
   --background: oklch(1 0 0);
   --foreground: oklch(0 0 0);

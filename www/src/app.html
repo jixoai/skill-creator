@@ -6,16 +6,21 @@
      (light|dark|system), set the `.dark` class + colorScheme on <html>.
   2. JS liveness flag (`html.js`): reveal/card-grid entrance hidden states
      key on it, so prerendered and no-JS output stays fully visible.
-  3. favicon + theme-color: theme-color carries the shared dark canvas
-     (#000000, the token sheet law); the favicon mark carries the rendered
-     light primary of --brand-hue 150 (#00b32d).
+  3. favicon + theme-color + share cards: theme-color carries the shared
+     dark canvas (#000000, the token sheet law); the favicon set is the
+     brand Monochrome Mini recolored to the documented brand primary
+     (oklch 0.841 0.238 128.85 → #5fa600, resources/README.md law);
+     og/twitter cards carry the generated og-image.png.
 -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
-    <link rel="icon" href="%sveltekit.assets%/icon.svg" />
+    <link rel="icon" type="image/png" sizes="48x48" href="%sveltekit.assets%/favicon-48.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="%sveltekit.assets%/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="%sveltekit.assets%/favicon-16.png" />
+    <link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
     <script>
       (() => {
         // No-flash theme bootstrap + JS liveness flag (reveal/card-grid

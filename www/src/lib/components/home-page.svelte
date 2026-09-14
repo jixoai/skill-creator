@@ -18,6 +18,7 @@
   import TerminalCard from "$lib/ui/terminal-card/terminal-card.svelte";
   import PressButton from "$lib/ui/press-button/press-button.svelte";
   import ResponsivePicture, { type PictureSet } from "$lib/components/responsive-picture.svelte";
+  import { base } from "$app/paths";
   import { GITHUB_URL, JIXOAI_URL, NPM_URL, SITE_URL } from "$lib/constants";
   import workspacesShot from "$lib/assets/workspaces.png?w=720;1100;1440&format=webp;png&as=picture";
   import creatorShot from "$lib/assets/creator.png?w=720;1100;1440&format=webp;png&as=picture";
@@ -138,7 +139,38 @@
     content="Skill Creator manages the full life of Agent skills on your machine: workspaces with discovery and validation, revision-checked skill editing, pinned-commit Git installs, a DSH-kernel agent panel, and an MCP surface where every mutation is a human-approved proposal."
   />
   <link rel="canonical" href={`${SITE_URL}/`} />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Skill Creator" />
+  <meta property="og:title" content="Skill Creator — a local-first workbench for Agent skills" />
+  <meta
+    property="og:description"
+    content="Workspaces, Creator, and Repository in one shell, an agent panel on a headless DSH kernel, and an MCP surface where every mutation is a human-approved proposal."
+  />
+  <meta property="og:url" content={`${SITE_URL}/`} />
+  <meta property="og:image" content={`${SITE_URL}/og-image.png`} />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Skill Creator — a local-first workbench for Agent skills" />
+  <meta
+    name="twitter:description"
+    content="Workspaces, Creator, and Repository in one shell, an agent panel on a headless DSH kernel, and an MCP surface where every mutation is a human-approved proposal."
+  />
+  <meta name="twitter:image" content={`${SITE_URL}/og-image.png`} />
 </svelte:head>
+
+<!-- Color Symbol 门面记号（resources/README：官网门面优先全彩渐变版）。 -->
+<div
+  class="mx-auto flex w-full max-w-[90rem] justify-center px-4 pt-10 sm:px-6 lg:px-8"
+  data-reveal=""
+>
+  <img
+    src={`${base}/logo-color.png`}
+    alt="Skill Creator"
+    class="h-20 w-20"
+    width="80"
+    height="80"
+    decoding="async"
+  />
+</div>
 
 <HeroSection
   eyebrow="Skill Creator"

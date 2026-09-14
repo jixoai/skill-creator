@@ -28,6 +28,8 @@ const llmsTxt = llmsTxtPlugin as unknown as (config: Record<string, unknown>) =>
 const siteUrl = process.env.SITE_URL ?? "https://jixoai.github.io/skill-creator";
 
 export default defineConfig({
+  // constants.ts 的 __SITE_URL__（此前只计算未接线，声明一直落到 fallback）
+  define: { __SITE_URL__: JSON.stringify(siteUrl) },
   plugins: [
     // image pipeline (Owner law 2026-09-07): ?w=…&format=webp;png&as=picture
     // imports for raster assets; must run before the sveltekit plugin.
