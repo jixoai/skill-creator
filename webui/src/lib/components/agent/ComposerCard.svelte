@@ -18,7 +18,7 @@
   发送成功由 sendAgentPrompt 清当前轨（失败留在原轨可重试）；草稿随会话
   切换换轨（store 侧），本组件对 bind 的 facade 不变。
   修订 [2026-09-14]（R18 用户裁决）：附件按钮唤醒 **native** file-picker——
-  daemon @xmorse/rfd AsyncFileDialog.pickFiles（真实路径直返，无 web 弹层）；
+  daemon 子进程 @xmorse/rfd sync pickFiles（真实路径直返，无 web 弹层）；
   粘贴/drop 的本地 File 通道保留（无真实路径，base64 wire）。
   正交意图：
   1. 输入卡：附件条（图片缩略/文件 chip，与 UserMessage 附件同视觉语言）、
@@ -250,8 +250,9 @@
 
   /**
    * R18 用户裁决：「在后端（nodejs）这边，唤醒 native 级别的 file-picker」——
-   * 附件按钮直调 agent.files.pickFiles（daemon @xmorse/rfd AsyncFileDialog），
-   * 返回真实路径后进对应附件通道（数量守卫在 store）。取消/失败静默（toast 错误面）。
+   * 附件按钮直调 agent.files.pickFiles（daemon 子进程 sync 对话框），
+   * 返回真实路径后进对应附件通道（数量守卫在 store）。取消静默；失败在
+   * store 层 toast（2.0.1：失败必须可感知）。
    */
   async function openPicker(target: "image" | "file"): Promise<void> {
     if (picking) return;

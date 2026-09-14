@@ -1,15 +1,21 @@
 /**
- * 后端文件选择器服务（R17-B → R18 修订）。
+ * 后端文件选择器服务（R17-B → R18 → 2.0.1 修订）。
  *
  * 用户原始需求 [2026-09-13]：「文件选择器、图片选择器，不要基于 web，而是基于
  * 后端，这样能拿到真实的路径，前端也能更轻。」
  * 修订 [2026-09-14]（R18 用户裁决）：「不是让你用 Web 做，而是在后端（nodejs）
- * 这边，唤醒 native 级别的 file-picker」——**pickFiles** 经 @xmorse/rfd
- * AsyncFileDialog 打开真原生对话框（OpenTray 本身无 dialog API 的结论不变，
- * rfd 提供跨平台 native 层）；list/preview 两 RPC 保留，服务附件条缩略预览链。
+ * 这边，唤醒 native 级别的 file-picker」——经 @xmorse/rfd 打开真原生对话框
+ * （OpenTray 本身无 dialog API 的结论不变，rfd 提供跨平台 native 层）。
+ * 修订 [2026-09-15]（2.0.0 回归修复，用户实测「选择器不能用」+ 探针实证）：
+ *   rfd 的 **Async**FileDialog 在非 GUI 宿主进程里会 panic（macOS 回退 sync
+ *   必须在主线程，却被调度到 tokio 工作线程），JS Promise 永久挂起——按钮死、
+ *   无错误、无对话框。修复：spawn 独立 node 子进程，在子进程主线程上跑 **sync**
+ *   FileDialog（探针 + 用户亲测可用）：panic 崩溃被隔离在子进程（退出码 →
+ *   类型化 UNAVAILABLE），daemon 事件循环全程不受模态阻塞。
  *
  * 正交意图：
- *   [1] 原生文件选择：pickFiles（mode 预置 filter；取消=空数组；句柄失效跳过）。
+ *   [1] 原生文件选择：pickFiles 子进程协议（mode 预置标题/filter；取消=空数组；
+ *       忙碌互斥；超时击杀；失败类型化）。
  *   [2] 单文件预览：图片走 jSquash 缩略管线、文本取 4KiB UTF-8 头、其余二进制
  *       仅名/大小——守卫外的输入一律降级 binary 投影，不伪装成功预览（list 的
  *       目录浏览投影同归本意图：预览的入口面）。
@@ -19,7 +25,9 @@
  *   一条选择器流程；评估过拆 folder（intent 警报 3），因拆分只会复制 helper 而
  *   不产生独立变化轴而保留单模块。
  */
+import { spawn } from "node:child_process";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -55,8 +63,9 @@ export interface AgentFilesService {
   list(input: AgentFilesListInput): Promise<AgentFilesListResult>;
   preview(input: AgentFilesPreviewInput): Promise<AgentFilesPreviewResult>;
   /**
-   * 原生文件选择（R18 用户裁决：后端唤醒 native file-picker，@xmorse/rfd）。
-   * filter 按 image/file 模式预置；返回真实路径列表（空 = 用户取消）。
+   * 原生文件选择（R18 用户裁决 + 2.0.1 修复）：独立子进程主线程上跑 @xmorse/rfd
+   * sync FileDialog。filter 按 image/file 模式预置；返回真实路径列表（空 = 用户
+   * 取消）；失败抛类型化 UNAVAILABLE。
    */
   pickFiles(input: { mode: "image" | "file" }): Promise<{ paths: string[] }>;
   /** path 通道附件读盘为 base64 形状（agentSessions.prompt 既有签名不变）。 */
@@ -66,9 +75,31 @@ export interface AgentFilesService {
   }): Promise<ResolvedPromptAttachments>;
 }
 
+/** 子进程对话框请求（mode → 标题/过滤器的映射真相留在 daemon 侧）。 */
+export interface PickerRequest {
+  title: string;
+  filters: Array<{ name: string; exts: string[] }>;
+}
+
+/** 子进程运行结果：picked / canceled / failed（三态互斥，映射真相单一）。 */
+export interface PickerOutcome {
+  status: "picked" | "canceled" | "failed";
+  paths?: string[];
+  message?: string;
+}
+
 export interface AgentFilesDeps {
   /** 默认起始目录（缺省 home）。 */
   defaultDir?: () => string;
+  /**
+   * 原生选择运行器（测试注入点）。真实实现 spawn `node -e` 子进程跑 sync
+   * FileDialog——AppKit/GTK 要求对话框在进程主线程上运行，独立子进程天然满足
+   * 且 panic 隔离；@xmorse/rfd 的 async 形态在非 GUI 宿主会 panic 并使 Promise
+   * 永久挂起（2026-09-15 探针实证），不可用。
+   */
+  runNativePicker?: (request: PickerRequest) => Promise<PickerOutcome>;
+  /** 子进程看门狗（测试可缩短；缺省 10 分钟——对话框合法地长时间停留）。 */
+  pickerTimeoutMs?: number;
 }
 
 /** Node fs 错误码 → 有限业务错误（未知码归 UNAVAILABLE，消息有界）。 */
@@ -121,27 +152,131 @@ function compareEntries(a: AgentFilesEntry, b: AgentFilesEntry): number {
   return a.name.localeCompare(b.name, "en", { sensitivity: "base", numeric: true });
 }
 
+/**
+ * 子进程选择器代码（CJS `-e`；`-e` 模式下用户参数从 argv[1] 起——argv[1]=请求
+ * JSON，argv[2]=rfd 入口绝对路径）。只用 sync FileDialog：子进程主 JS 线程即
+ * 进程主线程，满足 AppKit/GTK 的主线程法则。stdout 单行 JSON 是唯一类型化出口
+ * （panic/崩溃走非零退出码由父进程兜底）。
+ */
+const PICKER_CHILD_CODE = `"use strict";
+const write = (payload) => process.stdout.write(JSON.stringify(payload));
+try {
+  const spec = JSON.parse(process.argv[1]);
+  const rfd = require(process.argv[2]);
+  let dialog = new rfd.FileDialog();
+  if (spec.title) dialog = dialog.setTitle(spec.title);
+  for (const filter of spec.filters) dialog = dialog.addFilter(filter.name, filter.exts);
+  const paths = dialog.pickFiles();
+  write({ ok: true, paths: Array.isArray(paths) ? paths : [] });
+} catch (error) {
+  write({ ok: false, message: String((error && error.message) || error).slice(0, 300) });
+}`;
+
+/** 子进程看门狗缺省：对话框可能被用户合法地长时间留着，超时只兜僵尸/无显示器。 */
+const PICKER_TIMEOUT_MS = 10 * 60 * 1000;
+/** stdout 聚积上限（协议是单行小 JSON，超限即异常输入）。 */
+const PICKER_STDOUT_LIMIT = 64 * 1024;
+
+let cachedRfdEntry: string | null = null;
+
+/** rfd 入口解析（daemon bundle 内 external，路径经 createRequire 从本文件定位）。 */
+function resolveRfdEntry(): string {
+  if (cachedRfdEntry !== null) return cachedRfdEntry;
+  try {
+    cachedRfdEntry = createRequire(import.meta.url).resolve("@xmorse/rfd");
+  } catch {
+    throw new DomainError("UNAVAILABLE", "native file picker runtime is not installed");
+  }
+  return cachedRfdEntry;
+}
+
+/**
+ * 真实运行器：spawn 子进程跑 sync 对话框（导出供子进程协议契约测试直连）。
+ * `entry`/`timeoutMs` 供测试注入替身入口与缩短看门狗；生产路径走缺省。
+ */
+export function runPickerChild(
+  request: PickerRequest,
+  options: { entry?: string; timeoutMs?: number } = {},
+): Promise<PickerOutcome> {
+  const entry = options.entry ?? resolveRfdEntry();
+  const timeoutMs = options.timeoutMs ?? PICKER_TIMEOUT_MS;
+  const child = spawn(process.execPath, ["-e", PICKER_CHILD_CODE, JSON.stringify(request), entry], {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderrTail = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve({ status: "failed", message: `picker timed out after ${String(timeoutMs)}ms` });
+    }, timeoutMs);
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (stdout.length < PICKER_STDOUT_LIMIT) stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString("utf8")).slice(-300);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ status: "failed", message: String(error) });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      // 子进程自身的类型化出口优先；解析失败落到退出码 + stderr 兜底。
+      try {
+        const parsed = JSON.parse(stdout) as { ok?: unknown; paths?: unknown; message?: unknown };
+        if (parsed.ok === true && Array.isArray(parsed.paths)) {
+          const paths = parsed.paths.filter((value): value is string => typeof value === "string");
+          resolve(paths.length === 0 ? { status: "canceled" } : { status: "picked", paths });
+          return;
+        }
+        if (parsed.ok === false && typeof parsed.message === "string") {
+          resolve({ status: "failed", message: parsed.message });
+          return;
+        }
+      } catch {
+        // 非法 stdout：继续走兜底。
+      }
+      const detail = stderrTail.trim();
+      resolve({
+        status: "failed",
+        message: `picker exited with code ${String(code)}${detail.length > 0 ? `: ${detail}` : ""}`,
+      });
+    });
+  });
+}
+
 export function createAgentFilesService(deps: AgentFilesDeps = {}): AgentFilesService {
   const defaultDir = deps.defaultDir ?? (() => os.homedir());
+  const runNativePicker = deps.runNativePicker ?? runPickerChild;
+  let pickerInFlight: Promise<PickerOutcome> | null = null;
 
   async function pickFiles(input: { mode: "image" | "file" }): Promise<{ paths: string[] }> {
-    const { AsyncFileDialog } = await import("@xmorse/rfd");
-    let builder = new AsyncFileDialog();
-    builder = builder.setTitle(input.mode === "image" ? "Select images" : "Select files");
-    if (input.mode === "image") {
-      builder = builder.addFilter("Images", ["png", "jpg", "jpeg", "webp", "gif"]);
+    // 模态互斥：第二个客户端并发请求时对话框已开，直接类型化拒绝。
+    if (pickerInFlight !== null) {
+      throw new DomainError("INVALID_OPERATION", "file picker dialog is already open");
     }
-    const handles = await builder.pickFiles();
-    if (handles === null) return { paths: [] };
-    const paths: string[] = [];
-    for (const handle of handles) {
-      try {
-        paths.push(handle.path());
-      } catch {
-        // 句柄失效（选后即删等）：跳过，不炸整次选择。
-      }
+    const request: PickerRequest =
+      input.mode === "image"
+        ? {
+            title: "Select images",
+            filters: [{ name: "Images", exts: ["png", "jpg", "jpeg", "webp", "gif"] }],
+          }
+        : { title: "Select files", filters: [] };
+    const inFlight = runNativePicker(request);
+    pickerInFlight = inFlight;
+    try {
+      const outcome = await inFlight;
+      if (outcome.status === "picked") return { paths: outcome.paths ?? [] };
+      if (outcome.status === "canceled") return { paths: [] };
+      throw new DomainError(
+        "UNAVAILABLE",
+        `native file picker failed: ${outcome.message ?? "unknown error"}`,
+      );
+    } finally {
+      if (pickerInFlight === inFlight) pickerInFlight = null;
     }
-    return { paths };
   }
 
   async function list(input: AgentFilesListInput): Promise<AgentFilesListResult> {

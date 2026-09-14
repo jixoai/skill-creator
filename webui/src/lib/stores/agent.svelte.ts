@@ -52,6 +52,7 @@ import {
   switchComposerTrack,
 } from "./agent-composer.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
+import { showToast } from "$lib/toast.svelte";
 
 /** 待答审批的视图投影（approval-request 帧的 questions 载荷）。 */
 export interface PanelApprovalQuestion {
@@ -1077,13 +1078,18 @@ export function resetAgentPanelConnection(): void {
  * 写入 provider 凭据（R16 起视图回显 apiKey；结果更新 agentRuntimeConfig）。
  * 类型化 rejected 原样返回给调用方投影。
  */
-/** 原生文件选择（R18）：daemon @xmorse/rfd AsyncFileDialog；null = RPC 失败。 */
+/**
+ * 原生文件选择（R18 + 2.0.1 修复）：daemon 子进程 sync 对话框。
+ * null = 取消 / 无连接（静默——取消是用户意图）；RPC 失败已 toast（2.0.0 回归
+ * 教训：失败静默会让按钮「点了没反应」无法与取消区分）。
+ */
 export async function pickAgentFiles(mode: "image" | "file"): Promise<{ paths: string[] } | null> {
   try {
     const rpc = getRpc();
     if (rpc === null) return null;
     return await rpc.agent.files.pickFiles({ mode });
-  } catch {
+  } catch (error) {
+    showToast(`File picker failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }

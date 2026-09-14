@@ -14,14 +14,16 @@
  *   [3] prompt path 通道：读盘 + magic 嗅探 + 大小守卫（4MiB/512KiB 同文案）；
  *       base64 通道原样透传；畸形输入 typed 拒绝。
  *   [4] 契约收窄：AgentSessionPromptInputSchema 双通道 strict（互斥、越限拒绝）。
+ *   [5] 原生选择（2.0.1 子进程化）：mode→spec 映射、取消/失败/忙碌三态、
+ *       子进程协议契约（fake rfd 入口直连：pick/cancel/throw/garbage/hang）。
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { encode as encodeJpeg } from "@jsquash/jpeg";
 import encodePng from "@jsquash/png/encode.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAgentFilesService } from "../src/daemon/agent-files.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createAgentFilesService, runPickerChild } from "../src/daemon/agent-files.js";
 import { ensureImageCodecs } from "../src/daemon/image-codec.js";
 import { DomainError } from "../src/daemon/domain-error.js";
 import {
@@ -372,50 +374,155 @@ describe("files-only prompt is a valid contract shape (R17 codex P1)", () => {
   });
 });
 
-// rfd mock：模块级单一可配置（vi.mock 提升，同文件多次声明互相覆盖）。
-const rfdState = { handles: null as Array<{ path: () => string }> | null };
-vi.mock("@xmorse/rfd", () => ({
-  AsyncFileDialog: class {
-    setTitle() {
-      return this;
-    }
-    addFilter() {
-      return this;
-    }
-    pickFiles() {
-      return Promise.resolve(rfdState.handles);
-    }
-  },
-}));
+// rfd mock 已随 2.0.1 重构移除：pickFiles 不再在 daemon 进程内 import rfd，
+// 对话框跑在独立子进程（测试经 runNativePicker 注入替身；子进程协议契约由
+// runPickerChild + fake rfd 入口直连验证，CI 无 GUI 也能覆盖全链路）。
 
-describe("pickFiles native picker (R18 @xmorse/rfd)", () => {
-  it("returns real paths from the native dialog and empty on cancel", async () => {
-    vi.resetModules();
-    const { createAgentFilesService } = await import("../src/daemon/agent-files.js");
-    const service = createAgentFilesService();
-    rfdState.handles = [{ path: () => "/Users/x/a.png" }, { path: () => "/Users/x/b.jpg" }];
+describe("pickFiles service mapping (2.0.1 child-process picker)", () => {
+  it("maps mode to dialog spec and returns picked paths", async () => {
+    const specs: import("../src/daemon/agent-files.js").PickerRequest[] = [];
+    const service = createAgentFilesService({
+      runNativePicker: async (request) => {
+        specs.push(request);
+        return { status: "picked", paths: ["/Users/x/a.png", "/Users/x/b.jpg"] };
+      },
+    });
     await expect(service.pickFiles({ mode: "image" })).resolves.toEqual({
       paths: ["/Users/x/a.png", "/Users/x/b.jpg"],
     });
-    rfdState.handles = null;
-    await expect(service.pickFiles({ mode: "file" })).resolves.toEqual({ paths: [] });
+    await expect(service.pickFiles({ mode: "file" })).resolves.toEqual({
+      paths: ["/Users/x/a.png", "/Users/x/b.jpg"],
+    });
+    expect(specs[0]).toEqual({
+      title: "Select images",
+      filters: [{ name: "Images", exts: ["png", "jpg", "jpeg", "webp", "gif"] }],
+    });
+    expect(specs[1]).toEqual({ title: "Select files", filters: [] });
   });
 
-  it("skips dead handles without failing the batch", async () => {
-    vi.resetModules();
-    const { createAgentFilesService } = await import("../src/daemon/agent-files.js");
-    const service = createAgentFilesService();
-    rfdState.handles = [
-      { path: () => "/Users/x/ok.txt" },
-      {
-        path: () => {
-          throw new Error("gone");
-        },
-      },
-    ];
-    await expect(service.pickFiles({ mode: "file" })).resolves.toEqual({
-      paths: ["/Users/x/ok.txt"],
+  it("cancel maps to empty paths; failure maps to typed UNAVAILABLE", async () => {
+    const canceling = createAgentFilesService({
+      runNativePicker: async () => ({ status: "canceled" }),
     });
-    rfdState.handles = null;
+    await expect(canceling.pickFiles({ mode: "file" })).resolves.toEqual({ paths: [] });
+
+    const failing = createAgentFilesService({
+      runNativePicker: async () => ({ status: "failed", message: "boom" }),
+    });
+    await expectDomainError(
+      () => failing.pickFiles({ mode: "file" }),
+      "UNAVAILABLE",
+      /native file picker failed: boom/,
+    );
+  });
+
+  it("rejects concurrent picks while a dialog is open, then re-arms", async () => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const service = createAgentFilesService({
+      runNativePicker: async () => {
+        await gate;
+        return { status: "canceled" };
+      },
+    });
+    const first = service.pickFiles({ mode: "file" });
+    await expectDomainError(
+      () => service.pickFiles({ mode: "file" }),
+      "INVALID_OPERATION",
+      /file picker dialog is already open/,
+    );
+    release?.();
+    await expect(first).resolves.toEqual({ paths: [] });
+    // 门已复位：再次选择可用。
+    await expect(service.pickFiles({ mode: "file" })).resolves.toEqual({ paths: [] });
+  });
+});
+
+describe("runPickerChild process contract (2.0.1)", () => {
+  /** 生成 fake rfd 入口（纯 JS CommonJS 模块，子进程 require 它）。 */
+  function writeFakeRfd(behavior: "pick" | "cancel" | "throw" | "garbage" | "hang"): string {
+    const dir = path.join(sandbox, `fake-rfd-${behavior}`);
+    fs.mkdirSync(dir);
+    const body =
+      behavior === "pick"
+        ? `module.exports = { FileDialog: class {
+             setTitle() { return this; }
+             addFilter(name, exts) {
+               require("node:fs").appendFileSync(${JSON.stringify(path.join(dir, "filters.json"))}, JSON.stringify([name, exts]) + "\\n");
+               return this;
+             }
+             pickFiles() { return ["/tmp/a.png", "/tmp/b.txt"]; }
+           } };`
+        : behavior === "cancel"
+          ? `module.exports = { FileDialog: class {
+              setTitle() { return this; }
+              addFilter() { return this; }
+              pickFiles() { return null; }
+            } };`
+          : behavior === "throw"
+            ? `module.exports = { FileDialog: class {
+                setTitle() { return this; }
+                addFilter() { return this; }
+                pickFiles() { throw new Error("gtk init failed"); }
+              } };`
+            : behavior === "garbage"
+              ? `process.stdout.write("not json at all");`
+              : // hang：主线程自旋，逼出看门狗。
+                `module.exports = { FileDialog: class {
+                    setTitle() { return this; }
+                    addFilter() { return this; }
+                    pickFiles() { const t = Date.now() + 60_000; while (Date.now() < t) {} return null; }
+                  } };`;
+    const entry = path.join(dir, "index.js");
+    fs.writeFileSync(entry, body);
+    return entry;
+  }
+
+  it("spawns a real child, passes spec, and parses picked paths", async () => {
+    const entry = writeFakeRfd("pick");
+    const outcome = await runPickerChild(
+      { title: "Select images", filters: [{ name: "Images", exts: ["png", "jpg"] }] },
+      { entry },
+    );
+    expect(outcome).toEqual({
+      status: "picked",
+      paths: ["/tmp/a.png", "/tmp/b.txt"],
+    });
+    expect(fs.readFileSync(path.join(path.dirname(entry), "filters.json"), "utf8")).toContain(
+      '"Images"',
+    );
+  });
+
+  it("maps child cancel (null) and typed child failure to outcome statuses", async () => {
+    await expect(
+      runPickerChild({ title: "t", filters: [] }, { entry: writeFakeRfd("cancel") }),
+    ).resolves.toEqual({ status: "canceled" });
+    await expect(
+      runPickerChild({ title: "t", filters: [] }, { entry: writeFakeRfd("throw") }),
+    ).resolves.toEqual({ status: "failed", message: "gtk init failed" });
+  });
+
+  it("falls back to exit-code diagnostics on unparseable stdout", async () => {
+    const outcome = await runPickerChild(
+      { title: "t", filters: [] },
+      { entry: writeFakeRfd("garbage") },
+    );
+    expect(outcome.status).toBe("failed");
+    if (outcome.status === "failed") {
+      expect(outcome.message).toMatch(/picker exited with code/);
+    }
+  });
+
+  it("kills a hung child via the watchdog timeout", async () => {
+    const outcome = await runPickerChild(
+      { title: "t", filters: [] },
+      { entry: writeFakeRfd("hang"), timeoutMs: 300 },
+    );
+    expect(outcome.status).toBe("failed");
+    if (outcome.status === "failed") {
+      expect(outcome.message).toMatch(/timed out/);
+    }
   });
 });

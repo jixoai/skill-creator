@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.1 (2026-09-15)
+
+Hotfix for the native file picker shipped in 2.0.0.
+
+### Fixed
+
+- **Native file picker never opened (macOS)** — the `@xmorse/rfd` async dialog
+  panics off the main thread in non-GUI host processes, leaving the RPC promise
+  pending forever: the attach buttons went dead with no dialog, no error, and no
+  way to recover without a restart. The picker now runs the synchronous dialog
+  in a dedicated child process (main-thread-safe, panic-isolated, watchdog at
+  10 minutes). Verified live: dialog opens and returns real paths, and picker
+  failures now surface a toast instead of failing silently.
+- Concurrent picker requests from a second client get a typed
+  "dialog is already open" rejection instead of queueing invisibly.
+
 ## 2.0.0 (2026-09-14)
 
 A major rewrite of the Skill Creator experience: model configuration rebuilt around
