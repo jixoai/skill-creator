@@ -164,8 +164,12 @@ jobs:
           echo "Creating tag v$VERSION"
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin "v$VERSION"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists — skipping"
+          else
+            git tag -a "v$VERSION" -m "Release v$VERSION"
+            git push origin "v$VERSION"
+          fi
 
       - name: Generate Release Notes
         id: release-notes
