@@ -1,0 +1,43 @@
+name: CI
+
+# 2026-09-15 Owner 裁决 Q7-A：web 模式是 ext-webview 无关的可测面——ubuntu runner
+# 上以标准无头 Chrome 驱动真 daemon 的 WebUI（Linux 是 web 模式的默认平台，
+# 此 job 同时是 Q6 Linux 行为探针的常驻载体）。构建（pnpm build）在 smoke 前
+# ——它消费 dist 产物（源码态 daemon 不伺服 SPA，产品契约）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-mode-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build the dist artifacts (the smoke consumes them)
+        run: pnpm build
+      - name: Run the web-mode browser smoke (real daemon + headless Chrome)
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: pnpm exec vitest run test/web-mode-smoke.test.ts
