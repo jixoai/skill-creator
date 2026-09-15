@@ -18,7 +18,9 @@ const submission = vi.hoisted(() => {
   };
 });
 const agentStore = vi.hoisted(() => ({
-  agentQueue: { items: [] as Array<{ messageId: string; target: string; text: string; attachments: number }> },
+  agentQueue: {
+    items: [] as Array<{ messageId: string; target: string; text: string; attachments: number }>,
+  },
   agentSession: { status: "idle" as string },
   updateAgentQueueItem: vi.fn(),
 }));
@@ -54,7 +56,8 @@ function mountDock() {
     row: () => document.querySelector<HTMLElement>('[aria-label="Queued messages"] li'),
     editButton: () =>
       document.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]:not(input)'),
-    steerButton: () => document.querySelector<HTMLButtonElement>('[aria-label="Steer with this message"]'),
+    steerButton: () =>
+      document.querySelector<HTMLButtonElement>('[aria-label="Steer with this message"]'),
     removeButton: () =>
       document.querySelector<HTMLButtonElement>('[aria-label="Remove queued message"]'),
     editInput: () => document.querySelector<HTMLInputElement>('[aria-label="Edit queued message"]'),

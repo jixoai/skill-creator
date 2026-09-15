@@ -230,7 +230,9 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       },
       queue: {
         // C2：内核 inbox 队列面（非 live = 空 items；update 竞态 typed NOT_FOUND）。
-        list: rpc.agent.queue.list.handler(({ input }) => domain.agentSessions.queueList(input.sessionId)),
+        list: rpc.agent.queue.list.handler(({ input }) =>
+          domain.agentSessions.queueList(input.sessionId),
+        ),
         update: rpc.agent.queue.update.handler(({ input }) => {
           domain.agentSessions.queueUpdate(input.sessionId, {
             messageId: input.messageId,

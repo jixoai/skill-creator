@@ -87,6 +87,14 @@ Creator            = create + revision-checked edit/delete + change log
 Repository         = clone + pin commit + scan + preview + install
 Source             = Discover feed 的 curated 或 user Git 源（sources.json）
 Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply）
+@ Reference        = composer `@` 芯片引用：UI 只发 opaque 引用（file 绝对路径 /
+                      session id），daemon 展开为 [reference: …] 文本块（file 走
+                      agent-files 守卫链；session 走转录有界摘要）；绘制为 textarea
+                      镜像层芯片 + 原子退格（有序出现消费绑定）
+Queue Face         = agent.queue.*：内核 ReactLoopInbox 的读写面——list 投影
+                      next-turn/next-step 待处理项，update 按 messageId 行级
+                      edit（保留附件块）/remove/steer（仅 running）；真相在内核，
+                      QueueDock 混合乐观行渲染
 Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
 Agent Kernel       = headless DSH 内核：单 dsh-base bundle + 产品 preset（persona/ask-user）
                       + 工具面收窄（专注模式禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
@@ -476,7 +484,8 @@ src/
 |   |   `-- domain-capabilities.ts [2] contract-map 20 项能力登记（authority 标注）
 |   |-- kernel/
 |   |   |-- dsh-kernel.ts ------ [3] headless profile boot / 工具面收窄 / mcp row / role rows
-|   |   |-- agent-sessions.ts -- [4] 面板会话面 / 帧流投影（含 subagent 帧）/ user-questions answerer / prompt queue-steer
+|   |   |-- agent-sessions.ts -- [4] 面板会话面 / 帧流投影（含 subagent 帧）/ user-questions answerer / prompt queue-steer / queue 薄委托
+|   |   |-- agent-queue.ts ----- [2] 内核 inbox 投影 + edit/remove/steer 操作映射
 |   |   |-- agent-roles.ts ----- [2] 角色目录（shared AGENT_ROLES 单源）+ persona + tool-subagent 行 YAML
 |   |   `-- product-prompt.ts -- [2] 版本化最佳实践 system prompt section
 |   |-- mcp/

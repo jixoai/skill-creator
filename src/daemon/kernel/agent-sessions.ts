@@ -1557,14 +1557,20 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       const inbox = entry.agent.inbox as InboxLike;
       if (input.action === "remove") {
         if (!inbox.remove(input.messageId)) {
-          throw new DomainError("NOT_FOUND", `queued message no longer pending: ${input.messageId}`);
+          throw new DomainError(
+            "NOT_FOUND",
+            `queued message no longer pending: ${input.messageId}`,
+          );
         }
         return;
       }
       if (input.action === "edit") {
         const found = projectInbox(inbox).find(({ item }) => item.messageId === input.messageId);
         if (found === undefined) {
-          throw new DomainError("NOT_FOUND", `queued message no longer pending: ${input.messageId}`);
+          throw new DomainError(
+            "NOT_FOUND",
+            `queued message no longer pending: ${input.messageId}`,
+          );
         }
         inbox.replace(input.messageId, rebuildEditedMessage(found.parsed, input.text ?? ""));
         return;

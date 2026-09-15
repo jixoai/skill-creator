@@ -254,3 +254,56 @@ The composer MUST render locked/read-only states (session removed, disconnected,
 - **WHEN** a trigger adjudication or submission is in flight
 - **THEN** the draft stays visible and read-only
 - **AND** the model picker remains interactive.
+
+### Requirement: @ references carry daemon-side expansion
+
+The composer MUST offer an `@` trigger listing prior sessions (minus the current one) and files browsed through the daemon file face with directory drill and a pinned parent row; picking an entry MUST drop a `@name` token bound to an opaque reference in an ordered-occurrence registry; tokens MUST render as painted chips over the text base and backspace at a chip tail MUST delete the whole token; submission MUST carry only references whose tokens still appear; the daemon MUST expand file references through the shared guard chain (absolute/realpath/regular/≤512KiB/textual) and session references as bounded transcript digests, injecting `[reference: …]` text blocks, and missing targets MUST fail the prompt typed.
+
+#### Scenario: file reference expands server-side
+
+- **WHEN** a prompt carries a file reference whose token is still in the text
+- **THEN** the kernel message receives a `[reference: <canonical path>]` text block after the main text
+- **AND** a binary or oversized target is rejected typed, pointing at the attachment channel.
+
+#### Scenario: editing a token kills its reference
+
+- **WHEN** the user edits a chip token so it no longer matches
+- **THEN** the chip stops painting and the reference is pruned at submit time
+- **AND** a backspace at the token tail deletes the whole token and unregisters the reference.
+
+#### Scenario: reference-carrying slash text stays a message
+
+- **WHEN** a `/`-prefixed prompt carries references
+- **THEN** it bypasses the slash-command path and reaches the model with the reference blocks.
+
+### Requirement: queue rows are actionable against the kernel inbox
+
+The queue dock MUST merge kernel inbox items (with edit, remove, and steer actions addressed by kernel message id) with in-flight optimistic rows deduped by text; edit MUST be inline text-only with attachment blocks preserved by the daemon; steer MUST move a running session's next-turn item to next-step and MUST be disabled otherwise; a consumed message id MUST surface as a typed error that refreshes the dock to kernel truth.
+
+#### Scenario: editing a queued row preserves attachments
+
+- **WHEN** the user edits a queued row and saves
+- **THEN** the kernel inbox item's text block is replaced and its image/file blocks survive
+- **AND** the row re-renders from the refreshed kernel projection.
+
+#### Scenario: steer is boundary-gated
+
+- **WHEN** the session is idle or the row already sits in next-step
+- **THEN** the steer action is rejected typed or disabled
+- **AND** a running next-turn row steers into next-step with a visible badge.
+
+### Requirement: skill tokens get lexicon decoration and busy-Enter is a settings row
+
+`/name` tokens hitting the loaded skills catalog MUST render as neutral-tint decoration over the text base (boundary-safe: `/namez`, `//`, and `://` stay plain; unknown commands stay plain); the busy-Enter preference MUST be exposed as a Settings → Agent row sharing one reactive truth with the `/queue` `/steer` commands and the composer primary button.
+
+#### Scenario: catalog hit decorates
+
+- **WHEN** the draft contains `/agents-sdk` while that skill is loaded from the current provider
+- **THEN** the token paints with a muted tint that ends before the trailing space
+- **AND** plain text and reference chips remain visually distinct.
+
+#### Scenario: settings row and commands share truth
+
+- **WHEN** the user picks Steer in Settings → Agent
+- **THEN** the persisted preference updates and the composer primary button re-resolves immediately
+- **AND** `/queue` `/steer` commands flip the same row state.

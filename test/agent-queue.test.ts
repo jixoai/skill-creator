@@ -31,8 +31,7 @@ let service: AgentSessionsService | null = null;
 /** stub inbox：内存实现 ReactLoopInbox 结构面（replace 签发新 id 与内核同法）。 */
 function makeInbox() {
   const state = { nextTurn: [] as unknown[], nextStep: [] as unknown[] };
-  const idOf = (message: unknown): string =>
-    String((message as { id: unknown }).id ?? "");
+  const idOf = (message: unknown): string => String((message as { id: unknown }).id ?? "");
   return {
     state,
     get nextTurn() {
@@ -142,7 +141,10 @@ describe("agent queue projection (C2)", () => {
     const turnId = enqueue(agent, "second please", 1);
     agent.inbox.append(
       "next-step",
-      createUserMessage({ source: { kind: "user" }, content: [{ type: "text", text: "steer now" }] as never }),
+      createUserMessage({
+        source: { kind: "user" },
+        content: [{ type: "text", text: "steer now" }] as never,
+      }),
     );
     agent.inbox.nextTurn.push({ not: "a-message" });
 
@@ -194,9 +196,9 @@ describe("agent queue update (C2)", () => {
     const session = await boot(agent);
     const id = enqueue(agent, "redirect");
 
-    expect(() => service!.queueUpdate(session.sessionId, { messageId: id, action: "steer" })).toThrowError(
-      /needs a running turn/,
-    );
+    expect(() =>
+      service!.queueUpdate(session.sessionId, { messageId: id, action: "steer" }),
+    ).toThrowError(/needs a running turn/);
 
     agent.status = "running";
     service!.queueUpdate(session.sessionId, { messageId: id, action: "steer" });

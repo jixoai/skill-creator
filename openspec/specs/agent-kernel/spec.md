@@ -137,3 +137,25 @@ restrict（fs/shell/web 收窄）不因模式放宽。
 
 - **WHEN** WebUI 渲染模式卡与 chip
 - **THEN** label/description/tokenHint 来自 shared 契约常量，不存在第二份手抄目录
+
+### Requirement: kernel inbox exposes item-level queue operations
+
+The daemon MUST project the kernel ReactLoopInbox read face (next-turn and next-step pending items with joined text and attachment counts, malformed entries skipped) and MUST map the official updateQueue semantics onto its write face: edit replaces the text block while preserving non-text blocks with a fresh message id, remove drops the item, and steer moves a running session's next-turn item to next-step; consumed message ids MUST surface as typed NOT_FOUND rather than silent no-ops, and non-live sessions MUST project an empty queue rather than guessing.
+
+#### Scenario: edit preserves attachment blocks
+
+- **WHEN** a queued message with image blocks is edited through the queue face
+- **THEN** the replacement message carries the new text block plus the original image blocks
+- **AND** subsequent queue reads address the fresh message id.
+
+#### Scenario: stale id fails typed
+
+- **WHEN** a queue update targets a message the kernel already claimed
+- **THEN** the operation fails with typed NOT_FOUND
+- **AND** the client refreshes its queue projection instead of retrying the stale id.
+
+#### Scenario: steer is running-only
+
+- **WHEN** steer targets a next-turn item while the session is idle
+- **THEN** the operation is rejected typed INVALID_OPERATION
+- **AND** no inbox mutation occurs.

@@ -47,7 +47,10 @@ export function parseInboxMessage(raw: unknown): InboxMessage | null {
 }
 
 /** 消息 → 队列项投影（text = 文本块拼接；attachments = image/file 块计数）。 */
-export function queueItemOf(message: InboxMessage, target: AgentQueueItem["target"]): AgentQueueItem {
+export function queueItemOf(
+  message: InboxMessage,
+  target: AgentQueueItem["target"],
+): AgentQueueItem {
   const texts: string[] = [];
   let attachments = 0;
   for (const block of message.content) {

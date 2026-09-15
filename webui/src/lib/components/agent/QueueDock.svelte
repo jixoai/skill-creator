@@ -27,10 +27,7 @@
     const optimistic = queuedOutbox.items
       .filter((item) => !kernelTexts.has(item.text))
       .map((item) => ({ kind: "optimistic" as const, text: item.text }));
-    return [
-      ...agentQueue.items.map((item) => ({ kind: "kernel" as const, item })),
-      ...optimistic,
-    ];
+    return [...agentQueue.items.map((item) => ({ kind: "kernel" as const, item })), ...optimistic];
   });
 
   /** 行内编辑态（C2）：messageId + 草稿文本；Esc 取消、Enter 保存。 */
@@ -91,8 +88,7 @@
     >
       <IconListPlus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       <span class="font-medium">Queued</span>
-      <span class="rounded border border-border bg-background px-1 text-primary"
-        >{rows.length}</span
+      <span class="rounded border border-border bg-background px-1 text-primary">{rows.length}</span
       >
       <span class="flex-1"></span>
       <IconChevronDown
