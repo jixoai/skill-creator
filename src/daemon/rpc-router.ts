@@ -228,6 +228,18 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           session: await domain.agentSessions.setMode(input.sessionId, input.mode),
         })),
       },
+      queue: {
+        // C2：内核 inbox 队列面（非 live = 空 items；update 竞态 typed NOT_FOUND）。
+        list: rpc.agent.queue.list.handler(({ input }) => domain.agentSessions.queueList(input.sessionId)),
+        update: rpc.agent.queue.update.handler(({ input }) => {
+          domain.agentSessions.queueUpdate(input.sessionId, {
+            messageId: input.messageId,
+            action: input.action,
+            ...(input.action === "edit" ? { text: input.text } : {}),
+          });
+          return { updated: true as const };
+        }),
+      },
       files: {
         // R17-B 后端文件选择器：用户本机自由浏览（读面，无 containment）。
         list: rpc.agent.files.list.handler(async ({ input }) => domain.agentFiles.list(input)),

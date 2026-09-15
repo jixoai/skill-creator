@@ -41,6 +41,10 @@ import {
   AgentSessionPromptInputSchema,
   AgentSessionPromptResultSchema,
   AgentSessionSetModeInputSchema,
+  AgentQueueListInputSchema,
+  AgentQueueListResultSchema,
+  AgentQueueUpdateInputSchema,
+  AgentQueueUpdateResultSchema,
   AgentSessionSetModeResultSchema,
   AgentSessionStreamInputSchema,
   AgentSessionStreamResultSchema,
@@ -343,6 +347,16 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       /** 切换会话模式（add-agent-settings-modes：running 拒绝；live 句柄释放，
        * 下一次 prompt 以新模式 setup 复活，历史由内核 session log 保留）。 */
       setMode: oc.input(AgentSessionSetModeInputSchema).output(AgentSessionSetModeResultSchema),
+    },
+    /**
+     * 内核 inbox 队列面（C2）：queue 真相在 ReactLoopInbox；list 投影待处理项，
+     * update 执行行级 edit/remove/steer（官方 updateQueue 语义）。
+     */
+    queue: {
+      /** 待处理项（非 live 会话 = 空 items；live next-step + next-turn 有序）。 */
+      list: oc.input(AgentQueueListInputSchema).output(AgentQueueListResultSchema),
+      /** 行级操作；messageId 已消费 = typed NOT_FOUND（竞态可见）。 */
+      update: oc.input(AgentQueueUpdateInputSchema).output(AgentQueueUpdateResultSchema),
     },
     /**
      * 后端文件选择器（R17-B）：真实路径浏览 + 单文件预览。用户本机自由浏览是

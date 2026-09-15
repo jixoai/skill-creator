@@ -30,6 +30,8 @@
 import { z } from "zod";
 import {
   AgentApprovalQuestionSchema,
+  type AgentQueueItem,
+  type AgentQueueUpdateInput,
   type AgentSessionsCleanupInput,
   type AgentSessionsCleanupResult,
   type AgentSessionSummary,
@@ -133,6 +135,8 @@ const setModeGate = createRequestGenerationGate(getConnectionGeneration);
 const credentialGate = createRequestGenerationGate(getConnectionGeneration);
 // 会话清理（R14-C）：成功后代次门失效旧响应并刷新列表；失效结果投影为 null。
 const cleanupGate = createRequestGenerationGate(getConnectionGeneration);
+// C2：内核 inbox 队列投影（best-effort——失败保留上一状态，不打断帧流）。
+const queueGate = createRequestGenerationGate(getConnectionGeneration);
 
 /** 宽屏侧栏宽度语义（R17-C resize）：≥720px 可拖拽，320–720px，默认 440；
  * 持久键 sessionStorage（会话级，随 tab 存活，不在 daemon/文件系统落地）。 */
@@ -199,6 +203,14 @@ export const agentSessionsList = $state({
   loading: false,
   sessions: [] as AgentSessionSummary[],
   error: null as string | null,
+});
+
+/**
+ * 内核 inbox 队列投影（C2）：真相在内核 ReactLoopInbox；prompt 落定、
+ * user-text/turn-end 帧到达、会话切换时刷新（best-effort，失败保留旧态）。
+ */
+export const agentQueue = $state({
+  items: [] as AgentQueueItem[],
 });
 
 /** 配置投影。 */
@@ -410,6 +422,9 @@ function resetSessionView(
   pendingToolArgs = new Map();
   // W4：发件箱投影随会话清空（队列真相在内核 inbox）。
   resetQueuedOutbox();
+  // C2：队列投影随会话清空并按新会话拉取（非 live 会话投影为空 items）。
+  agentQueue.items = [];
+  void refreshAgentQueue();
   // R17-A：sessionId 变化即换轨到该会话的草稿（selectAgentSession 与惰性 create
   // 两个向量共用本入口；双向暂存，切换不丢任何一轨）。
   switchComposerTrack(sessionId);
@@ -547,6 +562,8 @@ export async function sendAgentPrompt(
     // R17-A：发送成功清发送轨（清轨收窄后的第二个调用点；提交点不清草稿——
     // 失败留在原轨可重试）。发送中途切走的会话轨照常按发送目标清理。
     resetComposerTrack(sessionId);
+    // C2：queue 模式的 prompt 已入内核 inbox——拉一次队列真相。
+    if (mode === "queue") void refreshAgentQueue();
   } catch (error) {
     if (!request.isCurrent()) return;
     agentSession.promptError = error instanceof Error ? error.message : String(error);
@@ -570,6 +587,58 @@ export async function cancelAgentSession(): Promise<void> {
     agentSession.error = error instanceof Error ? error.message : String(error);
   }
   void pollAgentStream();
+}
+
+/**
+ * 刷新内核队列投影（C2）：非当前会话/无会话直接清空；失败保留上一状态
+ * （队列是辅助投影，错误不打断帧流——下一次刷新时机自愈）。
+ */
+export async function refreshAgentQueue(): Promise<void> {
+  const sessionId = agentSession.sessionId;
+  if (!sessionId) {
+    agentQueue.items = [];
+    return;
+  }
+  const request = queueGate.issue();
+  try {
+    const result = await requireRpc().agent.queue.list({ sessionId });
+    if (!request.isCurrent()) return;
+    if (agentSession.sessionId !== sessionId) return;
+    agentQueue.items = result.items;
+  } catch {
+    // best-effort：保留上一投影。
+  }
+}
+
+/**
+ * 队列行级操作（C2）：成功后刷新投影；typed 失败（NOT_FOUND 竞态等）以
+ * { error } 返回给 dock 呈现，同时刷新一次让 UI 回到内核真相。
+ */
+export type AgentQueueUpdateBody =
+  | { messageId: string; action: "edit"; text: string }
+  | { messageId: string; action: "remove" }
+  | { messageId: string; action: "steer" };
+
+export async function updateAgentQueueItem(
+  input: AgentQueueUpdateBody,
+): Promise<{ updated: true } | { error: string } | null> {
+  const sessionId = agentSession.sessionId;
+  if (!sessionId) return null;
+  // 按 action 穷尽构造（union 的 Omit 不分布——spread 会破坏判别收窄）。
+  const payload: AgentQueueUpdateInput =
+    input.action === "edit"
+      ? { sessionId, messageId: input.messageId, action: "edit", text: input.text }
+      : input.action === "remove"
+        ? { sessionId, messageId: input.messageId, action: "remove" }
+        : { sessionId, messageId: input.messageId, action: "steer" };
+  try {
+    await requireRpc().agent.queue.update(payload);
+    await refreshAgentQueue();
+    return { updated: true as const };
+  } catch (error) {
+    void refreshAgentQueue();
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** 回答一个待答审批请求。 */
@@ -844,7 +913,9 @@ function appendFrame(frame: DshSessionStreamFrame): void {
       // 重置）队列必空，帧即唯一来源（attachments 元数据同时回填回显）。
       if (typeof frame.text === "string" && frame.text.length > 0) {
         // W4：排队发件箱同帧退队（durable 到达 = 该条已开始自己的轮次）。
+        // C2：user-text 到达 = 一条队列项被消费——刷新内核队列投影。
         retireQueuedSend(frame.text);
+        void refreshAgentQueue();
         const echoIndex = pendingUserEcho.indexOf(frame.text);
         if (echoIndex >= 0) {
           pendingUserEcho.splice(echoIndex, 1);
@@ -1004,6 +1075,8 @@ function appendFrame(frame: DshSessionStreamFrame): void {
     case "turn-end": {
       const reason =
         typeof frame.text === "string" && frame.text.length > 0 ? frame.text : "completed";
+      // C2：轮次边界是队列语义变化点（steer 窗口开合/下一条被 claim）。
+      void refreshAgentQueue();
       const usage = pendingUsage;
       pendingUsage = null;
       const startedAt = agentSession.turnStartedAt;

@@ -33,6 +33,11 @@ export const agentSessionsList = $state({
   sessions: [] as Array<{ sessionId: string; cwd: string; mode: string }>,
 });
 
+/** C2：内核队列投影（QueueDock 消费）。 */
+export const agentQueue = $state({
+  items: [] as Array<{ messageId: string; target: string; text: string; attachments: number }>,
+});
+
 export const updateAgentSettings = vi.fn();
 export const createAgentSession = vi.fn();
 export const sendAgentPrompt = vi.fn();
@@ -41,6 +46,9 @@ export const cancelAgentSession = vi.fn();
 export const beginNewAgentSession = vi.fn();
 // C1：ReferenceMenu 的会话列表惰性刷新面。
 export const loadAgentSessions = vi.fn();
+// C2：队列行级操作（QueueDock 消费；默认解析成功）。
+export const updateAgentQueueItem = vi.fn().mockResolvedValue({ updated: true });
+export const refreshAgentQueue = vi.fn();
 
 export function resetAgentStoreStub(view: DshStewardSettingsView | null): void {
   agentRuntimeConfig.view = view;

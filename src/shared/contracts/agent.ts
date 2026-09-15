@@ -200,6 +200,64 @@ export const AgentSessionStreamResultSchema = z.object({
 /** stream 查询结果。 */
 export type AgentSessionStreamResult = z.infer<typeof AgentSessionStreamResultSchema>;
 
+/**
+ * 内核 inbox 待处理项（composer-references-queue-actions C2）：queue 真相在内核
+ * ReactLoopInbox（next-turn 排队 / next-step 转向）；本投影只携带 messageId、
+ * 拼接文本与附件计数——面板行级操作（edit/remove/steer）按 messageId 寻址。
+ */
+export const AgentQueueItemSchema = z.object({
+  /** 内核 UserMessage id（edit/remove/steer 的幂等寻址键）。 */
+  messageId: z.string().min(1),
+  target: z.enum(["next-turn", "next-step"]),
+  /** content 文本块拼接（引用/附件块不展开——chip 已在正文 token 中）。 */
+  text: z.string(),
+  /** image/file 附件块计数（行尾 chip 展示）。 */
+  attachments: z.number().int().nonnegative(),
+});
+/** 队列项。 */
+export type AgentQueueItem = z.infer<typeof AgentQueueItemSchema>;
+
+/** queue 列表输入（非 live 会话返回空 items——重启未复活的挂起队列不可操作）。 */
+export const AgentQueueListInputSchema = z.object({ sessionId: z.string().min(1) });
+/** queue 列表输入。 */
+export type AgentQueueListInput = z.infer<typeof AgentQueueListInputSchema>;
+
+/** queue 列表结果。 */
+export const AgentQueueListResultSchema = z.object({ items: z.array(AgentQueueItemSchema) });
+/** queue 列表结果。 */
+export type AgentQueueListResult = z.infer<typeof AgentQueueListResultSchema>;
+
+/**
+ * queue 行级操作（官方 updateQueue 语义）：edit 仅文本（附件块原样保留）；
+ * remove 删除；steer 把 next-turn 项改为 next-step（仅 running，idle 无边界语义）。
+ * messageId 已被消费（轮次已开始）= typed NOT_FOUND——竞态可见，UI 刷新列表。
+ */
+export const AgentQueueUpdateInputSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    sessionId: z.string().min(1),
+    messageId: z.string().min(1),
+    action: z.literal("edit"),
+    text: z.string().min(1).max(20_000),
+  }),
+  z.strictObject({
+    sessionId: z.string().min(1),
+    messageId: z.string().min(1),
+    action: z.literal("remove"),
+  }),
+  z.strictObject({
+    sessionId: z.string().min(1),
+    messageId: z.string().min(1),
+    action: z.literal("steer"),
+  }),
+]);
+/** queue 更新输入。 */
+export type AgentQueueUpdateInput = z.infer<typeof AgentQueueUpdateInputSchema>;
+
+/** queue 更新结果（失败走 typed 错误，不伪装成功）。 */
+export const AgentQueueUpdateResultSchema = z.object({ updated: z.literal(true) });
+/** queue 更新结果。 */
+export type AgentQueueUpdateResult = z.infer<typeof AgentQueueUpdateResultSchema>;
+
 /** 跨会话帧查询输入（原 dsh.sessions.streams 语义平移；steward run 投影消费）。 */
 export const AgentSessionsStreamsInputSchema = z.object({
   runId: z.string().min(1).optional(),

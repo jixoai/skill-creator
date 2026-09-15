@@ -35,6 +35,7 @@ import {
   type DshSessionStreamFrame,
 } from "../../shared/contracts/dsh-runtime.js";
 import type {
+  AgentQueueItem,
   AgentSessionStatus,
   AgentSessionSummary,
   AgentSessionsCleanupInput,
@@ -48,6 +49,7 @@ import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
 import { applyAgentMode } from "./agent-modes.js";
 import { registerProductPromptSections } from "./product-prompt.js";
 import { runSessionCleanup } from "./session-cleanup.js";
+import { projectInbox, rebuildEditedMessage, type InboxLike } from "./agent-queue.js";
 import { summaryOfMeta, type SessionTranscripts } from "./session-transcripts.js";
 
 /** 内核句柄访问器（daemon boot 后注入；未挂载返回 null）。 */
@@ -92,6 +94,8 @@ interface AgentLike {
   /** W4 steer（next-step 转向）；内核 Agent 面存在——类型面可选防降级组合。 */
   steer?(message: unknown): void;
   cancel(cause: unknown, options?: unknown): void;
+  /** C2：内核 ReactLoopInbox 面（queue 行级操作）；unknown 收窄后交 agent-queue。 */
+  inbox?: unknown;
 }
 
 interface AgentsServiceLike {
@@ -1523,6 +1527,68 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       };
       deps.transcripts.append(sessionId, frame);
       return summary;
+    },
+    /**
+     * C2 queue 面薄委托（逻辑在 agent-queue）：非 live 会话返回空 items——
+     * 重启后未复活的挂起队列不可操作（记录边界，不伪装）。live 会话无 inbox
+     * 面（内核面缺失）同样空 items。
+     */
+    queueList(sessionId: string): { items: AgentQueueItem[] } {
+      const entry = live.get(sessionId);
+      if (!entry || entry.agent.inbox === undefined) return { items: [] };
+      return { items: projectInbox(entry.agent.inbox as InboxLike).map(({ item }) => item) };
+    },
+    /**
+     * C2 queue 行级操作：edit=replace（新文本 + 原附件块）；remove=remove；
+     * steer=next-turn → next-step（仅 running）。messageId 已被消费（轮次已
+     * 开始）typed NOT_FOUND——竞态可见；目标不在 next-turn 时 steer 拒绝。
+     */
+    queueUpdate(
+      sessionId: string,
+      input: { messageId: string; action: "edit" | "remove" | "steer"; text?: string },
+    ): void {
+      const entry = live.get(sessionId);
+      if (!entry) {
+        throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
+      }
+      if (entry.agent.inbox === undefined) {
+        throw new DomainError("UNAVAILABLE", "agent kernel inbox surface missing");
+      }
+      const inbox = entry.agent.inbox as InboxLike;
+      if (input.action === "remove") {
+        if (!inbox.remove(input.messageId)) {
+          throw new DomainError("NOT_FOUND", `queued message no longer pending: ${input.messageId}`);
+        }
+        return;
+      }
+      if (input.action === "edit") {
+        const found = projectInbox(inbox).find(({ item }) => item.messageId === input.messageId);
+        if (found === undefined) {
+          throw new DomainError("NOT_FOUND", `queued message no longer pending: ${input.messageId}`);
+        }
+        inbox.replace(input.messageId, rebuildEditedMessage(found.parsed, input.text ?? ""));
+        return;
+      }
+      // steer：next-turn → next-step；仅 running（idle 无步骤边界语义）。
+      if (statusOf(entry) !== "running") {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          "steer needs a running turn; the session is idle",
+        );
+      }
+      const queued = projectInbox(inbox).find(
+        ({ item }) => item.messageId === input.messageId && item.target === "next-turn",
+      );
+      if (queued === undefined) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `message is not a queued next-turn item: ${input.messageId}`,
+        );
+      }
+      if (!inbox.remove(input.messageId)) {
+        throw new DomainError("NOT_FOUND", `queued message no longer pending: ${input.messageId}`);
+      }
+      inbox.append("next-step", queued.original);
     },
     /** 增量帧读取（afterSeq 游标 + limit 窗口）；非 live 会话由转录回放。 */
     stream(

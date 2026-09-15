@@ -16,11 +16,11 @@
 
 ## C2 —— QueueDock 行级操作
 
-- [ ] 2.1 契约：agent.queue.list/update（discriminated union）
-- [ ] 2.2 daemon：inbox 面投影 + edit/remove/steer 实现
-- [ ] 2.3 rpc-contract + rpc-router 接线
-- [ ] 2.4 webui：queue store（list/refresh 时机）+ QueueDock 行操作 UI
-- [ ] 2.5 测试 + vision 走查 + 提交
+- [x] 2.1 契约：agent.queue.list/update（discriminated union）
+- [x] 2.2 daemon：inbox 面投影 + edit/remove/steer 实现
+- [x] 2.3 rpc-contract + rpc-router 接线
+- [x] 2.4 webui：queue store（list/refresh 时机）+ QueueDock 行操作 UI
+- [x] 2.5 测试 + vision 走查 + 提交
 
 ## C3 —— 技能装饰 + 忙碌 Enter 设置行
 
