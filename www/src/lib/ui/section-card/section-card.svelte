@@ -270,7 +270,7 @@
   >
     {#if eyebrow}
       <p
-        class="font-nav text-primary [font-size:calc(var(--jx-text-secondary)_-_calc(var(--jx-unit)_/_4))] uppercase tracking-[0.24em]"
+        class="font-nav text-primary-text [font-size:calc(var(--jx-text-secondary)_-_calc(var(--jx-unit)_/_4))] uppercase tracking-[0.24em]"
       >
         {eyebrow}
       </p>

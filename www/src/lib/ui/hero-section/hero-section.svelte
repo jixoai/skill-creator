@@ -140,7 +140,7 @@
     class="grid @min-[64rem]/jx-hero:grid-cols-[minmax(0,1fr)_minmax(10.5cm,13cm)] @min-[64rem]/jx-hero:items-end gap-10 @min-[64rem]/jx-hero:gap-14"
   >
     <div class="min-w-0">
-      <p class="{step} font-nav text-primary text-[11px] uppercase tracking-[0.24em]" style="--jx-hero-delay: 0ms">
+      <p class="{step} font-nav text-primary-text text-[11px] uppercase tracking-[0.24em]" style="--jx-hero-delay: 0ms">
         {eyebrow}
       </p>
       {#if title}

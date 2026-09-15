@@ -46,7 +46,11 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0 0 0);
   --primary: oklch(0.6489 0.237 var(--brand-hue));
-  --primary-foreground: oklch(1 0 0);
+  --primary-foreground: oklch(0 0 0);
+  /* text-role green: L0.55/C0.12 is the AA floor across the family hue
+     range (worst 4.54 at hue 165) — filled surfaces keep the brighter
+     primary; text on light backgrounds uses this (2026-09-15 ruling). */
+  --primary-text: oklch(0.55 0.12 var(--brand-hue));
   --secondary: oklch(0.968 0.211 109.7692);
   --secondary-foreground: oklch(0 0 0);
   --muted: oklch(0.9551 0 0);
@@ -193,6 +197,7 @@
   /* the primary hue drifts -4° toward dark, mirroring the reference */
   --primary: oklch(0.7044 0.1872 calc(var(--brand-hue) - 4));
   --primary-foreground: oklch(0 0 0);
+  --primary-text: var(--primary);
   --secondary: oklch(0.9691 0.2005 109.6228);
   --secondary-foreground: oklch(0 0 0);
   --muted: oklch(0.2178 0 0);
@@ -793,6 +798,7 @@ html:not(.js) .jx-surface.jx-waapi:popover-open .jx-surface-shadow {
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-text: var(--primary-text);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);

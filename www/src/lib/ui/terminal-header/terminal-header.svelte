@@ -194,7 +194,7 @@
           </span>
         {/if}
         <span class="flex min-w-0 flex-col gap-0.5">
-          <span class="font-nav text-primary text-[11px] uppercase tracking-[0.24em] leading-tight">
+          <span class="font-nav text-primary-text text-[11px] uppercase tracking-[0.24em] leading-tight">
             {brand}
           </span>
           {#if domain}

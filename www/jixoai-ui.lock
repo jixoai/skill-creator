@@ -2,7 +2,7 @@
   "items": {
     "jixoai-theme": {
       "files": {
-        "src/lib/jixoai.css": "29ae457322b4cc67ab843d03dac66de22e34dacd36f692d4f058dd511ad274c5"
+        "src/lib/jixoai.css": "c81e7967bc0b75779acf0f050af2429e8d61d0c99340b66a148fe2563e07a4a0"
       }
     },
     "scrollbar-measure": {
@@ -39,7 +39,7 @@
     },
     "terminal-header": {
       "files": {
-        "src/lib/ui/terminal-header/terminal-header.svelte": "d93c3a133019aed734bd58d3c0fc695c12ae3321533e80b99625330b7522cc3b",
+        "src/lib/ui/terminal-header/terminal-header.svelte": "de9564857577e989f560001fc951345fb8d8dc27772213869ecc38df5be55b7d",
         "src/lib/ui/terminal-header/index.ts": "e55c3c6983d34d278fbc09ed98fca3790608b2842d91f9fe12c039e266cc1718",
         "src/lib/ui/terminal-header/terminal-header.css": "277abf453584a5c38c18b8b2afa5bfb40f697eba15c0c55b73b69b85d8db2e5f"
       }
@@ -71,7 +71,7 @@
     },
     "section-card": {
       "files": {
-        "src/lib/ui/section-card/section-card.svelte": "77b0bc0f99901acaf97e47d6ad1db5cbbe8e71910d783fd6f182d394f52f60b2",
+        "src/lib/ui/section-card/section-card.svelte": "0f14e0f0e55aad0c7ceab566d8c0367e01fb7d0a41b38b6d2730ff13d1615431",
         "src/lib/ui/section-card/section-card.css": "738ff9b09cff59e11501d4a811f5a36738ac2f7670816d48f19cc304b8598087",
         "src/lib/ui/section-card/index.ts": "12951780bf450291139cae8cd77c105f4fbb91573817920dda09238621c71343",
         "src/lib/ui/section-card/section-card-defaults.svelte.ts": "402de935a76fae64c41b5c166de85abee1f108a8dd59264858b5d608bab9db2f"
@@ -95,7 +95,7 @@
     "hero-section": {
       "files": {
         "src/lib/ui/hero-section/hero-section.css": "4524f9eedf9cb9aae1532816d9676e354c987b214a519e550b6f9c44bd6edc11",
-        "src/lib/ui/hero-section/hero-section.svelte": "07e86e56ddcff4ca3753c11f81c5234716af3421c36f88d69debf334548c247b",
+        "src/lib/ui/hero-section/hero-section.svelte": "643fa45c1a5c4571d0528e61a27fa1c6f639ef6c2267b8bcfdc72d257a384b2e",
         "src/lib/ui/hero-section/index.ts": "87d5a050b2321516f2dc12b851afadd3b02ab1a9479d8cd7e6ddd436a064d450"
       }
     },

@@ -263,7 +263,7 @@
           <ul class="flex flex-col gap-2">
             {#each app.points as point (point)}
               <li class="text-muted-foreground flex gap-2 text-pretty text-[13px] leading-6">
-                <span class="text-primary flex-none" aria-hidden="true">→</span>
+                <span class="text-primary-text flex-none" aria-hidden="true">→</span>
                 <span>{point}</span>
               </li>
             {/each}
@@ -331,7 +331,7 @@
         <ul class="flex flex-col gap-2.5">
           {#each agentPanel.points as point (point.title)}
             <li class="border-b border-border/60 pb-2.5">
-              <p class="font-nav text-primary text-[12px] uppercase tracking-[0.14em]">
+              <p class="font-nav text-primary-text text-[12px] uppercase tracking-[0.14em]">
                 {point.title}
               </p>
               <p class="text-muted-foreground mt-1 max-w-[68ch] text-pretty text-[13px] leading-6">
@@ -462,7 +462,7 @@ skill-creator stop</code
           <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border/60 pb-3">
             <a
               href={link.href}
-              class="text-primary font-nav text-[13px] uppercase tracking-[0.14em] underline underline-offset-2"
+              class="text-primary-text font-nav text-[13px] uppercase tracking-[0.14em] underline underline-offset-2"
             >
               {link.label} ↗
             </a>
