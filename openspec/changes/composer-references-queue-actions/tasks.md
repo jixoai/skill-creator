@@ -24,9 +24,9 @@
 
 ## C3 —— 技能装饰 + 忙碌 Enter 设置行
 
-- [ ] 3.1 composer-chips 增 /name 技能 token 样式（skills 命中）
-- [ ] 3.2 Settings→Agent Behavior 增 Busy Enter 行
-- [ ] 3.3 测试 + vision 走查 + 提交
+- [x] 3.1 composer-chips 增 /name 技能 token 样式（skills 命中）
+- [x] 3.2 Settings→Agent Behavior 增 Busy Enter 行
+- [x] 3.3 测试 + vision 走查 + 提交
 
 ## 收尾
 

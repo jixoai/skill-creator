@@ -20,8 +20,8 @@ const DRAFT_KEY_PREFIX = "sc.composer.draft.";
 
 export type BusyEnterMode = "queue" | "steer";
 
-/** 忙碌 Enter 偏好（持久；缺省 queue，官方同缺省）。 */
-export function busyEnterPreference(): BusyEnterMode {
+/** localStorage 安全读（SSR/隐私模式/无 window 环境回缺省）。 */
+function readStoredBusyEnter(): BusyEnterMode {
   try {
     const value = localStorage.getItem(BUSY_ENTER_KEY);
     return value === "steer" ? "steer" : "queue";
@@ -30,7 +30,20 @@ export function busyEnterPreference(): BusyEnterMode {
   }
 }
 
+/**
+ * 忙碌 Enter 偏好的响应式真相（C3）：$state 镜像 + localStorage 持久——设置面
+ * 行、/queue //steer 命令与 composer 主按钮读同一 $state（derived 即时重算），
+ * 不再依赖「下一次无关重算」顺带刷新。
+ */
+export const busyEnter = $state({ mode: readStoredBusyEnter() });
+
+/** 忙碌 Enter 偏好（响应式读；缺省 queue，官方同缺省）。 */
+export function busyEnterPreference(): BusyEnterMode {
+  return busyEnter.mode;
+}
+
 export function setBusyEnterPreference(mode: BusyEnterMode): void {
+  busyEnter.mode = mode;
   try {
     localStorage.setItem(BUSY_ENTER_KEY, mode);
   } catch {

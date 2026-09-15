@@ -97,6 +97,7 @@
     hydratePickedImagePreviews,
   } from "$lib/stores/agent.svelte";
   import { connectionState } from "$lib/stores/connection.svelte";
+  import { skillsState } from "$lib/stores/skills.svelte";
   import {
     busyEnterPreference,
     resolveSubmitGesture,
@@ -117,6 +118,7 @@
   import {
     activeDraftReferences,
     atomicChipBeforeCaret,
+    findSkillTokens,
     resolveChipOccurrences,
   } from "./composer-chips.js";
   import { INPUT_TAKING_TOKENS } from "./SlashMenu.svelte";
@@ -141,6 +143,14 @@
   /** C1 芯片出现（文本/registry 变化即重算）：绘制层与提交共用同一消费序。 */
   const chipOccurrences = $derived(
     resolveChipOccurrences(agentComposer.text, agentComposer.references),
+  );
+
+  /** C3 技能词法装饰：`/name` 命中当前 Provider 技能目录即绘中性 tint。 */
+  const skillSpans = $derived(
+    findSkillTokens(
+      agentComposer.text,
+      skillsState.skills.map((skill) => skill.name),
+    ),
   );
 
   /** W3 claim 态（input-taking 命令；首版目录无此类命令，机器就绪）：draft
@@ -626,6 +636,7 @@
     <ChipPaintLayer
       text={agentComposer.text}
       occurrences={chipOccurrences}
+      {skillSpans}
       heightPx={textareaHeight}
     />
     {#key sendEpoch}

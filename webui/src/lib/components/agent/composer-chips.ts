@@ -86,29 +86,55 @@ export function activeDraftReferences(
   return resolveChipOccurrences(text, references).map((occurrence) => occurrence.reference);
 }
 
-/** 镜像层渲染段：plain 文本或芯片（芯片文本与原文逐字一致）。 */
+/** 镜像层渲染段：plain 文本、引用芯片（文本逐字一致）或技能装饰段（C3）。 */
 export type PaintSegment =
   | { kind: "plain"; text: string }
-  | { kind: "chip"; text: string; reference: ComposerReference };
+  | { kind: "chip"; text: string; reference: ComposerReference }
+  | { kind: "skill"; text: string; name: string };
 
-/** 绘制 span 投影：occurrences 区间以文本序切分 text。 */
+/**
+ * 绘制 span 投影：引用出现区间与技能装饰区间（互斥前缀面，重叠防御性丢弃
+ * 后者）以文本序切分 text。
+ */
 export function paintSegments(
   text: string,
   occurrences: readonly ChipOccurrence[],
+  skillSpans: readonly SkillChipSpan[] = [],
 ): PaintSegment[] {
+  type Mark = { start: number; end: number; segment: PaintSegment };
+  const marks: Mark[] = [
+    ...[...occurrences]
+      .sort((a, b) => a.start - b.start)
+      .map((occurrence) => ({
+        start: occurrence.start,
+        end: occurrence.end,
+        segment: {
+          kind: "chip",
+          text: text.slice(occurrence.start, occurrence.end),
+          reference: occurrence.reference,
+        } as PaintSegment,
+      })),
+    ...[...skillSpans]
+      .sort((a, b) => a.start - b.start)
+      .map((span) => ({
+        start: span.start,
+        end: span.end,
+        segment: {
+          kind: "skill",
+          text: text.slice(span.start, span.end),
+          name: span.name,
+        } as PaintSegment,
+      })),
+  ].sort((a, b) => a.start - b.start);
   const segments: PaintSegment[] = [];
   let cursor = 0;
-  for (const occurrence of [...occurrences].sort((a, b) => a.start - b.start)) {
-    if (occurrence.start < cursor) continue; // 防御：区间重叠（不应发生）时丢弃后者
-    if (occurrence.start > cursor) {
-      segments.push({ kind: "plain", text: text.slice(cursor, occurrence.start) });
+  for (const mark of marks) {
+    if (mark.start < cursor) continue; // 防御：区间重叠（不应发生）时丢弃后者
+    if (mark.start > cursor) {
+      segments.push({ kind: "plain", text: text.slice(cursor, mark.start) });
     }
-    segments.push({
-      kind: "chip",
-      text: text.slice(occurrence.start, occurrence.end),
-      reference: occurrence.reference,
-    });
-    cursor = occurrence.end;
+    segments.push(mark.segment);
+    cursor = mark.end;
   }
   if (cursor < text.length) segments.push({ kind: "plain", text: text.slice(cursor) });
   return segments;
@@ -121,4 +147,44 @@ export function atomicChipBeforeCaret(
   occurrences: readonly ChipOccurrence[],
 ): ChipOccurrence | null {
   return occurrences.find((occurrence) => occurrence.end === caret) ?? null;
+}
+
+/** 技能词法装饰 span（C3：官方 TextRefNode 的文本基座适配——仅样式无交互）。 */
+export interface SkillChipSpan {
+  start: number;
+  end: number;
+  /** 命中的技能名（不含 "/"）。 */
+  name: string;
+}
+
+/**
+ * 技能 token 扫描（C3）：`/name` 命中 skills 目录名集即装饰。边界 = 起点在
+ * 行首/空白后，终点后是文末/空白（`/namez` 不装饰 `/name`）；命令（不在技能
+ * 目录内的 `/compact` 等）天然不装饰；`//`、`://` 转义不命中（token 前必须
+ * 是空白/行首）。
+ */
+export function findSkillTokens(text: string, skillNames: readonly string[]): SkillChipSpan[] {
+  if (skillNames.length === 0) return [];
+  const names = [...new Set(skillNames)].sort((a, b) => b.length - a.length);
+  const spans: SkillChipSpan[] = [];
+  let index = 0;
+  while (index < text.length) {
+    if (!atTokenBoundary(text, index) || text[index] !== "/") {
+      index += 1;
+      continue;
+    }
+    const name = names.find(
+      (candidate) =>
+        text.startsWith(`/${candidate}`, index) &&
+        (index + candidate.length + 1 === text.length ||
+          /\s/.test(text[index + candidate.length + 1] ?? "")),
+    );
+    if (name === undefined) {
+      index += 1;
+      continue;
+    }
+    spans.push({ start: index, end: index + name.length + 1, name });
+    index += name.length + 1;
+  }
+  return spans;
 }

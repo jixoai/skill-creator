@@ -4,6 +4,9 @@
   1. 默认模式：四模式卡（shared DSH_AGENT_MODES 目录，单一事实源；free 卡明示
      token 成本）——新会话继承；当前会话经面板 header 的模式 chip 切换。
   2. 行为：LLM preset 与 approval policy 的行内切换（ask/never 语义沿用）。
+  3. Busy Enter（C3）：忙碌中 Enter 偏好（queue/steer）的设置行——与 /queue
+     //steer 命令同键同源（agent-submission 的 $state 镜像 + localStorage），
+     选中即生效无需保存。
 -->
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
@@ -13,11 +16,21 @@
     loadAgentSettings,
     updateAgentSettings,
   } from "$lib/stores/agent.svelte";
+  import {
+    busyEnter,
+    setBusyEnterPreference,
+    type BusyEnterMode,
+  } from "$lib/stores/agent-submission.svelte";
 
   let rejection = $state<string | null>(null);
 
   const presetOptions = ["deterministic", "live"] as const;
   const policyOptions = ["ask", "never"] as const;
+  /** C3：忙碌 Enter 偏好行（与 /queue //steer 同源）。 */
+  const busyEnterOptions: Array<{ mode: BusyEnterMode; label: string; hint: string }> = [
+    { mode: "queue", label: "Queue", hint: "after the current turn" },
+    { mode: "steer", label: "Steer", hint: "into the current turn" },
+  ];
 
   const view = $derived(agentRuntimeConfig.view);
 
@@ -99,6 +112,26 @@
               onclick={() => void apply({ permissions: { approvalPolicy: policy } })}
             >
               {policy}
+            </button>
+          {/each}
+        </div>
+      </div>
+      <div class="space-y-1" aria-label="Busy Enter">
+        <span class="text-[10px] text-muted-foreground"
+          >Busy Enter — what a plain Enter does while the agent is working</span
+        >
+        <div class="flex gap-1.5">
+          {#each busyEnterOptions as option (option.mode)}
+            <button
+              class="flex-1 rounded-md border px-2 py-1 transition-colors {busyEnter.mode ===
+              option.mode
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border hover:bg-muted'}"
+              aria-pressed={busyEnter.mode === option.mode}
+              onclick={() => setBusyEnterPreference(option.mode)}
+            >
+              {option.label}
+              <span class="ml-1 text-[9px] text-muted-foreground">{option.hint}</span>
             </button>
           {/each}
         </div>

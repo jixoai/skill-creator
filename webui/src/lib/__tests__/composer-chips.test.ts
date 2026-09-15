@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeDraftReferences,
   atomicChipBeforeCaret,
+  findSkillTokens,
   paintSegments,
   resolveChipOccurrences,
   type ComposerReference,
@@ -96,5 +97,50 @@ describe("paintSegments (C1)", () => {
 
   it("returns a single plain segment when no chips resolve", () => {
     expect(paintSegments("plain only", [])).toEqual([{ kind: "plain", text: "plain only" }]);
+  });
+});
+
+describe("findSkillTokens (C3 skill lexicon decoration)", () => {
+  const skills = ["code-review", "deploy"];
+
+  it("decorates /name tokens that hit the skills catalog", () => {
+    const spans = findSkillTokens("use /code-review then /deploy now", skills);
+    expect(spans).toEqual([
+      { start: 4, end: 16, name: "code-review" },
+      { start: 22, end: 29, name: "deploy" },
+    ]);
+  });
+
+  it("requires a boundary after the token (/deployz does not decorate /deploy)", () => {
+    expect(findSkillTokens("/deployz now", skills)).toEqual([]);
+    expect(findSkillTokens("/deploy", skills)).toEqual([{ start: 0, end: 7, name: "deploy" }]);
+  });
+
+  it("ignores command and escaped tokens (//, ://, unknown /compact)", () => {
+    expect(findSkillTokens("//code-review", skills)).toEqual([]);
+    expect(findSkillTokens("see https://x.com/code-review", skills)).toEqual([]);
+    expect(findSkillTokens("/compact now", skills)).toEqual([]);
+  });
+
+  it("returns empty without a catalog", () => {
+    expect(findSkillTokens("/deploy", [])).toEqual([]);
+  });
+
+  it("merges reference chips and skill spans in paintSegments output", () => {
+    const refs = [ref(1, "@spec.md", "/a/spec.md")];
+    const text = "see @spec.md and /deploy now";
+    const segments = paintSegments(
+      text,
+      resolveChipOccurrences(text, refs),
+      findSkillTokens(text, skills),
+    );
+    expect(segments.map((segment) => segment.kind)).toEqual([
+      "plain",
+      "chip",
+      "plain",
+      "skill",
+      "plain",
+    ]);
+    expect(segments[3]).toMatchObject({ kind: "skill", text: "/deploy", name: "deploy" });
   });
 });
