@@ -109,6 +109,29 @@ describe("dsh-mcp-client bridge over the kernel (task 4.1b)", () => {
         expect(mcpTools.length).toBeGreaterThan(3);
         expect(mcpTools).toContain("mcp__skill-creator__workspace_list");
         expect(mcpTools).toContain("mcp__skill-creator__skills_list");
+        // 角色行（dsh-alpha-native-subagents）：MCP 桥在场时 per-role 官方
+        // tool-subagent 行激活——role_* 工具进全局表。裸 delegation 工具
+        // （subagent/send_message 等）由基行注册进全局表，但经
+        // productToolDenyList 在 agent 层拒绝——产品会话只见本模式角色。
+        const globalNames = kernel.globalToolNames();
+        for (const slug of ["reviewer", "researcher", "writer"] as const) {
+          expect(globalNames).toContain(`role_${slug}`);
+        }
+        const { productToolDenyList } = await import("../src/daemon/kernel/agent-sessions.js");
+        const createDeny = productToolDenyList(globalNames, "create");
+        for (const bare of [
+          "subagent",
+          "subagent_fork",
+          "send_message",
+          "interrupt_agent",
+          "list_agents",
+        ]) {
+          expect(globalNames).toContain(bare);
+          expect(createDeny).toContain(bare);
+        }
+        expect(createDeny).not.toContain("role_reviewer");
+        expect(createDeny).not.toContain("role_writer");
+        expect(createDeny).toContain("role_researcher");
         // 收窄不变量保持：通用 fs 工具缺席；bash 是开放模式的例外（行激活，
         // 专注模式经 agent restrict 拒绝——productToolDenyList 单测钉死）。
         const leaked = kernel

@@ -83,6 +83,8 @@ export type PanelItem =
   | { kind: "status"; seq: number; text: string }
   /** 居中注记行（auto-compact 等系统动作留痕；text 为人话说明）。 */
   | { kind: "note"; seq: number; text: string }
+  /** 子代理 spawn 行（dsh-alpha-native-subagents：角色子代理的目录帧投影）。 */
+  | { kind: "subagent"; seq: number; label: string; mode: "one-shot" | "continuable" }
   | {
       kind: "user";
       seq: number;
@@ -759,6 +761,13 @@ const ModeChangedPayloadSchema = z.object({
   to: DshAgentModeSchema,
 });
 
+/** subagent 帧载荷（dsh-alpha-native-subagents）：childId/mode 必有，label 可缺省。 */
+const SubagentFramePayloadSchema = z.object({
+  childId: z.string().min(1),
+  mode: z.enum(["one-shot", "continuable"]),
+  label: z.string().optional(),
+});
+
 /** todo-snapshot payload → 全量快照数组（条目级收窄，extra 键剥除）；畸形 payload → null（丢帧）。 */
 function todosFromSnapshotPayload(
   payload: unknown,
@@ -794,6 +803,21 @@ function appendFrame(frame: DshSessionStreamFrame): void {
         agentSession.items.push({ kind: "note", seq: frame.seq, text: frame.text });
       }
       break;
+    case "subagent": {
+      // 角色子代理目录帧（spawn 可见性）：payload 过 schema 门，畸形丢弃；
+      // settlement 不在此渲染——subagent-settled 用户消息走 user-text 回流。
+      const checked = SubagentFramePayloadSchema.safeParse(frame.payload);
+      if (!checked.success) break;
+      const label =
+        typeof frame.text === "string" && frame.text.length > 0 ? frame.text : checked.data.childId;
+      agentSession.items.push({
+        kind: "subagent",
+        seq: frame.seq,
+        label,
+        mode: checked.data.mode,
+      });
+      break;
+    }
     case "user-text": {
       // 直播路径：乐观气泡已展示同文本，帧只做出队确认；切换/重连路径（气泡已
       // 重置）队列必空，帧即唯一来源（attachments 元数据同时回填回显）。

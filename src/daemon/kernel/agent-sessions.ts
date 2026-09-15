@@ -41,6 +41,7 @@ import type {
   AgentSessionsCleanupResult,
 } from "../../shared/contracts/agent.js";
 import { DomainError } from "../domain-error.js";
+import { AGENT_MODE_ROLES, agentRoleToolName } from "../../shared/contracts/agent-roles.js";
 import type { DshKernelHandle } from "./dsh-kernel.js";
 import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
 import { applyAgentMode } from "./agent-modes.js";
@@ -103,7 +104,13 @@ interface AgentsServiceLike {
 interface SessionsServiceLike {
   list(): Array<{
     id: string;
-    header: { cwd?: string; createdAt?: number | string };
+    header: {
+      cwd?: string;
+      createdAt?: number | string;
+      /** 子代理会话标记（dsh-subagent childSessionMeta）：面板列表过滤依据。 */
+      origin?: string;
+      parentSession?: string;
+    };
   }>;
   get(id: string): unknown;
 }
@@ -275,6 +282,17 @@ export const TurnStartEventSchema = z.record(z.string(), z.unknown());
 
 /** agent/status：data 整体进脱敏投影；非对象载荷按畸形丢弃（record 门）。 */
 export const AgentStatusEventSchema = z.record(z.string(), z.unknown());
+
+/**
+ * subagent/catalog（父会话持有的子代理目录事件；官方 shape 见 dsh-subagent
+ * establishCatalogChild）：childId/mode 必有，label 可缺省（one-shot）。
+ */
+export const SubagentCatalogEventSchema = z.object({
+  childId: z.string().min(1),
+  childCreatedAt: z.number().optional(),
+  mode: z.enum(["one-shot", "continuable"]),
+  label: z.string().optional(),
+});
 
 /** assistant/message 顶层 usage 的数值白名单信封（usage 存在则必须为对象）。 */
 const UsageEnvelopeSchema = z
@@ -678,6 +696,29 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
             seq: entry.frameSeq++,
             kind: "status",
             payload: redactDshPayload(checked.data),
+          },
+        ];
+      }
+      case "subagent/catalog": {
+        // 角色 spawn 的可见性帧（dsh-alpha-native-subagents）：父会话持有的目录
+        // 事件投影 childId/mode/label；子代理内部转录不入父轨（可经 transcripts
+        // 探视），settlement 以 subagent-settled 用户消息回流（user-text 帧）。
+        const checked = SubagentCatalogEventSchema.safeParse(data);
+        if (!checked.success) {
+          logDroppedEvent(entry.agent.session.id, event.type, data);
+          return [];
+        }
+        return [
+          {
+            ...base,
+            seq: entry.frameSeq++,
+            kind: "subagent",
+            text: checked.data.label ?? checked.data.childId,
+            payload: redactDshPayload({
+              childId: checked.data.childId,
+              mode: checked.data.mode,
+              ...(checked.data.label !== undefined ? { label: checked.data.label } : {}),
+            }),
           },
         ];
       }
@@ -1151,6 +1192,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       }
       for (const session of sessions.list()) {
         if (known.has(session.id)) continue;
+        // 子代理会话不入面板列表（dsh-alpha-native-subagents：origin==='subagent'
+        // 的 children 经父轨 subagent 帧可见，独立列出只会污染索引）。
+        if (session.header.origin === "subagent") continue;
         const entry = live.get(session.id);
         if (entry) {
           summaries.push(summaryOf(entry));
@@ -1445,6 +1489,21 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     },
     /** 有界销毁（daemon stop 时逐个回收 agent；待答请求以空答案释放）。 */
     async dispose(): Promise<void> {
+      // 先有界 drain continuable 子代理（官方 API；不留 orphan——与 ACP 池同
+      // 法则），再回收父 agent。drain 失败不阻塞父回收（allSettled 语义）。
+      const kernel = deps.kernel();
+      const drain = (
+        kernel?.ctx as
+          | {
+              subagents?: {
+                drainContinuableDescendants?: (parents: readonly string[]) => Promise<unknown>;
+              };
+            }
+          | undefined
+      )?.subagents?.drainContinuableDescendants;
+      if (drain && live.size > 0) {
+        await Promise.resolve(drain([...live.keys()])).catch(() => undefined);
+      }
       for (const entry of live.values()) {
         for (const pending of entry.pending.values()) {
           pending.resolve({ answers: [] });
@@ -1486,12 +1545,18 @@ function applyProductToolSurface(agentCtx: Context, mode: DshAgentMode): void {
 /**
  * 模式感知的全局工具 deny 名单（导出供单测）：显式 allowlist 与 mcp capability
  * 工具（mcp__skill-creator__*）永远保留；原生 bash 只在开放模式（free/Open）
- * 放行，专注模式拒绝。
+ * 放行，专注模式拒绝；角色工具（role_*）按 AGENT_MODE_ROLES 的模式暴露矩阵
+ * 放行（free 全放）。
  */
 export function productToolDenyList(globalNames: readonly string[], mode: DshAgentMode): string[] {
   const nativeAllowed =
     mode === "free" ? [...KERNEL_AGENT_TOOL_ALLOWLIST, "bash"] : KERNEL_AGENT_TOOL_ALLOWLIST;
+  const modeRoles = AGENT_MODE_ROLES[mode];
+  const roleAllowed = modeRoles.map(agentRoleToolName);
   return globalNames.filter(
-    (name) => !nativeAllowed.includes(name) && !name.startsWith("mcp__skill-creator__"),
+    (name) =>
+      !nativeAllowed.includes(name) &&
+      !roleAllowed.includes(name) &&
+      !name.startsWith("mcp__skill-creator__"),
   );
 }

@@ -31,6 +31,7 @@ import {
 } from "@deepseek-ai/dsh-app-boot";
 import type { Context } from "@deepseek-ai/cordis";
 import { completeTransitiveMirror, ensureDirLink } from "../dsh-profile-support.js";
+import { agentRoleRowsYaml } from "./agent-roles.js";
 
 const modulePath = fileURLToPath(import.meta.url);
 const sourceMode = path.basename(modulePath) === "dsh-kernel.ts";
@@ -195,6 +196,11 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
       "- id: workspace\n",
       "  name: '@deepseek-ai/dsh-workspace'\n",
       mcpRow,
+      // Roles（dsh-alpha-native-subagents task 2.3）：per-role 官方 tool-subagent
+      // 行。角色能力面全是 MCP capability 精确注册名——只在 MCP 桥在场时写入
+      // （无桥时 allow 名不存在，restrict 的实名校验会让 boot 失败；且角色无
+      // MCP 面本就无意义）。
+      ...(options.mcp ? [agentRoleRowsYaml()] : []),
     ].join(""),
     "utf8",
   );

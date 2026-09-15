@@ -23,6 +23,7 @@
   import IconFile from "@lucide/svelte/icons/file";
   import IconImage from "@lucide/svelte/icons/image";
   import IconArrowDown from "@lucide/svelte/icons/arrow-down";
+  import IconBot from "@lucide/svelte/icons/bot";
   import { showToast } from "$lib/toast.svelte";
   import { agentSession, sendAgentPrompt } from "$lib/stores/agent.svelte";
   import { beginComposerEdit } from "$lib/stores/agent-composer.svelte";
@@ -243,6 +244,21 @@
             <span class="h-px flex-1 bg-border"></span>
             <span class="rounded bg-muted px-1 text-[10px] uppercase">compact</span>
             <span class="truncate">{item.text}</span>
+            <span class="h-px flex-1 bg-border"></span>
+          </div>
+        {:else if item.kind === "subagent"}
+          <!-- 子代理 spawn 行（dsh-alpha-native-subagents）：与 note 同居中语法，
+               agent 图标 + label + 模式 chip；settlement 经 user-text 回流对话流。 -->
+          <div
+            class="flow-item flex h-6 items-center gap-2 px-3 text-[10px] text-muted-foreground"
+            role="status"
+            aria-label={`Subagent spawned: ${item.label} (${item.mode})`}
+          >
+            <span class="h-px flex-1 bg-border"></span>
+            <IconBot class="h-3 w-3 shrink-0" aria-hidden="true" />
+            <span class="rounded bg-muted px-1 uppercase">agent</span>
+            <span class="truncate">{item.label}</span>
+            <span class="rounded bg-primary/10 px-1 text-primary">{item.mode}</span>
             <span class="h-px flex-1 bg-border"></span>
           </div>
         {:else if item.kind === "user"}
