@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  DSH_AUDITED_COMMIT,
   DSH_LOCKED_PACKAGES,
   DSH_MCP_BRIDGE_PACKAGES,
   DshRuntimeStatusSchema,
@@ -49,7 +50,7 @@ describe("dsh runtime handshake (task 3.1)", () => {
     const status = adapter.handshake();
     expect(status.state).toBe("available");
     if (status.state !== "available") return;
-    expect(status.auditedCommit).toBe("d347e703908d0406b7a7ef80e3a0e594d86b2215");
+    expect(status.auditedCommit).toBe(DSH_AUDITED_COMMIT);
     expect(status.rows).toHaveLength(Object.keys(DSH_LOCKED_PACKAGES).length);
     for (const row of status.rows) {
       expect(row.resolvedVersion).toBe(row.lockedVersion);

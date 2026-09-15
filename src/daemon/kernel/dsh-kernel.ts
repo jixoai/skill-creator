@@ -219,13 +219,11 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
       constructed.push(entry);
     });
   };
-  const ctx = await boot(
-    "skill-creator",
-    configPath,
-    patches,
-    prepare,
-    new URL(".", import.meta.url).href,
-  );
+  const ctx = await boot("skill-creator", configPath, patches, prepare);
+  // bareModuleBaseUrl 不传（0.1.6-alpha.1 语义）：裸包名经 ctx.baseUrl（profile
+  // kernel 目录）向上解析到 $DSH_HOME/profiles/node_modules 的 heal 镜像——宿主
+  // 源码目录只持有直接依赖，钉死它会绕过镜像（rc.2 时代 boot 无此参，多传被
+  // 静默忽略；alpha 起被尊重，升版实测破坏点）。
 
   const treeEntries: Array<{ id: string; name: string }> = [];
   for (const entry of (
