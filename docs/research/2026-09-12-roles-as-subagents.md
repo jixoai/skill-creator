@@ -117,3 +117,17 @@ composer "@Explorer 找相似 skill"
 1. `@` 语义取 A（软召唤，主 Role 决定委托）还是 B（硬召唤，面板直发）？
 2. 四个 Role 的名字/头像方向：Maker/Curator/Explorer/General 有没有想改的？
 3. 子代理并发：默认「同时最多 1 个」够不够？
+
+## 6. 裁决记录（2026-09-15，Owner）
+
+1. **产品侧桥接方案否决**（本文 §3 的「daemon 代管子会话 + MCP 工具桥」）：不做。
+2. **采纳路径改为上游原生子代理**：DSH 官方 `packages/subagent` 家族已在 npm 发布
+   （`@deepseek-ai/dsh-subagent` + spawn/fork-in-process/driver/codex 等），且
+   `dsh-base@0.1.6-alpha.1` 已将其列为内置依赖——本文写作时「上游拿不到」的前提
+   （基于 0.1.5-rc.2 扫描）已过期。
+3. **重启触发条件**：下一个大迭代（DSH 升级 0.1.6-alpha.1 + composer 能力矩阵复刻）
+   中，Roles 基于原生子代理实现；§5 的三问（@ 语义/命名/并发）随该迭代的
+   openspec 设计稿重新进入决策面。
+4. 配套指令（Owner，2026-09-15）：Agent Chat 输入框能力「100% 复刻官方 webui」
+   ——以 `packages/client` 的 composer 为规格源，能力对等实现（能力矩阵钉死差距），
+   非代码移植。
