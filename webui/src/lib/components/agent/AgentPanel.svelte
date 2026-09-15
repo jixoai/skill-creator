@@ -27,9 +27,10 @@
     setAgentPanelOpen,
     setAgentPanelWidth,
   } from "$lib/stores/agent.svelte";
-  import { agentComposer, handleComposerDrop } from "$lib/stores/agent-composer.svelte";
+  import { agentComposer } from "$lib/stores/agent-composer.svelte";
   import AgentHeader from "./AgentHeader.svelte";
   import TranscriptView from "./TranscriptView.svelte";
+  import DropOverlay from "./DropOverlay.svelte";
   import TodoDock from "./TodoDock.svelte";
   import ComposerCard from "./ComposerCard.svelte";
 
@@ -105,9 +106,9 @@
     : 'border-l-0 max-[720px]:translate-x-full max-[720px]:invisible'}"
   style="--agent-panel-width: {agentPanel.open ? agentPanel.width : 0}px"
   aria-label="Agent panel"
-  ondragover={(event) => event.preventDefault()}
-  ondrop={handleComposerDrop}
 >
+  <!-- W2：document 级拖放（覆盖层 + 全窗落点）接管附件拖放；面板级 ondrop 移除。 -->
+  <DropOverlay />
   <!-- 左缘拖柄（仅 ≥720px；窄屏抽屉无侧栏宽度语义）：6px col-resize 命中区，
        hover 高亮。 -->
   <div

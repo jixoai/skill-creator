@@ -17,8 +17,9 @@
  * 正交意图：
  *   [1] composer 草稿：文本/图片/文件附件 + editing 态（append-only 语义标注）
  *       + 按 sessionId 分轨（活动轨真相只在 facade，非活动轨存 Map 暂存）。
- *   [2] 附件准入：类型/数量/大小守卫 + base64 读取（4×4MiB 图 + 2×512KiB 文件，
- *       守卫与 toast 文案沿用旧 footer 行为）；path 通道同数量守卫。
+ *   [2] 附件准入（W2 整批语义，官方 imageLimits 同法）：类型/数量/大小对整批
+ *       预检，任一违反整批拒绝（单条 reason 通知，零项入场）；path 通道同数量
+ *       守卫；读入计数（attachmentReads）供发送门控。
  */
 import { showToast } from "$lib/toast.svelte";
 
@@ -162,6 +163,34 @@ const IMAGE_MEDIA_TYPES: Record<string, true> = {
   "image/gif": true,
 };
 
+/** 图片通道限额（W2：服务端限额投影的常量形态——产品是 daemon fs 面，
+ *  限额由本模块持有；整批违反 = 整批拒绝，部分不入场）。 */
+export const IMAGE_INTAKE_LIMITS = {
+  maxCount: 4,
+  maxSizeBytes: 4 * 1024 * 1024,
+} as const;
+
+/** 文件通道限额（同上）。 */
+export const DOC_INTAKE_LIMITS = {
+  maxCount: 2,
+  maxSizeBytes: 512 * 1024,
+} as const;
+
+/** 整批拒绝的 reason key（官方 imageLimits 拒绝语义的适配面）。 */
+export type IntakeRefusalReason = "tooMany" | "fileTooLarge" | "unsupportedType";
+
+function refuseBatch(reason: IntakeRefusalReason, detail: string): void {
+  const copy: Record<IntakeRefusalReason, string> = {
+    tooMany: `Too many attachments: ${detail}. Nothing was added.`,
+    fileTooLarge: `"${detail}" exceeds its size limit. Nothing was added.`,
+    unsupportedType: `Unsupported attachment type: ${detail}. Nothing was added.`,
+  };
+  showToast(copy[reason]);
+}
+
+/** 读入中的附件通道数（W2 发送门控）：>0 时 Enter 保持（still-reading 通知）。 */
+export const attachmentReads = $state({ pending: 0 });
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -174,52 +203,75 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-/** 读入任意文件为附件（≤2 个、各 ≤512KiB；图片走图片通道）。 */
+/**
+ * 读入文件附件（W2 整批语义）：先对整批做数量/大小预检——任一违反则整批
+ * 拒绝（单条 reason 通知，零项入场，官方 imageLimits 同语义）；全过再逐个
+ * base64 读入并原子追加。图片由调用方分流（本函数跳过 image/*）。
+ */
 export async function addComposerDocs(list: FileList | File[]): Promise<void> {
-  for (const file of list) {
-    if (file.type.startsWith("image/")) continue;
-    if (agentComposer.files.length >= 2) {
-      showToast("At most 2 file attachments per message.");
-      return;
-    }
-    if (file.size > 512 * 1024) {
-      showToast(`"${file.name}" exceeds the 512KiB limit.`);
-      continue;
-    }
-    const data = await fileToBase64(file);
-    agentComposer.files = [...agentComposer.files, { name: file.name, data }];
+  const docs = [...list].filter((file) => !file.type.startsWith("image/"));
+  if (docs.length === 0) return;
+  if (agentComposer.files.length + docs.length > DOC_INTAKE_LIMITS.maxCount) {
+    refuseBatch("tooMany", `at most ${DOC_INTAKE_LIMITS.maxCount} file attachments`);
+    return;
+  }
+  const oversized = docs.find((file) => file.size > DOC_INTAKE_LIMITS.maxSizeBytes);
+  if (oversized) {
+    refuseBatch("fileTooLarge", oversized.name);
+    return;
+  }
+  attachmentReads.pending += 1;
+  try {
+    const entries = await Promise.all(
+      docs.map(async (file) => ({ name: file.name, data: await fileToBase64(file) })),
+    );
+    agentComposer.files = [...agentComposer.files, ...entries];
+  } finally {
+    attachmentReads.pending -= 1;
   }
 }
 
-/** 读入图片文件（类型/数量/大小守卫；base64 + 预览 dataURL）。 */
+/** 读入图片附件（W2 整批语义：类型/数量/大小全批预检，违反整批拒绝）。 */
 export async function addComposerImages(files: FileList | File[]): Promise<void> {
-  for (const file of files) {
-    if (agentComposer.images.length >= 4) {
-      showToast("At most 4 images per message.");
-      return;
-    }
-    if (!(file.type in IMAGE_MEDIA_TYPES)) {
-      showToast(`Unsupported image type: ${file.type || "unknown"}.`);
-      continue;
-    }
-    if (file.size > 4 * 1024 * 1024) {
-      showToast(`"${file.name}" exceeds the 4MiB limit.`);
-      continue;
-    }
-    const data = await fileToBase64(file);
-    agentComposer.images = [
-      ...agentComposer.images,
-      {
-        mediaType: file.type as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
-        data,
-        ...(file.name ? { name: file.name } : {}),
-        preview: `data:${file.type};base64,${data}`,
-      },
-    ];
+  const images = [...files];
+  if (images.length === 0) return;
+  const unsupported = images.find((file) => !(file.type in IMAGE_MEDIA_TYPES));
+  if (unsupported) {
+    refuseBatch("unsupportedType", unsupported.type || "unknown");
+    return;
+  }
+  if (agentComposer.images.length + images.length > IMAGE_INTAKE_LIMITS.maxCount) {
+    refuseBatch("tooMany", `at most ${IMAGE_INTAKE_LIMITS.maxCount} images`);
+    return;
+  }
+  const oversized = images.find((file) => file.size > IMAGE_INTAKE_LIMITS.maxSizeBytes);
+  if (oversized) {
+    refuseBatch("fileTooLarge", oversized.name);
+    return;
+  }
+  attachmentReads.pending += 1;
+  try {
+    const entries = await Promise.all(
+      images.map(async (file) => {
+        const data = await fileToBase64(file);
+        return {
+          mediaType: file.type as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+          data,
+          ...(file.name ? { name: file.name } : {}),
+          preview: `data:${file.type};base64,${data}`,
+        };
+      }),
+    );
+    agentComposer.images = [...agentComposer.images, ...entries];
+  } finally {
+    attachmentReads.pending -= 1;
   }
 }
 
-/** 面板级 drop 分流：图片进图片通道，其余进文件通道（守卫沿用）。 */
+/**
+ * 面板级 drop 分流（W2：图片/文件分道后各走整批预检）。document 级拖放
+ * （DropOverlay）与面板级 drop 都汇入此处。
+ */
 export function handleComposerDrop(event: DragEvent): void {
   const all = [...(event.dataTransfer?.files ?? [])];
   const images = all.filter((file) => file.type.startsWith("image/"));
@@ -230,35 +282,37 @@ export function handleComposerDrop(event: DragEvent): void {
 }
 
 /**
- * 后端选择器产物（R17-B path 通道）：真实路径图片入草稿（数量守卫沿用；大小
- * 守卫在 daemon 读盘时执行同文案）。preview 为 daemon 缩略 dataURL（可缺省）。
+ * 后端选择器产物（R17-B path 通道；W2 整批语义）：真实路径图片整批预检后
+ * 入草稿（大小守卫在 daemon 读盘时执行同文案）。preview 为 daemon 缩略
+ * dataURL（可缺省）。
  */
 export function addPickedComposerImages(
   picks: Array<{ path: string; name: string; preview?: string }>,
 ): void {
-  for (const pick of picks) {
-    if (agentComposer.images.length >= 4) {
-      showToast("At most 4 images per message.");
-      return;
-    }
-    agentComposer.images = [
-      ...agentComposer.images,
-      {
-        path: pick.path,
-        name: pick.name,
-        ...(pick.preview !== undefined ? { preview: pick.preview } : {}),
-      },
-    ];
+  if (picks.length === 0) return;
+  if (agentComposer.images.length + picks.length > IMAGE_INTAKE_LIMITS.maxCount) {
+    refuseBatch("tooMany", `at most ${IMAGE_INTAKE_LIMITS.maxCount} images`);
+    return;
   }
+  agentComposer.images = [
+    ...agentComposer.images,
+    ...picks.map((pick) => ({
+      path: pick.path,
+      name: pick.name,
+      ...(pick.preview !== undefined ? { preview: pick.preview } : {}),
+    })),
+  ];
 }
 
-/** 后端选择器产物（R17-B path 通道）：真实路径文件入草稿（数量守卫沿用）。 */
+/** 后端选择器产物（R18 path 通道；W2 整批语义）：真实路径文件整批入草稿。 */
 export function addPickedComposerDocs(picks: Array<{ path: string; name: string }>): void {
-  for (const pick of picks) {
-    if (agentComposer.files.length >= 2) {
-      showToast("At most 2 file attachments per message.");
-      return;
-    }
-    agentComposer.files = [...agentComposer.files, { name: pick.name, path: pick.path }];
+  if (picks.length === 0) return;
+  if (agentComposer.files.length + picks.length > DOC_INTAKE_LIMITS.maxCount) {
+    refuseBatch("tooMany", `at most ${DOC_INTAKE_LIMITS.maxCount} file attachments`);
+    return;
   }
+  agentComposer.files = [
+    ...agentComposer.files,
+    ...picks.map((pick) => ({ name: pick.name, path: pick.path })),
+  ];
 }

@@ -77,6 +77,7 @@
     addComposerImages,
     addPickedComposerDocs,
     addPickedComposerImages,
+    attachmentReads,
     clearComposerEdit,
   } from "$lib/stores/agent-composer.svelte";
   import {
@@ -251,6 +252,12 @@
       return;
     }
     if (agentSession.sending) return;
+    // W2 发送门控（官方 still-uploading 语义的适配面）：附件 base64 读入进行
+    // 中时保持提交（读入完成即可重发），草稿与附件原样保留。
+    if (attachmentReads.pending > 0) {
+      showToast("Attachments are still being read — try again in a moment.");
+      return;
+    }
     // R17-A：提交点不清草稿——发送成功由 sendAgentPrompt 清当前轨（清轨点收窄）；
     // 发送失败草稿留在当前会话轨，可直接修改重试。
     awaitingSendClear = true;
