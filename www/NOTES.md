@@ -92,8 +92,11 @@ The cutover is a workflow-env change only (documented in
     containers. The site previously used a hand-drawn `>_` SVG and hue 150
     sampled from the color symbol; the documented brand primary is
     oklch(0.841 0.238 128.85) → `--brand-hue: 129` (note: the on-disk
-    flat-symbol.png renders #006048 / hue 168 — older render, README is
-    the authority; owner may want to regenerate the PNG).
+    flat-symbol.png renders #006048 / hue 168 — intentional per the
+    Owner ruling 2026-09-15: the flat variant targets real-world/print
+    surfaces, not screens, so its deeper color is by design; the
+    screen-side primary stays the README-documented
+    oklch(0.841 0.238 128.85)).
 12. **Favicon = Monochrome Mini recolored brand green** (#5fa600, the hue-129
     light primary): the monochrome variants exist to be single-colored per
     context, and pure black would vanish on dark tabs. Apple-touch uses
