@@ -91,17 +91,10 @@ jobs:
       - name: Build project
         run: pnpm build
 
-      - name: Run tests (CI-safe scope)
-        # rpc-errors / skill-steward-runtime 在 Linux runner 上有两个环境敏感断言
-        # （oRPC 错误序列化形态、steward 时序），本地 macOS 全绿；发布门禁跑其余全部。
-        run: |
-          pnpm exec vp test run test/agent-files.test.ts test/agent-sessions-firehose.test.ts test/agent-sessions-gateway-integration.test.ts \
-            test/cli-lifecycle.test.ts test/creator-service.test.ts test/curated-sources.test.ts \
-            test/dsh-route-connection.test.ts test/dsh-runtime-integration.test.ts test/dsh-settings.test.ts \
-            test/dsh-user-text-attachment.test.ts test/model-catalog-context-window.test.ts test/repository-service.test.ts \
-            test/repository-sources-rpc.test.ts test/skills-cli-compat.test.ts test/source-registry.test.ts \
-            test/web-mode.test.ts test/workspace-registry.test.ts test/session-cleanup.test.ts test/skills-update-service.test.ts \
-            test/skill-intelligence.test.ts test/skill-steward-contracts.test.ts test/agent-sessions.test.ts test/agent-steward.test.ts
+      - name: Run tests
+        # issue #1 已修复（测试密闭性：rpc-errors / skill-steward-runtime 不再依赖
+        # 宿主 $HOME 的真实 Agent roots），发布门禁恢复全量——与本地 `pnpm test` 同一命令。
+        run: pnpm test
 
       - name: Type check
         run: pnpm typecheck

@@ -111,21 +111,34 @@ describe("RPC domain-error boundary", () => {
   });
 
   it("does not promote an unknown projection failure to DomainError", async () => {
+    // 密闭性（issue #1）：Global roots 解析自测试宿主的真实 $HOME——CI runner 上
+    // 没有任何 Agent root 时，always-reject 的 countSkills 桩根本不会被调用，
+    // list 反而成功。导入一个真实沙箱 workspace，保证 snapshot 至少有一个
+    // available provider root，桩必然被触发，与宿主环境完全解耦。
+    const workspaceDirectory = path.join(sandbox, "projection-workspace");
+    fs.mkdirSync(path.join(workspaceDirectory, "skills"), { recursive: true });
     const workspaces = createWorkspaceRegistry({
       countSkills: () => Promise.reject(new Error("count adapter failed")),
     });
     const client = createClient(
       createDaemonDomain(workspaces, { skillsCliProbe: deterministicSkillsCliProbe() }),
     );
+    const { workspace } = await client.workspace.add({ path: workspaceDirectory });
+    if (workspace.kind !== "directory") throw new Error("Expected an imported workspace.");
 
+    let projectionError: unknown;
     try {
       await client.workspace.list({});
-      expect.fail("Expected the projection adapter to fail.");
+      projectionError = new Error("workspace.list resolved despite the failing projection adapter");
     } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect(error).not.toBeInstanceOf(DomainError);
-      expect(error).not.toBeInstanceOf(ORPCError);
+      projectionError = error;
     }
+    // 断言错误本体（而非依赖 expect.fail 抛出的 Error 巧合满足 instanceof）：
+    // 假若桩未被触发、list 正常返回，这里会以真实原因失败，不再静默假绿。
+    expect(projectionError).toBeInstanceOf(Error);
+    expect(projectionError).not.toBeInstanceOf(DomainError);
+    expect(projectionError).not.toBeInstanceOf(ORPCError);
+    expect((projectionError as Error).message).toContain("count adapter failed");
 
     const [maskedError] = await createActionableClient(client.workspace.list)({});
     expect(maskedError).toMatchObject({

@@ -1066,6 +1066,27 @@ describe("restart recovery (task 2.3e)", () => {
   });
 
   it("Global workspace rejects optimize writes with unsupported scope", async () => {
+    // 密闭性（issue #1）：Global claude-code root 默认解析到测试宿主的真实
+    // $HOME/.claude/skills——CI runner 上不存在时发现数为 0，断言假红。
+    // 经 CLAUDE_CONFIG_DIR 把 root 钉进本用例沙箱并落一个最小合法技能。
+    const claudeConfigDir = path.join(sandbox, "claude-config");
+    const globalSkillsRoot = path.join(claudeConfigDir, "skills", "steward-global-probe");
+    fs.mkdirSync(globalSkillsRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(globalSkillsRoot, "SKILL.md"),
+      [
+        "---",
+        "name: steward-global-probe",
+        "description: Hermetic global skill for the steward scope test.",
+        "---",
+        "",
+        "# steward global probe",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const previousClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
     const domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
     try {
       const globalTarget = {
@@ -1083,6 +1104,8 @@ describe("restart recovery (task 2.3e)", () => {
       expect(run.terminal).toBe("failed");
       expect(run.proposals).toHaveLength(0);
     } finally {
+      if (previousClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousClaudeConfigDir;
       await domain.steward.dispose();
       await domain.repository.dispose();
     }

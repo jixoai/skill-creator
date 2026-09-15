@@ -41,3 +41,27 @@ jobs:
         env:
           CHROME_PATH: /usr/bin/google-chrome
         run: pnpm exec vitest run test/web-mode-smoke.test.ts
+
+  full-battery:
+    # issue #1 修复后的全量 Linux 验证面：每次 push/PR 跑完整套件（与本地
+    # `pnpm test` 同一命令），取代 release.yml 曾经的 23 文件 allowlist 门禁。
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build project
+        run: pnpm build
+      - name: Run the full test battery
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: pnpm test
