@@ -73,6 +73,7 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
   import {
     agentComposer,
+    addComposerDocs,
     addComposerImages,
     addPickedComposerDocs,
     addPickedComposerImages,
@@ -89,6 +90,13 @@
     pickAgentFiles,
     hydratePickedImagePreviews,
   } from "$lib/stores/agent.svelte";
+  import { connectionState } from "$lib/stores/connection.svelte";
+  import {
+    composerPlaceholder,
+    containsChipPlaceholders,
+    enterIsComposing,
+    sanitizeComposerText,
+  } from "./composer-keymap.js";
   import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { showToast } from "$lib/toast.svelte";
   import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
@@ -133,10 +141,6 @@
   );
   const editing = $derived(agentComposer.editing !== null);
 
-  const placeholder = $derived(
-    editing ? "Edit your message — sending will resend it as a new message" : "Message the agent…",
-  );
-
   /** 主按钮形态机（§3.4）：running 空稿 → 停止；running 有稿 → 置灰；否则发送。 */
   const primaryMode = $derived.by(() => {
     if (running && !hasDraft) return "stop" as const;
@@ -151,6 +155,17 @@
   );
 
   const modeLabel = $derived(DSH_AGENT_MODES.find((entry) => entry.id === activeMode)?.label);
+
+  /** 占位符链（W1）：owner（编辑态）> disconnected > unavailable > mode > 默认；
+   *  连接态来自 shell 级 connection store（断线时输入面给出人话提示）。 */
+  const placeholder = $derived(
+    composerPlaceholder({
+      owner: editing ? "Edit your message — sending will resend it as a new message" : null,
+      disconnected: connectionState.status === "disconnected",
+      unavailable: agentSession.error !== null && agentSession.sessionId === null,
+      modeLabel: modeLabel ?? null,
+    }),
+  );
 
   /** model chip 投影：provider · model + effort 点；活动路由悬空于 Routes 外 = amber。 */
   const modelChip = $derived.by(() => {
@@ -238,8 +253,22 @@
     if (agentSession.sending) return;
     // R17-A：提交点不清草稿——发送成功由 sendAgentPrompt 清当前轨（清轨点收窄）；
     // 发送失败草稿留在当前会话轨，可直接修改重试。
+    awaitingSendClear = true;
     void sendAgentPrompt(text, agentComposer.images, agentComposer.files);
   }
+
+  /** 撤销纪律（W1，官方 undo-cut-after-send 的 textarea 等价）：发送成功清轨时
+   *  递增 sendEpoch 重建 textarea 元素——原生 undo 栈随之丢弃，Cmd+Z 不能
+   *  复活已发送内容；发送失败草稿保留（epoch 不动，undo 语义不受影响）。 */
+  let sendEpoch = $state(0);
+  let awaitingSendClear = false;
+  $effect(() => {
+    if (!awaitingSendClear) return;
+    if (agentComposer.text === "") {
+      awaitingSendClear = false;
+      sendEpoch += 1;
+    }
+  });
 
   /** 取消编辑：退出 editing 态并清空回填文本（append-only 语义下不撤回原消息）。 */
   function cancelEdit(): void {
@@ -325,9 +354,34 @@
     if (slashMenu?.handleKeydown(event)) return;
     if (skillMenu?.handleKeydown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
+      // W1（composer-capability-parity）：IME 合成语境的 Enter 不提交不断行
+      // （isComposing + keyCode 229 + compositionend 后 10ms 宽限——中文输入
+      // 的确认 Enter 曾被误提交，官方 keymap 同判定序）；长按 repeat 不连发。
+      if (event.repeat) {
+        event.preventDefault();
+        return;
+      }
+      if (enterIsComposing(event, lastCompositionEndAt)) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       submit();
     }
+  }
+
+  /** IME 合成窗口（W1）：compositionend 时间戳——Safari 的收尾 keydown 晚于
+   *  compositionend，10ms 宽限内 Enter 仍视为合成中。 */
+  let lastCompositionEndAt: number | null = null;
+  let composing = $state(false);
+
+  function onCompositionStart(): void {
+    composing = true;
+  }
+
+  function onCompositionEnd(): void {
+    composing = false;
+    lastCompositionEndAt = Date.now();
   }
 
   /** 光标移动（无稿文变化）路径的首行判定同步（click/arrow/select）。 */
@@ -336,13 +390,37 @@
   }
 
   function onPaste(event: ClipboardEvent): void {
-    const files = [...(event.clipboardData?.files ?? [])].filter((file) =>
-      file.type.startsWith("image/"),
-    );
+    const files = [...(event.clipboardData?.files ?? [])];
     if (files.length > 0) {
       event.preventDefault();
-      void addComposerImages(files);
+      // W1：粘贴文件项统一路由（官方 keymap 语义；守卫沿用 store 双通道）。
+      const images = files.filter((file) => file.type.startsWith("image/"));
+      const docs = files.filter((file) => !file.type.startsWith("image/"));
+      if (images.length > 0) void addComposerImages(images);
+      if (docs.length > 0) void addComposerDocs(docs);
+      return;
     }
+    // 文本粘贴消毒（W1）：含芯片占位字符（U+E100–E11D/U+FFFC）时手工插入
+    // 消毒文本，外部文本不得伪造芯片身份。
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    if (containsChipPlaceholders(text)) {
+      event.preventDefault();
+      insertSanitizedText(sanitizeComposerText(text));
+    }
+  }
+
+  /** 消毒文本在光标处插入（覆盖选区；官方 PASTE 语义的 textarea 等价）。 */
+  function insertSanitizedText(text: string): void {
+    const el = textareaEl;
+    if (!el) {
+      agentComposer.text = sanitizeComposerText(agentComposer.text + text);
+      return;
+    }
+    const start = el.selectionStart ?? agentComposer.text.length;
+    const end = el.selectionEnd ?? start;
+    agentComposer.text = agentComposer.text.slice(0, start) + text + agentComposer.text.slice(end);
+    const caret = start + text.length;
+    requestAnimationFrame(() => el?.setSelectionRange(caret, caret));
   }
 </script>
 
@@ -411,20 +489,26 @@
     </div>
   {/if}
   <!-- New Session 态（R12-B 8）输入可用：首条消息即会话创建向量，不再按
-       sessionId 禁用。 -->
-  <textarea
-    bind:this={textareaEl}
-    rows={1}
-    maxlength={20000}
-    {placeholder}
-    bind:value={agentComposer.text}
-    onkeydown={onKeydown}
-    onkeyup={syncCaret}
-    onclick={syncCaret}
-    onselect={syncCaret}
-    onpaste={onPaste}
-    class="msg-body max-h-40 w-full resize-none border-0 bg-transparent px-3.5 py-2.5 outline-none focus:outline-none focus-visible:ring-0 placeholder:text-muted-foreground disabled:opacity-50"
-    aria-label="Message"></textarea>
+       sessionId 禁用。{#key sendEpoch}：发送成功清轨时重建元素丢弃原生 undo
+       栈（W1 undo-cut-after-send）。 -->
+  {#key sendEpoch}
+    <textarea
+      bind:this={textareaEl}
+      rows={1}
+      maxlength={20000}
+      {placeholder}
+      bind:value={agentComposer.text}
+      onkeydown={onKeydown}
+      onkeyup={syncCaret}
+      onclick={syncCaret}
+      onselect={syncCaret}
+      onpaste={onPaste}
+      oncompositionstart={onCompositionStart}
+      oncompositionend={onCompositionEnd}
+      data-composer-composing={composing ? "true" : undefined}
+      class="msg-body max-h-40 w-full resize-none border-0 bg-transparent px-3.5 py-2.5 outline-none focus:outline-none focus-visible:ring-0 placeholder:text-muted-foreground disabled:opacity-50"
+      aria-label="Message"></textarea>
+  {/key}
   <div class="flex h-11 items-center gap-1 px-2.5">
     <!-- 左簇：模式 chip + 图片 + 文件 -->
     <DropdownMenu.DropdownMenu bind:open={modeMenuOpen}>
