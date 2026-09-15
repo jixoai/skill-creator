@@ -53,6 +53,16 @@ const PROMPT_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
 /** prompt 文件附件源文件上限（与 base64 通道 512KiB 同限）。 */
 const PROMPT_FILE_MAX_BYTES = 512 * 1024;
 
+/**
+ * 文本类文件判定（按扩展名；mime 未知时的内联/引用准入面）。agent-sessions 的
+ * prompt 内联与 `@` file 引用共用这一份清单（单一事实源）。
+ */
+export function isTextualFileName(name: string): boolean {
+  return /\.(txt|md|markdown|json|ya?ml|toml|csv|tsv|log|patch|diff|ts|tsx|js|jsx|py|rs|go|java|c|h|cpp|sh|css|html|xml|ini|env)$/i.test(
+    name,
+  );
+}
+
 /** path 通道解析产物：base64 形状（agentSessions.prompt 既有签名不变）。 */
 export interface ResolvedPromptAttachments {
   images: Array<{ mediaType: string; data: string; name?: string }>;
@@ -73,6 +83,14 @@ export interface AgentFilesService {
     images: Array<{ mediaType?: string; data?: string; name?: string; path?: string }>;
     files: Array<{ name?: string; data?: string; path?: string }>;
   }): Promise<ResolvedPromptAttachments>;
+  /**
+   * `@` file 引用展开（composer-references C1）：绝对路径 + realpath + regular
+   * file + ≤512KiB + 文本扩展名（与 path 附件同守卫族）→ `[reference: …]` 文本块。
+   * 二进制/超限/非文本 typed 拒绝（引用面只承载文本；二进制走附件通道）。
+   */
+  resolvePromptReferences(input: {
+    references: Array<{ kind: "file"; path: string }>;
+  }): Promise<string[]>;
 }
 
 /** 子进程对话框请求（mode → 标题/过滤器的映射真相留在 daemon 侧）。 */
@@ -436,5 +454,34 @@ export function createAgentFilesService(deps: AgentFilesDeps = {}): AgentFilesSe
     return { images, files };
   }
 
-  return { pickFiles, list, preview, resolvePromptAttachments };
+  /**
+   * `@` file 引用展开（C1）：守卫链与 path 附件同族——绝对路径/realpath/regular
+   * file/≤512KiB；文本判定按扩展名（与 prompt 内联文件同一 isTextual 面，这里以
+   * basename 判定）。产出 `[reference: <path>]` 文本块；引用面不承载二进制。
+   */
+  async function resolvePromptReferences(input: {
+    references: Array<{ kind: "file"; path: string }>;
+  }): Promise<string[]> {
+    const blocks: string[] = [];
+    for (const reference of input.references) {
+      const { real, size } = await canonicalRegularFile(reference.path, "reference");
+      if (size > PROMPT_FILE_MAX_BYTES) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `"${path.basename(real)}" exceeds the 512KiB limit.`,
+        );
+      }
+      if (!isTextualFileName(path.basename(real))) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `"${path.basename(real)}" is not a textual file; attach it instead.`,
+        );
+      }
+      const text = await readFile(real, "utf8");
+      blocks.push(`[reference: ${real}]\n${text.slice(0, 200_000)}`);
+    }
+    return blocks;
+  }
+
+  return { pickFiles, list, preview, resolvePromptAttachments, resolvePromptReferences };
 }

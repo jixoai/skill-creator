@@ -39,6 +39,8 @@ export const sendAgentPrompt = vi.fn();
 export const setAgentSessionMode = vi.fn();
 export const cancelAgentSession = vi.fn();
 export const beginNewAgentSession = vi.fn();
+// C1：ReferenceMenu 的会话列表惰性刷新面。
+export const loadAgentSessions = vi.fn();
 
 export function resetAgentStoreStub(view: DshStewardSettingsView | null): void {
   agentRuntimeConfig.view = view;

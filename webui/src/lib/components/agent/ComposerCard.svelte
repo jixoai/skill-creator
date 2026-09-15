@@ -78,10 +78,12 @@
     agentComposer,
     addComposerDocs,
     addComposerImages,
+    addComposerReference,
     addPickedComposerDocs,
     addPickedComposerImages,
     attachmentReads,
     clearComposerEdit,
+    removeComposerReference,
   } from "$lib/stores/agent-composer.svelte";
   import {
     agentRuntimeConfig,
@@ -112,6 +114,11 @@
     stripClaimedToken,
     type TriggerClaim,
   } from "./composer-trigger.js";
+  import {
+    activeDraftReferences,
+    atomicChipBeforeCaret,
+    resolveChipOccurrences,
+  } from "./composer-chips.js";
   import { INPUT_TAKING_TOKENS } from "./SlashMenu.svelte";
   import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { showToast } from "$lib/toast.svelte";
@@ -119,13 +126,22 @@
   import ContextMeter from "./ContextMeter.svelte";
   import QueueDock from "./QueueDock.svelte";
   import SlashMenu from "./SlashMenu.svelte";
+  import ChipPaintLayer from "./ChipPaintLayer.svelte";
+  import ReferenceMenu, { type ReferencePick } from "./ReferenceMenu.svelte";
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
   /** SlashMenu 实例（W3 统一 `/` 触发：命令 + 技能单实例）；卡片根 relative，
    * 菜单锚定卡上方。 */
   let slashMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
+  /** ReferenceMenu 实例（C1 `@` 触发：文件/会话引用）。 */
+  let referenceMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
   /** 光标是否在首行（SlashMenu 锚定条件）。 */
   let caretOnFirstLine = $state(true);
+
+  /** C1 芯片出现（文本/registry 变化即重算）：绘制层与提交共用同一消费序。 */
+  const chipOccurrences = $derived(
+    resolveChipOccurrences(agentComposer.text, agentComposer.references),
+  );
 
   /** W3 claim 态（input-taking 命令；首版目录无此类命令，机器就绪）：draft
    *  前缀保持 claim 存活——退格删掉 token 即退出；Space 落 claim（官方
@@ -141,13 +157,15 @@
   /** W3 `+` 编程式启动器：无 query 全量展开统一菜单（官方 + 按钮同语义）。 */
   let launcherOpen = $state(false);
 
-  /** 自动长高：内容驱动，44px（1 行）→ 160px（4 行）封顶内滚。 */
+  /** 自动长高：内容驱动，44px（1 行）→ 160px（4 行）封顶内滚；镜像绘制层随高度。 */
+  let textareaHeight = $state(44);
   $effect(() => {
     void agentComposer.text;
     const el = textareaEl;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(160, Math.max(44, el.scrollHeight))}px`;
+    textareaHeight = Math.min(160, Math.max(44, el.scrollHeight));
+    el.style.height = `${textareaHeight}px`;
   });
 
   /** 首行光标判定（SlashMenu 锚定条件）：稿文变化（含 seed/edit 程序回填）后按
@@ -297,9 +315,11 @@
         ? resolveSubmitGesture(accelerated, busyEnterPreference())
         : "queue";
     // R17-A：提交点不清草稿——发送成功由 sendAgentPrompt 清当前轨（清轨点收窄）；
-    // 发送失败草稿留在当前会话轨，可直接修改重试。
+    // 发送失败草稿留在当前会话轨，可直接修改重试。C1：引用按文中出现序随文提交
+    // （token 被编辑掉的引用在此剪除，不复活）。
+    const references = activeDraftReferences(agentComposer.text, agentComposer.references);
     awaitingSendClear = true;
-    void sendAgentPrompt(text, agentComposer.images, agentComposer.files, mode);
+    void sendAgentPrompt(text, agentComposer.images, agentComposer.files, mode, references);
   }
 
   /** 撤销纪律（W1，官方 undo-cut-after-send 的 textarea 等价）：发送成功清轨时
@@ -403,11 +423,57 @@
     });
   }
 
+  /**
+   * C1 `@` 表达式写回：替换稿文 [0, 光标) 为 value（目录续览/引用落点共用）。
+   * 续览值带尾 "/"（query 保持 = 新前缀，菜单不收）；引用落值由调用方补尾空格。
+   */
+  function applyAtExpression(value: string): void {
+    const el = textareaEl;
+    const caret = Math.min(
+      el?.selectionStart ?? agentComposer.text.length,
+      agentComposer.text.length,
+    );
+    agentComposer.text = value + agentComposer.text.slice(caret);
+    const next = Math.min(value.length, agentComposer.text.length);
+    requestAnimationFrame(() => {
+      el?.setSelectionRange(next, next);
+      caretOnFirstLine = caretOnFirstLineNow();
+    });
+  }
+
+  /** C1 目录行/pinned 续览：写回前缀（无尾空格——菜单须保持锚定）。 */
+  function onReferenceNavigate(value: string): void {
+    applyAtExpression(value);
+  }
+
+  /** C1 引用选中：token + 尾空格落稿文，引用入 registry（绘制与提交同源）。 */
+  function onReferencePick(pick: ReferencePick): void {
+    applyAtExpression(`${pick.token} `);
+    addComposerReference(pick.reference);
+  }
+
   function onKeydown(event: KeyboardEvent): void {
-    // SlashMenu（W3 统一实例：命令 + 技能）先占导航/执行/驳回键；其
-    // handleKeydown 内部已 stopPropagation，Esc 不会冒泡到 AgentPanel 的
-    // window 级面板收起。
+    // ReferenceMenu（C1 `@` 触发）与 SlashMenu（W3 统一实例）按 query 前缀互斥，
+    // 先占序无冲突；两者内部已 stopPropagation（Esc 不冒泡收起面板）。
+    if (referenceMenu?.handleKeydown(event)) return;
     if (slashMenu?.handleKeydown(event)) return;
+    // C1 原子退格：光标紧邻芯片 token 尾部时整删 token + 注销引用（官方芯片
+    // 原子性适配；IME 合成中不介入）。
+    if (event.key === "Backspace" && !composing) {
+      const el = textareaEl;
+      if (el && el.selectionStart === el.selectionEnd) {
+        const hit = atomicChipBeforeCaret(agentComposer.text, el.selectionStart, chipOccurrences);
+        if (hit) {
+          event.preventDefault();
+          agentComposer.text =
+            agentComposer.text.slice(0, hit.start) + agentComposer.text.slice(hit.end);
+          removeComposerReference(hit.reference.uid);
+          const next = hit.start;
+          requestAnimationFrame(() => el.setSelectionRange(next, next));
+          return;
+        }
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       // W1（composer-capability-parity）：IME 合成语境的 Enter 不提交不断行
       // （isComposing + keyCode 229 + compositionend 后 10ms 宽限——中文输入
@@ -485,6 +551,14 @@
 >
   <!-- W4 排队发件箱（composer 卡上方 dock；durable 帧到达退队）。 -->
   <QueueDock />
+  <ReferenceMenu
+    text={agentComposer.text}
+    {caretOnFirstLine}
+    onNavigate={onReferenceNavigate}
+    onPick={onReferencePick}
+    suppress={claim !== null}
+    bind:this={referenceMenu}
+  />
   <SlashMenu
     text={agentComposer.text}
     {caretOnFirstLine}
@@ -546,25 +620,33 @@
   {/if}
   <!-- New Session 态（R12-B 8）输入可用：首条消息即会话创建向量，不再按
        sessionId 禁用。{#key sendEpoch}：发送成功清轨时重建元素丢弃原生 undo
-       栈（W1 undo-cut-after-send）。 -->
-  {#key sendEpoch}
-    <textarea
-      bind:this={textareaEl}
-      rows={1}
-      maxlength={20000}
-      {placeholder}
-      bind:value={agentComposer.text}
-      onkeydown={onKeydown}
-      onkeyup={syncCaret}
-      onclick={syncCaret}
-      onselect={syncCaret}
-      onpaste={onPaste}
-      oncompositionstart={onCompositionStart}
-      oncompositionend={onCompositionEnd}
-      data-composer-composing={composing ? "true" : undefined}
-      class="msg-body max-h-40 w-full resize-none border-0 bg-transparent px-3.5 py-2.5 outline-none focus:outline-none focus-visible:ring-0 placeholder:text-muted-foreground disabled:opacity-50"
-      aria-label="Message"></textarea>
-  {/key}
+       栈（W1 undo-cut-after-send）。C1：镜像绘制层垫在 textarea 下（同度量
+       芯片底色；文本本体仍由 textarea 绘制）。 -->
+  <div class="relative w-full">
+    <ChipPaintLayer
+      text={agentComposer.text}
+      occurrences={chipOccurrences}
+      heightPx={textareaHeight}
+    />
+    {#key sendEpoch}
+      <textarea
+        bind:this={textareaEl}
+        rows={1}
+        maxlength={20000}
+        {placeholder}
+        bind:value={agentComposer.text}
+        onkeydown={onKeydown}
+        onkeyup={syncCaret}
+        onclick={syncCaret}
+        onselect={syncCaret}
+        onpaste={onPaste}
+        oncompositionstart={onCompositionStart}
+        oncompositionend={onCompositionEnd}
+        data-composer-composing={composing ? "true" : undefined}
+        class="msg-body relative z-10 max-h-40 w-full resize-none border-0 bg-transparent px-3.5 py-2.5 outline-none focus:outline-none focus-visible:ring-0 placeholder:text-muted-foreground disabled:opacity-50"
+        aria-label="Message"></textarea>
+    {/key}
+  </div>
   <div class="flex h-11 items-center gap-1 px-2.5">
     <!-- 左簇：模式 chip + 图片 + 文件 -->
     <DropdownMenu.DropdownMenu bind:open={modeMenuOpen}>

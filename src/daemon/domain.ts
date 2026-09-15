@@ -113,6 +113,8 @@ export function createDaemonDomain(
   // 面板会话转录存储：appDir()/sessions/YYYY/MM/DD/<sessionId>（产品自有持久层）。
   const agentTranscripts = createSessionTranscripts(join(appDir(), "sessions"));
   const modelCatalog = createModelCatalogService();
+  // C1：file 引用展开守卫链归 agent-files（单一事实源）；agentSessions 经注入消费。
+  const agentFiles = createAgentFilesService();
   const agentSessions = createAgentSessionsService({
     kernel: () => kernelHostRef.handle,
     modelSelection: async () => (await dshSettings.getView()).settings.model,
@@ -126,6 +128,7 @@ export function createDaemonDomain(
       return { contextWindow: entry.contextWindow, maxOutputTokens: entry.maxOutputTokens };
     },
     transcripts: agentTranscripts,
+    expandFileReferences: (references) => agentFiles.resolvePromptReferences({ references }),
   });
   const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();
   const skills = createSkillService(workspaces, { skillsCliProbe });
@@ -148,7 +151,7 @@ export function createDaemonDomain(
     skillSteward: createSkillStewardPipelineService({ workspaces, skills, creator }),
     dshSettings,
     agentSessions,
-    agentFiles: createAgentFilesService(),
+    agentFiles,
     modelCatalog,
     setKernelHost: (handle: DshKernelHandle): void => {
       kernelHostRef.handle = handle;

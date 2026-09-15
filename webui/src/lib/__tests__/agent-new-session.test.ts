@@ -354,6 +354,7 @@ describe("R12-B 6: New Session mode sync (cards <-> composer chip)", () => {
         images: [],
         files: [],
         mode: "queue",
+        references: [],
       }),
     );
     expect(agentSession.sessionId).toBe("agent-s2");

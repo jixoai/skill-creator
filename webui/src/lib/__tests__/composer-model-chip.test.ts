@@ -22,7 +22,7 @@ const toast = vi.hoisted(() => ({
   showToast: vi.fn(),
 }));
 const composer = vi.hoisted(() => ({
-  agentComposer: { text: "", images: [], files: [], editing: null },
+  agentComposer: { text: "", images: [], files: [], references: [], editing: null },
 }));
 
 vi.mock("../stores/connection.svelte", () => ({

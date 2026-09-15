@@ -450,7 +450,8 @@ export async function setAgentSessionMode(mode: DshAgentMode): Promise<boolean> 
  * base64 wire）或后端真实路径通道（path——daemon 读盘 + magic 嗅探，浏览器不经
  * 手原始字节）；daemon 经内核 attachment 准入。New Session 态的首条消息先以待建
  * 模式（pendingMode）惰性建会话——这是空态下唯一的会话创建向量（R12-B 8：
- * 模式卡/chip 只改选择，不 eager 建会话）。
+ * 模式卡/chip 只改选择，不 eager 建会话）。C1：references 随文提交（`@` 芯片
+ * 的 opaque 引用，daemon 展开内容）。
  */
 export async function sendAgentPrompt(
   text: string,
@@ -463,6 +464,12 @@ export async function sendAgentPrompt(
   }> = [],
   files: Array<{ name?: string; data?: string; path?: string }> = [],
   mode: "queue" | "steer" = "queue",
+  references: Array<{
+    kind: "file" | "session";
+    token: string;
+    target: string;
+    label: string;
+  }> = [],
 ): Promise<void> {
   if (text.trim().length === 0 && images.length === 0 && files.length === 0) {
     return;
@@ -528,6 +535,12 @@ export async function sendAgentPrompt(
         }
         return { name: file.name, data: file.data };
       }),
+      // C1：opaque 引用（file 绝对路径 / session id）——内容由 daemon 展开。
+      references: references.map((reference) =>
+        reference.kind === "file"
+          ? { kind: "file" as const, path: reference.target }
+          : { kind: "session" as const, sessionId: reference.target },
+      ),
     });
     if (!request.isCurrent()) return;
     agentSession.promptError = null;

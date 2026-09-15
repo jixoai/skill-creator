@@ -111,6 +111,26 @@ export const AgentPromptFileSchema = z.union([
 /** prompt 文件附件。 */
 export type AgentPromptFile = z.infer<typeof AgentPromptFileSchema>;
 
+/**
+ * prompt 引用（composer-references C1）：`@` 芯片选中后的展开契约——UI 只提交
+ * opaque 引用，内容由 daemon server-owned 解析（file 读盘守卫 / session 转录摘要），
+ * 浏览器不拼内容。strict 判别联合。
+ */
+export const AgentPromptReferenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("file"),
+    /** daemon 可读的绝对路径（realpath + regular file + ≤512KiB + 文本扩展名）。 */
+    path: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("session"),
+    /** 被引用的历史会话（排除语义由 UI 持有；daemon 不猜）。 */
+    sessionId: z.string().min(1),
+  }),
+]);
+/** prompt 引用。 */
+export type AgentPromptReference = z.infer<typeof AgentPromptReferenceSchema>;
+
 /** prompt 输入（多模态：文本 + 可选图片；无图片时与纯文本等价）。 */
 export const AgentSessionPromptInputSchema = z
   .object({
@@ -124,6 +144,8 @@ export const AgentSessionPromptInputSchema = z
      * 当前轮）。缺省 queue。
      */
     mode: z.enum(["queue", "steer"]).default("queue"),
+    /** `@` 引用（C1）：daemon 展开为 [reference: …] 文本块；缺省无。 */
+    references: z.array(AgentPromptReferenceSchema).max(4).default([]),
   })
   .refine(
     // R17 codex P1：files-only 也是合法 prompt（后端文件选择器的主路径）。

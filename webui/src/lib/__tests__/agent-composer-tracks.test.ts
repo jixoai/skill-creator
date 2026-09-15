@@ -190,6 +190,8 @@ function agentRpc(): unknown {
         prompt: sessionPrompt,
         stream: async () => ({ frames: [], status: "idle" }),
       },
+      // C1：ReferenceMenu 的目录面（面板挂载即会请求；返回空目录即可）。
+      files: { list: async () => ({ dir: "/home/tester", parent: null, entries: [] }) },
     },
   };
 }

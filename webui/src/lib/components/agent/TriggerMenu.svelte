@@ -25,6 +25,15 @@
     /** 分组标题（W3：命令/技能统一菜单的 roster 分组；缺省 = 无组头）。 */
     group?: string;
   }
+
+  /**
+   * 结构性 pinned 行（C1 @ 菜单的 `..` 上级目录行）：不受前缀过滤约束、恒在
+   * 首位渲染与键盘导航内；label 自带视觉（如 ".."）。
+   */
+  export interface PinnedMenuRow {
+    value: string;
+    label: string;
+  }
 </script>
 
 <script lang="ts">
@@ -40,9 +49,10 @@
     suppress = false,
     forcedOpen = false,
     onForceClose,
+    pinned,
     onSelect,
   }: {
-    /** 触发字符（W3 起统一 "/"：命令 + 技能）。 */
+    /** 触发字符（W3 起统一 "/"：命令 + 技能；C1 起 "@" 引用）。 */
     trigger: string;
     /** 候选注册表（结构开放，由实例外壳持有）。 */
     entries: readonly MenuEntry[];
@@ -52,7 +62,7 @@
     caretOnFirstLine: boolean;
     /** 浮现列表的 aria-label。 */
     menuLabel: string;
-    /** data-slot 语义/测试锚（slash-menu / skill-menu）。 */
+    /** data-slot 语义/测试锚（slash-menu / reference-menu）。 */
     dataSlot: string;
     /** entries 为空时的占位文案（undefined = 无候选即隐藏菜单）。 */
     emptyMessage?: string;
@@ -64,6 +74,8 @@
     forcedOpen?: boolean;
     /** forcedOpen 的受控关闭（`+` 再点切换）。 */
     onForceClose?: () => void;
+    /** C1 结构性 pinned 行（恒在首位，不过滤；如 `..` 上级目录）。 */
+    pinned?: PinnedMenuRow;
     /** 选中候选：以完整 value 交回调用方（发送命令 / 插入 token 由外壳决定）。 */
     onSelect: (value: string) => void;
   } = $props();
@@ -75,11 +87,12 @@
   const query = $derived(text.startsWith(trigger) ? (text.split("\n", 1)[0] ?? "") : "");
   /** forcedOpen 的空 query 语义：全目录（官方空 query 分区展示）。 */
   const effectiveQuery = $derived(forcedOpen && query.length === 0 ? trigger : query);
-  const matches = $derived(
-    effectiveQuery.length > 0
-      ? entries.filter((entry) => entry.value.startsWith(effectiveQuery))
-      : [],
-  );
+  /** C1：前缀匹配大小写不敏感（官方 @/ 目录过滤语义；对 / 菜单无行为回退）。 */
+  const matches = $derived.by(() => {
+    if (effectiveQuery.length === 0) return [];
+    const needle = effectiveQuery.toLowerCase();
+    return entries.filter((entry) => entry.value.toLowerCase().startsWith(needle));
+  });
   /** 空注册表占位（如当前 Workspace 无 skill）：菜单保留但无可选项。 */
   const showEmpty = $derived(entries.length === 0 && emptyMessage !== undefined);
   const open = $derived(
@@ -87,10 +100,13 @@
       caretOnFirstLine &&
       dismissedText !== text &&
       ((forcedOpen && (matches.length > 0 || showEmpty)) ||
-        (query.length > 0 && (matches.length > 0 || showEmpty))),
+        (query.length > 0 &&
+          (matches.length > 0 || showEmpty || (pinned !== undefined && query.includes("/"))))),
   );
+  /** 可选行总数（pinned 行参与键盘导航，恒在首位）。 */
+  const rowCount = $derived(matches.length + (pinned !== undefined ? 1 : 0));
   /** 选中索引（matches 收缩时收敛到上界内）。 */
-  const selected = $derived(Math.min(selectedIndex, Math.max(0, matches.length - 1)));
+  const selected = $derived(Math.min(selectedIndex, Math.max(0, rowCount - 1)));
   /** 分组投序：按 entries 声明序渲染组头（组切换处落组头行）。 */
   const grouped = $derived(
     matches.map((entry, index) => ({
@@ -118,7 +134,7 @@
       onForceClose?.();
       return true;
     }
-    if (matches.length === 0) {
+    if (rowCount === 0) {
       // 空态占位：Enter 先占（不把半成品当消息发送）；方向键交还光标移动。
       if (event.key === "Enter") {
         consume(event);
@@ -128,22 +144,27 @@
     }
     if (event.key === "ArrowDown") {
       consume(event);
-      selectedIndex = (selected + 1) % matches.length;
+      selectedIndex = (selected + 1) % rowCount;
       return true;
     }
     if (event.key === "ArrowUp") {
       consume(event);
-      selectedIndex = (selected - 1 + matches.length) % matches.length;
+      selectedIndex = (selected - 1 + rowCount) % rowCount;
       return true;
     }
     if (event.key === "Enter" || (event.key === "Tab" && forcedOpen)) {
       // W3：forcedOpen 态 Tab 也选中（官方 `+` 启动器的列表盒语义）；常规态
-      // Tab 交还（既有键盘面不变）。
+      // Tab 交还（既有键盘面不变）。C1：index 0 = pinned 行（若有）。
       consume(event);
-      const entry = matches[selected];
-      if (entry) {
-        onSelect(entry.value);
+      if (pinned !== undefined && selected === 0) {
+        onSelect(pinned.value);
         onForceClose?.();
+      } else {
+        const entry = matches[selected - (pinned !== undefined ? 1 : 0)];
+        if (entry) {
+          onSelect(entry.value);
+          onForceClose?.();
+        }
       }
       return true;
     }
@@ -164,11 +185,30 @@
         {sourceLabel}
       </div>
     {/if}
-    {#if matches.length === 0}
+    {#if matches.length === 0 && pinned === undefined}
       <li class="cursor-default px-2.5 py-1.5 text-[11px] text-muted-foreground">
         {emptyMessage}
       </li>
     {:else}
+      {#if pinned}
+        <li>
+          <button
+            type="button"
+            class="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[11px] {selected ===
+            0
+              ? 'bg-accent text-accent-foreground'
+              : 'text-muted-foreground'} hover:bg-accent/50"
+            aria-current={selected === 0 ? "true" : undefined}
+            data-menu-pinned="true"
+            onclick={() => {
+              onSelect(pinned.value);
+              onForceClose?.();
+            }}
+          >
+            <span class="shrink-0 font-medium">{pinned.label}</span>
+          </button>
+        </li>
+      {/if}
       {#each grouped as item (item.entry.value)}
         {#if item.header && item.entry.group}
           <li
@@ -181,11 +221,14 @@
         <li>
           <button
             type="button"
-            class="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[11px] {item.index ===
+            class="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[11px] {item.index +
+              (pinned !== undefined ? 1 : 0) ===
             selected
               ? 'bg-accent text-accent-foreground'
               : 'text-foreground'} hover:bg-accent/50"
-            aria-current={item.index === selected ? "true" : undefined}
+            aria-current={item.index + (pinned !== undefined ? 1 : 0) === selected
+              ? "true"
+              : undefined}
             onclick={() => {
               onSelect(item.entry.value);
               onForceClose?.();

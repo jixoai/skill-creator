@@ -23,6 +23,7 @@
  */
 import { showToast } from "$lib/toast.svelte";
 import { loadPersistedDraftText, persistDraftText } from "./agent-submission.svelte";
+import type { ComposerReference } from "$lib/components/agent/composer-chips.js";
 
 /**
  * 图片附件（双通道，R17-B）：本地 File（mediaType+data+preview 原图 dataURL）
@@ -54,6 +55,8 @@ interface ComposerDraft {
   text: string;
   images: ComposerImageAttachment[];
   files: ComposerFileAttachment[];
+  /** `@` 引用 registry（C1）：按拾取序；与附件同生命周期（不落 localStorage）。 */
+  references: ComposerReference[];
   editing: string | null;
 }
 
@@ -68,6 +71,8 @@ export const agentComposer = $state({
   text: "",
   images: [] as ComposerImageAttachment[],
   files: [] as ComposerFileAttachment[],
+  /** `@` 引用 registry（C1）：绘制与提交按 token 出现序消费（composer-chips）。 */
+  references: [] as ComposerReference[],
   /** 编辑回填来源文本（非 null = editing 态：注记条 + 语义 placeholder）。 */
   editing: null as string | null,
 });
@@ -76,8 +81,11 @@ export const agentComposer = $state({
 const draftTracks = new Map<string, ComposerDraft>();
 let activeTrackKey = NEW_SESSION_COMPOSER_TRACK;
 
+/** 引用 uid 计数（模块级单调；与 queuedOutbox 同法则）。 */
+let referenceSeq = 0;
+
 function emptyDraft(): ComposerDraft {
-  return { text: "", images: [], files: [], editing: null };
+  return { text: "", images: [], files: [], references: [], editing: null };
 }
 
 function snapshotFacade(): ComposerDraft {
@@ -85,6 +93,7 @@ function snapshotFacade(): ComposerDraft {
     text: agentComposer.text,
     images: [...agentComposer.images],
     files: [...agentComposer.files],
+    references: [...agentComposer.references],
     editing: agentComposer.editing,
   };
 }
@@ -93,7 +102,21 @@ function applyDraft(draft: ComposerDraft): void {
   agentComposer.text = draft.text;
   agentComposer.images = draft.images;
   agentComposer.files = draft.files;
+  agentComposer.references = draft.references;
   agentComposer.editing = draft.editing;
+}
+
+/** 登记一条 `@` 引用（C1）：token 已由菜单落进稿文；uid 返回供移除。 */
+export function addComposerReference(reference: Omit<ComposerReference, "uid">): number {
+  referenceSeq += 1;
+  const uid = referenceSeq;
+  agentComposer.references = [...agentComposer.references, { ...reference, uid }];
+  return uid;
+}
+
+/** 按 uid 移除（原子退格/显式撤销）；未命中 no-op。 */
+export function removeComposerReference(uid: number): void {
+  agentComposer.references = agentComposer.references.filter((item) => item.uid !== uid);
 }
 
 /**

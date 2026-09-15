@@ -41,6 +41,7 @@ import type {
   AgentSessionsCleanupResult,
 } from "../../shared/contracts/agent.js";
 import { DomainError } from "../domain-error.js";
+import { isTextualFileName } from "../agent-files.js";
 import { AGENT_MODE_ROLES, agentRoleToolName } from "../../shared/contracts/agent-roles.js";
 import type { DshKernelHandle } from "./dsh-kernel.js";
 import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
@@ -72,6 +73,11 @@ export interface AgentSessionsDeps {
   retention?: number;
   /** 面板转录存储（跨重启回放与续聊定位）。 */
   transcripts: SessionTranscripts;
+  /**
+   * `@` file 引用展开（C1）：守卫链在 agent-files（单一事实源）；注入解耦
+   * kernel/ 对 daemon 根模块的运行时依赖（测试可替换）。
+   */
+  expandFileReferences?: (references: Array<{ kind: "file"; path: string }>) => Promise<string[]>;
 }
 
 /** 内核 Agent/Session 的最小结构面（unknown 收窄）。 */
@@ -986,6 +992,58 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     }
   }
 
+  /** session 引用摘要的帧数/字符双上限（C1：有界上下文注入）。 */
+  const SESSION_DIGEST_MAX_FRAMES = 30;
+  const SESSION_DIGEST_MAX_CHARS = 24_000;
+
+  /**
+   * `@` session 引用摘要（C1）：转录帧流只取 user-text / assistant-text（思考、
+   * 工具与审批不进引用），末尾 N 条、总字符 ≤24k；role 前缀行。被引会话缺失
+   * （无 meta 且无帧）= typed NOT_FOUND——用户引用了已删目标，失败可见可修。
+   */
+  function sessionReferenceDigest(sessionId: string): string {
+    const meta = deps.transcripts.listAll().find((item) => item.sessionId === sessionId);
+    const frames = deps.transcripts.readFrames(sessionId);
+    if (meta === undefined && frames.length === 0) {
+      throw new DomainError("NOT_FOUND", `referenced session not found: ${sessionId}`);
+    }
+    const lines: string[] = [];
+    let total = 0;
+    for (let i = frames.length - 1; i >= 0 && lines.length < SESSION_DIGEST_MAX_FRAMES; i -= 1) {
+      const frame = frames[i];
+      const role =
+        frame.kind === "user-text" ? "user" : frame.kind === "assistant-text" ? "assistant" : null;
+      if (role === null || typeof frame.text !== "string" || frame.text.length === 0) continue;
+      const line = `${role}: ${frame.text}`;
+      if (total + line.length > SESSION_DIGEST_MAX_CHARS && lines.length > 0) break;
+      lines.unshift(line.slice(0, SESSION_DIGEST_MAX_CHARS));
+      total += line.length;
+    }
+    const title = meta?.title !== undefined && meta.title.length > 0 ? ` "${meta.title}"` : "";
+    return `[reference: earlier session${title} (${sessionId})]\n${lines.join("\n")}`;
+  }
+
+  /** 引用展开（C1）：file 走注入的 agent-files 守卫链；session 走本层转录摘要。 */
+  async function expandReferences(
+    references: Array<{ kind: "file"; path: string } | { kind: "session"; sessionId: string }>,
+  ): Promise<string[]> {
+    const blocks: string[] = [];
+    for (const reference of references) {
+      if (reference.kind === "file") {
+        if (deps.expandFileReferences === undefined) {
+          throw new DomainError(
+            "UNAVAILABLE",
+            "file references require the agent-files service (not wired)",
+          );
+        }
+        blocks.push(...(await deps.expandFileReferences([reference])));
+      } else {
+        blocks.push(sessionReferenceDigest(reference.sessionId));
+      }
+    }
+    return blocks;
+  }
+
   /** 消息 content blocks 的 text 拼接（unknown 收窄）。 */
   function textOf(message: unknown): string | undefined {
     const content = (message as { content?: unknown } | null | undefined)?.content;
@@ -1029,12 +1087,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     return out;
   }
 
-  /** 文本类文件判定（mime 未知时按扩展名；≤512KiB 上限由契约保证）。 */
-  function isTextualFile(name: string): boolean {
-    return /\.(txt|md|markdown|json|ya?ml|toml|csv|tsv|log|patch|diff|ts|tsx|js|jsx|py|rs|go|java|c|h|cpp|sh|css|html|xml|ini|env)$/i.test(
-      name,
-    );
-  }
+  /** 文本类文件判定（mime 未知时按扩展名；≤512KiB 上限由契约保证）——清单单一
+   * 事实源在 agent-files（prompt 内联与 `@` 引用共用）。 */
+  const isTextualFile = isTextualFileName;
 
   /** assistant/message 事件顶层 usage 的数值白名单投影（非数值丢弃；信封经 safeParse，无 cast）。 */
   function usageSnapshotOf(data: unknown): Record<string, number> | undefined {
@@ -1280,13 +1335,19 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       return summaryOf(entry);
     },
     /** 驱动一轮用户输入（长度硬上限与 RPC 契约一致——外部输入 runtime 收窄）。
-     * 非live但有转录的会话先经内核 agents.resume 复活（跨 daemon 重启续聊）。 */
+     * 非live但有转录的会话先经内核 agents.resume 复活（跨 daemon 重启续聊）。
+     * C1：references 由 daemon 展开（file 读盘 / session 转录摘要）为
+     * [reference: …] 文本块，注入内核 content——与文件附件内联同构；目标缺失
+     * typed NOT_FOUND 整体拒绝，不静默降级。 */
     async prompt(
       sessionId: string,
       text: string,
       images: Array<{ mediaType: string; data: string; name?: string }> = [],
       files: Array<{ name: string; data: string }> = [],
       mode: "queue" | "steer" = "queue",
+      references: Array<
+        { kind: "file"; path: string } | { kind: "session"; sessionId: string }
+      > = [],
     ): Promise<void> {
       if (text.length > PROMPT_MAX_CHARS) {
         throw new DomainError(
@@ -1294,13 +1355,21 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           `prompt too long: ${text.length} chars (max ${PROMPT_MAX_CHARS})`,
         );
       }
+      // 引用展开先于 live/revive 与 slash 分流（纯 daemon 面，不触内核）：
+      // 目标缺失在会话复活前失败；携带引用的 "/xxx" 是普通消息，不被命令分流吞。
+      const referenceBlocks = references.length > 0 ? await expandReferences(references) : [];
       let entry = live.get(sessionId);
       if (!entry) {
         entry = await reviveSession(sessionId);
       }
       // slash 命令分流（差距-2 2026-09-12）："/compact" 等经内核 ctx.commands
       // 执行（不进 LLM）；非命令（execute 返回 undefined）回落普通消息。
-      if (text.startsWith("/") && images.length === 0 && files.length === 0) {
+      if (
+        text.startsWith("/") &&
+        images.length === 0 &&
+        files.length === 0 &&
+        references.length === 0
+      ) {
         const commands = (
           requireKernel().ctx as Context & {
             commands?: {
@@ -1338,6 +1407,10 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         });
         return false;
       });
+      // C1 引用块：正文/文件内联之后（模型视角 = 消息尾部的上下文载荷）。
+      for (const block of referenceBlocks) {
+        content.push({ type: "text", text: block });
+      }
       if (images.length > 0 || restFiles.length > 0) {
         const kernel = requireKernel();
         const attachments = (
