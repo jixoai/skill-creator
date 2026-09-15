@@ -33,7 +33,7 @@
 - [x] 4.1 Agent 面板：subagent 帧渲染为居中 hairline 行（bot 图标 + agent chip +
       label + mode chip；TranscriptView + store 投影 + payload schema 门）
 - [~] 4.2 会话头 lineage 计数：首版以会话内 subagent 帧计数表达（官方 catalog
-      计数 RPC 留待有真实 spawn 流量后接）；子会话转录探视延后
+  计数 RPC 留待有真实 spawn 流量后接）；子会话转录探视延后
 - [x] 4.3 vision 走查（独立完成）：PASS——spawn 行渲染干净、与既有居中行视觉
       语言一致；P2 发现（工具行 args 不可见）为种子数据伪影（真实流走
       tool-args-delta 通道），非本阶段回归；P3×3（composer 芯片截断/状态点/
@@ -45,8 +45,7 @@
 
 - [x] 5.1 全量电池 880 + typecheck + webui check（30 文件/284）+ build + dist
       冒烟（CI 双 job 绿：web-mode-smoke + full-battery）
-- [x] 5.2 AGENTS.md 诊断更新（DSH integration fact → 0.1.6-alpha.1 + 0a15e36e
-      + bareModuleBaseUrl 升级注记；Agent Role/Composer 词汇；拓扑模块表）
+- [x] 5.2 AGENTS.md 诊断更新（DSH integration fact → 0.1.6-alpha.1 + 0a15e36e + bareModuleBaseUrl 升级注记；Agent Role/Composer 词汇；拓扑模块表）
 - [x] 5.3 spec 同步归档（agent-kernel 主 spec 并入子代理三 Requirement +
       版本矩阵 MODIFIED；4.2 lineage 计数以帧计数首版表达、catalog RPC 延后
       记录于 design）

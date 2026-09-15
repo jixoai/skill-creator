@@ -22,8 +22,8 @@
   API），子代理生命周期（spawn/join/abort）与转录/事件流投影到 Agent 面板；
   工具面收窄法则对子代理工具行同样生效（专注模式 deny 收窄不因子代理旁路）。
 - **Roles 骑原生子代理**：Role = 子代理定义（版本化 prompt section + 受限工具面
-  + 明确的返回契约）；从会话内 spawn，结果以事件回到父转录；Roles 目录成为
-  browser-safe shared 常量（UI 不手抄）。
+  - 明确的返回契约）；从会话内 spawn，结果以事件回到父转录；Roles 目录成为
+    browser-safe shared 常量（UI 不手抄）。
 - **面板 UI**：子代理活动可见（spawn 进度、转录摘要、取消），不引入第二宿主面。
 
 ## Non-Goals

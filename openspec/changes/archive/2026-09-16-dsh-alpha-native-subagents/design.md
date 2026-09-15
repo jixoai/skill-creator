@@ -36,12 +36,12 @@ subagent 行）：
 
 ```yaml
 - id: tool-role-<slug>
-  name: '@deepseek-ai/dsh-tool-subagent'
+  name: "@deepseek-ai/dsh-tool-subagent"
   config:
-    provider: spawn              # 零父上下文的全新子进程内 agent
-    toolName: role_<slug>        # 模型面名（每角色唯一，避开同 fiber 冲突）
-    backgroundMode: continuable  # durable 子代理；不需要 ctx.jobs
-    persona: |                   # 版本化角色 prompt section
+    provider: spawn # 零父上下文的全新子进程内 agent
+    toolName: role_<slug> # 模型面名（每角色唯一，避开同 fiber 冲突）
+    backgroundMode: continuable # durable 子代理；不需要 ctx.jobs
+    persona: | # 版本化角色 prompt section
       # Role: <name> (v1) ...
     toolFilter:
       allow: [ask_user_question 禁用, mcp__skill-creator__<能力面>...]
@@ -74,11 +74,11 @@ subagent 行）：
 
 ## Roles 目录（首版）
 
-| role | 场景 | 能力面（toolFilter allow） |
-|---|---|---|
-| reviewer | 技能评审：读技能给改进意见 | 只读 mcp 能力（skills_list/info/validate） |
-| researcher | 源调研：Discover 源扫描分析 | 只读 repository/sources 能力 |
-| writer | 草稿撰写：按模板写 SKILL.md 初稿 | skills_propose（mutation→proposal 链） |
+| role       | 场景                             | 能力面（toolFilter allow）                 |
+| ---------- | -------------------------------- | ------------------------------------------ |
+| reviewer   | 技能评审：读技能给改进意见       | 只读 mcp 能力（skills_list/info/validate） |
+| researcher | 源调研：Discover 源扫描分析      | 只读 repository/sources 能力               |
+| writer     | 草稿撰写：按模板写 SKILL.md 初稿 | skills_propose（mutation→proposal 链）     |
 
 目录为 browser-safe shared 常量（`src/shared/contracts/agent-roles.ts`），
 UI 不手抄；每角色 prompt section 版本化（product-prompt.ts 同法）。
