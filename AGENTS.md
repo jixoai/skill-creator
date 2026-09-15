@@ -90,11 +90,23 @@ Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 che
 Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
 Agent Kernel       = headless DSH 内核：单 dsh-base bundle + 产品 preset（persona/ask-user）
                       + 工具面收窄（专注模式禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
+Agent Role         = 官方原生子代理的受控暴露：一条 dsh-tool-subagent 行 = 一个角色
+                      （spawn provider + continuable + 唯一 role_* 工具名 + 版本化 persona
+                      + 结构化 toolFilter——allow 为精确 MCP 注册名、deny ask_user_question
+                      红线）；模式暴露矩阵 AGENT_MODE_ROLES 按 mode 放行；子会话不入面板
+                      列表（origin=subagent 过滤），spawn 经父会话 subagent/catalog 事件投影
+                      subagent 帧，settlement 以用户消息回流；dispose 有界 drain 子代理
 Agent Mode         = create/manage/explore/free(General，默认) 四种会话模式：专有模式 =
                       版本化 prompt section + guard 收窄 MCP 工具面；General 为轻量入口
                       段（只列专注模式）+ 全工具面 + 原生 bash，经 setMode（dispose+resume）
                       中途切换，mode 持久于转录 meta；模型 provider 预设两档（CN 五家 +
                       OpenAI/Anthropic/Gemini，pi-ai 目录对齐）经 settings.modelRoutes 桥接
+Composer           = Agent Chat 输入框（官方 webui 能力矩阵复刻，textarea 底座语义对齐）：
+                      IME 守卫/undo-cut-after-send/粘贴消毒/占位符链（W1）；附件整批预检 +
+                      全窗 DnD 覆盖层 + 读入门控（W2）；`/` 统一命令+技能菜单、claim 机、
+                      `+` 启动器（W3，$ 触发符已退役）；prompt.mode queue/steer 直译内核
+                      next-turn/next-step、忙碌 Enter 持久偏好、QueueDock、草稿文本持久化、
+                      Stop 保队列（W4）；官方没有的计数器/输入历史/语音/引用回复不做
 Agent Panel        = shell 级右栏 drawer：agent.* RPC 消费内核会话（帧流/审批/模式 chip）；
                       设置面（list-detail Dialog）为全局面，入口在左导航底部
 capability-core    = 领域能力层：name + Zod IO + handler + authority class
@@ -121,7 +133,7 @@ ACP Bridge         = internal legacy：generic ACP session 已从产品入口移
 
 ## 3. 系统拓扑
 
-DSH integration fact (2026-09-06): official `deepseek-ai/deepseek-harness` commit `d347e703908d0406b7a7ef80e3a0e594d86b2215` (v0.1.3-alpha.1, MIT) exposes composable `agent`, `agent-loop`, `session`, `tools`, `system-prompt`, `agent-presets`, `approval`, `sandbox`, API gateway and client module seams. The local `/Users/kzf/Dev/GitHub/dsh` checkout is only `dsh-herdr`; it is not evidence of the official Agent harness. Use `docs/research/2026-09-06-dsh-integration.md` and the active staged changes as the integration boundary; do not treat DSH stores or profiles as Manager truth.
+DSH integration fact (2026-09-16): the kernel pins the official `deepseek-ai/deepseek-harness` family at `0.1.6-alpha.1` (audited against tag commit `0a15e36e7f82b6ed45af6fa9759f29b40dcd965d` — the checkout both research passes ran on). The historical integration boundary research lives at `docs/research/2026-09-06-dsh-integration.md` (commit `d347e703`, v0.1.3-alpha.1 era) plus `docs/research/2026-09-12-roles-as-subagents.md` §6. The local `/Users/kzf/Dev/GitHub/dsh` checkout is only `dsh-herdr`; it is not evidence of the official Agent harness. Do not treat DSH stores or profiles as Manager truth. Upgrade note: 0.1.6's `boot()` honors its `bareModuleBaseUrl` argument that the rc.2 era silently ignored — the kernel must not pass it (bare package names resolve through the healed profile mirror).
 
 ```text
                          process boundary
@@ -463,8 +475,9 @@ src/
 |   |   |-- core.ts ------------ [2] 能力定义 + registry（闭合面 / principal 边界 / 投影）
 |   |   `-- domain-capabilities.ts [2] contract-map 20 项能力登记（authority 标注）
 |   |-- kernel/
-|   |   |-- dsh-kernel.ts ------ [3] headless profile boot / 工具面收窄 / mcp row
-|   |   |-- agent-sessions.ts -- [4] 面板会话面 / 帧流投影 / user-questions answerer
+|   |   |-- dsh-kernel.ts ------ [3] headless profile boot / 工具面收窄 / mcp row / role rows
+|   |   |-- agent-sessions.ts -- [4] 面板会话面 / 帧流投影（含 subagent 帧）/ user-questions answerer / prompt queue-steer
+|   |   |-- agent-roles.ts ----- [2] 角色目录（shared AGENT_ROLES 单源）+ persona + tool-subagent 行 YAML
 |   |   `-- product-prompt.ts -- [2] 版本化最佳实践 system prompt section
 |   |-- mcp/
 |   |   |-- skill-creator-mcp.ts [3] MCP server（tools / resources / propose 变体）
@@ -483,8 +496,8 @@ src/
         |-- routes/ ------------ SvelteKit catch-all 承载点（+layout/+page/[...catch]）
         |-- lib/shell/ --------- ChromeTabs shell / route registry / nav / device prefs
         |-- lib/apps/ ---------- workspaces / creator / repository 三个 App manifest + 视图
-        |-- lib/stores/ -------- connection / request generation / workspace / skills / creator / repository
-        |-- lib/components/ ---- product composition（creator 子视图、source-card 等）
+        |-- lib/stores/ -------- connection / request generation / workspace / skills / creator / repository / agent（含 composer 双轨与 submission 面）
+        |-- lib/components/ ---- product composition（agent composer 家族：ComposerCard/TriggerMenu/SlashMenu/QueueDock/DropOverlay + composer-keymap/trigger 内核；creator 子视图、source-card 等）
         `-- lib/components/ui/ - shadcn-svelte generated primitives
 ```
 

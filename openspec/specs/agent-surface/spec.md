@@ -176,3 +176,81 @@ The composer MUST be one rounded card (attachments strip, autogrowing textarea, 
 
 - **WHEN** the active model's route carries a contextWindow (e.g. 204800) and the last usage reports input tokens
 - **THEN** the ring ratio uses that capacity; when unknown, the popover shows the fallback value labeled as assumed
+
+### Requirement: composer editor core matches the official input surface semantics
+
+The Agent Chat composer MUST provide a rich editing surface whose observable semantics match the official webui input box: multi-line editing with unconditional Shift+Enter line breaks, IME-safe submission (composition-closing Enter neither submits nor breaks), undo history cut after a successful send, and paste sanitization that strips reference placeholder characters from all external text.
+
+#### Scenario: IME composition Enter is inert
+
+- **WHEN** the user presses Enter while composing (isComposing, keyCode 229, or within the 10ms post-compositionend window)
+- **THEN** the draft is neither submitted nor line-broken
+- **AND** no placeholder is rendered during composition.
+
+#### Scenario: undo cannot resurrect sent content
+
+- **WHEN** a send succeeds and the user presses Ctrl/Cmd+Z
+- **THEN** the committed prefix does not return
+- **AND** a pure suffix typed during the host round-trip is retained.
+
+#### Scenario: placeholder chain
+
+- **WHEN** draft, attachments and claim are all empty
+- **THEN** the placeholder follows the priority chain: owner override > disconnected > unavailable > queue hint > mode-specific > default
+- **AND** the same text is exposed as the accessible label.
+
+### Requirement: composer attachments are gated and recoverable
+
+Attachment intake MUST enforce channel limits (count/size/media types) with whole-batch refusal; a document-level drag-and-drop overlay MUST cover the window during file drags; submission MUST wait while any attachment read is in flight; an empty draft with attachments MUST submit an attachment-only message; failed sends MUST keep the draft snapshot for retry.
+
+#### Scenario: over-limit batch refused whole
+
+- **WHEN** a picked batch violates the channel limits
+- **THEN** no item of the batch enters the rail and a single reason-keyed notice is shown.
+
+#### Scenario: read-gated send
+
+- **WHEN** the user presses Enter while an attachment read is in flight
+- **THEN** submission is held with a still-reading notice
+- **AND** the draft and attachments are retained.
+
+### Requirement: trigger pipeline provides command claims and a unified slash directory
+
+The composer MUST run the official trigger grammar: `/` opens at start/whitespace/punctuation with URL carve-outs and claims input-taking commands (claimed phase suppresses the `/` trigger and strips the token's args at submit); `/` skills land as plain text; a programmatic `+` launcher opens the directory without typing a trigger; a durable busy-Enter preference resolves gestures while a turn runs.
+
+#### Scenario: command claim round-trip
+
+- **WHEN** a user picks an input-taking command and submits with args
+- **THEN** the claimed token is stripped from the submitted text and the command executes with its arguments
+- **AND** Escape does not release a claim — only backspacing the token does.
+
+#### Scenario: URL carve-outs
+
+- **WHEN** the first line begins with `//` (protocol-relative) or the trigger position carries a `://` scheme
+- **THEN** the trigger menu does not open.
+
+### Requirement: submission supports queue and steer with durable preference
+
+Enter and the primary button MUST resolve to the configured busy-Enter preference (queue or steer) while a turn is running; Cmd/Ctrl+Enter MUST use the opposite; queued rows MUST be visible in a dock that retires each row when its durable user message frame lands; drafts MUST persist per session across reloads; stopping MUST leave the queue alive to resume FIFO.
+
+#### Scenario: busy-Enter preference drives gesture
+
+- **WHEN** the session is running and the user presses plain Enter with an actionable draft
+- **THEN** the gesture resolves to the durable busy-Enter preference and the primary button names the resolved mode
+- **AND** Cmd/Ctrl+Enter takes the opposite path.
+
+#### Scenario: queued row retires on arrival
+
+- **WHEN** a message queued while running becomes the next turn
+- **THEN** its dock row retires as its durable user message frame arrives
+- **AND** a failed send retires its row while keeping the draft for retry.
+
+### Requirement: composer states and seats stay live per the official block model
+
+The composer MUST render locked/read-only states (session removed, disconnected, adjudicating) while keeping the model seat live; transient notices MUST anchor with identical-repeat restart; the context meter MUST render only when the host reports pressure and capacity.
+
+#### Scenario: adjudicating is read-only
+
+- **WHEN** a trigger adjudication or submission is in flight
+- **THEN** the draft stays visible and read-only
+- **AND** the model picker remains interactive.

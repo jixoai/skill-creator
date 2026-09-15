@@ -43,6 +43,10 @@
 
 ## 5 收尾
 
-- [ ] 5.1 全量电池 + typecheck + webui check + build + dist 冒烟
-- [ ] 5.2 AGENTS.md 诊断更新（DSH integration fact → 0.1.6-alpha.1 + 0a15e36e）
-- [ ] 5.3 spec 同步归档
+- [x] 5.1 全量电池 880 + typecheck + webui check（30 文件/284）+ build + dist
+      冒烟（CI 双 job 绿：web-mode-smoke + full-battery）
+- [x] 5.2 AGENTS.md 诊断更新（DSH integration fact → 0.1.6-alpha.1 + 0a15e36e
+      + bareModuleBaseUrl 升级注记；Agent Role/Composer 词汇；拓扑模块表）
+- [x] 5.3 spec 同步归档（agent-kernel 主 spec 并入子代理三 Requirement +
+      版本矩阵 MODIFIED；4.2 lineage 计数以帧计数首版表达、catalog RPC 延后
+      记录于 design）
