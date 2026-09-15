@@ -23,6 +23,9 @@
 
   export const SLASH_COMMANDS: readonly SlashCommand[] = [
     { command: "/compact", description: "Summarize the transcript to reclaim context" },
+    // W4：忙碌 Enter 偏好（客户端命令——选中即本地生效，不发送）。
+    { command: "/queue", description: "While busy, Enter queues after the current turn" },
+    { command: "/steer", description: "While busy, Enter steers the current turn" },
   ];
 
   /** input-taking 命令 token 集（含尾随空格；claim 机的命令目录）。 */

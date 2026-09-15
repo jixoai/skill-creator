@@ -45,6 +45,7 @@ import {
   type DshStewardSettingsView,
 } from "$shared/contracts/dsh-runtime.js";
 import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
+import { resetQueuedOutbox, retireQueuedSend, trackQueuedSend } from "./agent-submission.svelte";
 import {
   NEW_SESSION_COMPOSER_TRACK,
   agentComposer,
@@ -407,6 +408,8 @@ function resetSessionView(
   pendingUserEcho = [];
   pendingUsage = null;
   pendingToolArgs = new Map();
+  // W4：发件箱投影随会话清空（队列真相在内核 inbox）。
+  resetQueuedOutbox();
   // R17-A：sessionId 变化即换轨到该会话的草稿（selectAgentSession 与惰性 create
   // 两个向量共用本入口；双向暂存，切换不丢任何一轨）。
   switchComposerTrack(sessionId);
@@ -459,10 +462,13 @@ export async function sendAgentPrompt(
     preview?: string;
   }> = [],
   files: Array<{ name?: string; data?: string; path?: string }> = [],
+  mode: "queue" | "steer" = "queue",
 ): Promise<void> {
   if (text.trim().length === 0 && images.length === 0 && files.length === 0) {
     return;
   }
+  // W4：running 中以 queue 模式提交 → 发件箱投影（durable 帧到达退队）。
+  if (mode === "queue" && agentSession.status === "running") trackQueuedSend(text);
   if (!agentSession.sessionId) {
     await createAgentSession(undefined, agentSession.pendingMode);
     // 创建失败（含被代次门取代）：sessionId 仍为 null，错误已进 error 面。
@@ -498,6 +504,7 @@ export async function sendAgentPrompt(
     await requireRpc().agent.session.prompt({
       sessionId,
       text,
+      mode,
       images: images.map((image) => {
         // R17-B 双通道分流：path 通道 daemon 读盘（mediaType 由 magic 字节嗅探）。
         if (image.path !== undefined) {
@@ -530,7 +537,8 @@ export async function sendAgentPrompt(
   } catch (error) {
     if (!request.isCurrent()) return;
     agentSession.promptError = error instanceof Error ? error.message : String(error);
-    // 该气泡不会有对应帧到达，出队避免吞掉后续同文本帧。
+    // 该气泡不会有对应帧到达，出队避免吞掉后续同文本帧；W4 发件箱同退。
+    retireQueuedSend(text);
     const echoIndex = pendingUserEcho.indexOf(text);
     if (echoIndex >= 0) pendingUserEcho.splice(echoIndex, 1);
   } finally {
@@ -822,6 +830,8 @@ function appendFrame(frame: DshSessionStreamFrame): void {
       // 直播路径：乐观气泡已展示同文本，帧只做出队确认；切换/重连路径（气泡已
       // 重置）队列必空，帧即唯一来源（attachments 元数据同时回填回显）。
       if (typeof frame.text === "string" && frame.text.length > 0) {
+        // W4：排队发件箱同帧退队（durable 到达 = 该条已开始自己的轮次）。
+        retireQueuedSend(frame.text);
         const echoIndex = pendingUserEcho.indexOf(frame.text);
         if (echoIndex >= 0) {
           pendingUserEcho.splice(echoIndex, 1);

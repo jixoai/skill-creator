@@ -65,6 +65,8 @@
 <script lang="ts">
   import IconImage from "@lucide/svelte/icons/image";
   import IconPlus from "@lucide/svelte/icons/plus";
+  import IconListPlus from "@lucide/svelte/icons/list-plus";
+  import IconSplit from "@lucide/svelte/icons/split";
   import IconFileUp from "@lucide/svelte/icons/file-up";
   import IconSend from "@lucide/svelte/icons/arrow-up";
   import IconStop from "@lucide/svelte/icons/square";
@@ -94,6 +96,11 @@
   } from "$lib/stores/agent.svelte";
   import { connectionState } from "$lib/stores/connection.svelte";
   import {
+    busyEnterPreference,
+    resolveSubmitGesture,
+    setBusyEnterPreference,
+  } from "$lib/stores/agent-submission.svelte";
+  import {
     composerPlaceholder,
     containsChipPlaceholders,
     enterIsComposing,
@@ -110,6 +117,7 @@
   import { showToast } from "$lib/toast.svelte";
   import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import ContextMeter from "./ContextMeter.svelte";
+  import QueueDock from "./QueueDock.svelte";
   import SlashMenu from "./SlashMenu.svelte";
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
@@ -162,10 +170,12 @@
   );
   const editing = $derived(agentComposer.editing !== null);
 
-  /** 主按钮形态机（§3.4）：running 空稿 → 停止；running 有稿 → 置灰；否则发送。 */
+  /** 主按钮形态机（§3.4 + W4）：running 空稿 → 停止；running 有稿 → 按忙碌
+   *  Enter 偏好解析为 queue/steer（可点按提交，Cmd/Ctrl 取反在键盘面）；否则
+   *  发送。W4 后 running 有稿不再置灰——内核 inbox 原生排队/转向。 */
   const primaryMode = $derived.by(() => {
     if (running && !hasDraft) return "stop" as const;
-    if (running) return "wait" as const;
+    if (running) return busyEnterPreference() === "steer" ? ("steer" as const) : ("queue" as const);
     return "send" as const;
   });
 
@@ -262,7 +272,7 @@
     showToast(`Active model → ${provider} · ${model}`);
   }
 
-  function submit(): void {
+  function submit(accelerated = false): void {
     // W3：input-taking 命令的 claim token 在提交点剥离（官方 argsAfter 同法；
     //  首版目录无此类命令——strip 是 passthrough，机器就绪）。
     const text = stripClaimedToken(agentComposer.text.trim(), claim).trim();
@@ -280,10 +290,16 @@
       showToast("Attachments are still being read — try again in a moment.");
       return;
     }
+    // W4（官方 submission-policy）：running 中手势解析——plain = 偏好，
+    // Cmd/Ctrl = 反向；非 running 恒为 queue（即普通发送语义）。
+    const mode =
+      agentSession.status === "running"
+        ? resolveSubmitGesture(accelerated, busyEnterPreference())
+        : "queue";
     // R17-A：提交点不清草稿——发送成功由 sendAgentPrompt 清当前轨（清轨点收窄）；
     // 发送失败草稿留在当前会话轨，可直接修改重试。
     awaitingSendClear = true;
-    void sendAgentPrompt(text, agentComposer.images, agentComposer.files);
+    void sendAgentPrompt(text, agentComposer.images, agentComposer.files, mode);
   }
 
   /** 撤销纪律（W1，官方 undo-cut-after-send 的 textarea 等价）：发送成功清轨时
@@ -349,10 +365,18 @@
     void setAgentSessionMode(mode);
   }
 
-  /** SlashMenu 命令执行（§3.4）：以命令文本发送（丢弃查询草稿与附件，不进入
-   *  对话正文）；`+` 启动器随选关闭。 */
+  /** SlashMenu 命令执行（§3.4 + W4）：客户端命令（/queue /steer 设忙碌 Enter
+   *  偏好）本地处理；其余以命令文本发送（丢弃查询草稿与附件，不进入对话正文）；
+   *  `+` 启动器随选关闭。 */
   function executeSlashCommand(command: string): void {
     launcherOpen = false;
+    if (command === "/queue" || command === "/steer") {
+      const mode = command === "/queue" ? "queue" : "steer";
+      setBusyEnterPreference(mode);
+      showToast(`Busy-Enter preference → ${mode}`);
+      agentComposer.text = "";
+      return;
+    }
     if (agentSession.sending) return;
     agentComposer.text = "";
     agentComposer.images = [];
@@ -397,7 +421,8 @@
         return;
       }
       event.preventDefault();
-      submit();
+      // W4：Cmd/Ctrl+Enter 取偏好反向（accelerated 手势）。
+      submit(event.metaKey || event.ctrlKey);
     }
   }
 
@@ -458,6 +483,8 @@
 <div
   class="relative mx-3 mb-3 flex shrink-0 flex-col rounded-[22px] border border-border bg-card shadow-sm"
 >
+  <!-- W4 排队发件箱（composer 卡上方 dock；durable 帧到达退队）。 -->
+  <QueueDock />
   <SlashMenu
     text={agentComposer.text}
     {caretOnFirstLine}
@@ -723,20 +750,35 @@
       class="relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full transition-colors after:absolute after:-inset-0.5 after:content-[''] {primaryMode ===
       'stop'
         ? 'bg-destructive text-white hover:bg-destructive/90'
-        : primaryMode === 'wait'
-          ? 'bg-muted text-muted-foreground'
+        : primaryMode === 'queue' || primaryMode === 'steer'
+          ? 'bg-primary/85 text-primary-foreground hover:bg-primary'
           : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'}"
-      aria-label={primaryMode === "stop" ? "Cancel current activity" : "Send message"}
+      aria-label={primaryMode === "stop"
+        ? "Cancel current activity"
+        : primaryMode === "queue"
+          ? "Queue message after the current turn"
+          : primaryMode === "steer"
+            ? "Steer the current turn with this message"
+            : "Send message"}
       title={primaryMode === "stop"
         ? "Cancel current activity"
-        : primaryMode === "wait"
-          ? "Wait for the current turn"
-          : "Send (Enter)"}
+        : primaryMode === "queue"
+          ? "Queue (Enter) · Steer (⌘/Ctrl+Enter)"
+          : primaryMode === "steer"
+            ? "Steer (Enter) · Queue (⌘/Ctrl+Enter)"
+            : "Send (Enter)"}
       disabled={primaryMode !== "stop" && (!hasDraft || agentSession.sending)}
-      onclick={() => (primaryMode === "stop" ? void cancelAgentSession() : submit())}
+      onclick={() =>
+        primaryMode === "stop"
+          ? void cancelAgentSession()
+          : submit(primaryMode === "steer" && busyEnterPreference() === "queue")}
     >
       {#if primaryMode === "stop"}
         <IconStop class="h-3 w-3" />
+      {:else if primaryMode === "queue"}
+        <IconListPlus class="h-4 w-4" />
+      {:else if primaryMode === "steer"}
+        <IconSplit class="h-4 w-4" />
       {:else}
         <IconSend class="h-4 w-4" />
       {/if}

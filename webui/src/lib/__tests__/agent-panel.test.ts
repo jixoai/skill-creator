@@ -117,6 +117,7 @@ describe("agent panel store (task 3.x)", () => {
       text: "second",
       images: [],
       files: [],
+      mode: "queue",
     });
     expect(agentSession.items.some((item) => item.kind === "user" && item.text === "second")).toBe(
       true,
@@ -341,6 +342,7 @@ describe("agent panel store (task 3.x)", () => {
       text: "look",
       images: [{ mediaType: "image/png", data: "aGk=", name: "dot.png" }],
       files: [],
+      mode: "queue",
     });
     // 乐观气泡带图片预览。
     const bubble = agentSession.items.find((item) => item.kind === "user");

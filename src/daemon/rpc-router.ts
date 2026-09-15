@@ -201,13 +201,14 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         })),
         prompt: rpc.agent.session.prompt.handler(async ({ input }) => {
           // R17-B：path 通道附件在 daemon 读盘（大小/magic 守卫）→ base64 交给
-          // 既有内核准入链；agentSessions.prompt 签名不变。
+          // 既有内核准入链；W4 mode 透传（queue/steer 提交模式）。
           const resolved = await domain.agentFiles.resolvePromptAttachments(input);
           await domain.agentSessions.prompt(
             input.sessionId,
             input.text,
             resolved.images,
             resolved.files,
+            input.mode ?? "queue",
           );
           return { accepted: true as const };
         }),

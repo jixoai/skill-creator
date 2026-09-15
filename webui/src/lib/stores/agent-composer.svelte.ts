@@ -22,6 +22,7 @@
  *       守卫；读入计数（attachmentReads）供发送门控。
  */
 import { showToast } from "$lib/toast.svelte";
+import { loadPersistedDraftText, persistDraftText } from "./agent-submission.svelte";
 
 /**
  * 图片附件（双通道，R17-B）：本地 File（mediaType+data+preview 原图 dataURL）
@@ -99,35 +100,43 @@ function applyDraft(draft: ComposerDraft): void {
  * 换轨（sessionId 或 "__new__"）：暂存当前轨 → 载入目标轨（无则空白）——
  * 任一轨的草稿都不丢。同键 no-op。sessionId 变化的三个向量
  * （selectAgentSession / beginNewAgentSession / 惰性 create）都经此换轨。
+ * W4：换轨时文本面同步 localStorage 持久化；目标轨内存为空时回灌持久文本
+ * （附件不落盘——base64 体积与生命周期不属于浏览器存储）。
  */
 export function switchComposerTrack(trackKey: string): void {
   if (trackKey === activeTrackKey) return;
+  persistDraftText(activeTrackKey, snapshotFacade().text);
   draftTracks.set(activeTrackKey, snapshotFacade());
   const next = draftTracks.get(trackKey) ?? emptyDraft();
   draftTracks.delete(trackKey);
   activeTrackKey = trackKey;
+  if (next.text.length === 0) next.text = loadPersistedDraftText(trackKey);
   applyDraft(next);
 }
 
 /**
  * 清轨（R17-A 语义收窄后的 resetComposer）：调用点仅两个——显式新建
  * （beginNewAgentSession 后清 "__new__" 桶）与发送成功（sendAgentPrompt 清
- * 发送轨）。面板开合不调用；非活动轨不受影响。
+ * 发送轨）。面板开合不调用；非活动轨不受影响。W4：清轨同步清持久文本。
  */
 export function resetComposerTrack(trackKey: string): void {
   draftTracks.delete(trackKey);
+  persistDraftText(trackKey, "");
   if (trackKey === activeTrackKey) applyDraft(emptyDraft());
 }
 
 /**
  * 轨间迁移（惰性建会话向量）：New Session 桶的在途草稿挪到新会话轨——草稿在
- * 发送期间继续可见；成功清该轨，失败留在当前会话轨可重试。
+ * 发送期间继续可见；成功清该轨，失败留在当前会话轨可重试。W4：持久文本随
+ * 所有权迁移（源轨清键、目标轨写键）——成功发送后切回源轨不得复活已发草稿。
  */
 export function migrateComposerDraft(fromKey: string, toKey: string): void {
   if (fromKey === toKey) return;
   const draft = draftTracks.get(fromKey);
   if (draft === undefined) return;
   draftTracks.delete(fromKey);
+  persistDraftText(fromKey, "");
+  persistDraftText(toKey, draft.text);
   if (activeTrackKey === toKey) {
     applyDraft(draft);
   } else if (!draftTracks.has(toKey)) {

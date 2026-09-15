@@ -83,6 +83,8 @@ interface AgentLike {
     header: { cwd?: string; createdAt?: number | string };
   };
   followup(message: unknown): void;
+  /** W4 steer（next-step 转向）；内核 Agent 面存在——类型面可选防降级组合。 */
+  steer?(message: unknown): void;
   cancel(cause: unknown, options?: unknown): void;
 }
 
@@ -1284,6 +1286,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       text: string,
       images: Array<{ mediaType: string; data: string; name?: string }> = [],
       files: Array<{ name: string; data: string }> = [],
+      mode: "queue" | "steer" = "queue",
     ): Promise<void> {
       if (text.length > PROMPT_MAX_CHARS) {
         throw new DomainError(
@@ -1378,18 +1381,24 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           content.push({ type: "file", attachment: ref });
         }
       }
-      entry.agent.followup(
-        createUserMessage({
-          source: { kind: "user" },
-          content: content as never,
-        }),
-      );
+      // W4（官方 submission-policy）：queue = followup（next-turn，inbox 排队）；
+      // steer = next-step（内核 loop 的 steer 语义——下一步骤边界转向当前轮）。
+      const message = createUserMessage({
+        source: { kind: "user" },
+        content: content as never,
+      });
+      if (mode === "steer" && typeof entry.agent.steer === "function") {
+        entry.agent.steer(message);
+      } else {
+        entry.agent.followup(message);
+      }
     },
-    /** 取消当前活动（幂等；无活动为 no-op）。 */
+    /** 取消当前活动（幂等；无活动为 no-op）。W4：keepInbox——排队消息在停止后
+     *  存活并按 FIFO 续跑（官方 Stop 语义；内核缺省会清 inbox）。 */
     cancel(sessionId: string): void {
       const entry = live.get(sessionId);
       if (!entry) throw new DomainError("NOT_FOUND", `agent session not found: ${sessionId}`);
-      entry.agent.cancel("user");
+      entry.agent.cancel("user", { keepInbox: true });
     },
     /**
      * 切换会话模式（add-agent-settings-modes）：meta 持久化 + live 句柄有界释放 +

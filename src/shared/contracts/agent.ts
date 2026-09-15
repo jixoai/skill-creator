@@ -118,6 +118,12 @@ export const AgentSessionPromptInputSchema = z
     text: z.string().max(20_000),
     images: z.array(AgentPromptImageSchema).max(4).default([]),
     files: z.array(AgentPromptFileSchema).max(2).default([]),
+    /**
+     * 提交模式（W4，官方 submission-policy 语义）：queue = next-turn（当前轮
+     * 完成后运行，内核 inbox 排队）；steer = next-step（在下一步骤边界转向
+     * 当前轮）。缺省 queue。
+     */
+    mode: z.enum(["queue", "steer"]).default("queue"),
   })
   .refine(
     // R17 codex P1：files-only 也是合法 prompt（后端文件选择器的主路径）。
