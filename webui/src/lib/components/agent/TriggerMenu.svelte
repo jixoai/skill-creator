@@ -18,10 +18,12 @@
   hover 仅 CSS 高亮不改变键盘选中）。
 -->
 <script module lang="ts">
-  /** 补全候选条目：value = 完整 token（含 trigger 前缀，如 `/compact`、`$skill`）。 */
+  /** 补全候选条目：value = 完整 token（含 trigger 前缀，如 `/compact`）。 */
   export interface MenuEntry {
     value: string;
     description?: string;
+    /** 分组标题（W3：命令/技能统一菜单的 roster 分组；缺省 = 无组头）。 */
+    group?: string;
   }
 </script>
 
@@ -35,9 +37,12 @@
     dataSlot,
     emptyMessage,
     sourceLabel,
+    suppress = false,
+    forcedOpen = false,
+    onForceClose,
     onSelect,
   }: {
-    /** 触发字符（"/" 命令 / "$" skill 引用）。 */
+    /** 触发字符（W3 起统一 "/"：命令 + 技能）。 */
     trigger: string;
     /** 候选注册表（结构开放，由实例外壳持有）。 */
     entries: readonly MenuEntry[];
@@ -51,8 +56,14 @@
     dataSlot: string;
     /** entries 为空时的占位文案（undefined = 无候选即隐藏菜单）。 */
     emptyMessage?: string;
-    /** 数据源副标题（R15：$ 菜单显示当前加载的 provider，绑定可追溯）。 */
+    /** 数据源副标题（$ 菜单显示当前加载的 provider，绑定可追溯）。 */
     sourceLabel?: string;
+    /** W3 claim 压制：claimed 态下触发符菜单不浮现（官方 guard tier）。 */
+    suppress?: boolean;
+    /** W3 `+` 编程式启动：true = 无 query 也全量展开（空 query 显示全目录）。 */
+    forcedOpen?: boolean;
+    /** forcedOpen 的受控关闭（`+` 再点切换）。 */
+    onForceClose?: () => void;
     /** 选中候选：以完整 value 交回调用方（发送命令 / 插入 token 由外壳决定）。 */
     onSelect: (value: string) => void;
   } = $props();
@@ -62,19 +73,32 @@
   let selectedIndex = $state(0);
 
   const query = $derived(text.startsWith(trigger) ? (text.split("\n", 1)[0] ?? "") : "");
+  /** forcedOpen 的空 query 语义：全目录（官方空 query 分区展示）。 */
+  const effectiveQuery = $derived(forcedOpen && query.length === 0 ? trigger : query);
   const matches = $derived(
-    query.length > 0 ? entries.filter((entry) => entry.value.startsWith(query)) : [],
+    effectiveQuery.length > 0
+      ? entries.filter((entry) => entry.value.startsWith(effectiveQuery))
+      : [],
   );
   /** 空注册表占位（如当前 Workspace 无 skill）：菜单保留但无可选项。 */
   const showEmpty = $derived(entries.length === 0 && emptyMessage !== undefined);
   const open = $derived(
-    query.length > 0 &&
+    !suppress &&
       caretOnFirstLine &&
       dismissedText !== text &&
-      (matches.length > 0 || showEmpty),
+      ((forcedOpen && (matches.length > 0 || showEmpty)) ||
+        (query.length > 0 && (matches.length > 0 || showEmpty))),
   );
   /** 选中索引（matches 收缩时收敛到上界内）。 */
   const selected = $derived(Math.min(selectedIndex, Math.max(0, matches.length - 1)));
+  /** 分组投序：按 entries 声明序渲染组头（组切换处落组头行）。 */
+  const grouped = $derived(
+    matches.map((entry, index) => ({
+      entry,
+      index,
+      header: entry.group !== undefined && entry.group !== matches[index - 1]?.group,
+    })),
+  );
 
   function consume(event: KeyboardEvent): void {
     event.preventDefault();
@@ -91,10 +115,11 @@
     if (event.key === "Escape") {
       consume(event);
       dismissedText = text;
+      onForceClose?.();
       return true;
     }
     if (matches.length === 0) {
-      // 空态占位：Enter 先占（不把 "$" 半成品当消息发送）；方向键交还光标移动。
+      // 空态占位：Enter 先占（不把半成品当消息发送）；方向键交还光标移动。
       if (event.key === "Enter") {
         consume(event);
         return true;
@@ -111,10 +136,15 @@
       selectedIndex = (selected - 1 + matches.length) % matches.length;
       return true;
     }
-    if (event.key === "Enter") {
+    if (event.key === "Enter" || (event.key === "Tab" && forcedOpen)) {
+      // W3：forcedOpen 态 Tab 也选中（官方 `+` 启动器的列表盒语义）；常规态
+      // Tab 交还（既有键盘面不变）。
       consume(event);
       const entry = matches[selected];
-      if (entry) onSelect(entry.value);
+      if (entry) {
+        onSelect(entry.value);
+        onForceClose?.();
+      }
       return true;
     }
     return false;
@@ -126,7 +156,7 @@
        键盘留在 textarea（handleKeydown 先占），条目本身是原生 button 可点执行。 -->
   <ul
     data-slot={dataSlot}
-    class="absolute bottom-full left-3 z-20 mb-1.5 w-72 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-md"
+    class="absolute bottom-full left-3 z-20 mb-1.5 max-h-64 w-72 overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-md"
     aria-label={menuLabel}
   >
     {#if sourceLabel}
@@ -139,20 +169,31 @@
         {emptyMessage}
       </li>
     {:else}
-      {#each matches as entry, index (entry.value)}
+      {#each grouped as item (item.entry.value)}
+        {#if item.header && item.entry.group}
+          <li
+            class="px-2.5 pt-1.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+            data-menu-group={item.entry.group}
+          >
+            {item.entry.group}
+          </li>
+        {/if}
         <li>
           <button
             type="button"
-            class="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[11px] {index ===
+            class="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[11px] {item.index ===
             selected
               ? 'bg-accent text-accent-foreground'
               : 'text-foreground'} hover:bg-accent/50"
-            aria-current={index === selected ? "true" : undefined}
-            onclick={() => onSelect(entry.value)}
+            aria-current={item.index === selected ? "true" : undefined}
+            onclick={() => {
+              onSelect(item.entry.value);
+              onForceClose?.();
+            }}
           >
-            <span class="shrink-0 font-medium">{entry.value}</span>
-            {#if entry.description}
-              <span class="truncate text-muted-foreground">{entry.description}</span>
+            <span class="shrink-0 font-medium">{item.entry.value}</span>
+            {#if item.entry.description}
+              <span class="truncate text-muted-foreground">{item.entry.description}</span>
             {/if}
           </button>
         </li>

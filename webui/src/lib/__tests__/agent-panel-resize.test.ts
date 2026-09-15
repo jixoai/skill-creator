@@ -35,6 +35,7 @@ vi.mock("../toast.svelte", () => ({
   showToast: vi.fn(),
 }));
 vi.mock("@lucide/svelte/icons/x", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/plus", async () => await import("./stubs/lucide-icon-mocks.js"));
 // 子组件不在被测面：以空渲染 stub 隔离（AgentHeader→settings-ui/lucide、
 // TranscriptView→markstream、ComposerCard→bits-ui 的重导入链全部短路）。
 vi.mock("../components/agent/AgentHeader.svelte", async () => {

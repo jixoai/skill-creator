@@ -31,6 +31,7 @@ vi.mock("../stores/connection.svelte", () => ({
   requireRpc: () => {
     throw new Error("not connected");
   },
+  connectionState: { status: "connected", error: null },
 }));
 vi.mock("../stores/agent.svelte", async () => await import("./stubs/agent-store-stub.svelte"));
 vi.mock("../stores/agent-composer.svelte", () => ({
@@ -61,6 +62,7 @@ vi.mock(
 );
 vi.mock("@lucide/svelte/icons/check", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/x", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/plus", async () => await import("./stubs/lucide-icon-mocks.js"));
 
 // bits-ui 在 node_modules 含 .svelte（vitest 外置）——以同 data-slot 契约的
 // 本地 dropdown stub 替换；分组/勾选/禁用/选择 payload 等组件逻辑不受影响。

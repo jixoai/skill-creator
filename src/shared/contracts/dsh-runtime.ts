@@ -595,6 +595,9 @@ export const DshSessionStreamFrameKindSchema = z.enum([
   /** 自动压缩标记（daemon 在 turn-end 后按 inputTokens + maxOutputTokens ≥
    * contextWindow 阈值自动执行 compact；text = 触发说明，UI 以居中注记渲染）。 */
   "auto-compact",
+  /** 子代理目录（父会话 subagent/catalog 事件投影；payload = {childId, mode,
+   *  label}——角色 spawn 的可见性帧，settlement 经 user-text 回流）。 */
+  "subagent",
 ]);
 /** session stream 帧类别。 */
 export type DshSessionStreamFrameKind = z.infer<typeof DshSessionStreamFrameKindSchema>;

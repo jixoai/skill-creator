@@ -64,6 +64,7 @@
 
 <script lang="ts">
   import IconImage from "@lucide/svelte/icons/image";
+  import IconPlus from "@lucide/svelte/icons/plus";
   import IconFileUp from "@lucide/svelte/icons/file-up";
   import IconSend from "@lucide/svelte/icons/arrow-up";
   import IconStop from "@lucide/svelte/icons/square";
@@ -98,20 +99,39 @@
     enterIsComposing,
     sanitizeComposerText,
   } from "./composer-keymap.js";
+  import {
+    claimOnSpace,
+    claimSurvives,
+    stripClaimedToken,
+    type TriggerClaim,
+  } from "./composer-trigger.js";
+  import { INPUT_TAKING_TOKENS } from "./SlashMenu.svelte";
   import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { showToast } from "$lib/toast.svelte";
   import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import ContextMeter from "./ContextMeter.svelte";
   import SlashMenu from "./SlashMenu.svelte";
-  import SkillMenu from "./SkillMenu.svelte";
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
-  /** SlashMenu/SkillMenu 实例（textarea 键盘先占，两触发符互斥）；卡片根
-   * relative，菜单锚定卡上方。 */
+  /** SlashMenu 实例（W3 统一 `/` 触发：命令 + 技能单实例）；卡片根 relative，
+   * 菜单锚定卡上方。 */
   let slashMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
-  let skillMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
   /** 光标是否在首行（SlashMenu 锚定条件）。 */
   let caretOnFirstLine = $state(true);
+
+  /** W3 claim 态（input-taking 命令；首版目录无此类命令，机器就绪）：draft
+   *  前缀保持 claim 存活——退格删掉 token 即退出；Space 落 claim（官方
+   *  matchSpace 同步裁决）。claimed 态压制 `/` 触发菜单。 */
+  let claim = $state<TriggerClaim | null>(null);
+  $effect(() => {
+    void agentComposer.text;
+    claim =
+      claimSurvives(claim, agentComposer.text) ??
+      claimOnSpace(agentComposer.text, INPUT_TAKING_TOKENS);
+  });
+
+  /** W3 `+` 编程式启动器：无 query 全量展开统一菜单（官方 + 按钮同语义）。 */
+  let launcherOpen = $state(false);
 
   /** 自动长高：内容驱动，44px（1 行）→ 160px（4 行）封顶内滚。 */
   $effect(() => {
@@ -243,7 +263,9 @@
   }
 
   function submit(): void {
-    const text = agentComposer.text.trim();
+    // W3：input-taking 命令的 claim token 在提交点剥离（官方 argsAfter 同法；
+    //  首版目录无此类命令——strip 是 passthrough，机器就绪）。
+    const text = stripClaimedToken(agentComposer.text.trim(), claim).trim();
     if (
       text.length === 0 &&
       agentComposer.images.length === 0 &&
@@ -327,8 +349,10 @@
     void setAgentSessionMode(mode);
   }
 
-  /** SlashMenu 执行（§3.4）：以命令文本发送（丢弃查询草稿与附件，不进入对话正文）。 */
+  /** SlashMenu 命令执行（§3.4）：以命令文本发送（丢弃查询草稿与附件，不进入
+   *  对话正文）；`+` 启动器随选关闭。 */
   function executeSlashCommand(command: string): void {
+    launcherOpen = false;
     if (agentSession.sending) return;
     agentComposer.text = "";
     agentComposer.images = [];
@@ -337,9 +361,10 @@
     void sendAgentPrompt(command);
   }
 
-  /** SkillMenu 选中（R14-B 5）：`$name ` 替换稿文 [0, 光标) 的未完成 token；
-   *  尾随空格让 query（首行前缀匹配）脱离所有候选，菜单自然收起。 */
+  /** 技能选中（W3：`/name ` 纯文本落点，官方 ui-skill 同法）：替换稿文
+   *  [0, 光标) 的未完成 token；尾随空格让 query 脱离所有候选，菜单自然收起。 */
   function insertSkillToken(token: string): void {
+    launcherOpen = false;
     const el = textareaEl;
     const caret = Math.min(
       el?.selectionStart ?? agentComposer.text.length,
@@ -355,11 +380,10 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
-    // SlashMenu/SkillMenu 先占导航/执行/驳回键（打开时；两触发符互斥）；其
+    // SlashMenu（W3 统一实例：命令 + 技能）先占导航/执行/驳回键；其
     // handleKeydown 内部已 stopPropagation，Esc 不会冒泡到 AgentPanel 的
     // window 级面板收起。
     if (slashMenu?.handleKeydown(event)) return;
-    if (skillMenu?.handleKeydown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       // W1（composer-capability-parity）：IME 合成语境的 Enter 不提交不断行
       // （isComposing + keyCode 229 + compositionend 后 10ms 宽限——中文输入
@@ -438,13 +462,11 @@
     text={agentComposer.text}
     {caretOnFirstLine}
     onExecute={executeSlashCommand}
+    onInsertSkill={insertSkillToken}
+    suppress={claim !== null}
+    forcedOpen={launcherOpen}
+    onForceClose={() => (launcherOpen = false)}
     bind:this={slashMenu}
-  />
-  <SkillMenu
-    text={agentComposer.text}
-    {caretOnFirstLine}
-    onInsert={insertSkillToken}
-    bind:this={skillMenu}
   />
   {#if agentComposer.files.length > 0 || agentComposer.images.length > 0}
     <!-- 附件条：与转录 UserMessage 附件行同视觉语言（56×56 缩略 / 文件 chip）；
@@ -573,6 +595,20 @@
         </DropdownMenu.Content>
       {/if}
     </DropdownMenu.DropdownMenu>
+    <button
+      type="button"
+      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
+      title="Commands and skills"
+      aria-label="Commands and skills"
+      aria-expanded={launcherOpen}
+      onclick={() => {
+        // W3 `+` 编程式启动器：无 query 全量展开；再点切换关闭（官方同语义）。
+        launcherOpen = !launcherOpen;
+        textareaEl?.focus();
+      }}
+    >
+      <IconPlus class="h-4 w-4" />
+    </button>
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"

@@ -1,19 +1,16 @@
 // @vitest-environment jsdom
 /**
- * ComposerCard SlashMenu + 模式 chip DropdownMenu 组件测试（design §3.4；
- * codex R2：SlashMenu defer 解除、mode chip 脱离原生 select）。
+ * ComposerCard 统一 `/` 触发菜单测试（R14-B 5 原始能力 + W3 统一迁移）。
  *
- * 用户原始需求 [2026-09-12]：「SlashMenu：稿文以 `/` 开头且光标在首行时，于
- * composer 上方锚定浮现……当前命令 `/compact`（执行并发送）；↑↓ 导航 + Enter
- * 执行 + Esc 关闭」；「模式 chip（`General ▾`……DropdownMenu 列 DSH_AGENT_MODES；
- * running 置灰 + title「Switch after the current turn ends」」；R12-B 6 修订：
- * 无会话时点击 = 预选 pendingMode（默认 General），不建会话。
+ * 用户原始需求 [2026-09-12]：「Chat 输入框中要支持补全从而输入 skill」。
+ * 修订 [2026-09-16]（composer-capability-parity W3）：技能触发符从 `$` 迁至
+ * `/`——单一菜单承载 Commands（roster 前）+ Skills（随后）两组；`+` 启动器
+ * 无 query 全量展开；URL 剔除（`//` 与 `://`）不激发。
  *
  * 正交意图：
- *   [1] SlashMenu：`/` 浮现、`/x` 无匹配隐藏、Enter 以命令文本发送并清稿、
- *       Esc 对当前稿文一次性驳回（稿文再变化重新浮现）。
- *   [2] 模式 chip：目录渲染 + 当前项 check；会话内切换 / 无会话预选待建模式
- *       （R12-B 6/8）；running 禁用与 title 文案。
+ *   [1] 统一候选：`/` 列命令组 + 技能组；`/x` 前缀过滤；无匹配隐藏。
+ *   [2] 键盘/启动器语义：Enter 插入技能 token 或执行命令；`+` 全量展开 +
+ *       Tab 选中；Esc 驳回一次；URL 剔除。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,9 +30,11 @@ vi.mock("../stores/connection.svelte", () => ({
   requireRpc: () => {
     throw new Error("not connected");
   },
+  // W1 placeholder 链消费 connectionState（composer 导入）——mock 补齐导出。
+  connectionState: { status: "connected", error: null },
 }));
 vi.mock("../stores/agent.svelte", async () => await import("./stubs/agent-store-stub.svelte"));
-// agent-composer 用真 store（runes .svelte.ts）：bind:value 与 SlashMenu 的
+// agent-composer 用真 store（runes .svelte.ts）：bind:value 与菜单的
 // text 属性必须随草稿真实联动；只 mock 其依赖的 toast。
 vi.mock("../toast.svelte", () => ({
   showToast: toast.showToast,
@@ -59,10 +58,10 @@ vi.mock(
 );
 vi.mock("@lucide/svelte/icons/check", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/x", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/plus", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/bot", async () => await import("./stubs/lucide-icon-mocks.js"));
 
 // bits-ui 在 node_modules 含 .svelte（vitest 外置）——本地 dropdown stub 替换。
-// 用 per-instance 三件套（Root/Trigger/Content：context 级开合态，经 $bindable
-// 同步组件的 bind:open），Item/Group 等无状态件沿用共享 stub 目录。
 vi.mock("$lib/components/ui/dropdown-menu", async () => {
   const Root = (await import("./stubs/dropdown-menu-pi-stub/Root.svelte")).default;
   const Trigger = (await import("./stubs/dropdown-menu-pi-stub/Trigger.svelte")).default;
@@ -89,11 +88,35 @@ import { flushSync, mount, unmount } from "./svelte-client";
 import {
   agentSession,
   resetAgentStoreStub,
-  createAgentSession,
   sendAgentPrompt,
-  setAgentSessionMode,
 } from "./stubs/agent-store-stub.svelte";
 import { agentComposer } from "../stores/agent-composer.svelte";
+// 真 skills store（runes .svelte.ts）：菜单的技能候选源就是它的已加载列表；
+// 测试直接写 skillsState.skills（不发 RPC）。
+import { skillsState } from "../stores/skills.svelte";
+import { SkillMetadataSchema } from "$shared/contracts/skills.js";
+import type { SkillMetadata } from "$shared/contracts/skills.js";
+
+let fixtureSeq = 0;
+
+/** 技能列表 fixture：经契约 schema parse 产出（branded ID 类型 + 形状即校验）。 */
+function skillFixture(name: string, description = ""): SkillMetadata {
+  fixtureSeq += 1;
+  return SkillMetadataSchema.parse({
+    id: `sk_${fixtureSeq.toString(16).padStart(24, "0")}`,
+    name,
+    description,
+    directoryName: name,
+    disabled: false,
+    provider: "claude-code",
+    location: "user",
+    path: `/roots/claude/${name}`,
+    hasReferences: false,
+    hasScripts: false,
+    hasAssets: false,
+    pluginInfo: null,
+  });
+}
 
 function mountComposer() {
   const target = document.createElement("div");
@@ -103,23 +126,8 @@ function mountComposer() {
   return {
     textarea: () => document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']"),
     menu: () => document.querySelector<HTMLElement>('[data-slot="slash-menu"]'),
-    modeTrigger: () =>
-      document.querySelector<HTMLButtonElement>('button[aria-label="Session mode"]'),
-    modeItems: () => [
-      ...document.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]'),
-    ],
-    openModeMenu: async () => {
-      const trigger = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="Session mode"]',
-      );
-      if (!trigger) throw new Error("mode chip trigger not rendered");
-      trigger.click();
-      await vi.waitFor(() => {
-        if (document.querySelector('[data-slot="dropdown-menu-content"]') === null) {
-          throw new Error("mode menu content not rendered");
-        }
-      });
-    },
+    launcher: () =>
+      document.querySelector<HTMLButtonElement>('button[aria-label="Commands and skills"]'),
     cleanup: () => {
       unmount(instance);
       target.remove();
@@ -135,7 +143,7 @@ function pressKey(key: string): void {
   textarea.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 }
 
-describe("ComposerCard SlashMenu (design §3.4)", () => {
+describe("ComposerCard unified `/` trigger menu (R14-B 5 + W3)", () => {
   beforeEach(() => {
     resetAgentStoreStub(null);
     agentSession.sessionId = "agent-s1";
@@ -144,42 +152,62 @@ describe("ComposerCard SlashMenu (design §3.4)", () => {
     agentComposer.images = [];
     agentComposer.files = [];
     agentComposer.editing = null;
+    skillsState.target = null;
+    skillsState.skills = [
+      skillFixture("review", "Review a skill draft"),
+      skillFixture("prototype", ""),
+    ];
   });
 
-  it("surfaces the menu with /compact when the draft starts with a bare slash", () => {
+  it("surfaces commands and skills as roster groups on a bare /", () => {
     const ctx = mountComposer();
     agentComposer.text = "/";
     flushSync();
 
     const menu = ctx.menu();
     expect(menu).not.toBeNull();
+    expect(menu?.textContent).toContain("Commands");
     expect(menu?.textContent).toContain("/compact");
+    expect(menu?.textContent).toContain("Skills");
+    expect(menu?.textContent).toContain("/review");
+    expect(menu?.textContent).toContain("Review a skill draft");
+    expect(menu?.textContent).toContain("/prototype");
     ctx.cleanup();
   });
 
-  it("hides the menu when no registered command matches the query", () => {
+  it("Enter inserts `/name ` at the caret without sending (skill pick)", () => {
     const ctx = mountComposer();
-    agentComposer.text = "/x";
+    agentComposer.text = "/rev";
     flushSync();
+    expect(ctx.menu()).not.toBeNull();
+
+    const textarea = ctx.textarea();
+    if (!textarea) throw new Error("composer textarea not rendered");
+    // jsdom 不会随程序化 value 赋值移动光标——显式对齐到 token 末尾。
+    textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+    pressKey("Enter");
+    flushSync();
+
+    expect(agentComposer.text).toBe("/review ");
+    expect(sendAgentPrompt).not.toHaveBeenCalled();
+    // 尾随空格使首行 query 脱离所有候选前缀——菜单自然收起。
     expect(ctx.menu()).toBeNull();
     ctx.cleanup();
   });
 
-  it("Enter executes the selected command: sends the command text and clears the draft", () => {
+  it("Enter on the command entry executes it (commands rank first)", () => {
     const ctx = mountComposer();
-    agentComposer.text = "/comp";
+    agentComposer.text = "/com";
     flushSync();
     expect(ctx.menu()).not.toBeNull();
 
     pressKey("Enter");
     flushSync();
     expect(sendAgentPrompt).toHaveBeenCalledWith("/compact");
-    expect(agentComposer.text).toBe("");
-    expect(ctx.menu()).toBeNull();
     ctx.cleanup();
   });
 
-  it("Escape dismisses the menu for the current draft; further typing resurfaces it", () => {
+  it("Escape dismisses once for the current draft; further typing resurfaces", () => {
     const ctx = mountComposer();
     agentComposer.text = "/";
     flushSync();
@@ -189,89 +217,48 @@ describe("ComposerCard SlashMenu (design §3.4)", () => {
     flushSync();
     expect(ctx.menu()).toBeNull();
 
-    agentComposer.text = "/c";
+    agentComposer.text = "/r";
     flushSync();
     expect(ctx.menu()).not.toBeNull();
     ctx.cleanup();
   });
 
-  it("keeps plain Enter submit untouched when the menu is closed", () => {
+  it("hides the menu when nothing matches the query", () => {
     const ctx = mountComposer();
-    agentComposer.text = "plain message";
+    agentComposer.text = "/xyz";
+    flushSync();
+    expect(ctx.menu()).toBeNull();
+    ctx.cleanup();
+  });
+
+  it("URL carve-outs: protocol-relative and scheme lines never open the menu", () => {
+    const ctx = mountComposer();
+    agentComposer.text = "//example.com/path";
     flushSync();
     expect(ctx.menu()).toBeNull();
 
-    pressKey("Enter");
+    agentComposer.text = "https://example.com/x";
     flushSync();
-    expect(sendAgentPrompt).toHaveBeenCalledWith("plain message", [], []);
-    ctx.cleanup();
-  });
-});
-
-describe("ComposerCard mode chip dropdown (design §3.4)", () => {
-  beforeEach(() => {
-    resetAgentStoreStub(null);
-    agentComposer.text = "";
-    agentComposer.images = [];
-    agentComposer.files = [];
-    agentComposer.editing = null;
-  });
-
-  it("lists DSH_AGENT_MODES and checks the current mode", async () => {
-    resetAgentStoreStub(null);
-    agentSession.sessionId = "agent-s1";
-    agentSession.mode = "free";
-    const ctx = mountComposer();
-
-    expect(ctx.modeTrigger()?.textContent).toContain("General");
-    await ctx.openModeMenu();
-
-    const labels = ctx.modeItems().map((n) => n.textContent?.trim());
-    expect(labels).toEqual(["Create", "Manage", "Explore", "General"]);
-    const active = ctx.modeItems().find((n) => n.getAttribute("data-mode-active") === "true");
-    expect(active?.textContent).toContain("General");
+    expect(ctx.menu()).toBeNull();
     ctx.cleanup();
   });
 
-  it("switches the session mode in-session, and pre-selects the pending mode when none exists", async () => {
-    // 有会话：切换模式。
-    resetAgentStoreStub(null);
-    agentSession.sessionId = "agent-s1";
-    agentSession.mode = "free";
-    const withSession = mountComposer();
-    await withSession.openModeMenu();
-    const explore = withSession.modeItems().find((n) => n.textContent?.includes("Explore"));
-    explore!.click();
-    expect(setAgentSessionMode).toHaveBeenCalledWith("explore");
-    withSession.cleanup();
-
-    // 无会话（R12-B 6）：chip 默认 General（pendingMode），选择只改待建模式，
-    // 不建会话——首条消息才创建（R12-B 8）。
-    resetAgentStoreStub(null);
-    const withoutSession = mountComposer();
-    expect(withoutSession.modeTrigger()?.textContent).toContain("General");
-    await withoutSession.openModeMenu();
-    const create = withoutSession.modeItems().find((n) => n.textContent?.includes("Create"));
-    create!.click();
-    flushSync();
-    expect(createAgentSession).not.toHaveBeenCalled();
-    expect(agentSession.pendingMode).toBe("create");
-    expect(withoutSession.modeTrigger()?.textContent).toContain("Create");
-    withoutSession.cleanup();
-  });
-
-  it("disables the trigger while running with the shared switch-later title", () => {
-    resetAgentStoreStub(null);
-    agentSession.sessionId = "agent-s1";
-    agentSession.mode = "free";
+  it("`+` launcher opens the full directory without a query; Tab picks", () => {
     const ctx = mountComposer();
-    expect(ctx.modeTrigger()?.disabled).toBe(false);
-
-    agentSession.status = "running";
+    const launcher = ctx.launcher();
+    if (!launcher) throw new Error("launcher button not rendered");
+    launcher.click();
     flushSync();
-    const trigger = ctx.modeTrigger();
-    expect(trigger?.disabled).toBe(true);
-    expect(trigger?.title).toBe("Switch after the current turn ends");
+
+    const menu = ctx.menu();
+    expect(menu).not.toBeNull();
+    expect(menu?.textContent).toContain("/compact");
+    expect(menu?.textContent).toContain("/review");
+
+    // forcedOpen 态 Tab 也选中（官方 + 启动器列表盒语义）。
+    pressKey("Tab");
+    flushSync();
+    expect(sendAgentPrompt).toHaveBeenCalledWith("/compact");
     ctx.cleanup();
   });
 });

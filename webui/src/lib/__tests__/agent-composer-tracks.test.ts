@@ -34,6 +34,7 @@ vi.mock("../stores/connection.svelte", () => ({
     if (!connection.rpc) throw new Error("not connected");
     return connection.rpc;
   },
+  connectionState: { status: "connected", error: null },
 }));
 vi.mock("../toast.svelte", () => ({
   showToast: toast.showToast,
@@ -67,6 +68,7 @@ vi.mock("../components/agent/AgentCard.svelte", async () => {
 // @lucide/svelte 图标 = node_modules 的 .svelte（root vitest 管线不编译）——空壳替换
 // （AgentHeader / TranscriptView / AgentToolRow / TodoDock / DisclosureRow / ComposerCard）。
 vi.mock("@lucide/svelte/icons/x", async () => await import("./stubs/lucide-icon-mocks.js"));
+vi.mock("@lucide/svelte/icons/plus", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/plus", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/copy", async () => await import("./stubs/lucide-icon-mocks.js"));
 vi.mock("@lucide/svelte/icons/check", async () => await import("./stubs/lucide-icon-mocks.js"));

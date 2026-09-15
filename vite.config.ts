@@ -66,10 +66,19 @@ export default defineConfig({
           ).svelte(),
         ],
         resolve: {
-          alias: {
-            $shared: path.join(projectRoot, "src/shared"),
-            $lib: path.join(projectRoot, "webui/src/lib"),
-          },
+          alias: [
+            { find: "$shared", replacement: path.join(projectRoot, "src/shared") },
+            { find: "$lib", replacement: path.join(projectRoot, "webui/src/lib") },
+            // @lucide/svelte 图标是 node_modules 的 .svelte——root vitest 管线
+            // 不编译它们；统一替换为空壳 stub（组件面测试不判读图标形状）。
+            {
+              find: /^@lucide\/svelte\/icons\/.*$/,
+              replacement: path.join(
+                projectRoot,
+                "webui/src/lib/__tests__/stubs/lucide-icon-mocks.js",
+              ),
+            },
+          ],
         },
         test: {
           name: "webui",
