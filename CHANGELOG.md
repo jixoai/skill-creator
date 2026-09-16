@@ -1,5 +1,61 @@
 # Changelog
 
+## 2.1.0 (2026-09-16)
+
+The `$` skill-reference composer surface, the dual-era MCP fix that revives the
+in-session tool face, and a calmer Settings → Model pane.
+
+### Added
+
+- **`$` skill references in the composer** — typing `$` opens a fuzzy-searchable
+  menu of every enabled skill across all workspaces, grouped under
+  `Workspace / provider` headers (916 skills · 44 groups on the dev machine).
+  Matching is case-insensitive subsequence with contiguous-run and word-start
+  weighting (description hits rank slightly higher without rescuing misses).
+  Picking an entry drops a `$name ` chip that rides the same ordered-occurrence
+  machinery as `@` references: same-name skills from different providers pair
+  in pick order, backspace deletes the whole chip, and edited-out tokens are
+  pruned at submit. The daemon expands each reference server-side into a
+  bounded `[reference: skill <name> · <provider>]` block (registry-scoped
+  document read, ≤200k chars; missing targets fail the prompt typed). The `$`
+  reference semantics stay orthogonal to `/name` command triggering.
+
+### Fixed
+
+- **In-session MCP tools were silently dead** — the kernel's MCP client rides
+  the 2026-07-28 protocol line; the daemon endpoint (SDK 1.30) rejected its
+  `MCP-Protocol-Version` header with 400, so `mcp__skill-creator__*` tools never
+  reached agent sessions. The MCP server stack migrates to
+  `@modelcontextprotocol/server@2`: one per-request factory now serves both
+  eras — modern `server/discover` negotiation and legacy 2025 `initialize`
+  (external clients unaffected). Verified by a regression test that drives a
+  real v2 client through the HTTP endpoint and calls a tool over the negotiated
+  era, plus a live dev stack with zero protocol errors in the daemon log.
+- **Settings → Model scroll chaos** — the right pane now hands scroll ownership
+  to the Model section (the tab-content area is the single vertical scroller),
+  the provider gallery flows inline instead of its own `52vh` scroller, and the
+  phantom horizontal scrollbar (a negative-margin escape widening the child
+  32px past the pane) is gone. The tab strip only captures vertical wheel
+  events while it can actually scroll. Verified by a per-container walkthrough
+  (desktop/narrow × light/dark) with DOM-measured scroll facts.
+- **Opening the agent panel too early killed app reactivity** — opening the
+  panel before the WebSocket connected tripped Svelte's
+  `effect_update_depth_exceeded` (the settings loader threw synchronously and
+  wrote its own effect inputs back in the same frame), leaving the whole app
+  unresponsive until reload. The lazy load now gates on connection status.
+- Trigger-menu selected rows get a visible primary tint (the old accent was
+  ~3% lightness from the popover), and queue-dock row actions move from bare
+  12px icons to 24px pads with expanded hit zones plus an explicit steer
+  disabled state.
+
+### Changed
+
+- **The kernel DSH home is app-scoped by default** — the daemon now bootstraps
+  `<home>/.skill-creator/dsh-home` instead of reading your real `~/.dsh`, so an
+  incompatible harness checkout can no longer break the product kernel mount
+  (model routes and credentials project into the same isolated home). Set
+  `DSH_HOME` to opt back into a shared harness home.
+
 ## 2.0.2 (2026-09-15)
 
 Hotfix for picked-image thumbnails.
