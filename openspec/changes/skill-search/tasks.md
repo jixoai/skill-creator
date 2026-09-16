@@ -14,7 +14,7 @@
 - [x] 1.3 scanner.ts：roots 枚举（catalog global + imported workspaces 持久
       态只读投影，不走 WorkspaceRegistry.list() 的 ccski 计数）+ symlink
       入口层跟进 + broken 跳过 + 真实子目录递归 ≤2 不跟进 symlink + dot/
-      node_modules 跳过；单元测试（symlink/broken/nested/环）
+      node_modules 跳过；单元测试（symlink/broken/nested/环/SKILL.md 目录陷阱）
 - [x] 1.4 canonicalize.ts：realpath 去重 + installations[{path,workspaceId,
       providerId}] 分组 + 双文件规则（SKILL.md 优先 / conflict / disabled）+ sha256 contentHash（实际被索引文件）；单元测试（same realpath /
       same content / different / 双文件冲突）
@@ -26,12 +26,16 @@
       configDigest}）+ search-index.json 持久化（atomicWriteUtf8 0600 /
       safeParse / loadJSON 失败重建 / IO 故障 hard error）+ stat 新鲜度
       （mtimeMs+size+ino+ctimeMs）增量（discard(id)+add、脏度阈值全量重建）；
-      单元测试（fresh/incremental/rebuild/corrupt/EACCES/EIO/ENOSPC/rename 失败/保时保长替换/并发 stale-writer 自愈）
+      单元测试（fresh/incremental/rebuild/corrupt JSON/loadJSON 失败/存储投影篡改拒绝/缺 stats
+      自愈/EACCES hard error + 写失败后内存失效自愈（EIO/ENOSPC/rename 共用 save
+      hard-error 分支，经该事务语义测试覆盖）/保时保长替换/并发 last-writer-wins）
 - [x] 1.7 ranking.ts：冻结公式（exactName .9/namePrefix .5/queryInName .4/
       keywordExact .3/descCoverage .2，final=0.7×bm25/(bm25+8)+0.3×rerank，
       rerank 后按 contentHash 折叠，tie-break final→name→canonicalPath）；
       测试（name>description>body 次序、dup 折叠、tie-break 稳定、typo 召回）
-- [x] 1.8 service.ts：createSkillSearchService() 编排 + daemon/CLI 进程内装配
+- [x] 1.8 service.ts：createSkillSearchService()（生产零参、server-owned roots）+
+      createSkillSearchServiceWithRoots 测试 seam + 默认装配测试（catalog global +
+      imported workspaces 真实路径）
 
 ## C2 —— CLI
 

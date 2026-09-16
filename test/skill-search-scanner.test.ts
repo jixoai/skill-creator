@@ -112,3 +112,12 @@ describe("skill search scanner", () => {
     expect(entries.map((entry) => path.basename(entry.path))).toEqual(["disabled-skill"]);
   });
 });
+
+describe("skill search scanner pathological entries", () => {
+  it("skips candidates whose SKILL.md is a directory instead of a regular file", () => {
+    const directory = path.join(sandbox, "skills", "trap");
+    fs.mkdirSync(path.join(directory, "SKILL.md"), { recursive: true });
+    const entries = scanSkillRoots([rootOf("skills")]);
+    expect(entries.map((entry) => entry.path)).toEqual([]);
+  });
+});

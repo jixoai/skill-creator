@@ -131,3 +131,21 @@ describe("skill search parser", () => {
     expect(parsed.body.length).toBeGreaterThan(0);
   });
 });
+
+describe("skill search parser fence semantics", () => {
+  it("does not collect atx text inside fenced code blocks as headings", () => {
+    const text = [
+      "---",
+      "name: fence-demo",
+      "description: fenced heading demo",
+      "---",
+      "```markdown",
+      "# fake heading",
+      "```",
+      "",
+      "# real heading",
+    ].join("\n");
+    const parsed = parseSkillDocument(Buffer.from(text, "utf8"), "fence-demo");
+    expect(parsed.headings.split("\n")).toEqual(["real heading"]);
+  });
+});

@@ -94,5 +94,15 @@ function scanDirectory(
 }
 
 function hasSkillFile(entryPath: string): boolean {
-  return SKILL_FILE_NAMES.some((name) => fs.existsSync(path.join(entryPath, name)));
+  // 必须是 regular file：名为 SKILL.md 的目录/设备不是技能文档（后续 readFileSync 会 EISDIR）。
+  return SKILL_FILE_NAMES.some((name) => isRegularFile(path.join(entryPath, name)));
+}
+
+/** statSync（跟进 symlink）确认为 regular file；不可 stat 或非 regular 一律 false。 */
+function isRegularFile(file: string): boolean {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
 }

@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createSkillSearchService } from "../src/daemon/skill-search/service.js";
+import { createSkillSearchServiceWithRoots } from "../src/daemon/skill-search/service.js";
 import { scanSkillRoots, type SkillRoot } from "../src/daemon/skill-search/scanner.js";
 import { GLOBAL_WORKSPACE_ID, ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
@@ -126,14 +126,23 @@ function evaluate(run: (query: string) => Array<{ name: string }>): Metrics {
   for (const { q, expect, category } of labeledQueries) {
     const top = run(q);
     const expected = new Set(expect);
-    const hitsAt = (count: number) =>
-      top.slice(0, count).filter((result) => expected.has(result.name)).length;
-    r5 += hitsAt(5) / expect.length;
-    r10 += top.filter((result) => expected.has(result.name)).length / expect.length;
+    // 命中按期望名去重（同名不同 canonical 的多结果只计一次），保证 recall ≤ 1。
+    const hitNamesAt = (count: number) =>
+      new Set(
+        top
+          .slice(0, count)
+          .filter((result) => expected.has(result.name))
+          .map((r) => r.name),
+      );
+    const allHitNames = new Set(
+      top.filter((result) => expected.has(result.name)).map((r) => r.name),
+    );
+    r5 += hitNamesAt(5).size / expect.length;
+    r10 += allHitNames.size / expect.length;
     const firstIndex = top.findIndex((result) => expected.has(result.name));
     reciprocalRank += firstIndex >= 0 ? 1 / (firstIndex + 1) : 0;
     if (category === "typo") {
-      typoR5 += hitsAt(5) / expect.length;
+      typoR5 += hitNamesAt(5).size / expect.length;
       typoCount += 1;
     }
   }
@@ -153,7 +162,7 @@ describe("skill search quality benchmark (frozen ranking pipeline)", () => {
     expect(syntheticSkills).toHaveLength(11);
     expect(labeledQueries).toHaveLength(45);
 
-    const service = createSkillSearchService({ resolveRoots: () => [root] });
+    const service = createSkillSearchServiceWithRoots(() => [root]);
     const results = new Map<string, Array<{ name: string }>>();
     for (const { q } of labeledQueries) {
       results.set(
@@ -178,13 +187,13 @@ describe("skill search quality benchmark (frozen ranking pipeline)", () => {
 
   it("replays byte-identical output across a fresh (stat-stable) second run", async () => {
     const root = materializeCorpus();
-    const service = createSkillSearchService({ resolveRoots: () => [root] });
+    const service = createSkillSearchServiceWithRoots(() => [root]);
     const firstRun: string[] = [];
     for (const { q } of labeledQueries) {
       firstRun.push(JSON.stringify(await service.search(q, { limit: 10 })));
     }
     // 新进程视角：重新装配 service（freshen 走 stat 全等路径），输出必须逐字节相等。
-    const secondService = createSkillSearchService({ resolveRoots: () => [root] });
+    const secondService = createSkillSearchServiceWithRoots(() => [root]);
     for (const [index, { q }] of labeledQueries.entries()) {
       expect(JSON.stringify(await secondService.search(q, { limit: 10 }))).toBe(firstRun[index]);
     }
@@ -203,16 +212,14 @@ describe("skill search quality benchmark (frozen ranking pipeline)", () => {
     const aliasRoot = path.join(sandbox, "roots", "codex", "skills");
     fs.mkdirSync(aliasRoot, { recursive: true });
     fs.cpSync(source, path.join(aliasRoot, path.basename(source)), { recursive: true });
-    const service = createSkillSearchService({
-      resolveRoots: () => [
-        root,
-        {
-          rootPath: aliasRoot,
-          workspaceId: GLOBAL_WORKSPACE_ID,
-          providerId: ProviderIdSchema.parse("codex"),
-        },
-      ],
-    });
+    const service = createSkillSearchServiceWithRoots(() => [
+      root,
+      {
+        rootPath: aliasRoot,
+        workspaceId: GLOBAL_WORKSPACE_ID,
+        providerId: ProviderIdSchema.parse("codex"),
+      },
+    ]);
     const name = corpus[0]?.name || corpus[0]?.directoryName || "acp";
     const results = await service.search(name, { limit: 10 });
     const primary = results.find((result) => result.name === name);

@@ -30,22 +30,30 @@ export interface SkillSearchStateSource {
   load: () => WorkspaceRegistryState;
 }
 
-export interface SkillSearchServiceOptions {
-  /** Imported Workspace 持久态来源；缺省绑定 appDir 的 workspaces.json（只读，不走 list() 的 ccski 计数）。 */
-  registry?: SkillSearchStateSource;
-  /** 覆盖默认 root 解析（测试注入沙箱 roots）；提供后 registry 不参与。 */
-  resolveRoots?: () => SkillRoot[];
+/** skill 搜索服务：单次 search 内完成扫描、新鲜度维护与查询。 */
+export type SkillSearchService = ReturnType<typeof createSkillSearchEngine>;
+
+/**
+ * 创建 skill 搜索服务（生产入口）。roots 只来自 provider catalog globalPath 与
+ * workspace registry 持久态的 server 侧解析——生产构造不接受任何调用方路径。
+ * 索引文件恒由 appDir() 派生（server-owned）。
+ */
+export function createSkillSearchService(): SkillSearchService {
+  return createSkillSearchEngine(defaultResolveRoots(createWorkspaceRegistryPersistence()));
 }
 
-/** skill 搜索服务：单次 search 内完成扫描、新鲜度维护与查询。 */
-export type SkillSearchService = ReturnType<typeof createSkillSearchService>;
+/**
+ * 测试专用 seam：显式注入 roots（沙箱语料）。仅测试导入，禁止接入 CLI/daemon/
+ * RPC 装配——生产 root 解析必须经 createSkillSearchService 的 server-owned 路径。
+ */
+export function createSkillSearchServiceWithRoots(
+  resolveRoots: () => SkillRoot[],
+): SkillSearchService {
+  return createSkillSearchEngine(resolveRoots);
+}
 
-/** 创建 skill 搜索服务；索引文件恒由 appDir() 派生（server-owned，不接受调用方路径）。 */
-export function createSkillSearchService(options: SkillSearchServiceOptions = {}) {
+function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
   const tokenizer = createSkillTokenizer();
-  const resolveRoots =
-    options.resolveRoots ??
-    defaultResolveRoots(options.registry ?? createWorkspaceRegistryPersistence());
   const index = createSkillSearchIndex(tokenizer);
 
   return {

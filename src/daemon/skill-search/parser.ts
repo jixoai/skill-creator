@@ -19,8 +19,8 @@ export const PARSER_VERSION = "matter-headings-12k-v1";
 const HEADINGS_LIMIT = 30;
 /** body 截断上限（chars）。 */
 const BODY_LIMIT = 12_000;
-/** code fence 围栏行（含 info string）；整行移除，代码内容保留。 */
-const FENCE_LINE_RE = /^[ \t]*(?:```|~~~).*$/gm;
+/** code fence 围栏行（含 info string）的行级判定；无 g 标志（循环 .test 不带 lastIndex 状态）。 */
+const FENCE_MARKER_RE = /^[ \t]*(?:```|~~~)/;
 const HEADING_RE = /^#{1,4}[ \t]+(.+)$/gm;
 
 /** frontmatter 最小合法形状（对齐 ccski：name/description min-1；未知字段在解析层忽略）。 */
@@ -66,8 +66,21 @@ export function parseSkillDocument(raw: Buffer, directoryName: string): ParsedSk
       ? (frontmatter as Record<string, unknown>)
       : {};
 
-  const headings = collectHeadings(content);
-  const body = content.replace(FENCE_LINE_RE, "").slice(0, BODY_LIMIT);
+  // fence 状态机：围栏行整行移除；代码内容进 body（标识符可检索），但 fence 内
+  // 的 ATX 文本不是标题——headings 只从非 fence 行提取。
+  const headingLines: string[] = [];
+  const bodyLines: string[] = [];
+  let inFence = false;
+  for (const line of content.split("\n")) {
+    if (FENCE_MARKER_RE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    bodyLines.push(line);
+    if (!inFence) headingLines.push(line);
+  }
+  const headings = collectHeadings(headingLines.join("\n"));
+  const body = bodyLines.join("\n").slice(0, BODY_LIMIT);
 
   return {
     name: valid ? valid.name : directoryName,

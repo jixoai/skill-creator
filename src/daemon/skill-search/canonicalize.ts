@@ -111,8 +111,9 @@ function selectSourceFile(canonicalPath: string): {
 } | null {
   const enabled = path.join(canonicalPath, "SKILL.md");
   const disabledFile = path.join(canonicalPath, ".SKILL.md");
-  const hasEnabled = fs.existsSync(enabled);
-  const hasDisabled = fs.existsSync(disabledFile);
+  // regular file 检查：名为 SKILL.md 的目录不是内容源（readFileSync 会 EISDIR）。
+  const hasEnabled = isRegularFile(enabled);
+  const hasDisabled = isRegularFile(disabledFile);
   if (hasEnabled) {
     return { sourceFile: "SKILL.md", sourcePath: enabled, disabled: false, conflict: hasDisabled };
   }
@@ -124,4 +125,13 @@ function selectSourceFile(canonicalPath: string): {
 
 function compareString(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** statSync（跟进 symlink）确认为 regular file。 */
+function isRegularFile(file: string): boolean {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
 }

@@ -270,3 +270,82 @@ describe("skill search index concurrency", () => {
     expect(reader.search("alpha")).toEqual([]);
   });
 });
+
+describe("skill search index load validation (external input boundary)", () => {
+  it("rejects tampered stored projections and rebuilds with real metadata", () => {
+    writeSkill("target", "---\nname: target\ndescription: real skill\n---\nbody");
+    const first = createSkillSearchIndex();
+    const scans = canonicalizeCandidates(scanSkillRoots([root()]));
+    first.freshen(scans, readSkillSearchDocument);
+    const id = scans[0]!.id as string;
+
+    const file = path.join(home, ".skill-creator", "search-index.json");
+    const envelope = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      index: {
+        documentIds: Record<string, string>;
+        storedFields: Record<string, { canonicalPath: string; contentHash: string }>;
+      };
+    };
+    const shortIdEntry = Object.entries(envelope.index.documentIds).find(
+      ([, docId]) => docId === id,
+    );
+    const shortId = shortIdEntry?.[0]!;
+    envelope.index.storedFields[shortId]!.canonicalPath = "/etc/passwd";
+    envelope.index.storedFields[shortId]!.contentHash = "not-a-sha256";
+    fs.writeFileSync(file, JSON.stringify(envelope));
+
+    const second = createSkillSearchIndex();
+    const summary = second.freshen(scans, readSkillSearchDocument);
+    expect(summary.mode).toBe("rebuilt");
+    expect(summary.rebuildReason).toBe("corrupt");
+    const hit = second.search("real skill").find((candidate) => candidate.id === id);
+    expect(hit?.canonicalPath).not.toBe("/etc/passwd");
+    expect(hit?.contentHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("rebuilds instead of crashing when a stats entry was removed from the envelope", () => {
+    writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
+    const first = createSkillSearchIndex();
+    const scans = canonicalizeCandidates(scanSkillRoots([root()]));
+    first.freshen(scans, readSkillSearchDocument);
+
+    const file = path.join(home, ".skill-creator", "search-index.json");
+    const envelope = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      stats: Record<string, unknown>;
+    };
+    delete envelope.stats[scans[0]!.id as string];
+    fs.writeFileSync(file, JSON.stringify(envelope));
+
+    const second = createSkillSearchIndex();
+    const summary = second.freshen(scans, readSkillSearchDocument);
+    expect(summary.mode).toBe("rebuilt");
+    // 空/被裁剪 stats 经由 dirty-ratio 路径全量重建；关键断言是不崩溃且结果正确。
+    expect(["corrupt", "dirty-ratio"]).toContain(summary.rebuildReason);
+    expect(second.search("alpha skill")).toHaveLength(1);
+  });
+
+  it("invalidates in-memory state after a save failure and self-heals on the next call", () => {
+    writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
+    const index = createSkillSearchIndex();
+    const scans = canonicalizeCandidates(scanSkillRoots([root()]));
+    index.freshen(scans, readSkillSearchDocument);
+
+    // 引入第二个 skill 后把 appDir 置为只读：save 失败必须抛错并作废内存状态。
+    writeSkill("beta", "---\nname: beta\ndescription: beta skill\n---\nbody");
+    const scansWithBeta = canonicalizeCandidates(scanSkillRoots([root()]));
+    const appDataDir = path.join(home, ".skill-creator");
+    fs.chmodSync(appDataDir, 0o500);
+    try {
+      expect(() => index.freshen(scansWithBeta, readSkillSearchDocument)).toThrow(
+        SkillSearchIndexError,
+      );
+    } finally {
+      fs.chmodSync(appDataDir, 0o700);
+    }
+
+    // 下一次调用从磁盘重新加载并自愈（磁盘索引缺 beta → 增量补齐）。
+    const summary = index.freshen(scansWithBeta, readSkillSearchDocument);
+    expect(["incremental", "rebuilt"]).toContain(summary.mode);
+    expect(index.search("beta").map((candidate) => candidate.name)).toEqual(["beta"]);
+  });
+});

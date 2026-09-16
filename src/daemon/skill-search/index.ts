@@ -117,13 +117,13 @@ export class SkillSearchIndexError extends Error {
 
 const StatEnvelopeSchema = z
   .object({
-    canonicalPath: z.string(),
+    canonicalPath: z.string().min(1),
     mtimeMs: z.number(),
     size: z.number(),
     ino: z.number(),
     ctimeMs: z.number(),
-    installations: z.array(SkillInstallationSchema),
-    contentHash: z.string(),
+    installations: z.array(SkillInstallationSchema).min(1),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
     disabled: z.boolean(),
     conflict: z.boolean(),
     invalidFrontmatter: z.boolean(),
@@ -138,18 +138,22 @@ const IndexEnvelopeSchema = z
     rankingVersion: z.string(),
     engine: z.object({ name: z.string(), version: z.string(), configDigest: z.string() }).strict(),
     index: z.unknown(),
-    stats: z.record(z.string(), StatEnvelopeSchema),
+    stats: z.record(SkillIdSchema, StatEnvelopeSchema),
   })
   .strict();
 
-/** 存储字段投影的运行时收窄（index JSON 是外部输入，进入内存前必须 safeParse）。 */
+/**
+ * 存储字段投影的运行时收窄（index JSON 是外部输入，进入内存前必须 safeParse）。
+ * contentHash/canonicalPath/installations 带格式约束：篡改的缓存（伪路径、伪
+ * hash）在加载即被拒绝并按损坏重建，不会注入结果元数据。
+ */
 const StoredProjectionSchema = z.object({
   name: z.string(),
   description: z.string(),
   keywords: z.array(z.string()),
-  canonicalPath: z.string(),
+  canonicalPath: z.string().min(1),
   installations: z.array(SkillInstallationSchema).min(1),
-  contentHash: z.string(),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
   disabled: z.boolean(),
   conflict: z.boolean(),
 });
@@ -252,18 +256,31 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       this.stats.delete(id);
     }
     let parsed = 0;
-    for (const scan of changed) {
-      if (indexedIds.has(scan.id as string)) this.discardIndexed(scan.id as string);
-      const document = readDocument(scan);
-      this.miniSearch.add(document);
-      this.stats.set(scan.id as string, statEntry(scan, document));
-      parsed += 1;
+    try {
+      for (const scan of changed) {
+        if (indexedIds.has(scan.id as string)) this.discardIndexed(scan.id as string);
+        const document = readDocument(scan);
+        this.miniSearch.add(document);
+        this.stats.set(scan.id as string, statEntry(scan, document));
+        parsed += 1;
+      }
+    } catch {
+      // 索引内部状态与磁盘视角不一致（如加载校验漏网的重复 id）：按损坏自愈重建。
+      return this.rebuild(scans, readDocument, "corrupt");
     }
 
     if (removed.length === 0 && changed.length === 0) {
       return { mode: "fresh", documents: this.stats.size, parsed: 0, discarded: 0 };
     }
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      // 落盘失败：内存已偏离磁盘真相，作废内存状态并强制下次从磁盘重建后重抛。
+      this.loaded = false;
+      this.miniSearch = createSearchMiniSearch(this.tokenizer);
+      this.stats = new Map();
+      throw error;
+    }
     return {
       mode: "incremental",
       documents: this.stats.size,
@@ -346,6 +363,16 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
         JSON.stringify(envelope.index),
         miniSearchOptions(this.tokenizer),
       );
+      // 每个 stats 条目必须在索引中在场且存储投影通过严格收窄：伪造
+      // canonicalPath/contentHash 的缓存在此拒绝，不注入结果元数据。（被裁剪的
+      // stats——索引含 id 而 stats 缺条目——由 freshen 的 duplicate-ID 自愈重建兜底。）
+      for (const id of Object.keys(envelope.stats)) {
+        if (!miniSearch.has(id)) return { kind: "empty", reason: "corrupt" };
+        const stored = miniSearch.getStoredFields(id);
+        if (!stored || !safeParseExternal(StoredProjectionSchema, stored)) {
+          return { kind: "empty", reason: "corrupt" };
+        }
+      }
       return { kind: "ok", miniSearch, stats: new Map(Object.entries(envelope.stats)) };
     } catch {
       return { kind: "empty", reason: "corrupt" };
