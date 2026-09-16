@@ -127,10 +127,10 @@ function compareString(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-/** statSync（跟进 symlink）确认为 regular file。 */
+/** lstatSync（不跟进文档级 symlink）确认为 regular file；入口层目录 symlink 不受影响。 */
 function isRegularFile(file: string): boolean {
   try {
-    return fs.statSync(file).isFile();
+    return fs.lstatSync(file).isFile();
   } catch {
     return false;
   }

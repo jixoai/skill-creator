@@ -61,6 +61,13 @@ src/cli/cli.ts  COMMANDS.search         （+1 意图：query/flag 解析与输�
   先改表再改代码）；small-ICU 探针失败 → 逐字退化 + 滑窗 = pure-bigram。
 - **集成测试入口**：源码树用 `bun src/cli/cli.ts`（仓库 dev:cli 同款），
   或构建后 execFile dist/cli.js；均隔离 SKILL_CREATOR_HOME 与真实 roots。
+- **测试 seam 边界声明**：`createSkillSearchServiceWithRoots` 是显式命名的
+  测试专用导出（JSDoc 标注，测试/基准专用）——它是文档化的测试边界而非安全
+  不变量；安全不变量 = 生产装配（CLI/daemon/RPC）只经零参
+  `createSkillSearchService()`，不存在调用方 root 传参路径。索引外部输入
+  边界：加载时序列化活跃 id 集与 stats 键等值 + 存储投影与 stats 逐字段
+  交叉校验（stats 为唯一可重放元数据源），矛盾即损坏重建；文档级
+  SKILL.md symlink 以 lstat 拒绝（symlink 跟进仅限入口层目录）。
 
 ## 数据流
 

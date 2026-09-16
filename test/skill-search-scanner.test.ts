@@ -121,3 +121,14 @@ describe("skill search scanner pathological entries", () => {
     expect(entries.map((entry) => entry.path)).toEqual([]);
   });
 });
+
+describe("skill search scanner file-symlink escape guard", () => {
+  it("rejects document-level SKILL.md symlinks pointing outside the root", () => {
+    const outside = path.join(sandbox, "outside.md");
+    fs.writeFileSync(outside, "---\nname: outside\ndescription: secret marker\n---\n");
+    const directory = path.join(sandbox, "skills", "linked");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.symlinkSync(outside, path.join(directory, "SKILL.md"));
+    expect(scanSkillRoots([rootOf("skills")])).toEqual([]);
+  });
+});

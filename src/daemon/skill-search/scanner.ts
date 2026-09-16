@@ -98,10 +98,13 @@ function hasSkillFile(entryPath: string): boolean {
   return SKILL_FILE_NAMES.some((name) => isRegularFile(path.join(entryPath, name)));
 }
 
-/** statSync（跟进 symlink）确认为 regular file；不可 stat 或非 regular 一律 false。 */
+/**
+ * lstatSync（不跟进最终组件的 symlink）确认为 regular file：symlink 跟进限定在
+ * 入口层（目录 symlink），文档级 SKILL.md symlink 一律拒绝（防 provider root 外读取）。
+ */
 function isRegularFile(file: string): boolean {
   try {
-    return fs.statSync(file).isFile();
+    return fs.lstatSync(file).isFile();
   } catch {
     return false;
   }

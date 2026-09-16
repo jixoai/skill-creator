@@ -310,7 +310,15 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       this.miniSearch.add(document);
       this.stats.set(scan.id as string, statEntry(scan, document));
     }
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      // 与增量路径同一事务语义：落盘失败作废内存状态，长生命周期实例下次从磁盘重来。
+      this.loaded = false;
+      this.miniSearch = createSearchMiniSearch(this.tokenizer);
+      this.stats = new Map();
+      throw error;
+    }
     return {
       mode: "rebuilt",
       documents: this.stats.size,
@@ -359,17 +367,39 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       return { kind: "empty", reason: "incompatible" };
     }
     try {
+      // 活跃文档集合等值校验：MiniSearch 7 的 discard() 立即移除 active id 记录
+      // （序列化 documentIds 只含活跃文档），因此序列化活跃 id 与 stats 键必须
+      // 互为镜像——stats 被裁剪的「幽灵文档」或 stats 多出的悬空条目都按损坏重建。
+      const serialized = safeParseExternal(
+        z.object({ documentIds: z.record(z.string(), z.string()) }).passthrough(),
+        envelope.index,
+      );
+      if (!serialized) return { kind: "empty", reason: "corrupt" };
+      const activeIds = new Set(Object.values(serialized.documentIds));
+      const statIds = new Set(Object.keys(envelope.stats));
+      if (activeIds.size !== statIds.size || [...activeIds].some((id) => !statIds.has(id))) {
+        return { kind: "empty", reason: "corrupt" };
+      }
+
       const miniSearch = MiniSearch.loadJSON<SkillSearchDocument>(
         JSON.stringify(envelope.index),
         miniSearchOptions(this.tokenizer),
       );
-      // 每个 stats 条目必须在索引中在场且存储投影通过严格收窄：伪造
-      // canonicalPath/contentHash 的缓存在此拒绝，不注入结果元数据。（被裁剪的
-      // stats——索引含 id 而 stats 缺条目——由 freshen 的 duplicate-ID 自愈重建兜底。）
-      for (const id of Object.keys(envelope.stats)) {
+      // 每个 stats 条目必须在索引中在场，且存储投影与 stats 逐字段一致：stats 是
+      // 唯一可重放元数据源，格式合法但与 stats 相矛盾的缓存（伪路径/伪 hash/伪
+      // 安装表）在加载即拒绝，不注入结果元数据。
+      for (const [id, stat] of Object.entries(envelope.stats)) {
         if (!miniSearch.has(id)) return { kind: "empty", reason: "corrupt" };
         const stored = miniSearch.getStoredFields(id);
-        if (!stored || !safeParseExternal(StoredProjectionSchema, stored)) {
+        const projection = stored ? safeParseExternal(StoredProjectionSchema, stored) : null;
+        if (
+          !projection ||
+          projection.canonicalPath !== stat.canonicalPath ||
+          projection.contentHash !== stat.contentHash ||
+          projection.disabled !== stat.disabled ||
+          projection.conflict !== stat.conflict ||
+          JSON.stringify(projection.installations) !== JSON.stringify(stat.installations)
+        ) {
           return { kind: "empty", reason: "corrupt" };
         }
       }
