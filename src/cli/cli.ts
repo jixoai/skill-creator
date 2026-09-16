@@ -2,11 +2,14 @@
 /**
  * 原始需求 [2026-07-14]：「参考 ../../pnpm-pub 这个项目的架构：cli+gui(webui+opentray)，基于 ../ccski 这个 sdk 来快速搭建一个 “skills 管理器”。」
  * 用户原始需求 [2026-07-22]：「同意，但是改成 `skill-creator openinbrowser`。」
+ * 用户原始需求 [2026-09-17]：「`skill-creator search <query...>` 进程内完成（不要求 daemon），
+ * 支持 --json 与 --limit；空 query 或 flag 解析失败 exit 1。」
  * 正交意图：
  * 1. 解析并路由公开 CLI 命令。
  * 2. 通过带版本、运行时校验的 IPC 协议调用 daemon。
  * 3. 安全启动、替换或恢复 tray 已失联的分离运行 daemon。
  * 4. 向终端投影 daemon 与 tray 状态，并只由显式命令打开系统浏览器。
+ * 5. search 命令的 query/flag 解析与结果投影（进程内最小装配，不 import kernel/MCP/domain）。
  *
  * Routing:
  *   skill-creator start   -> spawn daemon + open tray window
@@ -14,6 +17,7 @@
  *   skill-creator openinbrowser -> open the running daemon WebUI in the system browser
  *   skill-creator status  -> query daemon status
  *   skill-creator stop    -> graceful daemon shutdown
+ *   skill-creator search  -> in-process BM25 skill search (no daemon)
  *   skill-creator help    -> print command help
  *   skill-creator version -> print version
  *
@@ -408,6 +412,102 @@ async function runOpenInBrowser(): Promise<number> {
   }
 }
 
+interface SearchArguments {
+  json: boolean;
+  limit: number;
+  query: string;
+}
+
+/** 解析 `search` 之后的 token：非 flag 拼 query；--json；--limit N / --limit=N（1..50）。 */
+function parseSearchArguments(rest: string[]): SearchArguments | null {
+  let json = false;
+  let limit: number | undefined;
+  const queryParts: string[] = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    const token = rest[i];
+    if (token === "--json") {
+      json = true;
+      continue;
+    }
+    const limitMatch = /^--limit(?:=(.*))?$/.exec(token);
+    if (limitMatch) {
+      const raw = limitMatch[1] ?? rest[++i];
+      if (raw === undefined || !/^[1-9]\d*$/.test(raw)) return null;
+      const parsed = Number(raw);
+      if (parsed < 1 || parsed > 50) return null;
+      limit = parsed;
+      continue;
+    }
+    if (token.startsWith("-")) return null;
+    queryParts.push(token);
+  }
+  const query = queryParts.join(" ").trim();
+  if (query === "") return null;
+  return { json, limit: limit ?? 10, query };
+}
+
+/**
+ * `skill-creator search <query...> [--json] [--limit N]`：进程内完成扫描/索引/查询，
+ * 不要求 daemon（动态 import 只装配 workspace registry 持久态 + search service）。
+ * 退出码：查询成功（含 0 结果）0；空 query / flag 解析失败 / 索引 IO 故障 1。
+ */
+async function runSearch(): Promise<number> {
+  const argv = hideBin(process.argv);
+  const rest = argv.slice(argv.indexOf("search") + 1);
+  const parsedArgs = parseSearchArguments(rest);
+  if (!parsedArgs) {
+    console.error(
+      "Usage: skill-creator search <query...> [--json] [--limit N]  (limit: 1-50, default 10)",
+    );
+    return 1;
+  }
+  const startedAt = Date.now();
+  try {
+    const { createSkillSearchService } = await import("../daemon/skill-search/service.js");
+    const service = createSkillSearchService();
+    const results = await service.search(parsedArgs.query, { limit: parsedArgs.limit });
+    if (parsedArgs.json) {
+      // JSON 模式 stdout 仅含合法 JSON；人读诊断走 stderr。
+      console.log(JSON.stringify({ results }));
+    } else {
+      printSearchResults(results, parsedArgs.limit);
+    }
+    console.error(
+      `${results.length} result(s) for "${parsedArgs.query}" in ${Date.now() - startedAt}ms (limit ${parsedArgs.limit})`,
+    );
+    return 0;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+}
+
+function printSearchResults(
+  results: Array<{
+    name: string;
+    description: string;
+    canonicalPath: string;
+    score: number;
+    installations: Array<{ path: string }>;
+    duplicates: Array<{ canonicalPath: string }>;
+  }>,
+  limit: number,
+): void {
+  if (results.length === 0) {
+    console.log(`No skills matched (limit ${limit}).`);
+    return;
+  }
+  results.forEach((result, index) => {
+    console.log(`${index + 1}. ${result.name}  (${result.score.toFixed(4)})`);
+    if (result.description) console.log(`   ${result.description}`);
+    console.log(`   ${result.canonicalPath}`);
+    console.log(`   installations: ${result.installations.length}`);
+    for (const duplicate of result.duplicates) {
+      console.log(`   duplicate: ${duplicate.canonicalPath}`);
+    }
+  });
+}
+
 interface CommandDefinition {
   description: string;
   run: () => number | Promise<number>;
@@ -422,6 +522,10 @@ const COMMANDS = {
   },
   status: { description: "Check the running daemon", run: runStatus },
   stop: { description: "Gracefully stop the daemon", run: runStop },
+  search: {
+    description: "Search local skills (BM25 + skill tokenizer)",
+    run: () => runSearch(),
+  },
   mcp: {
     description: "Run the skill-creator MCP server over stdio (readonly face)",
     run: () => {

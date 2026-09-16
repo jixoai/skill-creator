@@ -1,0 +1,227 @@
+[
+  {
+    "q": "React component design",
+    "expect": ["react-component-design"],
+    "category": "en"
+  },
+  {
+    "q": "test driven development",
+    "expect": ["tdd"],
+    "category": "en"
+  },
+  {
+    "q": "how to hand off conversation to another agent",
+    "expect": ["claude-handoff", "handoff"],
+    "category": "en"
+  },
+  {
+    "q": "resolve git merge conflict",
+    "expect": ["resolving-merge-conflicts"],
+    "category": "en"
+  },
+  {
+    "q": "deploy cloudflare workers",
+    "expect": ["wrangler", "workers-best-practices", "cloudflare"],
+    "category": "en"
+  },
+  {
+    "q": "durable objects chat room",
+    "expect": ["durable-objects"],
+    "category": "en"
+  },
+  {
+    "q": "review my pull request changes",
+    "expect": ["code-review"],
+    "category": "en"
+  },
+  {
+    "q": "browser automation CLI for agents",
+    "expect": ["agent-browser", "ego-browser"],
+    "category": "en"
+  },
+  {
+    "q": "terminal user interface",
+    "expect": ["opentui"],
+    "category": "en"
+  },
+  {
+    "q": "view transitions",
+    "expect": ["view-transitions-toolkit"],
+    "category": "en"
+  },
+  {
+    "q": "typography system",
+    "expect": ["typography-system"],
+    "category": "en"
+  },
+  {
+    "q": "shadcn svelte components",
+    "expect": ["shadcn-svelte"],
+    "category": "en"
+  },
+  {
+    "q": "pre-commit lint hooks",
+    "expect": ["setup-pre-commit"],
+    "category": "en"
+  },
+  {
+    "q": "grill me about my plan",
+    "expect": ["grill-me", "grilling", "grill-with-docs"],
+    "category": "en"
+  },
+  {
+    "q": "lynx performance trace",
+    "expect": ["lynx-trace-analysis", "lynx-trace-record"],
+    "category": "en"
+  },
+  {
+    "q": "figma design file inspection",
+    "expect": ["open-pencil"],
+    "category": "en"
+  },
+  {
+    "q": "agent client protocol",
+    "expect": ["acp"],
+    "category": "en"
+  },
+  {
+    "q": "three.js model from image",
+    "expect": ["img2threejs"],
+    "category": "en"
+  },
+  {
+    "q": "find and install agent skills",
+    "expect": ["find-skills"],
+    "category": "en"
+  },
+  {
+    "q": "TypeScript type safety",
+    "expect": ["typescript-type-safety"],
+    "category": "en"
+  },
+  {
+    "q": "React组件设计",
+    "expect": ["react-component-design"],
+    "category": "mixed"
+  },
+  {
+    "q": "如何创建Svelte组件",
+    "expect": ["svelte-component-dev"],
+    "category": "mixed"
+  },
+  {
+    "q": "TypeScript类型检查",
+    "expect": ["typescript-type-safety"],
+    "category": "mixed"
+  },
+  {
+    "q": "中文写作 术语一致",
+    "expect": ["中文技术写作"],
+    "category": "mixed"
+  },
+  {
+    "q": "多引擎AI搜索 联网查证",
+    "expect": ["agent-search-engine"],
+    "category": "mixed"
+  },
+  {
+    "q": "用ripgrep搜索代码",
+    "expect": ["ripgrep"],
+    "category": "mixed"
+  },
+  {
+    "q": "去模板化写作风格",
+    "expect": ["gaubee-writer", "lieflat-less-ai-tone"],
+    "category": "zh"
+  },
+  {
+    "q": "玻璃拟态",
+    "expect": ["glass-morphism-css"],
+    "category": "zh"
+  },
+  {
+    "q": "中文排版规范",
+    "expect": ["中文技术写作"],
+    "category": "zh"
+  },
+  {
+    "q": "多引擎搜索",
+    "expect": ["agent-search-engine"],
+    "category": "zh"
+  },
+  {
+    "q": "React 组件设计",
+    "expect": ["react-component-design"],
+    "category": "mixed"
+  },
+  {
+    "q": "SvelteKit UI 组件",
+    "expect": ["svelte-component-dev"],
+    "category": "mixed"
+  },
+  {
+    "q": "AI Agent Skill 开发",
+    "expect": ["skill-creator-guide", "find-skills", "skill-creator"],
+    "category": "mixed"
+  },
+  {
+    "q": "dweb 路由",
+    "expect": ["opendweb-routing"],
+    "category": "mixed"
+  },
+  {
+    "q": "玻璃拟态 毛玻璃效果",
+    "expect": ["glass-morphism-css"],
+    "category": "mixed"
+  },
+  {
+    "q": "@jixoai/jixoai-ui",
+    "expect": ["jixoai-ui-registry"],
+    "category": "ident"
+  },
+  {
+    "q": "shadcn-svelte",
+    "expect": ["shadcn-svelte"],
+    "category": "ident"
+  },
+  {
+    "q": "http3",
+    "expect": ["http3-quic-notes"],
+    "category": "ident"
+  },
+  {
+    "q": "opentui",
+    "expect": ["opentui"],
+    "category": "ident"
+  },
+  {
+    "q": "reactlynx 最佳实践",
+    "expect": ["reactlynx-best-practices"],
+    "category": "mixed"
+  },
+  {
+    "q": "react componet design",
+    "expect": ["react-component-design"],
+    "category": "typo"
+  },
+  {
+    "q": "sveltte component",
+    "expect": ["svelte-component-dev", "shadcn-svelte"],
+    "category": "typo"
+  },
+  {
+    "q": "shadcn-svlete",
+    "expect": ["shadcn-svelte"],
+    "category": "typo"
+  },
+  {
+    "q": "typograpyh",
+    "expect": ["typography-system"],
+    "category": "typo"
+  },
+  {
+    "q": "cloudflare workrs deploy",
+    "expect": ["wrangler", "workers-best-practices", "cloudflare"],
+    "category": "typo"
+  }
+]

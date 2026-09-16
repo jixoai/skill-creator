@@ -123,6 +123,7 @@ Inside the repository use `pnpm skill-creator <command>` after building; as an i
 | `openinbrowser` | Explicitly open the current daemon's tokened WebUI URL in the system browser                                                                                                     |
 | `status`        | Print PID, version, HTTP port, tray state (mounted/web/headless), and any tray error                                                                                             |
 | `stop`          | Stop the production daemon; if the production endpoint is gone, discover and stop the dev daemon, waiting for endpoint release                                                   |
+| `search`        | Search local skills in-process (BM25 + skill tokenizer, no daemon required); see [Skill search](#skill-search)                                                                   |
 | `version`       | Print the package version                                                                                                                                                        |
 | `help`          | Print command help                                                                                                                                                               |
 
@@ -137,6 +138,18 @@ pnpm skill-creator stop
 ```
 
 The commands above were exercised against the built output (`dist/`, identical to the published package): headless `start` prints the recovery hint and exits 0; `status` prints pid/version/port/tray state, the DSH host health line (`--json` prints the full state), and the tokened WebUI URL; `open` is unavailable headless and hints `openinbrowser`; `openinbrowser` prints and invokes the system browser; after `stop` the HTTP endpoint releases immediately and `status` reports ENOENT with the `start` recovery entry. The published package was black-box tested the same way (start/status/stop/restart) after `npm install <tarball>` in an empty directory outside the repo (ccski is bundled into the output, no `link:` dependency; reproduce with `bun scripts/clean-install-check.sh.ts`, evidence in `docs/release/skill-steward.md`). Runtime requires Node `>=24.0.0` (kernel persistence uses `node:zlib`'s zstd; the `node:module` `stripTypeScriptTypes` that DSH code-runtime needs requires `>=22.13`, already covered by 24).
+
+## Skill search
+
+`skill-creator search <query...>` searches every local skill — all Global Workspace provider roots plus every Imported Workspace — in-process, without the daemon:
+
+```bash
+skill-creator search "React组件设计"            # human-readable output
+skill-creator search react component --json    # machine-readable: { "results": [...] }
+skill-creator search http3 --limit 20          # limit 1..50, default 10
+```
+
+Results are canonical: multiple installations of the same skill (symlinks included) collapse into one entry with an `installations` list, and byte-identical copies fold into `duplicates`. Ranking is field-weighted BM25+ (name ×10 … body ×1) plus a frozen rerank pass, with prefix and fuzzy (typo) matching; ordering is deterministic and replayable. The first run builds a persistent index under `~/.skill-creator/search-index.json`; later runs refresh it incrementally via stat checks (mtime/size/inode/ctime), so unchanged corpora are not re-read. Exit codes: `0` on a successful query (including zero results), `1` for an empty query, a bad flag, or an index I/O failure. Design, frozen tokenizer/ranking contracts, and benchmark methodology: [docs/search-design.md](docs/search-design.md).
 
 ## Skill Steward
 

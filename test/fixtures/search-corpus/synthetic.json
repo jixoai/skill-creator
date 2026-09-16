@@ -1,0 +1,90 @@
+[
+  {
+    "name": "react-component-design",
+    "description": "Design and review production React components: composition, props boundaries, render performance and accessibility.",
+    "keywords": ["react", "component", "jsx", "tsx", "fiber"],
+    "triggers": ["design a react component", "review component hierarchy"],
+    "headings": ["Component boundaries", "State colocation", "Re-render analysis"],
+    "body": "React 组件设计指南。Composition over inheritance; lift state only when needed. Use React.memo sparingly. @testing-library/react for behavior tests. Prefer server components for data-heavy pages; keep client components at the leaves. react-component-design checklist: props contract, error boundaries, suspense fallbacks."
+  },
+  {
+    "name": "typescript-type-safety",
+    "description": "TypeScript 类型安全：unknown 收窄、discriminated union、zod safeParse 边界与 no any 法则。",
+    "keywords": ["typescript", "类型安全", "zod", "strict"],
+    "triggers": ["make types safe", "类型检查"],
+    "headings": ["Unknown narrowing", "Discriminated unions", "Runtime boundaries"],
+    "body": "TypeScript type safety practices: every external input starts as unknown; safeParse at trust boundaries; discriminated unions with exhaustive switch; never use as any. 类型检查先行，runtime-safe 才算 type-safe。"
+  },
+  {
+    "name": "svelte-component-dev",
+    "description": "Svelte component development: runes, snippets, transitions and store patterns for Svelte 5.",
+    "keywords": ["svelte", "sveltekit", "runes"],
+    "triggers": ["create a svelte component", "如何创建Svelte组件"],
+    "headings": ["Runes ($state/$derived)", "Snippets vs slots", "Transitions"],
+    "body": "Svelte 组件开发：$state/$derived/$effect runes; snippets replace slots in Svelte 5. SvelteKit load functions and +page.ts. Transitions use tweened/spring. 编译期剥离行内元素边界空格，注意排版。"
+  },
+  {
+    "name": "mcp-server-guide",
+    "description": "Build Model Context Protocol (MCP) servers: tools, resources, prompts, stdio vs HTTP transports.",
+    "keywords": ["mcp", "model context protocol", "server"],
+    "triggers": ["build an mcp server"],
+    "headings": ["Tool schema", "Transports", "Bearer auth"],
+    "body": "MCP server implementation guide with @modelcontextprotocol/server. Tools vs resources vs prompts; stdio for local, streamable HTTP for remote. Zod schemas for tool input validation."
+  },
+  {
+    "name": "jixoai-ui-registry",
+    "description": "@jixoai/jixoai-ui 组件 registry 的使用：shadcn 风格 CLI、CSS laws 与 vendor 约定。",
+    "keywords": ["@jixoai/jixoai-ui", "registry", "shadcn"],
+    "triggers": [],
+    "headings": ["Registry add", "CSS laws"],
+    "body": "使用 @jixoai/jixoai-ui 的 registry item（如 code-card、highlight）。依赖边走 registry.json；shadcn-add 镜像桥处理 CLI 兼容。CSS 法则：separator INK law、减色墨律。"
+  },
+  {
+    "name": "opendweb-routing",
+    "description": "OpenDweb 路由系统：文件路由、布局嵌套与 dweb 路由参数约定。",
+    "keywords": ["opendweb", "dweb", "routing", "路由"],
+    "triggers": ["dweb 路由"],
+    "headings": ["File routes", "Layout nesting"],
+    "body": "OpenDweb 路由（dweb 路由）基于文件系统：routes/ 目录映射路径段，layout 文件嵌套。参数用 [param] 约定。支持 http3 传输层与离线 service worker。"
+  },
+  {
+    "name": "http3-quic-notes",
+    "description": "HTTP3/QUIC 传输要点：0-RTT、连接迁移与流优先级。",
+    "keywords": ["http3", "quic", "transport"],
+    "triggers": [],
+    "headings": ["0-RTT", "Connection migration"],
+    "body": "http3 overview: QUIC handshake, 0-RTT resumption, connection migration via connection IDs, stream prioritization. Compare with TCP+TLS."
+  },
+  {
+    "name": "skill-creator-guide",
+    "description": "skill-creator 使用指南：创建、管理与搜索 Agent Skills。",
+    "keywords": ["skill-creator", "skills"],
+    "triggers": [],
+    "headings": ["Create", "Search"],
+    "body": "skill-creator 命令行：创建技能、管理 workspace providers、search 检索本地技能索引。"
+  },
+  {
+    "name": "中文技术写作",
+    "description": "中文技术写作规范：术语一致性、中英混排空格、标点与段落节奏。",
+    "keywords": ["写作", "中文", "排版"],
+    "triggers": ["润色中文文档"],
+    "headings": ["术语表", "中英混排"],
+    "body": "中文技术写作要点：术语统一；中英之间加空格；避免翻译腔。段落节奏以信息密度优先。"
+  },
+  {
+    "name": "react-hook-patterns",
+    "description": "React hooks 模式：自定义 hook 抽取、useEffect 依赖治理与并发特性。",
+    "keywords": ["react", "hooks"],
+    "triggers": [],
+    "headings": ["Custom hooks", "Effect hygiene"],
+    "body": "React hooks: extract custom hooks for reuse; treat useEffect as synchronization, not lifecycle. useSyncExternalStore for stores."
+  },
+  {
+    "name": "glass-morphism-css",
+    "description": "玻璃拟态 CSS：backdrop-filter、渐进模糊与减色墨律。",
+    "keywords": ["css", "backdrop-filter", "毛玻璃"],
+    "triggers": [],
+    "headings": ["Progressive blur"],
+    "body": "玻璃拟态实现：backdrop-filter: blur + saturate；遮罩禁止加黑，用 contrast(0.5) 减色（减色墨律）。"
+  }
+]
