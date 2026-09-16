@@ -30,6 +30,8 @@ vi.mock("../stores/connection.svelte", () => ({
     if (!connection.rpc) throw new Error("not connected");
     return connection.rpc;
   },
+  // AgentPanel 的配置惰性加载 effect 消费 status（走查 P1 修复）。
+  connectionState: { status: "connected", error: null },
 }));
 vi.mock("../toast.svelte", () => ({
   showToast: vi.fn(),

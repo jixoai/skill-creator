@@ -69,15 +69,17 @@
         {/each}
       </nav>
     </div>
-    <div class="min-w-0 overflow-y-auto p-4">
+    <!-- 滚动所有权按分区切换（skill-refs-and-platform-fixes C2）：Model 分区
+         自管唯一纵滚（tab 内容容器，R16 裁决），右栏 overflow-hidden 只供高度链；
+         其余分区右栏即唯一纵滚所有者。不再用负边距逃逸——overflow-y 的隐式
+         overflow-x:auto 会让逃逸子块宽出 32px 触发横向滚动条。 -->
+    <div
+      class="min-w-0 p-4 {settingsUi.section === 'model' ? 'overflow-hidden' : 'overflow-y-auto'}"
+    >
       {#if settingsUi.section === "general"}
         <GeneralSettingsSection />
       {:else if settingsUi.section === "model"}
-        <!-- R16 用户裁决：models 配置的滚动发生在 tab page 内部，外层不滚——
-             分区根改 flex 列布局，页面主体 min-h-0 自滚。 -->
-        <div class="flex h-full min-h-0 flex-col -m-4 p-4">
-          <ModelSettingsSection />
-        </div>
+        <ModelSettingsSection />
       {:else if settingsUi.section === "sessions"}
         <SessionsSettingsSection />
       {:else}

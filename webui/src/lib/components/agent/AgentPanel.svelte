@@ -27,6 +27,7 @@
     setAgentPanelOpen,
     setAgentPanelWidth,
   } from "$lib/stores/agent.svelte";
+  import { connectionState } from "$lib/stores/connection.svelte";
   import { agentComposer } from "$lib/stores/agent-composer.svelte";
   import AgentHeader from "./AgentHeader.svelte";
   import TranscriptView from "./TranscriptView.svelte";
@@ -40,8 +41,16 @@
 
   // 惰性加载配置投影（model chip 消费）：面板常驻挂载后以 open 为闸——首次
   // 打开且 view 缺失时补拉（未打开不发 RPC；断线重连由 open 重开驱动）。
+  // 走查 P1 修复（2026-09-16）：连接建立前不开闸——requireRpc 未连接时同步抛错
+  // 会让 loading/error 在同一 effect 帧内写回，effect_update_depth_exceeded 无限环
+  // 杀死整个 app 响应性；status 入依赖后，连接建立/重连本身驱动补拉。
   $effect(() => {
-    if (agentPanel.open && agentRuntimeConfig.view === null && !agentRuntimeConfig.loading) {
+    if (
+      agentPanel.open &&
+      connectionState.status === "connected" &&
+      agentRuntimeConfig.view === null &&
+      !agentRuntimeConfig.loading
+    ) {
       void loadAgentSettings();
     }
   });

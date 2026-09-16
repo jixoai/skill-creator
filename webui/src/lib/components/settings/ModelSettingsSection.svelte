@@ -177,6 +177,9 @@
     if (!el) return;
     const onWheel = (event: WheelEvent) => {
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      // C2：仅在 tab 条确实可横滚时劫持纵向滚轮；不可滚时交还页面滚动
+      //（原实现无条件 preventDefault，溢出不明显时滚轮「失灵」）。
+      if (el.scrollWidth <= el.clientWidth) return;
       el.scrollLeft += event.deltaY;
       event.preventDefault();
     };

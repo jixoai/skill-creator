@@ -135,9 +135,12 @@
               {/if}
               <span class="flex-1"></span>
               {#if editingId !== row.item.messageId}
+                <!-- P3 修复（2026-09-16 走查）：行操作图标按钮从裸 12px 图标改
+                     24px 底座 + after 扩张热区（与 ComposerCard 工具行同模式）；
+                     steer 禁用态显式可辨（hover 反馈 + title 说明）。 -->
                 <button
                   type="button"
-                  class="shrink-0 text-muted-foreground hover:text-foreground"
+                  class="relative flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
                   aria-label="Edit queued message"
                   title="Edit this queued message"
                   onclick={() => beginEdit(row.item.messageId, row.item.text)}
@@ -146,9 +149,11 @@
                 </button>
                 <button
                   type="button"
-                  class="shrink-0 text-muted-foreground hover:text-foreground"
+                  class="relative flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                   aria-label="Steer with this message"
-                  title="Steer the current turn with this message"
+                  title={running
+                    ? "Steer the current turn with this message"
+                    : "Steering unlocks while a turn is running"}
                   disabled={!running || row.item.target !== "next-turn"}
                   onclick={() => void steerItem(row.item.messageId)}
                 >
@@ -157,7 +162,7 @@
               {/if}
               <button
                 type="button"
-                class="shrink-0 text-muted-foreground hover:text-destructive"
+                class="relative flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-destructive"
                 aria-label="Remove queued message"
                 title="Remove from queue"
                 onclick={() => void removeItem(row.item.messageId)}

@@ -373,7 +373,9 @@
         {catalogLoading ? "Loading catalog…" : "Catalog unavailable."}
       </p>
     {:else}
-      <div class="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
+      <!-- C2 滚动所有权：画廊自然流式——滚动只属于 Model 分区的 tab 内容容器
+           （52vh 独立滚容器与 Dialog 高度上限不联动，曾出双滚条）。 -->
+      <div class="space-y-2">
         {#if filteredPresets.length > 0}
           <div class="space-y-1">
             <span class="text-[10px] font-medium text-muted-foreground">Your presets</span>

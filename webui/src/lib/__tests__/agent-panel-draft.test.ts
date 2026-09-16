@@ -18,6 +18,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 const connection = vi.hoisted(() => ({
   generation: 0,
   rpc: null as unknown,
+  // 可变连接状态（走查 P1 回归：面板早开竞态——effect 消费 status）。
+  state: { status: "idle" as string, error: null as string | null },
 }));
 const settingsUi = vi.hoisted(() => ({
   openSettings: vi.fn(),
@@ -33,7 +35,7 @@ vi.mock("../stores/connection.svelte", () => ({
     if (!connection.rpc) throw new Error("not connected");
     return connection.rpc;
   },
-  connectionState: { status: "connected", error: null },
+  connectionState: connection.state,
 }));
 vi.mock("../toast.svelte", () => ({
   showToast: toast.showToast,
@@ -211,6 +213,8 @@ beforeEach(() => {
   settingsGet = vi.fn().mockResolvedValue(VIEW);
   connection.rpc = agentRpc(settingsGet);
   connection.generation = 0;
+  connection.state.status = "connected";
+  connection.state.error = null;
   agentPanel.open = false;
   agentPanel.seedPrompt = null;
   agentSession.sessionId = null;
@@ -236,6 +240,37 @@ afterAll(() => {
 });
 
 describe("AgentPanel composer draft protection (codex R2 blocker 5)", () => {
+  it("does not fire the lazy settings load before the connection is established (walkthrough P1)", async () => {
+    // 走查 P1（2026-09-16）：连接建立前打开面板曾让 requireRpc 同步抛错——
+    // loading/error 同帧写回触发 effect_update_depth_exceeded 无限环，杀死
+    // 整个 app 响应性。修复后 status 未连接不开闸；连接建立后正常补拉。
+    //（mock 的 connectionState 是普通对象，无响应性——第二分支以重挂载驱动，
+    // 与生产 status 变化重跑同一 effect 体等价。）
+    connection.state.status = "connecting";
+    connection.rpc = null;
+    let ctx = mountPanel();
+    try {
+      flushSync();
+      flushSync();
+      expect(settingsGet).not.toHaveBeenCalled();
+      expect(agentRuntimeConfig.loading).toBe(false);
+      expect(agentRuntimeConfig.error).toBeNull();
+      ctx.cleanup();
+      // 连接建立：重挂载（= 同一 effect 体以 connected status 运行）→ 补拉一次。
+      connection.rpc = agentRpc(settingsGet);
+      connection.state.status = "connected";
+      agentRuntimeConfig.view = null;
+      ctx = mountPanel();
+      flushSync();
+      await vi.waitFor(() => {
+        expect(agentRuntimeConfig.view).not.toBeNull();
+      });
+      expect(settingsGet).toHaveBeenCalledTimes(1);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   it("keeps the draft across mount cycles (R17-A/R17-C: mount never resets)", async () => {
     agentComposer.text = "stale draft from a previous mount";
     const ctx = mountPanel();
