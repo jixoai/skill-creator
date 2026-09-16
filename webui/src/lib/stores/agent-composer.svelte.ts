@@ -23,7 +23,10 @@
  */
 import { showToast } from "$lib/toast.svelte";
 import { loadPersistedDraftText, persistDraftText } from "./agent-submission.svelte";
-import type { ComposerReference } from "$lib/components/agent/composer-chips.js";
+import type {
+  ComposerReference,
+  ComposerReferenceInput,
+} from "$lib/components/agent/composer-chips.js";
 
 /**
  * 图片附件（双通道，R17-B）：本地 File（mediaType+data+preview 原图 dataURL）
@@ -106,8 +109,8 @@ function applyDraft(draft: ComposerDraft): void {
   agentComposer.editing = draft.editing;
 }
 
-/** 登记一条 `@` 引用（C1）：token 已由菜单落进稿文；uid 返回供移除。 */
-export function addComposerReference(reference: Omit<ComposerReference, "uid">): number {
+/** 登记一条引用（C1 `@` / skill-refs `$`）：token 已由菜单落进稿文；uid 返回供移除。 */
+export function addComposerReference(reference: ComposerReferenceInput): number {
   referenceSeq += 1;
   const uid = referenceSeq;
   agentComposer.references = [...agentComposer.references, { ...reference, uid }];

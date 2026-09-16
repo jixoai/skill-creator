@@ -29,6 +29,8 @@ import {
   DshSettingsUpdateSchema,
   DshStewardSettingsViewSchema,
 } from "./dsh-runtime.js";
+import { ProviderIdSchema, WorkspaceIdSchema } from "./workspaces.js";
+import { SkillIdSchema } from "./skills.js";
 
 /** 面板可见的 agent 生命周期状态（AgentStatus 两态 + 服务层 disposed 投影）。 */
 export const AgentSessionStatusSchema = z.enum(["idle", "running", "disposed"]);
@@ -112,9 +114,9 @@ export const AgentPromptFileSchema = z.union([
 export type AgentPromptFile = z.infer<typeof AgentPromptFileSchema>;
 
 /**
- * prompt 引用（composer-references C1）：`@` 芯片选中后的展开契约——UI 只提交
- * opaque 引用，内容由 daemon server-owned 解析（file 读盘守卫 / session 转录摘要），
- * 浏览器不拼内容。strict 判别联合。
+ * prompt 引用（composer-references C1 + skill-refs C1）：`@`/`$` 芯片选中后的展开
+ * 契约——UI 只提交 opaque 引用，内容由 daemon server-owned 解析（file 读盘守卫 /
+ * session 转录摘要 / skill 文档读取），浏览器不拼内容。strict 判别联合。
  */
 export const AgentPromptReferenceSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -126,6 +128,13 @@ export const AgentPromptReferenceSchema = z.discriminatedUnion("kind", [
     kind: z.literal("session"),
     /** 被引用的历史会话（排除语义由 UI 持有；daemon 不猜）。 */
     sessionId: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("skill"),
+    /** 技能引用的 server-owned 作用域三元组（`$` 触发；registry 解析 containment）。 */
+    workspaceId: WorkspaceIdSchema,
+    providerId: ProviderIdSchema,
+    skillId: SkillIdSchema,
   }),
 ]);
 /** prompt 引用。 */

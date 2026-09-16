@@ -5,6 +5,8 @@
   修订 [2026-09-12]（R14-B 5）：「Chat 输入框中要支持 `$` 来激发输入补全，从而
   输入 skill」——通用化 SlashMenu 的浮现/键盘语法为 TriggerMenu（"/" 命令与
   "$" skill 引用并排两实例；SlashMenu 保留命令注册表外壳）。
+  修订 [2026-09-16]（skill-refs C1）：`$` 以「技能引用」语义复活（SkillMenu
+  独立实例，模糊匹配经 matcher prop 注入）；matcher/key 泛化不动既有实例。
   正交意图：
     [1] 浮现语法（纯函数投影）：query = 稿文首行且以 trigger 开头；候选 value
         （含 trigger 前缀）对 query 做 startsWith 前缀匹配——候选行一旦离开
@@ -24,6 +26,8 @@
     description?: string;
     /** 分组标题（W3：命令/技能统一菜单的 roster 分组；缺省 = 无组头）。 */
     group?: string;
+    /** 渲染键（skill-refs C1：跨组同名 `$name` 行需唯一键；缺省 = value）。 */
+    key?: string;
   }
 
   /**
@@ -50,9 +54,10 @@
     forcedOpen = false,
     onForceClose,
     pinned,
+    matcher,
     onSelect,
   }: {
-    /** 触发字符（W3 起统一 "/"：命令 + 技能；C1 起 "@" 引用）。 */
+    /** 触发字符（W3 起统一 "/"：命令 + 技能；C1 起 "@" 引用；skill-refs 起 "$"）。 */
     trigger: string;
     /** 候选注册表（结构开放，由实例外壳持有）。 */
     entries: readonly MenuEntry[];
@@ -62,7 +67,7 @@
     caretOnFirstLine: boolean;
     /** 浮现列表的 aria-label。 */
     menuLabel: string;
-    /** data-slot 语义/测试锚（slash-menu / reference-menu）。 */
+    /** data-slot 语义/测试锚（slash-menu / reference-menu / skill-menu）。 */
     dataSlot: string;
     /** entries 为空时的占位文案（undefined = 无候选即隐藏菜单）。 */
     emptyMessage?: string;
@@ -76,8 +81,15 @@
     onForceClose?: () => void;
     /** C1 结构性 pinned 行（恒在首位，不过滤；如 `..` 上级目录）。 */
     pinned?: PinnedMenuRow;
-    /** 选中候选：以完整 value 交回调用方（发送命令 / 插入 token 由外壳决定）。 */
-    onSelect: (value: string) => void;
+    /**
+     * 自定义匹配器（skill-refs C1：`$` 技能菜单的模糊搜索）：query 含 trigger
+     * 前缀，返回 true = 候选入选（外壳自持排序）。缺省 = 大小写不敏感 startsWith
+     * （既有命令/引用菜单行为不变）。
+     */
+    matcher?: (query: string, entry: MenuEntry) => boolean;
+    /** 选中候选：以完整 value 交回调用方（发送命令 / 插入 token 由外壳决定）。
+     *  skill-refs C1：附带整条 entry（同 value 跨组同名时按 key 反查唯一行）。 */
+    onSelect: (value: string, entry?: MenuEntry) => void;
   } = $props();
 
   /** Esc 驳回的稿文快照：稿文再变化即重新浮现。 */
@@ -87,9 +99,13 @@
   const query = $derived(text.startsWith(trigger) ? (text.split("\n", 1)[0] ?? "") : "");
   /** forcedOpen 的空 query 语义：全目录（官方空 query 分区展示）。 */
   const effectiveQuery = $derived(forcedOpen && query.length === 0 ? trigger : query);
-  /** C1：前缀匹配大小写不敏感（官方 @/ 目录过滤语义；对 / 菜单无行为回退）。 */
+  /** C1：前缀匹配大小写不敏感（官方 @/ 目录过滤语义；对 / 菜单无行为回退）。
+   *  skill-refs C1：提供 matcher 时由其全权裁决（$ 菜单模糊搜索）。 */
   const matches = $derived.by(() => {
     if (effectiveQuery.length === 0) return [];
+    if (matcher !== undefined) {
+      return entries.filter((entry) => matcher(effectiveQuery, entry));
+    }
     const needle = effectiveQuery.toLowerCase();
     return entries.filter((entry) => entry.value.toLowerCase().startsWith(needle));
   });
@@ -162,7 +178,7 @@
       } else {
         const entry = matches[selected - (pinned !== undefined ? 1 : 0)];
         if (entry) {
-          onSelect(entry.value);
+          onSelect(entry.value, entry);
           onForceClose?.();
         }
       }
@@ -196,7 +212,7 @@
             type="button"
             class="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[11px] {selected ===
             0
-              ? 'bg-accent text-accent-foreground'
+              ? 'bg-primary/15 text-foreground'
               : 'text-muted-foreground'} hover:bg-accent/50"
             aria-current={selected === 0 ? "true" : undefined}
             data-menu-pinned="true"
@@ -209,7 +225,7 @@
           </button>
         </li>
       {/if}
-      {#each grouped as item (item.entry.value)}
+      {#each grouped as item (item.entry.key ?? item.entry.value)}
         {#if item.header && item.entry.group}
           <li
             class="px-2.5 pt-1.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
@@ -224,13 +240,13 @@
             class="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-[11px] {item.index +
               (pinned !== undefined ? 1 : 0) ===
             selected
-              ? 'bg-accent text-accent-foreground'
+              ? 'bg-primary/15 text-foreground'
               : 'text-foreground'} hover:bg-accent/50"
             aria-current={item.index + (pinned !== undefined ? 1 : 0) === selected
               ? "true"
               : undefined}
             onclick={() => {
-              onSelect(item.entry.value);
+              onSelect(item.entry.value, item.entry);
               onForceClose?.();
             }}
           >

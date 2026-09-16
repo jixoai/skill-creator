@@ -13,6 +13,8 @@ import {
   resolveChipOccurrences,
   type ComposerReference,
 } from "$lib/components/agent/composer-chips";
+import { WorkspaceProviderTargetSchema } from "$shared/contracts/workspaces.js";
+import { SkillIdSchema } from "$shared/contracts/skills.js";
 
 function ref(
   uid: number,
@@ -142,5 +144,52 @@ describe("findSkillTokens (C3 skill lexicon decoration)", () => {
       "plain",
     ]);
     expect(segments[3]).toMatchObject({ kind: "skill", text: "/deploy", name: "deploy" });
+  });
+});
+
+describe("skill references ($ trigger, skill-refs C1)", () => {
+  /** branded 三元组经契约 parse 构造（与生产 wire 路径同源）。 */
+  const target = {
+    ...WorkspaceProviderTargetSchema.parse({ workspaceId: "~", providerId: "agents" }),
+    skillId: SkillIdSchema.parse("sk_0123456789abcdef01234567"),
+  };
+  const otherSkillId = SkillIdSchema.parse("sk_999999999999999999999999");
+  const skillRef = (uid: number, token: string): ComposerReference => ({
+    uid,
+    kind: "skill",
+    token,
+    target: target.skillId,
+    label: token.slice(1),
+    skill: target,
+  });
+
+  it("pairs $ tokens through the same occurrence machinery as @ chips", () => {
+    const refs = [skillRef(1, "$code-review"), ref(2, "@spec.md", "/a/spec.md")];
+    const hits = resolveChipOccurrences("use $code-review and @spec.md", refs);
+    expect(hits.map((hit) => hit.reference.kind)).toEqual(["skill", "file"]);
+    expect(hits[0]).toMatchObject({ start: 4, end: "use $code-review".length });
+  });
+
+  it("consumes same-named skills from different providers in pick order", () => {
+    const first = skillRef(1, "$deploy");
+    const second = {
+      ...skillRef(2, "$deploy"),
+      skill: { ...target, skillId: otherSkillId },
+    };
+    const hits = resolveChipOccurrences("$deploy or $deploy", [first, second]);
+    expect(
+      hits.map((hit) => (hit.reference.kind === "skill" ? hit.reference.skill.skillId : null)),
+    ).toEqual([target.skillId, otherSkillId]);
+  });
+
+  it("keeps atomic backspace working for $ chips", () => {
+    const refs = [skillRef(1, "$deploy")];
+    const text = "run $deploy now";
+    const hit = atomicChipBeforeCaret(
+      text,
+      "run $deploy".length,
+      resolveChipOccurrences(text, refs),
+    );
+    expect(hit?.reference.kind).toBe("skill");
   });
 });

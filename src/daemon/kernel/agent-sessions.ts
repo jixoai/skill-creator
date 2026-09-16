@@ -41,6 +41,8 @@ import type {
   AgentSessionsCleanupInput,
   AgentSessionsCleanupResult,
 } from "../../shared/contracts/agent.js";
+import type { ProviderId, WorkspaceId } from "../../shared/contracts/workspaces.js";
+import type { SkillId } from "../../shared/contracts/skills.js";
 import { DomainError } from "../domain-error.js";
 import { isTextualFileName } from "../agent-files.js";
 import { AGENT_MODE_ROLES, agentRoleToolName } from "../../shared/contracts/agent-roles.js";
@@ -54,6 +56,14 @@ import { summaryOfMeta, type SessionTranscripts } from "./session-transcripts.js
 
 /** 内核句柄访问器（daemon boot 后注入；未挂载返回 null）。 */
 export type KernelAccessor = () => DshKernelHandle | null;
+
+/** `$` skill 引用的作用域三元组（wire 形状； branded ID 经契约 parse 后入此）。 */
+export interface SkillReferenceInput {
+  kind: "skill";
+  workspaceId: WorkspaceId;
+  providerId: ProviderId;
+  skillId: SkillId;
+}
 
 /** 服务依赖（settings 供 model/preset 读取——创建会话时应用 agentOptions）。 */
 export interface AgentSessionsDeps {
@@ -80,6 +90,11 @@ export interface AgentSessionsDeps {
    * kernel/ 对 daemon 根模块的运行时依赖（测试可替换）。
    */
   expandFileReferences?: (references: Array<{ kind: "file"; path: string }>) => Promise<string[]>;
+  /**
+   * `$` skill 引用展开（skill-refs C1）：registry 作用域解析 + SkillService 文档
+   * 读取在 domain 装配（kernel/ 不 import daemon 根模块；测试可替换）。
+   */
+  expandSkillReferences?: (references: SkillReferenceInput[]) => Promise<string[]>;
 }
 
 /** 内核 Agent/Session 的最小结构面（unknown 收窄）。 */
@@ -1027,9 +1042,12 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     return `[reference: earlier session${title} (${sessionId})]\n${lines.join("\n")}`;
   }
 
-  /** 引用展开（C1）：file 走注入的 agent-files 守卫链；session 走本层转录摘要。 */
+  /** 引用展开（C1）：file 走注入的 agent-files 守卫链；session 走本层转录摘要；
+   * skill 走注入的 domain 作用域解析 + 文档读取（skill-refs C1）。 */
   async function expandReferences(
-    references: Array<{ kind: "file"; path: string } | { kind: "session"; sessionId: string }>,
+    references: Array<
+      { kind: "file"; path: string } | { kind: "session"; sessionId: string } | SkillReferenceInput
+    >,
   ): Promise<string[]> {
     const blocks: string[] = [];
     for (const reference of references) {
@@ -1041,6 +1059,14 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           );
         }
         blocks.push(...(await deps.expandFileReferences([reference])));
+      } else if (reference.kind === "skill") {
+        if (deps.expandSkillReferences === undefined) {
+          throw new DomainError(
+            "UNAVAILABLE",
+            "skill references require the skills service (not wired)",
+          );
+        }
+        blocks.push(...(await deps.expandSkillReferences([reference])));
       } else {
         blocks.push(sessionReferenceDigest(reference.sessionId));
       }
@@ -1350,7 +1376,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       files: Array<{ name: string; data: string }> = [],
       mode: "queue" | "steer" = "queue",
       references: Array<
-        { kind: "file"; path: string } | { kind: "session"; sessionId: string }
+        | { kind: "file"; path: string }
+        | { kind: "session"; sessionId: string }
+        | SkillReferenceInput
       > = [],
     ): Promise<void> {
       if (text.length > PROMPT_MAX_CHARS) {

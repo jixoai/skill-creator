@@ -115,6 +115,9 @@ export function createDaemonDomain(
   const modelCatalog = createModelCatalogService();
   // C1：file 引用展开守卫链归 agent-files（单一事实源）；agentSessions 经注入消费。
   const agentFiles = createAgentFilesService();
+  // skills 先于 agentSessions 装配（skill-refs C1 的 `$` 引用展开需要注入）。
+  const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();
+  const skills = createSkillService(workspaces, { skillsCliProbe });
   const agentSessions = createAgentSessionsService({
     kernel: () => kernelHostRef.handle,
     modelSelection: async () => (await dshSettings.getView()).settings.model,
@@ -129,9 +132,22 @@ export function createDaemonDomain(
     },
     transcripts: agentTranscripts,
     expandFileReferences: (references) => agentFiles.resolvePromptReferences({ references }),
+    // skill-refs C1：`$` 引用展开——registry 作用域解析 + 文档读取在 skills 服务
+    //（NOT_FOUND 随 resolveSkill typed 抛出）；内容截断对齐 file 引用（200k chars）。
+    expandSkillReferences: async (references) => {
+      const blocks: string[] = [];
+      for (const reference of references) {
+        const info = await skills.info(
+          { workspaceId: reference.workspaceId, providerId: reference.providerId },
+          reference.skillId,
+        );
+        blocks.push(
+          `[reference: skill ${info.name} · ${info.provider}]\n${info.content.slice(0, 200_000)}`,
+        );
+      }
+      return blocks;
+    },
   });
-  const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();
-  const skills = createSkillService(workspaces, { skillsCliProbe });
   const repository = createRepositoryService(workspaces, skills);
   const creator = createCreatorService(workspaces, skills);
   const skillIntelligence = createSkillIntelligenceService(skills, creator);

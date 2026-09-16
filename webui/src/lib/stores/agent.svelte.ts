@@ -36,6 +36,8 @@ import {
   type AgentSessionsCleanupResult,
   type AgentSessionSummary,
 } from "$shared/contracts/agent.js";
+import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
+import type { SkillId } from "$shared/contracts/skills.js";
 import {
   DshAgentModeSchema,
   DshUserTextAttachmentSchema,
@@ -479,12 +481,15 @@ export async function sendAgentPrompt(
   }> = [],
   files: Array<{ name?: string; data?: string; path?: string }> = [],
   mode: "queue" | "steer" = "queue",
-  references: Array<{
-    kind: "file" | "session";
-    token: string;
-    target: string;
-    label: string;
-  }> = [],
+  references: Array<
+    | { kind: "file" | "session"; token: string; target: string; label: string }
+    | {
+        kind: "skill";
+        token: string;
+        label: string;
+        skill: { workspaceId: WorkspaceId; providerId: ProviderId; skillId: SkillId };
+      }
+  > = [],
 ): Promise<void> {
   if (text.trim().length === 0 && images.length === 0 && files.length === 0) {
     return;
@@ -550,11 +555,19 @@ export async function sendAgentPrompt(
         }
         return { name: file.name, data: file.data };
       }),
-      // C1：opaque 引用（file 绝对路径 / session id）——内容由 daemon 展开。
+      // C1：opaque 引用（file 绝对路径 / session id / skill 作用域三元组）——内容
+      // 由 daemon 展开。
       references: references.map((reference) =>
         reference.kind === "file"
           ? { kind: "file" as const, path: reference.target }
-          : { kind: "session" as const, sessionId: reference.target },
+          : reference.kind === "skill"
+            ? {
+                kind: "skill" as const,
+                workspaceId: reference.skill.workspaceId,
+                providerId: reference.skill.providerId,
+                skillId: reference.skill.skillId,
+              }
+            : { kind: "session" as const, sessionId: reference.target },
       ),
     });
     if (!request.isCurrent()) return;

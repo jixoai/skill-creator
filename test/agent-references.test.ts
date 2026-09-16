@@ -1,15 +1,20 @@
 /**
- * `@` 引用展开链测试（composer-references C1）。
+ * `@`/`$` 引用展开链测试（composer-references C1 + skill-refs C1）。
  *
  * 用户指示 [2026-09-16]：「继续完善遗留工作。完成 1/2/3」——1 = @ 引用芯片。
  * daemon 展开契约：file 走 agent-files 守卫链（绝对路径/realpath/regular/
  * ≤512KiB/文本扩展名）；session 走转录摘要（user/assistant text 帧有界投影，
  * 思考/工具排除）；展开块注入内核消息 content，经 user-text 帧端到端可见。
+ * 用户指示 [2026-09-16]（skill-refs C1）：「AgentChatInput 输入要支持 `$` 开头
+ * 引用 skill」——skill 引用经注入的 expandSkillReferences 展开（domain 装配
+ * registry 作用域解析 + 文档读取；本文件以注入桩覆盖分支语义）。
  *
  * 正交意图：
  *   [1] resolvePromptReferences 单元面（守卫拒绝的类型化矩阵 + 内联形状）。
  *   [2] 真实内核端到端：prompt 携带引用 → user-text 帧含 [reference: …] 块；
  *       引用缺失在会话复活前 typed NOT_FOUND；引用 prompt 不被 slash 分流吞。
+ *   [3] skill 引用：契约 parse（合法三元组/畸形 ID 拒绝）+ 展开块注入与
+ *       NOT_FOUND 传播（注入桩承载 domain 语义）。
  * 妥协声明：端到端断言不依赖 LLM 成功（user/message 事件在驱动前即落序）。
  */
 import fs from "node:fs";
@@ -22,9 +27,13 @@ import { bootDshKernel, type DshKernelHandle } from "../src/daemon/kernel/dsh-ke
 import {
   createAgentSessionsService,
   type AgentSessionsService,
+  type SkillReferenceInput,
 } from "../src/daemon/kernel/agent-sessions.js";
 import { createSessionTranscripts } from "../src/daemon/kernel/session-transcripts.js";
 import type { DshSessionStreamFrame } from "../src/shared/contracts/dsh-runtime.js";
+import { AgentSessionPromptInputSchema } from "../src/shared/contracts/agent.js";
+import { SkillIdSchema } from "../src/shared/contracts/skills.js";
+import { WorkspaceProviderTargetSchema } from "../src/shared/contracts/workspaces.js";
 
 let sandbox = "";
 let kernel: DshKernelHandle | null = null;
@@ -211,6 +220,130 @@ describe("agent sessions reference expansion (C1, real kernel)", () => {
       // 若被命令分流吞掉，user-text 帧不会出现（命令不进对话流）。
       expect(userText).toContain("/compact with a reference");
       expect(userText).toContain("command context");
+    },
+  );
+});
+
+describe("skill references ($ trigger, skill-refs C1)", () => {
+  const skillId = SkillIdSchema.parse("sk_0123456789abcdef01234567");
+  /** branded 作用域构造（契约 parse = 与 RPC 边界同源）。 */
+  const stubTarget = WorkspaceProviderTargetSchema.parse({
+    workspaceId: "~",
+    providerId: "agents",
+  });
+
+  /** domain 装配语义的注入桩（registry 作用域解析 + 文档读取由 domain 测试覆盖；
+   *  本桩承载 agent-sessions 的分支/传播语义）。 */
+  function stubSkillExpander(
+    blocks: Map<string, string> = new Map([["sk_0123456789abcdef01234567", "# Stub Skill\nbody"]]),
+  ) {
+    return async (references: SkillReferenceInput[]): Promise<string[]> => {
+      const out: string[] = [];
+      for (const reference of references) {
+        const content = blocks.get(String(reference.skillId));
+        if (content === undefined) {
+          throw new DomainError(
+            "NOT_FOUND",
+            `Skill not found in Workspace Provider: ${String(reference.skillId)}`,
+          );
+        }
+        out.push(`[reference: skill stub · provider]\n${content.slice(0, 200_000)}`);
+      }
+      return out;
+    };
+  }
+
+  it("parses the skill reference triple and rejects malformed ids at the contract boundary", () => {
+    const parsed = AgentSessionPromptInputSchema.safeParse({
+      sessionId: "agent-live",
+      text: "use $stub",
+      references: [
+        {
+          kind: "skill",
+          workspaceId: "~",
+          providerId: "agents",
+          skillId: "sk_0123456789abcdef01234567",
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.references[0]).toMatchObject({ kind: "skill", providerId: "agents" });
+    }
+    // 畸形三元组：非 sk_ 形状的 skillId / 未知字段一律拒。
+    expect(
+      AgentSessionPromptInputSchema.safeParse({
+        sessionId: "agent-live",
+        text: "use $stub",
+        references: [
+          { kind: "skill", workspaceId: "~", providerId: "agents", skillId: "not-an-id" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      AgentSessionPromptInputSchema.safeParse({
+        sessionId: "agent-live",
+        text: "use $stub",
+        references: [
+          {
+            kind: "skill",
+            workspaceId: "~",
+            providerId: "agents",
+            skillId: "sk_0123456789abcdef01234567",
+            extra: true,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a missing referenced skill before any kernel work (typed NOT_FOUND)", async () => {
+    service = createAgentSessionsService({
+      kernel: () => kernel,
+      modelSelection: async () => ({ provider: "deepseek-official", model: "deepseek-v4-flash" }),
+      defaultMode: async () => "free",
+      transcripts: createSessionTranscripts(path.join(sandbox, "transcripts")),
+      expandSkillReferences: stubSkillExpander(new Map()),
+    });
+    const failure = await service
+      .prompt("agent-live", "use $gone", [], [], "queue", [
+        { kind: "skill", ...stubTarget, skillId },
+      ])
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DomainError);
+    expect((failure as DomainError).code).toBe("NOT_FOUND");
+  });
+
+  it(
+    "injects the skill reference block into the kernel message (real kernel)",
+    { timeout: 180_000 },
+    async () => {
+      kernel = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
+      service = createAgentSessionsService({
+        kernel: () => kernel,
+        modelSelection: async () => ({ provider: "deepseek-official", model: "deepseek-v4-flash" }),
+        defaultMode: async () => "free",
+        transcripts: createSessionTranscripts(path.join(sandbox, "transcripts")),
+        expandSkillReferences: stubSkillExpander(),
+      });
+      service.attach(kernel);
+      const session = await service.create({ cwd: sandbox });
+      await service.prompt(session.sessionId, "use $stub please", [], [], "queue", [
+        { kind: "skill", ...stubTarget, skillId },
+      ]);
+
+      let userText = "";
+      for (let i = 0; i < 20 && userText === ""; i += 1) {
+        const frames = service.stream(session.sessionId, 0, 200).frames;
+        const hit = frames.find(
+          (frame) => frame.kind === "user-text" && frame.text.includes("$stub"),
+        );
+        if (hit?.text) userText = hit.text;
+        else await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      expect(userText).toContain("use $stub please");
+      expect(userText).toContain("[reference: skill stub · provider]");
+      expect(userText).toContain("# Stub Skill");
     },
   );
 });

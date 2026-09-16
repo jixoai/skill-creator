@@ -12,8 +12,9 @@
   不再 eager 建会话——首条消息发出时才创建（textarea/附件/发送在空态可用）。
   修订 [2026-09-12]（R14-B 3/4/5）：textarea focus 轮廓显式 reset（UA :focus
   outline 穿透，agent-flow.css `.msg-body` 作者源规则兜底）；附件按钮语义化
-  （image/file-up 图标 + 语义 tooltip/aria-label，替代 paperclip/file 混淆）；
-  `$` 前缀激发 skill 名补全（SkillMenu，与 SlashMenu 同 TriggerMenu 语法）。
+  （image/file-up 图标 + 语义 tooltip/aria-label，替代 paperclip/file 混淆）。
+  修订 [2026-09-16]（skill-refs C1）：`$` 前缀激发技能引用（SkillMenu——跨
+  Workspace 分组 + 模糊搜索；引用语义与 `/` 的命令触发并存）。
   修订 [2026-09-13]（R17-A）：提交点不再清草稿——草稿按 sessionId 分轨，
   发送成功由 sendAgentPrompt 清当前轨（失败留在原轨可重试）；草稿随会话
   切换换轨（store 侧），本组件对 bind 的 facade 不变。
@@ -130,6 +131,7 @@
   import SlashMenu from "./SlashMenu.svelte";
   import ChipPaintLayer from "./ChipPaintLayer.svelte";
   import ReferenceMenu, { type ReferencePick } from "./ReferenceMenu.svelte";
+  import SkillMenu from "./SkillMenu.svelte";
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
   /** SlashMenu 实例（W3 统一 `/` 触发：命令 + 技能单实例）；卡片根 relative，
@@ -137,6 +139,8 @@
   let slashMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
   /** ReferenceMenu 实例（C1 `@` 触发：文件/会话引用）。 */
   let referenceMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
+  /** SkillMenu 实例（skill-refs C1 `$` 触发：跨 Workspace 技能引用）。 */
+  let skillMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
   /** 光标是否在首行（SlashMenu 锚定条件）。 */
   let caretOnFirstLine = $state(true);
 
@@ -463,9 +467,11 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
-    // ReferenceMenu（C1 `@` 触发）与 SlashMenu（W3 统一实例）按 query 前缀互斥，
-    // 先占序无冲突；两者内部已 stopPropagation（Esc 不冒泡收起面板）。
+    // ReferenceMenu（C1 `@`）、SkillMenu（skill-refs `$`）与 SlashMenu（W3 统一
+    // `/` 实例）按 query 前缀互斥，先占序无冲突；内部已 stopPropagation（Esc
+    // 不冒泡收起面板）。
     if (referenceMenu?.handleKeydown(event)) return;
+    if (skillMenu?.handleKeydown(event)) return;
     if (slashMenu?.handleKeydown(event)) return;
     // C1 原子退格：光标紧邻芯片 token 尾部时整删 token + 注销引用（官方芯片
     // 原子性适配；IME 合成中不介入）。
@@ -568,6 +574,13 @@
     onPick={onReferencePick}
     suppress={claim !== null}
     bind:this={referenceMenu}
+  />
+  <SkillMenu
+    text={agentComposer.text}
+    {caretOnFirstLine}
+    onPick={onReferencePick}
+    suppress={claim !== null}
+    bind:this={skillMenu}
   />
   <SlashMenu
     text={agentComposer.text}

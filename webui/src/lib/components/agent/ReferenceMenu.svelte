@@ -15,7 +15,7 @@
 -->
 <script lang="ts">
   import TriggerMenu, { type MenuEntry, type PinnedMenuRow } from "./TriggerMenu.svelte";
-  import type { ComposerReference } from "./composer-chips.js";
+  import type { ComposerReferenceInput } from "./composer-chips.js";
   import type { AgentFilesEntry } from "$shared/contracts/agent.js";
   import { agentSession, agentSessionsList, loadAgentSessions } from "$lib/stores/agent.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
@@ -24,15 +24,16 @@
    * reference.token 冗余携带（调用方不重算）。 */
   export interface ReferencePick {
     token: string;
-    reference: Omit<ComposerReference, "uid">;
+    reference: ComposerReferenceInput;
   }
 
-  /** 会话/文件共用的引用构造（token 重复出现在两侧是刻意的：pick 自含）。 */
-  function pickOf(
+  /** 会话/文件共用的引用构造（token 重复出现在两侧是刻意的：pick 自含）。
+   *  泛型保持判别联合不塌缩；spread 还原 token 的 cast 由构造保证安全。 */
+  function pickOf<T extends ComposerReferenceInput>(
     token: string,
-    reference: Omit<ComposerReference, "uid" | "token">,
+    reference: Omit<T, "token">,
   ): ReferencePick {
-    return { token, reference: { ...reference, token } };
+    return { token, reference: { ...reference, token } as T };
   }
 
   let {

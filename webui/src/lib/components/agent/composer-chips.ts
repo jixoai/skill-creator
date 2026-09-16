@@ -17,17 +17,39 @@
  * 妥协声明：无（token 边界 = 起点须为行首/空白；终点不限——尾部粘连文本时
  *   仍按起点边界匹配，近似官方原子芯片，差异已记录于 change design）。
  */
+import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
+import type { SkillId } from "$shared/contracts/skills.js";
 
-/** 一条草稿引用（registry 项；target 对 file 是绝对路径、对 session 是会话 id）。 */
-export interface ComposerReference {
-  uid: number;
-  kind: "file" | "session";
-  /** 文中 token（含 "@" 前缀，不含尾随空格），如 `@api.md`。 */
-  token: string;
-  target: string;
-  /** chip/菜单显示名（file basename / session 标题）。 */
-  label: string;
-}
+/** 一条草稿引用（registry 项；判别联合——file/session 携 target 字符串，skill
+ * 携作用域三元组）。 */
+export type ComposerReference =
+  | {
+      uid: number;
+      kind: "file" | "session";
+      /** 文中 token（含触发符前缀，不含尾随空格），如 `@api.md`。 */
+      token: string;
+      /** file = 绝对路径；session = 会话 id。 */
+      target: string;
+      /** chip/菜单显示名（file basename / session 标题）。 */
+      label: string;
+    }
+  | {
+      uid: number;
+      kind: "skill";
+      /** 文中 token，如 `$code-review`。 */
+      token: string;
+      /** 冗余承载 skillId（与 skill.skillId 一致；接口习惯保留非空 target）。 */
+      target: string;
+      /** chip/菜单显示名（skill 名）。 */
+      label: string;
+      /** `$` 引用的作用域三元组（daemon 解析 containment）。 */
+      skill: { workspaceId: WorkspaceId; providerId: ProviderId; skillId: SkillId };
+    };
+
+/** Omit 的分布式版（联合逐支剔除，不塌缩）。 */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+/** 入 registry 前的引用形状（菜单 pick 构造）。 */
+export type ComposerReferenceInput = DistributiveOmit<ComposerReference, "uid">;
 
 /** 一次成功消费的出现：引用 + 文中区间 [start, end)。 */
 export interface ChipOccurrence {
