@@ -13,14 +13,23 @@
  *   [3] 有界停止：dispose 关闭 cordis fiber + 还原 DSH_HOME env。
  * 妥协声明：boot 是 best-effort 前台步骤；降级后不自动重试——重启 daemon 是
  *   唯一恢复入口（与既有 4.1 重启验证语义一致）。
+ * 修订 [2026-09-16]（skill-refs-and-platform-fixes C4）：缺省 home 隔离到
+ *   `<homeDir()>/.skill-creator/dsh-home`（env DSH_HOME 覆盖权保留）。
  */
+import { join } from "node:path";
+import { homeDir } from "../shared/paths.js";
 
-/** 缺省 home：env DSH_HOME ?? ~/.dsh（与官方 storage 解析一致）。 */
-/** DSH 存储 home（官方默认：env DSH_HOME ?? ~/.dsh）；settings 桥接同源使用。 */
+/**
+ * DSH 存储 home（skill-refs-and-platform-fixes C4）：env `DSH_HOME`（非空白）
+ * → app 隔离目录 `<homeDir()>/.skill-creator/dsh-home`。不再默认读 `~/.dsh`——
+ * 用户真实 harness 状态不兼容时会压垮产品内核挂载（handoff 遗留 2 实证）；
+ * 产品的模型路由桥自闭环写 settings.yaml/凭据到该目录。回滚口：
+ * `DSH_HOME=~/.dsh` 恢复旧行为。settings 桥接同源使用。
+ */
 export function resolveDefaultDshHome(): string {
   const env = process.env.DSH_HOME;
   if (env && env.trim() !== "") return env;
-  return `${process.env.HOME ?? ""}/.dsh`;
+  return join(homeDir(), ".skill-creator", "dsh-home");
 }
 
 /** 生产 DSH 内核宿主句柄。 */
