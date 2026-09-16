@@ -34,7 +34,7 @@ The Agent panel MUST provide session list/switching, conversation stream with ex
 
 ### Requirement: capabilities are served over MCP via the official bridge
 
-Skill Creator domain capabilities MUST be declared in one capability layer (name, Zod input/output, handler, authority class) and exposed by the skill-creator-mcp MCP server. In-shell agent sessions MUST consume them through the official `@deepseek-ai/dsh-mcp-client` plugin composed into the kernel; external MCP clients use the same server. No bespoke tool-projection bridge may be interposed.
+Skill Creator domain capabilities MUST be declared in one capability layer (name, Zod input/output, handler, authority class) and exposed by the skill-creator-mcp MCP server. In-shell agent sessions MUST consume them through the official `@deepseek-ai/dsh-mcp-client` plugin composed into the kernel; external MCP clients use the same server. No bespoke tool-projection bridge may be interposed. The MCP server stack MUST serve both protocol eras from one factory: modern `2026-07-28` clients negotiate through `server/discover` while 2025-era clients keep the `initialize` handshake on the stateless per-request path — a modern-version `MCP-Protocol-Version` request header MUST NOT be rejected by the endpoint.
 
 #### Scenario: in-shell consumption through the official bridge
 
@@ -46,6 +46,12 @@ Skill Creator domain capabilities MUST be declared in one capability layer (name
 - **WHEN** an external MCP client connects to the daemon `/mcp` endpoint
 - **THEN** it receives the full capability set with schema-faithful descriptors
 - **AND** mutating capabilities produce proposals for Manager approval instead of direct writes.
+
+#### Scenario: dual-era protocol negotiation
+
+- **WHEN** a v2-line client (the dsh-mcp-client family) probes with `server/discover` and then sends requests carrying `MCP-Protocol-Version: 2026-07-28`
+- **THEN** the endpoint negotiates the modern era and serves the call (no `Unsupported protocol version` rejection)
+- **AND** a 2025-era `initialize` handshake against the same endpoint still lists tools and executes calls.
 
 #### Scenario: external MCP client via standalone stdio
 
@@ -143,6 +149,12 @@ Settings → Model MUST present model routes as tabs, one route per tab, with a 
 
 - **WHEN** settings.model references a provider with no configured route (e.g. env-injected)
 - **THEN** the tab strip shows an amber "active outside tabs" chip that links to NewTab prefilled with that provider, and the composer model chip renders amber
+
+#### Scenario: one scroll owner per settings pane
+
+- **WHEN** the Model section is open, its right pane clips (no outer scroll) and the tab content area is the single vertical scroller, with the NewTab provider gallery flowing inline (no independent gallery scrollbar, no horizontal scrollbar from the pane)
+- **AND** when the tab strip cannot scroll horizontally, a vertical wheel over it scrolls the page instead of being consumed
+- **THEN** other sections keep the right pane itself as their single vertical scroller.
 
 ### Requirement: Agent panel conversation follows the dsh-webui disclosure grammar
 
@@ -275,6 +287,28 @@ The composer MUST offer an `@` trigger listing prior sessions (minus the current
 
 - **WHEN** a `/`-prefixed prompt carries references
 - **THEN** it bypasses the slash-command path and reaches the model with the reference blocks.
+
+### Requirement: `$` skill references span workspaces with fuzzy search
+
+The composer MUST offer a `$` trigger listing enabled skills from every available provider across workspaces, grouped under `Workspace label / provider label` headers in workspace declaration order (Global first); matching MUST be case-insensitive subsequence fuzzy over name with description as a low-weight ranking bonus, and a query containing whitespace MUST close the menu; picking an entry MUST drop a `$name` token bound to an opaque `{workspaceId, providerId, skillId}` reference through the same ordered-occurrence registry, chip painting, atomic backspace, and submit-time pruning as `@` references; disabled skills MUST NOT be listed, a failed provider group MUST degrade to an empty group without blocking the rest, and the daemon MUST expand skill references server-side into bounded `[reference: skill <name> · <provider>]` text blocks with missing targets failing the prompt typed.
+
+#### Scenario: cross-workspace pick with duplicate names
+
+- **WHEN** two providers expose a skill with the same name and the user picks both
+- **THEN** each `$name` occurrence pairs with its own registry entry in pick order
+- **AND** each submission expands against its own workspace/provider/skill triple.
+
+#### Scenario: fuzzy narrowing and natural dismissal
+
+- **WHEN** the user types `$cod` the menu ranks contiguous name hits above scattered ones
+- **AND** picking an entry drops `$name ` whose trailing space leaves the candidate prefix set, closing the menu
+- **AND** a backspace at the token tail deletes the whole chip and unregisters the reference.
+
+#### Scenario: missing skill fails typed
+
+- **WHEN** a submitted skill reference no longer resolves in its workspace provider
+- **THEN** the prompt fails with a typed NOT_FOUND before any kernel work
+- **AND** the draft stays on its track for correction.
 
 ### Requirement: queue rows are actionable against the kernel inbox
 

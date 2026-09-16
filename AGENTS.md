@@ -91,6 +91,12 @@ Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 che
                       session id），daemon 展开为 [reference: …] 文本块（file 走
                       agent-files 守卫链；session 走转录有界摘要）；绘制为 textarea
                       镜像层芯片 + 原子退格（有序出现消费绑定）
+$ Skill Reference  = composer `$` 芯片引用（2026-09-16 以引用语义复活）：跨
+                      Workspace 全量 enabled 技能（组头 = Workspace/provider
+                      label）+ 子序列模糊搜索；opaque 三元组 {workspaceId,
+                      providerId, skillId}，daemon 经 registry 作用域解析 +
+                      SkillService 文档读取展开 [reference: skill …]；与 `/name`
+                      的命令触发语义正交（触发 vs 引用），同一 occurrence 机制
 Queue Face         = agent.queue.*：内核 ReactLoopInbox 的读写面——list 投影
                       next-turn/next-step 待处理项，update 按 messageId 行级
                       edit（保留附件块）/remove/steer（仅 running）；真相在内核，
@@ -112,7 +118,8 @@ Agent Mode         = create/manage/explore/free(General，默认) 四种会话�
 Composer           = Agent Chat 输入框（官方 webui 能力矩阵复刻，textarea 底座语义对齐）：
                       IME 守卫/undo-cut-after-send/粘贴消毒/占位符链（W1）；附件整批预检 +
                       全窗 DnD 覆盖层 + 读入门控（W2）；`/` 统一命令+技能菜单、claim 机、
-                      `+` 启动器（W3，$ 触发符已退役）；prompt.mode queue/steer 直译内核
+                      `+` 启动器（W3）；`@` 文件/会话引用 + `$` 技能引用（Workspace 分组
+                      + 模糊搜索）；prompt.mode queue/steer 直译内核
                       next-turn/next-step、忙碌 Enter 持久偏好、QueueDock、草稿文本持久化、
                       Stop 保队列（W4）；官方没有的计数器/输入历史/语音/引用回复不做
 Agent Panel        = shell 级右栏 drawer：agent.* RPC 消费内核会话（帧流/审批/模式 chip）；
@@ -120,7 +127,10 @@ Agent Panel        = shell 级右栏 drawer：agent.* RPC 消费内核会话（�
 capability-core    = 领域能力层：name + Zod IO + handler + authority class
                       （readonly/proposal/approved-mutation）；MCP 与 steward 共同投影
 skill-creator-mcp  = MCP server 双形态：daemon 内 /mcp（Bearer）+ skill-creator mcp
-                      （stdio readonly）；mutation 一律 *_propose 产 proposal 待审批
+                      （stdio readonly）；mutation 一律 *_propose 产 proposal 待审批；
+                      服务端栈 = @modelcontextprotocol/server@2 双纪元（modern
+                      server/discover 2026-07-28 + legacy initialize 2025，2026-09-16
+                      迁移修复内核 dsh-mcp-client v2 线的协议协商 400）
 ui:// Cards        = 工具结果附带的视觉卡（skill/finding/proposal/install 四类）；
                       沙箱 iframe 渲染 + postMessage 导航；不可信文本模板层转义
 ACP Bridge         = internal legacy：generic ACP session 已从产品入口移除，
@@ -141,7 +151,7 @@ ACP Bridge         = internal legacy：generic ACP session 已从产品入口移
 
 ## 3. 系统拓扑
 
-DSH integration fact (2026-09-16): the kernel pins the official `deepseek-ai/deepseek-harness` family at `0.1.6-alpha.1` (audited against tag commit `0a15e36e7f82b6ed45af6fa9759f29b40dcd965d` — the checkout both research passes ran on). The historical integration boundary research lives at `docs/research/2026-09-06-dsh-integration.md` (commit `d347e703`, v0.1.3-alpha.1 era) plus `docs/research/2026-09-12-roles-as-subagents.md` §6. The local `/Users/kzf/Dev/GitHub/dsh` checkout is only `dsh-herdr`; it is not evidence of the official Agent harness. Do not treat DSH stores or profiles as Manager truth. Upgrade note: 0.1.6's `boot()` honors its `bareModuleBaseUrl` argument that the rc.2 era silently ignored — the kernel must not pass it (bare package names resolve through the healed profile mirror).
+DSH integration fact (2026-09-16): the kernel pins the official `deepseek-ai/deepseek-harness` family at `0.1.6-alpha.1` (audited against tag commit `0a15e36e7f82b6ed45af6fa9759f29b40dcd965d` — the checkout both research passes ran on). The historical integration boundary research lives at `docs/research/2026-09-06-dsh-integration.md` (commit `d347e703`, v0.1.3-alpha.1 era) plus `docs/research/2026-09-12-roles-as-subagents.md` §6. The local `/Users/kzf/Dev/GitHub/dsh` checkout is only `dsh-herdr`; it is not evidence of the official Agent harness. Do not treat DSH stores or profiles as Manager truth. Upgrade note: 0.1.6's `boot()` honors its `bareModuleBaseUrl` argument that the rc.2 era silently ignored — the kernel must not pass it (bare package names resolve through the healed profile mirror). DSH home note (2026-09-16): the kernel host defaults to the app-scoped `<homeDir()/>/.skill-creator/dsh-home` (env `DSH_HOME` overrides; the user's `~/.dsh` is never read by default) — the model-route bridge resolves the same home.
 
 ```text
                          process boundary

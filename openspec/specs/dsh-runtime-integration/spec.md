@@ -24,6 +24,21 @@ DSH session, settings, profile and client stores MUST remain runtime concerns. S
 - **WHEN** a DSH tool or model asks to write a Provider path outside the domain registry
 - **THEN** the request is denied and the Provider is unchanged
 
+### Requirement: the kernel DSH home is app-scoped by default
+
+The daemon kernel host MUST default its DSH storage home to the app-scoped `<homeDir()/>/.skill-creator/dsh-home`, bootstrapping it empty on first boot; a non-blank `DSH_HOME` env override MUST be honored verbatim (the rollback switch to a user harness home). The model-route bridge (settings.yaml / credentials projection) MUST write to the same resolved home as the kernel host, and the user's `~/.dsh` MUST NOT be read or mutated unless selected via the env override.
+
+#### Scenario: incompatible user harness state cannot break the kernel
+
+- **WHEN** the user's real `~/.dsh` holds state the pinned harness family rejects
+- **THEN** the product kernel still boots from the app-scoped home and agent sessions work
+- **AND** no part of the product writes into `~/.dsh`.
+
+#### Scenario: explicit override
+
+- **WHEN** `DSH_HOME` is set to a non-blank path
+- **THEN** the kernel host and the model-route bridge both resolve that path; blank values fall back to the app-scoped default.
+
 ### Requirement: Stream continuity is terminally safe
 
 Disconnect, cancellation, stale session and daemon stop MUST produce terminal run states; late DSH events MUST be ignored after the run loses ownership.
