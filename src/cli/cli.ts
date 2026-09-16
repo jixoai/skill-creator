@@ -478,23 +478,22 @@ async function main(): Promise<number> {
  * `skill-creator mcp`（task 4.1 形态 B）：stdio transport，不依赖 daemon 常驻——
  * 进程内自建 domain（无 IPC/HTTP/tray）。面收窄为 readonly + propose-only：
  * mutation 仅经形态 A 的 daemon 审批链。
+ * skill-refs-and-platform-fixes C3：SDK v2 的 serveStdio 入口（开场交换按连接
+ * 选纪元——stdio 客户端单连接单纪元，与 HTTP 双纪元入口不同源）。
  */
 async function runMcpStdio(): Promise<void> {
-  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+  const { serveStdio } = await import("@modelcontextprotocol/server/stdio");
   const { createDaemonDomain } = await import("../daemon/domain.js");
   const { createSkillCreatorMcpServer } = await import("../daemon/mcp/skill-creator-mcp.js");
   const domain = createDaemonDomain();
-  const server = createSkillCreatorMcpServer({
-    capabilities: domain.managerCapabilities,
-    cards: domain.uiCards,
-    face: "stdio",
-  });
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
   console.error("skill-creator mcp: stdio server ready (readonly face)");
-  process.on("SIGINT", () => {
-    void server.close().finally(() => process.exit(0));
-  });
+  await serveStdio(() =>
+    createSkillCreatorMcpServer({
+      capabilities: domain.managerCapabilities,
+      cards: domain.uiCards,
+      face: "stdio",
+    }),
+  );
 }
 
 void main()

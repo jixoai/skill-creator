@@ -16,8 +16,8 @@
  * 妥协声明：无。
  */
 import { describe, expect, it } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { z } from "zod";
 import { createCapabilityRegistry } from "../src/daemon/capability/core.js";
 import { createSkillCreatorMcpServer } from "../src/daemon/mcp/skill-creator-mcp.js";

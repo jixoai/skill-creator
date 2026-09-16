@@ -22,7 +22,7 @@ import { log } from "./log.js";
 import { createRpcRouter } from "./rpc-router.js";
 
 /** WebUI 静态服务和 RPC 通道的启动配置。 */
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 
 export interface WebServerOptions {
   webToken: string;
@@ -116,19 +116,26 @@ export class WebServer {
   private readonly unsubscribeExited: () => void;
   /**
    * 挂载 skill-creator MCP 面（task 4.1 形态 A）。传 null 卸载（降级语义：
-   * MCP 面缺席 → 404）。stateless streamable HTTP：每请求从 factory 新建
-   * server + transport（SDK stateless 模式；capability 面无状态）。
+   * MCP 面缺席 → 404）。v2 双纪元（skill-refs-and-platform-fixes C3）：
+   * createMcpHandler 以 factory 每请求新建 server 实例——modern（2026-07-28
+   * server/discover，dsh-mcp-client v2 线）与 legacy（2025 initialize）都由
+   * 该入口服务；legacy 走 stateless（与 v1 逐请求 transport 语义同构）。
    */
   mountMcp(factory: (() => McpServer) | null): void {
     this.mcpFactory = factory;
+    this.mcpNodeHandler = null;
     log(
       factory ? "skill-creator mcp endpoint mounted: /mcp" : "skill-creator mcp endpoint unmounted",
     );
   }
 
   private mcpFactory: (() => McpServer) | null = null;
+  /** Node 适配处理器缓存（按 factory 身份失效；mountMcp 变更即置空）。 */
+  private mcpNodeHandler:
+    | ((req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>)
+    | null = null;
 
-  /** /mcp 请求处理：Bearer 鉴权 → stateless transport → 每请求新 server。 */
+  /** /mcp 请求处理：Bearer 鉴权（daemon 侧前置）→ 双纪元 MCP handler。 */
   private async handleMcp(
     request: http.IncomingMessage,
     response: http.ServerResponse,
@@ -145,24 +152,23 @@ export class WebServer {
       response.end(JSON.stringify({ error: "unauthorized" }));
       return;
     }
-    const [{ StreamableHTTPServerTransport }, server] = await Promise.all([
-      import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
-      Promise.resolve(this.mcpFactory()),
-    ]);
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-    transport.onerror = (error) => {
-      log(`mcp transport error: ${error instanceof Error ? error.message : String(error)}`);
-    };
-    await server.connect(transport);
-    // 清理挂在响应完成（request 流在 body 消费后即 close，挂 request 会在响应前
-    // 关掉 transport，竞争出 "Session not found"）。
-    response.on("close", () => {
-      void transport.close().catch(() => undefined);
-    });
-    await transport.handleRequest(request, response);
+    if (this.mcpNodeHandler === null) {
+      const [{ createMcpHandler }, { toNodeHandler }] = await Promise.all([
+        import("@modelcontextprotocol/server"),
+        import("@modelcontextprotocol/node"),
+      ]);
+      const factory = this.mcpFactory;
+      const handler = createMcpHandler(() => factory(), {
+        legacy: "stateless",
+        onerror: (error) => {
+          log(`mcp handler error: ${error instanceof Error ? error.message : String(error)}`);
+        },
+      });
+      // 竞态守卫：await 期间 mountMcp 变更（换 factory/卸载）→ 本次构建作废。
+      if (this.mcpFactory !== factory) return;
+      this.mcpNodeHandler = toNodeHandler(handler);
+    }
+    await this.mcpNodeHandler(request, response);
   }
 
   constructor(private readonly options: WebServerOptions) {

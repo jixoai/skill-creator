@@ -86,7 +86,8 @@
     "@jsquash/jpeg": "1.6.0",
     "@jsquash/png": "3.1.1",
     "@jsquash/resize": "2.1.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@opentray/ext-webview": "0.24.0",
     "@opentray/vite-plugin": "0.24.0",
     "@orpc/contract": "1.14.6",
@@ -100,6 +101,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
     "ccski": "2.5.0",

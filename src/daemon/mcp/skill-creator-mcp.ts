@@ -14,9 +14,12 @@
  *       server 解析 containment——外部 client 不拼路径）。
  * 妥协声明：dsh-mcp-client 只桥 tools（resources/prompts 不支持）——resource 面
  *   服务外部 client；内核会话的工具消费全部走 tools。
+ * 修订 [2026-09-16]（skill-refs-and-platform-fixes C3）：SDK 迁 @modelcontextprotocol/
+ * server@2（2026-07-28 双纪元）——注册面 variadic server.tool → registerTool
+ * （raw shape 包 z.object），resources 注册面不变。
  */
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { z } from "zod";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
+import { z } from "zod";
 import type { CapabilityRegistry } from "../capability/core.js";
 import { uiCardForCapability, type UiCardRegistry } from "./cards.js";
 import type { McpProposalStore } from "./proposals.js";
@@ -135,16 +138,20 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
         ],
       });
       if (shape) {
-        server.tool(
+        server.registerTool(
           proposeName,
-          `Propose: ${descriptor.description} A human approves it in the Skill Creator UI before execution.`,
-          shape,
+          {
+            description: `Propose: ${descriptor.description} A human approves it in the Skill Creator UI before execution.`,
+            inputSchema: z.object(shape),
+          },
           async (args) => proposeResult(deps.proposals!.create(descriptor.name, args)),
         );
       } else {
-        server.tool(
+        server.registerTool(
           proposeName,
-          `Propose: ${descriptor.description} A human approves it in the Skill Creator UI before execution.`,
+          {
+            description: `Propose: ${descriptor.description} A human approves it in the Skill Creator UI before execution.`,
+          },
           async () => proposeResult(deps.proposals!.create(descriptor.name, undefined)),
         );
       }
@@ -158,15 +165,18 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
         : null;
     const toolName = mcpToolName(descriptor.name);
     if (shape) {
-      server.tool(toolName, descriptor.description, shape, async (args) =>
-        withCard(
-          descriptor.name,
-          await deps.capabilities.call(descriptor.name, args, MCP_PRINCIPAL),
-          deps.cards,
-        ),
+      server.registerTool(
+        toolName,
+        { description: descriptor.description, inputSchema: z.object(shape) },
+        async (args) =>
+          withCard(
+            descriptor.name,
+            await deps.capabilities.call(descriptor.name, args, MCP_PRINCIPAL),
+            deps.cards,
+          ),
       );
     } else {
-      server.tool(toolName, descriptor.description, async () =>
+      server.registerTool(toolName, { description: descriptor.description }, async () =>
         withCard(
           descriptor.name,
           await deps.capabilities.call(descriptor.name, undefined, MCP_PRINCIPAL),

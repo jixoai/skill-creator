@@ -4,20 +4,29 @@
  *
  * 用户原始需求 [2026-09-08]：「先做内部，但是不排除可以独立启用：skill-creator
  * mcp:启动 mcp-server」。
+ * 修订 [2026-09-16]（skill-refs-and-platform-fixes C3）：SDK 迁 v2 线——对拍
+ * client 换 @modelcontextprotocol/client@2；新增 modern 纪元（2026-07-28
+ * server/discover 协商）回归测试（handoff 遗留 1：v1 端点曾以 400 拒绝
+ * MCP-Protocol-Version: 2026-07-28，内核 mcp__skill-creator__* 工具面不可用）。
  *
  * 正交意图：
- *   [1] SDK Client 对拍：initialize → tools/list → tools/call（readonly 面真实
- *       执行 + approved-mutation 工具缺席）。
+ *   [1] v2 Client 对拍（legacy 纪元 in-memory）：initialize → tools/list →
+ *       tools/call（readonly 面真实执行 + approved-mutation 工具缺席）。
  *   [2] /mcp 形态 A：Bearer 鉴权（无/错 token 401；未挂载 404；合法 token 走
  *       streamable HTTP initialize）。
+ *   [3] modern 纪元回归：v2 client versionNegotiation auto（dsh-mcp-client 同
+ *       线）经真实 HTTP 协商 2026-07-28 并调用工具——协议协商修复的钉子。
  * 妥协声明：无。
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+  Client,
+  InMemoryTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { createSkillCreatorMcpServer, mcpToolName } from "../src/daemon/mcp/skill-creator-mcp.js";
 import { WebServer } from "../src/daemon/web-server.js";
@@ -191,5 +200,29 @@ describe("skill-creator mcp server (task 4.1)", () => {
     expect(tools.status).toBe(200);
     const toolsBody = await tools.text();
     expect(toolsBody).toContain("workspace_list");
+
+    // C3 modern 纪元回归：v2 client auto 协商（dsh-mcp-client 同线）——probe
+    // server/discover → 2026-07-28；后续请求头携带 modern 版本不得再被 400 拒。
+    const modernClient = new Client(
+      { name: "modern-smoke", version: "0.0.1" },
+      { versionNegotiation: { mode: "auto" } },
+    );
+    const modernTransport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${port}/mcp`),
+      {
+        authProvider: { token: async () => token },
+      },
+    );
+    await modernClient.connect(modernTransport);
+    try {
+      expect(modernClient.getProtocolEra?.()).not.toBe("legacy");
+      const modernTools = await modernClient.listTools();
+      expect(modernTools.tools.map((tool) => tool.name)).toContain("workspace_list");
+      const call = await modernClient.callTool({ name: "workspace_list", arguments: {} });
+      const callText = (call.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+      expect(JSON.parse(callText)).toMatchObject({ kind: "ok" });
+    } finally {
+      await modernClient.close().catch(() => undefined);
+    }
   });
 });
