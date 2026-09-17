@@ -214,7 +214,7 @@ describe("skill search index freshness", () => {
     expect(envelope.schemaVersion).toBe(3);
     expect(envelope.tokenizerVersion).toBe("segmenter-bigram-v1");
     expect(envelope.parserVersion).toBe("matter-mdset-v2");
-    expect(envelope.rankingVersion).toBe("rerank-2026-09-17-v1");
+    expect(envelope.rankingVersion).toBe("rerank-2026-09-18-v2");
     expect(envelope.engine).toEqual({
       name: "minisearch",
       version: minisearchRuntimeVersion(),

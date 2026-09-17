@@ -1,17 +1,15 @@
 <!--
   用户原始需求 [2026-09-05]：「用户可以导入 Workspace，浏览 Provider 和 Skill……Remove 只删除 registry entry，不删除目录。」
+  修订 [2026-09-18]（用户走查）：删除「同内容技能」整屏区块——同源信息改为
+  ProviderView 技能行上的小角标（symlink 式标识），不再占据首页版面。
   正交意图：
   1. Skill locations 索引：Global（~）与 Imported Workspace 分组、availability、skill count、Provider 入口。
   2. 导入（共享全局对话框）与移除（仅 registry entry，confirm + busy 锁 + toast 终态）。
   3. 加载 / 空 / 更新中 / 失败四态可区分。
- 6. 呈现索引同内容技能区块（连接后单发加载；空组不渲染、错误内联）。
 -->
 <script lang="ts">
   import {
-    installationScopeLabel,
-    loadSkillDuplicates,
     loadWorkspaces,
-    skillDuplicatesState,
     removeWorkspace,
     workspaceEntryPath,
     workspaceState,
@@ -27,9 +25,7 @@
   import IconHeart from "@lucide/svelte/icons/heart-pulse";
   import IconCompass from "@lucide/svelte/icons/compass";
   import IconMessage from "@lucide/svelte/icons/message-square";
-  import { connectionState } from "$lib/store.svelte";
   import { requestImportWorkspace } from "$lib/stores/import-workspace.svelte";
-  import { goById } from "$lib/shell";
   import { showToast } from "$lib/toast.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -61,15 +57,6 @@
     void loadWorkspaces();
     // 首屏 Continue 区需要会话列表（面板未打开时也要有数据）。
     if (!agentSessionsList.loaded && !agentSessionsList.loading) void loadAgentSessions();
-  });
-
-  // 重复组：连接建立后单发一次（走查 W4 复盘：挂载态与 WS 就绪存在竞态，无门控的
-  // 重试会放大成请求风暴 + effect 深度超限；显式 latch 只发不重试，失败静默收起区块）。
-  let duplicatesStarted = false;
-  $effect(() => {
-    if (duplicatesStarted || connectionState.status !== "connected") return;
-    duplicatesStarted = true;
-    void loadSkillDuplicates();
   });
 
   /** 库快照：跨全部 workspace 的技能/位置/导入目录总数。 */
@@ -120,7 +107,6 @@
 
   async function refresh(): Promise<void> {
     await loadWorkspaces();
-    void loadSkillDuplicates();
   }
 
   function providerPath(ws: Workspace, provider: WorkspaceProvider): string {
@@ -178,70 +164,15 @@
     </div>
   </header>
 
-  <div class="mx-auto mt-5 w-full max-w-3xl space-y-6">
-    {#if skillDuplicatesState.groups.length > 0 || skillDuplicatesState.error}
-      <!-- 同内容技能（search-duplicates P3）：索引 contentHash 分组事实；
-           成员行点击直达其 provider 详情。空组不渲染；失败区块内一行文案。 -->
-      <section aria-label="Content-duplicate skills" class="rounded-lg border border-border">
-        <header class="flex items-center justify-between border-b border-border px-3 py-2">
-          <h2 class="text-xs font-medium">同内容技能</h2>
-          {#if !skillDuplicatesState.error}
-            <span class="text-[11px] text-muted-foreground">
-              {skillDuplicatesState.groups.length} 组
-            </span>
-          {/if}
-        </header>
-        {#if skillDuplicatesState.error}
-          <p class="px-3 py-2 text-xs text-muted-foreground">
-            重复组加载失败：{skillDuplicatesState.error}
-          </p>
-        {:else}
-          <ul class="divide-y divide-border">
-            {#each skillDuplicatesState.groups as group (group.contentHash)}
-              <li class="px-3 py-2">
-                <div class="flex flex-wrap gap-x-3 gap-y-1">
-                  {#each group.members as member (member.id)}
-                    <button
-                      type="button"
-                      class="inline-flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 text-xs hover:bg-accent"
-                      onclick={() =>
-                        goById(
-                          "workspaces.provider",
-                          {
-                            wsId: member.installations[0]?.workspaceId ?? "~",
-                            providerId: member.installations[0]?.providerId ?? "",
-                          },
-                          { skill: member.id, view: "detail" },
-                        )}
-                    >
-                      <span class="truncate font-medium">{member.name}</span>
-                      <span class="shrink-0 text-[11px] text-muted-foreground">
-                        {installationScopeLabel(
-                          member.installations[0]?.workspaceId ?? "~",
-                          member.installations[0]?.providerId ?? "",
-                        )}
-                      </span>
-                      {#if member.disabled}
-                        <Badge variant="outline" class="h-4 px-1 text-[10px]">disabled</Badge>
-                      {/if}
-                    </button>
-                  {/each}
-                </div>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-    {/if}
-
+  <div class="mx-auto mt-5 w-full max-w-5xl space-y-6">
     <!-- 快速行动：回答「这个软件能帮我什么」——每个动作直达一个具体行为。 -->
     <section aria-label="Quick actions" class="grid grid-cols-1 gap-2 min-[560px]:grid-cols-2">
       <button
-        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
         onclick={() =>
           startAgentAction("create", "I want to create a new skill. It should help me ")}
       >
-        <IconPen class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <IconPen class="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
         <span class="min-w-0">
           <span class="block text-sm font-medium">Create a skill</span>
           <span class="block text-xs text-muted-foreground">
@@ -250,14 +181,14 @@
         </span>
       </button>
       <button
-        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
         onclick={() =>
           startAgentAction(
             "manage",
             "Audit my skill library: find duplicates, vague descriptions, and stale skills, then propose concrete fixes.",
           )}
       >
-        <IconHeart class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <IconHeart class="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
         <span class="min-w-0">
           <span class="block text-sm font-medium">Health check my library</span>
           <span class="block text-xs text-muted-foreground">
@@ -266,10 +197,10 @@
         </span>
       </button>
       <button
-        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
         onclick={() => void goto("/repository")}
       >
-        <IconCompass class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <IconCompass class="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
         <span class="min-w-0">
           <span class="block text-sm font-medium">Explore skill sources</span>
           <span class="block text-xs text-muted-foreground">
@@ -278,11 +209,11 @@
         </span>
       </button>
       <button
-        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
+        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
         onclick={() =>
           document.getElementById("library-index")?.scrollIntoView({ behavior: "smooth" })}
       >
-        <IconBoxes class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <IconBoxes class="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
         <span class="min-w-0">
           <span class="block text-sm font-medium">Browse the library</span>
           <span class="block text-xs text-muted-foreground">
@@ -306,12 +237,10 @@
               <span class="min-w-0 flex-1 truncate text-xs">
                 {session.title || "Untitled session"}
               </span>
-              <span
-                class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-              >
+              <span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                 {session.mode}
               </span>
-              <span class="shrink-0 text-[10px] text-muted-foreground">
+              <span class="shrink-0 text-xs text-muted-foreground">
                 {relativeTime(session.createdAt)}
               </span>
             </button>
@@ -365,7 +294,7 @@
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">
                   <h2 class="truncate text-sm font-medium">{ws.label}</h2>
-                  <Badge variant="secondary" class="text-[10px]">~ global</Badge>
+                  <Badge variant="secondary" class="text-xs">~ global</Badge>
                 </div>
                 <p class="mt-0.5 text-xs text-muted-foreground">
                   {ws.skillCount} skill{ws.skillCount === 1 ? "" : "s"} across {ws.providers.length}
@@ -377,7 +306,7 @@
               {#each ws.providers as provider (provider.id)}
                 <li>
                   <button
-                    class="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/50 disabled:pointer-events-none disabled:opacity-50"
+                    class="flex min-h-11 w-full items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70 disabled:pointer-events-none disabled:opacity-50"
                     disabled={!target || !provider.available}
                     title={provider.path ?? provider.label}
                     onclick={() => target && void goto(providerPath(ws, provider))}
@@ -385,9 +314,9 @@
                     <span class="min-w-0">
                       <span class="block truncate text-xs font-medium">{provider.label}</span>
                       {#if !provider.available}
-                        <span class="text-[11px] text-muted-foreground">Not found on disk</span>
+                        <span class="text-xs text-muted-foreground">Not found on disk</span>
                       {:else if provider.path}
-                        <span class="block truncate font-mono text-[10px] text-muted-foreground">
+                        <span class="block truncate font-mono text-xs text-muted-foreground">
                           {provider.path}
                         </span>
                       {/if}
@@ -430,14 +359,12 @@
                         <span class="flex items-center gap-2">
                           <span class="truncate text-sm font-medium">{ws.label}</span>
                           {#if !ws.available}
-                            <Badge variant="destructive" class="text-[10px]">
+                            <Badge variant="destructive" class="text-xs">
                               <IconAlert class="h-3 w-3" /> Missing
                             </Badge>
                           {/if}
                         </span>
-                        <span
-                          class="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground"
-                        >
+                        <span class="mt-0.5 block truncate font-mono text-xs text-muted-foreground">
                           {ws.path}
                         </span>
                       </span>

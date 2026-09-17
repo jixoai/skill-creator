@@ -17,6 +17,7 @@ import {
   type RankingCandidate,
 } from "../src/daemon/skill-search/ranking.js";
 import { createSkillTokenizer } from "../src/daemon/skill-search/tokenizer.js";
+import { ProviderIdSchema, WorkspaceIdSchema } from "../src/shared/contracts/workspaces.js";
 import {
   buildIndexWithDocuments,
   createSkillSearchDocument,
@@ -183,7 +184,7 @@ describe("frozen rankResults unit properties", () => {
   });
 
   it("caps the rerank contribution and freezes the ranking version", () => {
-    expect(RANKING_VERSION).toBe("rerank-2026-09-17-v1");
+    expect(RANKING_VERSION).toBe("rerank-2026-09-18-v2");
     const boosted = candidate({
       name: "alpha",
       canonicalPath: "/p/alpha",
@@ -230,5 +231,97 @@ describe("frozen rankResults unit properties", () => {
     const forward = rankResults(base, "query", 10, tokenize);
     const backward = rankResults([...base].reverse(), "query", 10, tokenize);
     expect(forward).toEqual(backward);
+  });
+});
+
+describe("v2 pool-level folding (real-corpus walkthrough fix)", () => {
+  /**
+   * 用户原始需求 [2026-09-18]：「随便输点东西啥都搜索不出来」——真实语料下同一
+   * 技能有 30+ 份跨 agent 副本，v1 的 top-40 池被副本挤爆（折叠后只剩一两组），
+   * 且代表只带自身 installations（provider 作用域过滤必然空）。
+   */
+  function replica(index: number, hash: string, bm25 = 20): RankingCandidate {
+    return candidate({
+      name: "cloudflare-one",
+      canonicalPath: `/Users/kzf/.provider${index}/skills/cloudflare-one`,
+      contentHash: hash,
+      bm25,
+      installations: [
+        {
+          path: `/Users/kzf/.provider${index}/skills/cloudflare-one`,
+          workspaceId: WorkspaceIdSchema.parse("~"),
+          providerId: ProviderIdSchema.parse(`provider-${index}`),
+        },
+      ],
+    });
+  }
+
+  it("deduplicates the candidate pool by contentHash before the top-40 cut", () => {
+    const replicas = Array.from({ length: 34 }, (_, index) => replica(index, "a".repeat(64)));
+    const unique = Array.from({ length: 6 }, (_, index) =>
+      candidate({
+        name: `unique-skill-${index}`,
+        canonicalPath: `/p/unique-${index}`,
+        contentHash: createHash("sha256").update(`u${index}`).digest("hex"),
+        bm25: 10 - index,
+      }),
+    );
+    // 34 副本 + 6 独特内容全部进池候选；v1 会取 top40 全部为副本邻位再折叠成 1 条。
+    const results = rankResults([...replicas, ...unique], "skill", 5, tokenize);
+    const hashes = new Set(results.map((result) => result.contentHash));
+    expect(hashes.size).toBe(5);
+    expect(results.map((result) => result.name)).toContain("unique-skill-0");
+  });
+
+  it("merges every group member's installations into the primary result", () => {
+    const primary = replica(0, "a".repeat(64), 20);
+    const other = replica(1, "a".repeat(64), 12);
+    const results = rankResults([other, primary], "cloudflare", 10, tokenize);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.canonicalPath).toBe(primary.canonicalPath);
+    expect(results[0]?.installations).toEqual([primary.installations[0], other.installations[0]]);
+    expect(results[0]?.duplicates).toEqual([{ id: other.id, canonicalPath: other.canonicalPath }]);
+  });
+
+  it("deduplicates merged installations across members sharing one entry path", () => {
+    // 同一物理目录服务多个 provider（amp/replit/universal 共享 ~/.config/agents）：
+    // path 相同但 providerId 不同 → 两个 installation 都保留；完全相同的三元组去重。
+    const entryPath = "/Users/kzf/.config/agents/skills/cloudflare-one";
+    const primary = candidate({
+      name: "shared-entry",
+      canonicalPath: "/Users/kzf/.adal/skills/cloudflare-one",
+      contentHash: "a".repeat(64),
+      bm25: 30,
+      installations: [
+        {
+          path: entryPath,
+          workspaceId: WorkspaceIdSchema.parse("~"),
+          providerId: ProviderIdSchema.parse("amp"),
+        },
+        {
+          path: entryPath,
+          workspaceId: WorkspaceIdSchema.parse("~"),
+          providerId: ProviderIdSchema.parse("amp"),
+        },
+      ],
+    });
+    const member = candidate({
+      name: "shared-entry",
+      canonicalPath: "/Users/kzf/.config/agents/skills/cloudflare-one",
+      contentHash: "a".repeat(64),
+      bm25: 12,
+      installations: [
+        {
+          path: entryPath,
+          workspaceId: WorkspaceIdSchema.parse("~"),
+          providerId: ProviderIdSchema.parse("replit"),
+        },
+      ],
+    });
+    const results = rankResults([primary, member], "cloudflare", 10, tokenize);
+    expect(results[0]?.installations).toEqual([
+      { path: entryPath, workspaceId: "~", providerId: "amp" },
+      { path: entryPath, workspaceId: "~", providerId: "replit" },
+    ]);
   });
 });

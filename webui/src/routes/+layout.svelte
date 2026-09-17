@@ -154,7 +154,7 @@
           <button
             class="flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-muted {activeAppId ===
             app.id
-              ? 'bg-primary/10 text-primary'
+              ? 'bg-accent text-primary ring-1 ring-inset ring-primary/25'
               : 'text-muted-foreground'}"
             title={app.name}
             aria-label={app.name}

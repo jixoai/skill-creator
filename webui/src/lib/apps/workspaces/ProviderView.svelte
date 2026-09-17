@@ -27,6 +27,7 @@
     validateSkill,
   } from "$lib/store.svelte";
   import { saveSkill } from "$lib/store.svelte";
+  import { loadSkillDuplicates, skillDuplicatesState } from "$lib/stores/skills.svelte";
   import {
     applyUpdates,
     checkUpdates,
@@ -57,6 +58,7 @@
   import IconPower from "@lucide/svelte/icons/power";
   import IconShield from "@lucide/svelte/icons/shield-check";
   import IconSearch from "@lucide/svelte/icons/search";
+  import IconSameContent from "@lucide/svelte/icons/arrow-up-right";
   import IconSliders from "@lucide/svelte/icons/sliders-horizontal";
   import IconX from "@lucide/svelte/icons/x";
 
@@ -141,6 +143,26 @@
   // 离开本视图时回收全局检索态（命令面板等消费方各持自己的检索生命周期）。
   $effect(() => {
     return () => resetSkillSearch();
+  });
+
+  // 同源角标数据（2026-09-18 用户走查裁决）：同内容信息不再占首页整屏区块，
+  // 改为技能行上的 symlink 式小角标。连接建立后单发一次重复组查询
+  // （W4 复盘模式：显式 latch 只发不重试；失败静默——角标缺失不是错误态）。
+  let duplicatesStarted = false;
+  $effect(() => {
+    if (duplicatesStarted || connectionState.status !== "connected") return;
+    duplicatesStarted = true;
+    void loadSkillDuplicates();
+  });
+
+  /** skillId → 组内其他成员数（同内容副本计数；不在组内的 id 无条目）。 */
+  const sameContentCountById = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const group of skillDuplicatesState.groups) {
+      const others = group.members.length - 1;
+      for (const member of group.members) counts.set(member.id, others);
+    }
+    return counts;
   });
 
   /** 检索态是否属于本视图当前查询（store 是全局单例，可能被命令面板接管）。 */
@@ -250,6 +272,24 @@
       "workspaces.provider",
       { wsId, providerId },
       { ...search, skill: skillId, view: "detail" },
+    );
+  }
+
+  /**
+   * 搜索结果行的选中（vision 走查 P1-A 修复）：SkillSearchResult.id 是全局
+   * canonical id（折叠代表的路径 digest），不能直接作为本 provider 作用域
+   * 的详情 id（会得到 not found）。命中行点击后在已载列表中按 name 匹配
+   * 本地技能并清掉 q——回到全量列表高亮本地行，详情走本地 id。
+   */
+  function selectSearchResult(resultName: string): void {
+    if (!wsId || !providerId) return;
+    const local = skillsState.skills.find((skill) => skill.name === resultName);
+    if (!local) return;
+    const { q: _q, ...rest } = search;
+    goById(
+      "workspaces.provider",
+      { wsId, providerId },
+      { ...rest, skill: local.id, view: "detail" },
     );
   }
 
@@ -465,12 +505,14 @@
         {:else}
           <Badge variant="secondary">{listCount}</Badge>
         {/if}
-        <div class="ml-auto flex flex-wrap items-center gap-1">
+        <div class="ml-auto flex items-center gap-1">
+          <!-- 次要操作 icon-only（vision 走查 P1-3：带字按钮在窄列里换行掉到第二行）。 -->
           <Button
             variant="ghost"
-            size="sm"
-            class="h-7 gap-1.5 px-2 text-xs"
-            title="Read-only analysis: duplicates, conflicts, shared resources"
+            size="icon"
+            class="h-7 w-7"
+            title="Insights — read-only analysis: duplicates, conflicts, shared resources"
+            aria-label="Insights"
             onclick={() => {
               if (wsId && providerId) {
                 goById("workspaces.intelligence", { wsId, providerId }, {});
@@ -478,13 +520,13 @@
             }}
           >
             <IconGraph class="h-3.5 w-3.5" />
-            Insights
           </Button>
           <Button
             variant="ghost"
-            size="sm"
-            class="h-7 gap-1.5 px-2 text-xs"
-            title="Compare installed skills against their upstream sources"
+            size="icon"
+            class="h-7 w-7"
+            title="Updates — compare installed skills against their upstream sources"
+            aria-label="Updates"
             disabled={skillsUpdateState.checking}
             onclick={() => void handleCheckUpdates()}
           >
@@ -493,7 +535,6 @@
             {:else}
               <IconDownload class="h-3.5 w-3.5" />
             {/if}
-            Updates
           </Button>
         </div>
       </div>
@@ -624,24 +665,24 @@
         </div>
         {#if skillsUpdateState.applyResults ?? skillsUpdateState.results}
           {@const report = skillsUpdateState.applyResults ?? skillsUpdateState.results}
-          <ul class="mt-1.5 max-h-40 space-y-1 overflow-y-auto text-[11px]">
+          <ul class="mt-1.5 max-h-40 space-y-1 overflow-y-auto text-xs">
             {#each report as entry (entry.skillId)}
               <li class="flex items-baseline gap-1.5">
                 <span class="min-w-0 flex-1 truncate">{entry.name}</span>
                 {#if entry.status === "updated"}
-                  <Badge variant="secondary" class="text-[10px]">
+                  <Badge variant="secondary" class="text-xs">
                     {applySummary ? "reinstalled" : "outdated"}
                   </Badge>
                 {:else if entry.status === "already-current"}
-                  <Badge variant="outline" class="text-[10px]">current</Badge>
+                  <Badge variant="outline" class="text-xs">current</Badge>
                 {:else if entry.status === "failed"}
-                  <Badge variant="destructive" class="text-[10px]">failed</Badge>
+                  <Badge variant="destructive" class="text-xs">failed</Badge>
                 {:else}
-                  <Badge variant="outline" class="text-[10px]">unavailable</Badge>
+                  <Badge variant="outline" class="text-xs">unavailable</Badge>
                 {/if}
               </li>
               {#if entry.error}
-                <li class="pl-3 text-[10px] text-muted-foreground">{entry.error}</li>
+                <li class="pl-3 text-xs text-muted-foreground">{entry.error}</li>
               {/if}
             {/each}
           </ul>
@@ -649,11 +690,7 @@
       </section>
     {/if}
     <div class="min-h-0 flex-1 overflow-y-auto">
-      {#if skillsState.loading}
-        <div class="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
-          <IconLoader class="h-3.5 w-3.5 animate-spin" /> Loading skills…
-        </div>
-      {:else if skillsState.error}
+      {#if skillsState.error && skillsState.skills.length === 0}
         <div class="flex flex-col items-start gap-2 px-4 py-6 text-xs text-destructive">
           <p class="break-words">{skillsState.error}</p>
           {#if providerTarget}
@@ -666,6 +703,32 @@
               Retry
             </Button>
           {/if}
+        </div>
+      {:else if skillsState.error}
+        <!-- 刷新失败但已有数据（vision 走查 P0-4）：错误降级为顶部提示，已加载
+             行保留，上下文不归零。 -->
+        <div class="flex items-start gap-2 px-4 py-2.5 text-xs text-destructive" role="alert">
+          <span class="min-w-0 flex-1 break-words">{skillsState.error}</span>
+          {#if providerTarget}
+            <button
+              class="shrink-0 underline underline-offset-2"
+              onclick={() => void loadSkills(providerTarget)}
+            >
+              Retry
+            </button>
+          {/if}
+        </div>
+        {#each visibleSkills as skill (skill.id)}
+          <SkillCard
+            {skill}
+            selected={skill.id === selectedSkillId}
+            sameContentCount={sameContentCountById.get(skill.id) ?? 0}
+            onclick={() => selectSkill(skill.id)}
+          />
+        {/each}
+      {:else if skillsState.loading}
+        <div class="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
+          <IconLoader class="h-3.5 w-3.5 animate-spin" /> Loading skills…
         </div>
       {:else if searchProjection.mode === "searching"}
         <!-- 检索骨架：BM25 结果到场前的加载态。 -->
@@ -699,7 +762,7 @@
             type="button"
             data-skill-id={result.id}
             aria-pressed={result.id === selectedSkillId}
-            onclick={() => selectSkill(result.id)}
+            onclick={() => selectSearchResult(result.name)}
             class="group flex min-h-14 w-full items-start gap-2.5 border-b border-border/70 px-3 py-2.5 text-left transition-colors {result.id ===
             selectedSkillId
               ? 'bg-accent text-foreground'
@@ -708,19 +771,31 @@
             {#if result.disabled}
               <IconPause class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             {:else}
-              <IconFile class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <IconFile class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             {/if}
             <span class="min-w-0 flex-1">
               <span class="flex items-center gap-2">
                 <span class="truncate text-[13px] font-medium text-foreground">{result.name}</span>
                 {#if result.disabled}
                   <span
-                    class="shrink-0 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                    class="shrink-0 text-xs uppercase tracking-wide text-amber-600 dark:text-amber-400"
                     >disabled</span
                   >
                 {/if}
+                {#if result.duplicates.length > 0}
+                  <span
+                    class="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground/80"
+                    title="Same content as {result.duplicates.length} other installation{result
+                      .duplicates.length === 1
+                      ? ''
+                      : 's'}"
+                  >
+                    <IconSameContent class="h-3 w-3" aria-hidden="true" />
+                    <span class="tabular-nums">{result.duplicates.length}</span>
+                  </span>
+                {/if}
               </span>
-              <span class="mt-0.5 line-clamp-2 text-[11px] leading-4"
+              <span class="mt-0.5 line-clamp-2 text-xs leading-4"
                 >{result.description || "No description"}</span
               >
             </span>
@@ -733,6 +808,7 @@
           <SkillCard
             {skill}
             selected={skill.id === selectedSkillId}
+            sameContentCount={sameContentCountById.get(skill.id) ?? 0}
             onclick={() => selectSkill(skill.id)}
           />
         {/each}
@@ -748,10 +824,12 @@
     aria-label="Skill detail"
   >
     {#if !selectedSkillId}
+      <!-- my-auto 兜底垂直居中（vision 走查 P2-F：h-full 在高度链缺失时塌陷，
+           空态漂到面板顶部；margin auto 在 flex 列里不依赖父高）。 -->
       <div
-        class="flex h-full flex-col items-center justify-center gap-2 px-8 text-center text-muted-foreground"
+        class="m-auto flex flex-col items-center justify-center gap-2 px-8 py-10 text-center text-muted-foreground"
       >
-        <IconFile class="h-8 w-8 opacity-50" />
+        <IconFile class="h-6 w-6" />
         <p class="text-sm font-medium text-foreground">Select a skill</p>
         <p class="max-w-xs text-xs">
           Inspect its frontmatter, rendered body, and validation status.
@@ -763,7 +841,14 @@
       </div>
     {:else if detailError}
       <div class="flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
-        <p class="text-xs text-destructive">{detailError}</p>
+        <p class="text-sm font-medium text-destructive">Skill not found</p>
+        <p class="text-xs text-muted-foreground">
+          This skill could not be loaded. It may have been moved, renamed, or deleted.
+        </p>
+        <!-- 排障信息（vision 走查 P2-C）：opaque id/技术细节放弱化小字，不撑主文案。 -->
+        <p class="max-w-md break-all font-mono text-xs text-muted-foreground/70">
+          {detailError}
+        </p>
         {#if providerTarget && selectedSkillId}
           <Button
             variant="outline"
@@ -776,126 +861,131 @@
       </div>
     {:else if detail}
       {@const editable = providerWritable}
-      <header
-        bind:this={detailHeaderEl}
-        tabindex="-1"
-        class="detail-header shrink-0 border-b border-border px-4 py-3 focus:outline-none"
-      >
-        <div class="flex items-start gap-2">
-          <button
-            class="provider-back mt-0.5 hidden h-8 w-8 items-center justify-center"
-            aria-label="Back to skills"
-            onclick={backToList}
-          >
-            <IconArrowLeft class="h-4 w-4" />
-          </button>
-          <div class="min-w-0 flex-1">
-            {#if editable}
-              <Input
-                bind:value={draftName}
-                class="h-8 text-base font-semibold"
-                aria-label="Skill name"
-              />
-            {:else}
-              <h2 class="truncate text-base font-semibold">{detail.name}</h2>
-            {/if}
-            {#if editable}
-              <textarea
-                bind:value={draftDescription}
-                rows="2"
-                class="mt-1 w-full resize-y rounded-md border border-input bg-input/20 px-2 py-1 text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-                aria-label="Skill description"></textarea>
-            {:else}
-              <p class="mt-0.5 text-xs leading-5 text-muted-foreground">{detail.description}</p>
-            {/if}
-          </div>
-          <div class="flex shrink-0 items-center gap-1.5">
-            {#if editable}
-              <Button size="sm" class="h-8 gap-1.5" onclick={handleSave} disabled={saving}>
-                {#if saving}<IconLoader class="h-3.5 w-3.5 animate-spin" /> Save{:else}Save{/if}
-              </Button>
-            {/if}
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-8 gap-1.5"
-              onclick={handleValidate}
-              disabled={validating}
+      <!-- 内容宽约束：宽屏下详情正文不再满铺整栏（vision 走查 P0-1/P1-4）。 -->
+      <div class="provider-detail-inner flex min-h-0 flex-1 flex-col">
+        <header
+          bind:this={detailHeaderEl}
+          tabindex="-1"
+          class="detail-header shrink-0 border-b border-border px-4 py-3 focus:outline-none"
+        >
+          <div class="flex items-start gap-2">
+            <button
+              class="provider-back mt-0.5 hidden h-8 w-8 items-center justify-center"
+              aria-label="Back to skills"
+              onclick={backToList}
             >
-              {#if validating}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconShield
-                  class="h-3.5 w-3.5"
-                />{/if}
-              Validate
-            </Button>
-            <Button
-              size="sm"
-              variant={detail.disabled ? "default" : "outline"}
-              class="h-8 gap-1.5"
-              disabled={toggling}
-              onclick={handleToggle}
-            >
-              {#if toggling}
-                <IconLoader class="h-3.5 w-3.5 animate-spin" />
+              <IconArrowLeft class="h-4 w-4" />
+            </button>
+            <div class="min-w-0 flex-1">
+              {#if editable}
+                <Input
+                  bind:value={draftName}
+                  class="h-8 text-base font-semibold"
+                  aria-label="Skill name"
+                />
               {:else}
-                <IconPower class="h-3.5 w-3.5" />
+                <h2 class="truncate text-base font-semibold">{detail.name}</h2>
               {/if}
-              {detail.disabled ? "Enable" : "Disable"}
-            </Button>
-          </div>
-        </div>
-        <div class="mt-2 flex flex-wrap gap-1.5">
-          <Badge variant="secondary">{detail.provider}</Badge>
-          <Badge variant="outline">{detail.directoryName}</Badge>
-          {#if detail.disabled}
-            <Badge variant="outline" class="text-amber-700 dark:text-amber-300">Disabled</Badge>
-          {/if}
-        </div>
-      </header>
-
-      <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {#if validation}
-          <section class="mb-4 border-b border-border pb-3" aria-live="polite">
-            <div class="flex items-center gap-2 text-xs font-medium">
-              {#if validation.success}<IconCheck class="h-4 w-4 text-emerald-600" /> Valid skill{:else}<IconShield
-                  class="h-4 w-4 text-destructive"
-                /> Validation issues{/if}
+              {#if editable}
+                <textarea
+                  bind:value={draftDescription}
+                  rows="2"
+                  class="mt-1 w-full resize-y rounded-md border border-input bg-input/20 px-2 py-1 text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                  aria-label="Skill description"></textarea>
+              {:else}
+                <p class="mt-0.5 text-xs leading-5 text-muted-foreground">{detail.description}</p>
+              {/if}
             </div>
-            {#each validation.errors as issue}
-              <p class="mt-1 text-xs text-destructive">{issue}</p>
-            {/each}
-            {#each validation.warnings as issue}
-              <p class="mt-1 text-xs text-amber-700 dark:text-amber-300">{issue}</p>
-            {/each}
-          </section>
-        {/if}
+            <div class="flex shrink-0 items-center gap-1.5">
+              {#if editable}
+                <Button size="sm" class="h-8 gap-1.5" onclick={handleSave} disabled={saving}>
+                  {#if saving}<IconLoader class="h-3.5 w-3.5 animate-spin" /> Save{:else}Save{/if}
+                </Button>
+              {/if}
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-8 gap-1.5"
+                onclick={handleValidate}
+                disabled={validating}
+              >
+                {#if validating}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconShield
+                    class="h-3.5 w-3.5"
+                  />{/if}
+                Validate
+              </Button>
+              <Button
+                size="sm"
+                variant={detail.disabled ? "default" : "outline"}
+                class="h-8 gap-1.5"
+                disabled={toggling}
+                onclick={handleToggle}
+              >
+                {#if toggling}
+                  <IconLoader class="h-3.5 w-3.5 animate-spin" />
+                {:else}
+                  <IconPower class="h-3.5 w-3.5" />
+                {/if}
+                {detail.disabled ? "Enable" : "Disable"}
+              </Button>
+            </div>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            <Badge variant="secondary">{detail.provider}</Badge>
+            <Badge variant="outline">{detail.directoryName}</Badge>
+            {#if detail.disabled}
+              <Badge variant="outline" class="text-amber-700 dark:text-amber-300">Disabled</Badge>
+            {/if}
+          </div>
+        </header>
 
-        {#if split}
-          <section class="mb-4">
-            <h3 class="mb-2 text-xs font-medium text-muted-foreground">Frontmatter</h3>
-            <dl class="overflow-x-auto rounded-md border border-border">
-              {#each Object.entries(split.frontmatter) as [key, value], i}
-                <div
-                  class="grid grid-cols-[120px_minmax(0,1fr)] {i > 0
-                    ? 'border-t border-border'
-                    : ''}"
-                >
-                  <dt class="bg-muted/40 px-2 py-1 text-[11px] font-medium text-muted-foreground">
-                    {key}
-                  </dt>
-                  <dd class="break-words px-2 py-1 text-[11px]">
-                    {value === null ? "null" : String(value)}
-                  </dd>
-                </div>
+        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {#if validation}
+            <section class="mb-4 border-b border-border pb-3" aria-live="polite">
+              <div class="flex items-center gap-2 text-xs font-medium">
+                {#if validation.success}<IconCheck class="h-4 w-4 text-emerald-600" /> Valid skill{:else}<IconShield
+                    class="h-4 w-4 text-destructive"
+                  /> Validation issues{/if}
+              </div>
+              {#each validation.errors as issue}
+                <p class="mt-1 text-xs text-destructive">{issue}</p>
               {/each}
-            </dl>
-          </section>
-        {/if}
+              {#each validation.warnings as issue}
+                <p class="mt-1 text-xs text-amber-700 dark:text-amber-300">{issue}</p>
+              {/each}
+            </section>
+          {/if}
 
-        <section>
-          <h3 class="mb-2 text-xs font-medium text-muted-foreground">SKILL.md</h3>
-          <!-- 渲染器关闭原始 HTML 透传，并兜底 sanitize；详见 render-skill-md.ts -->
-          <div class="prose prose-sm max-w-none overflow-x-auto">{@html renderedBody}</div>
-        </section>
+          {#if split}
+            <section class="mb-4">
+              <h3 class="mb-2 text-xs font-medium text-muted-foreground">Frontmatter</h3>
+              <dl class="overflow-x-auto rounded-md border border-border">
+                {#each Object.entries(split.frontmatter) as [key, value], i}
+                  <div
+                    class="grid grid-cols-[120px_minmax(0,1fr)] {i > 0
+                      ? 'border-t border-border'
+                      : ''}"
+                  >
+                    <dt class="bg-muted/40 px-2 py-1 text-xs font-medium text-muted-foreground">
+                      {key}
+                    </dt>
+                    <dd class="break-words px-2 py-1 text-xs">
+                      {value === null ? "null" : String(value)}
+                    </dd>
+                  </div>
+                {/each}
+              </dl>
+            </section>
+          {/if}
+
+          <section>
+            <h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              SKILL.md
+            </h3>
+            <!-- 渲染器关闭原始 HTML 透传，并兜底 sanitize；详见 render-skill-md.ts -->
+            <div class="prose prose-sm max-w-none overflow-x-auto">{@html renderedBody}</div>
+          </section>
+        </div>
       </div>
     {/if}
   </section>
@@ -906,9 +996,10 @@
     container-type: inline-size;
   }
 
-  /* 宽屏：列表固定宽度，详情占满剩余；两者始终并排可见。 */
+  /* 宽屏：列表固定 22rem（vision 走查 P2-D：cqw 基准含 Agent 面板，随面板
+     开合在 320-415px 跳变；固定宽换取稳定），详情占满剩余并约束正文行长。 */
   .provider-list {
-    width: 18rem;
+    width: 22rem;
     flex-shrink: 0;
   }
   .provider-detail {
@@ -916,6 +1007,11 @@
     /* flex item 默认 min-width:auto 会随长代码行增长，导致 pre 的横向滚动永不触发、
        面板宽度被内容撑破；显式归零后宽度由容器分配，代码块改为内部滚动。 */
     min-width: 0;
+  }
+  .provider-detail-inner {
+    max-width: 48rem;
+    margin-inline: auto;
+    width: 100%;
   }
   /* 列表/详情在宽屏下都可见；隐藏类只在窄屏生效。 */
   .provider-back {

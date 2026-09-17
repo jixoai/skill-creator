@@ -164,7 +164,7 @@
           >
             <IconFolder class="h-4 w-4" />
             <span class="flex-1 truncate">{ws.label}</span>
-            <span class="text-[10px] tabular-nums text-muted-foreground">{ws.skillCount ?? 0}</span>
+            <span class="text-xs tabular-nums text-muted-foreground">{ws.skillCount ?? 0}</span>
           </Command.Item>
         {/each}
       </Command.Group>
@@ -174,7 +174,7 @@
          的召回与排序由 daemon BM25 裁决，面板只做分组渲染。 -->
     {#if !trimmedQuery}
       <Command.Group heading="Skills" value="skills" forceMount>
-        <div class="px-2.5 py-1.5 text-[11px] text-muted-foreground">
+        <div class="px-2.5 py-1.5 text-xs text-muted-foreground">
           Type to search skills across workspaces…
         </div>
       </Command.Group>
@@ -184,13 +184,13 @@
       </Command.Group>
     {:else if searchFresh && searchState.error}
       <Command.Group heading="Skills" value="skills" forceMount>
-        <div class="px-2.5 py-1.5 text-[11px] text-destructive">
+        <div class="px-2.5 py-1.5 text-xs text-destructive">
           Skill search failed — {searchState.error}
         </div>
       </Command.Group>
     {:else if skillGroups.length === 0}
       <Command.Group heading="Skills" value="skills" forceMount>
-        <div class="px-2.5 py-1.5 text-[11px] text-muted-foreground">No matching skill.</div>
+        <div class="px-2.5 py-1.5 text-xs text-muted-foreground">No matching skill.</div>
       </Command.Group>
     {:else}
       {#each skillGroups as group (group.scope)}
@@ -212,7 +212,7 @@
               <span class="min-w-0 flex-1 truncate">{row.result.name}</span>
               {#if row.result.description}
                 <span
-                  class="hidden min-w-0 max-w-[45%] truncate text-[11px] text-muted-foreground sm:block"
+                  class="hidden min-w-0 max-w-[45%] truncate text-xs text-muted-foreground sm:block"
                   >{row.result.description}</span
                 >
               {/if}

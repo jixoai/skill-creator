@@ -202,7 +202,9 @@ describe("skill search watcher (real fs.watch integration)", () => {
     try {
       watcher.reconcile([path.join(sandbox, "skills")]);
       fs.writeFileSync(path.join(dir, "SKILL.md"), "edited");
-      const deadline = Date.now() + 5_000;
+      // 全量套件并行时 FSEvents 投递可远慢于隔离运行（实测 5s 在高负载下假红）；
+      // deadline 取 20s：真实事件通常 <200ms，只有系统性失效才会耗尽。
+      const deadline = Date.now() + 20_000;
       while (Date.now() < deadline && onFlush.mock.calls.length === 0) {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
