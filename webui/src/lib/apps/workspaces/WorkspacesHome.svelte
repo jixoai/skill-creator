@@ -4,6 +4,7 @@
   1. Skill locations 索引：Global（~）与 Imported Workspace 分组、availability、skill count、Provider 入口。
   2. 导入（共享全局对话框）与移除（仅 registry entry，confirm + busy 锁 + toast 终态）。
   3. 加载 / 空 / 更新中 / 失败四态可区分。
+ 6. 呈现索引同内容技能区块（连接后单发加载；空组不渲染、错误内联）。
 -->
 <script lang="ts">
   import {
@@ -26,6 +27,7 @@
   import IconHeart from "@lucide/svelte/icons/heart-pulse";
   import IconCompass from "@lucide/svelte/icons/compass";
   import IconMessage from "@lucide/svelte/icons/message-square";
+  import { connectionState } from "$lib/store.svelte";
   import { requestImportWorkspace } from "$lib/stores/import-workspace.svelte";
   import { goById } from "$lib/shell";
   import { showToast } from "$lib/toast.svelte";
@@ -57,9 +59,17 @@
 
   $effect(() => {
     void loadWorkspaces();
-    void loadSkillDuplicates();
     // 首屏 Continue 区需要会话列表（面板未打开时也要有数据）。
     if (!agentSessionsList.loaded && !agentSessionsList.loading) void loadAgentSessions();
+  });
+
+  // 重复组：连接建立后单发一次（走查 W4 复盘：挂载态与 WS 就绪存在竞态，无门控的
+  // 重试会放大成请求风暴 + effect 深度超限；显式 latch 只发不重试，失败静默收起区块）。
+  let duplicatesStarted = false;
+  $effect(() => {
+    if (duplicatesStarted || connectionState.status !== "connected") return;
+    duplicatesStarted = true;
+    void loadSkillDuplicates();
   });
 
   /** 库快照：跨全部 workspace 的技能/位置/导入目录总数。 */
@@ -110,6 +120,7 @@
 
   async function refresh(): Promise<void> {
     await loadWorkspaces();
+    void loadSkillDuplicates();
   }
 
   function providerPath(ws: Workspace, provider: WorkspaceProvider): string {
@@ -168,15 +179,17 @@
   </header>
 
   <div class="mx-auto mt-5 w-full max-w-3xl space-y-6">
-    {#if skillDuplicatesState.groups.length > 0}
+    {#if skillDuplicatesState.groups.length > 0 || skillDuplicatesState.error}
       <!-- 同内容技能（search-duplicates P3）：索引 contentHash 分组事实；
            成员行点击直达其 provider 详情。空组不渲染；失败区块内一行文案。 -->
       <section aria-label="Content-duplicate skills" class="rounded-lg border border-border">
         <header class="flex items-center justify-between border-b border-border px-3 py-2">
           <h2 class="text-xs font-medium">同内容技能</h2>
-          <span class="text-[11px] text-muted-foreground">
-            {skillDuplicatesState.groups.length} 组
-          </span>
+          {#if !skillDuplicatesState.error}
+            <span class="text-[11px] text-muted-foreground">
+              {skillDuplicatesState.groups.length} 组
+            </span>
+          {/if}
         </header>
         {#if skillDuplicatesState.error}
           <p class="px-3 py-2 text-xs text-muted-foreground">

@@ -79,6 +79,8 @@ export function canonicalizeCandidates(
       continue;
     }
     const extras = collectExtraMarkdownFiles(canonicalPath, excludedDirs);
+    // 信封 stat 快照：全路径升序（复审 P2——source-first 是 hash 的拼接序，
+    // 与 stat 快照序是两个已冻结序列；读取按 sourcePath 定位身份源）。
     const files: SkillContentFile[] = [
       {
         path: source.sourcePath,
@@ -87,8 +89,8 @@ export function canonicalizeCandidates(
         ino: sourceStat.ino,
         ctimeMs: sourceStat.ctimeMs,
       },
-      ...extras.filter((extra) => extra.path !== source.sourcePath),
-    ];
+      ...extras,
+    ].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
     scans.push({
       id: SkillIdSchema.parse(opaquePathId("sk", canonicalPath)),
       canonicalPath,

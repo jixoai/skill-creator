@@ -2,7 +2,8 @@
  * 用户原始需求 [2026-09-18]：「有没有合理使用高性能的方案监听 skill 文件夹的
  * 内容发生改变，并实时更新索引？」
  * 正交意图：
- * 1. 事件驱动新鲜度：去重 canonical roots 的 fs.watch(recursive) 集合与 reconcile。
+ * 1. 事件驱动新鲜度：去重 canonical roots 的 watch 集合与 reconcile（watch 经
+ *    可注入 seam，生产绑定 fs.watch recursive；测试用确定性假实现）。
  * 2. dirty 语义与去抖 flush：无事件时 search 零扫描；事件后 ≤20k 文档同步刷新
  *    （实时），更大语料保持 dirty 到下次 search（lazy 降级）。
  * 妥协声明：flush 回调在事件循环内同步执行（≤20k 文档的增量 freshen 实测量级
@@ -11,9 +12,31 @@
 import fs from "node:fs";
 
 /** 事件去抖窗口（ms）：合并连续编辑/安装风暴为一次刷新。 */
-const FLUSH_DEBOUNCE_MS = 300;
+export const FLUSH_DEBOUNCE_MS = 300;
 /** 同步 flush 的文档量上限；更大语料降级 dirty-lazy（下次 search 刷新）。 */
-const SYNCHRONOUS_FLUSH_DOCUMENT_LIMIT = 20_000;
+export const SYNCHRONOUS_FLUSH_DOCUMENT_LIMIT = 20_000;
+
+/** 单目录 watch 句柄（seam：生产为 fs.watch 包装；测试为可控假实现）。 */
+export interface WatchHandle {
+  close: () => void;
+  /** 目录内任意变更事件（回调内不得抛出）。 */
+  onEvent: (callback: () => void) => void;
+  /** watch 通道故障（目录删除/权限回收）：句柄随之失效。 */
+  onError: (callback: () => void) => void;
+}
+
+/** watch 工厂 seam：建立失败（平台不支持/EMFILE/目录不存在）直接抛错。 */
+export type WatchFactory = (directory: string) => WatchHandle;
+
+/** 生产工厂：fs.watch(recursive, persistent:false)。 */
+export const fsWatchFactory: WatchFactory = (directory) => {
+  const watcher = fs.watch(directory, { recursive: true, persistent: false });
+  return {
+    close: () => watcher.close(),
+    onEvent: (callback) => watcher.on("change", callback),
+    onError: (callback) => watcher.on("error", callback),
+  };
+};
 
 /** watcher 的对外抽象（service 持有；测试可直接驱动）。 */
 export interface SkillSearchWatcher {
@@ -30,13 +53,15 @@ export interface SkillSearchWatcher {
 /**
  * 创建 watcher。onFlush 在去抖窗口后同步调用（由 service 提供完整
  * scan→canonicalize→freshen→reconcile 闭包）；flush 抛错时保持 dirty，
- * 下一次 search 会重走完整路径自愈。
+ * 下一次 search 会重走完整路径自愈。watch seam 仅供测试注入确定性句柄。
  */
 export function createSkillSearchWatcher(options: {
   onFlush: () => void;
   documentCount: () => number;
+  watch?: WatchFactory;
 }): SkillSearchWatcher {
-  const watched = new Map<string, fs.FSWatcher>();
+  const watchFactory = options.watch ?? fsWatchFactory;
+  const watched = new Map<string, { handle: WatchHandle; closed: boolean }>();
   let dirty = false;
   let disposed = false;
   let flushTimer: NodeJS.Timeout | null = null;
@@ -64,33 +89,27 @@ export function createSkillSearchWatcher(options: {
     reconcile(watchDirs: readonly string[]): void {
       if (disposed) return;
       const desired = new Set(watchDirs);
-      for (const [dir, watcher] of watched) {
+      for (const [dir, entry] of watched) {
         if (!desired.has(dir)) {
           watched.delete(dir);
-          try {
-            watcher.close();
-          } catch {
-            // 句柄已失效：关闭失败无需处理。
-          }
+          closeQuietly(entry);
         }
       }
       for (const dir of desired) {
         if (watched.has(dir)) continue;
         try {
-          const watcher = fs.watch(dir, { recursive: true, persistent: false }, () => {
-            markDirty();
-          });
-          watcher.on("error", () => {
-            // watch 通道故障（目录删除/权限回收）：摘除该目录，search 回退扫描。
-            watched.delete(dir);
-            try {
-              watcher.close();
-            } catch {
-              // 已失效。
+          const handle = watchFactory(dir);
+          handle.onEvent(() => markDirty());
+          handle.onError(() => {
+            // watch 通道故障：摘除该目录，search 回退扫描。
+            const entry = watched.get(dir);
+            if (entry) {
+              watched.delete(dir);
+              closeQuietly(entry);
             }
             markDirty();
           });
-          watched.set(dir, watcher);
+          watched.set(dir, { handle, closed: false });
         } catch {
           // 平台不支持 recursive / EMFILE / 目录不存在：该目录保持 unwatched，
           // isClean 恒 false，search 回退逐次扫描（行为与无 watcher 时代一致）。
@@ -107,13 +126,7 @@ export function createSkillSearchWatcher(options: {
         clearTimeout(flushTimer);
         flushTimer = null;
       }
-      for (const watcher of watched.values()) {
-        try {
-          watcher.close();
-        } catch {
-          // 回收路径：尽力关闭。
-        }
-      }
+      for (const entry of watched.values()) closeQuietly(entry);
       watched.clear();
       dirty = false;
     },
@@ -121,4 +134,14 @@ export function createSkillSearchWatcher(options: {
       return watched.size;
     },
   };
+}
+
+function closeQuietly(entry: { handle: WatchHandle; closed: boolean }): void {
+  if (entry.closed) return;
+  entry.closed = true;
+  try {
+    entry.handle.close();
+  } catch {
+    // 已失效句柄：关闭失败无需处理。
+  }
 }

@@ -183,6 +183,51 @@ describe("search robustness RPC surface", () => {
     expect(opened.startsWith(sandbox)).toBe(true);
   });
 
+  it("creates search-config.toml at daemon assembly before any search (R2 boot)", () => {
+    // 复审 P1：boot（domain 装配）即预写模板，编辑器入口不依赖检索发生过。
+    const configBefore = fs.existsSync(searchConfigPath());
+    makeClient(async () => {});
+    const configAfter = fs.existsSync(searchConfigPath());
+    expect(configAfter).toBe(true);
+    // 首次装配前文件不存在（沙箱隔离下证明是本 daemon 写的）。
+    expect(configBefore).toBe(false);
+    expect(fs.readFileSync(searchConfigPath(), "utf8")).toContain("excludeDirs");
+  });
+
+  it("collects dot-named markdown bodies while skipping dot directories (R1)", async () => {
+    // 复审 P1：dot 规则只作用于目录；.notes.md 等合法 dot md 进入正文与 hash。
+    writeGlobalSkill(
+      "dotfile-docs",
+      "---\nname: dotfile-docs\ndescription: Dot markdown fixture.\n---\n# dot\n",
+      { ".notes.md": "quokka-dotfile-marker" },
+    );
+    const client = makeClient(async () => {});
+    const hits = await client.skills.search({ query: "quokka-dotfile-marker" });
+    expect(hits.results.map((result) => result.name)).toContain("dotfile-docs");
+  });
+
+  it("snapshots the file set in path order regardless of source position (R1)", async () => {
+    writeGlobalSkill(
+      "ordering-skill",
+      "---\nname: ordering-skill\ndescription: Ordering fixture.\n---\n# order\n",
+      { "0.md": "zero marker" },
+    );
+    const client = makeClient(async () => {});
+    // 触发一次检索：freshen 落盘后才存在可断言的信封。
+    await client.skills.search({ query: "ordering" });
+    const envelope = JSON.parse(
+      fs.readFileSync(path.join(sandbox, "state", ".skill-creator", "search-index.json"), "utf8"),
+    ) as { stats: Record<string, { canonicalPath: string; files: Array<{ path: string }> }> };
+    const entry = Object.values(envelope.stats).find((stat) =>
+      stat.canonicalPath.endsWith("ordering-skill"),
+    );
+    expect(entry).toBeDefined();
+    const paths = (entry?.files ?? []).map((file) => path.basename(file.path));
+    expect(paths).toEqual([...paths].sort());
+    expect(paths).toContain("0.md");
+    expect(paths).toContain("SKILL.md");
+  });
+
   it("finds a newly written skill immediately without recreating the service (R6)", async () => {
     makeClient(async () => {});
     writeGlobalSkill(

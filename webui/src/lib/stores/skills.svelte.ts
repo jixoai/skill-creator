@@ -7,6 +7,7 @@
  *   [2] 编排同一 Provider 根目录内的启停和校验命令。
  *   [3] 派生查询过滤与统计数据。
  *   [4] 持有跨 Workspace 的 BM25 检索态（latest-request-wins + 断线代次失效）。
+ *   [5] 内容重复组态与配置入口动作（duplicates 单发加载 + opener 防重入）。
  */
 import type {
   ProviderId,
@@ -241,15 +242,22 @@ export async function searchSkills(query: string, limit: number = SEARCH_LIMIT):
   }
 }
 
+/** 打开配置入口的在途锁（交互请求 loading lock：双入口并发点击只发一次 RPC）。 */
+let openingSearchConfig = false;
+
 /**
  * 以系统默认编辑器打开 server-owned search-config.toml（检索排除配置）。
  * 成功无 toast（OS 打开编辑器即反馈）；失败 toast——入口可见性优先。
  */
 export async function openSkillSearchConfig(): Promise<void> {
+  if (openingSearchConfig) return;
+  openingSearchConfig = true;
   try {
     await requireRpc().skills.searchConfig.open({});
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error));
+  } finally {
+    openingSearchConfig = false;
   }
 }
 

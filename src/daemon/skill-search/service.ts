@@ -74,10 +74,25 @@ export function createSkillSearchServiceWithRoots(
 
 function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
   const tokenizer = createSkillTokenizer();
-  // 最近一次维护载入的配置（摘要供索引信封校验/落盘；首次维护前为空摘要——
-  // 首次 freshen 一定发生在 maintain 内 config 载入之后）。
+  // 最近一次维护载入的配置（摘要供索引信封校验/落盘）。
   let config: SkillSearchConfig | null = null;
   const index = createSkillSearchIndex(tokenizer, () => config?.configDigest ?? "");
+
+  // daemon boot（domain 装配即 engine 构造）预写配置模板：编辑器入口在任何
+  // 检索发生前也要指向真实存在的文件（复审 P1）。IO 硬错误不阻止 daemon 启动
+  // ——warn 后继续；后续 maintain 中的同类错误按 typed 失败上抛。
+  try {
+    config = loadSkillSearchConfig();
+  } catch (error) {
+    console.warn(
+      `[skill-search] config priming failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  // clean 判定的 roots→watchDirs 缓存（复审 P1：clean 查询不做 readdir/realpath
+  // ——纯字符串键比对 + 缓存目录集合；roots 集合变化即失效走完整维护）。
+  let cachedWatchDirs: string[] = [];
+  let cachedRootsKey: string | null = null;
 
   /** 完整维护路径：config 载入 → scan → canonicalize → freshen → watcher reconcile。 */
   function maintain(): void {
@@ -88,7 +103,9 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
     const excluded = new Set(activeConfig.excludedDirs);
     const scans = canonicalizeCandidates(candidates, excluded);
     index.freshen(scans, readSkillSearchDocument);
-    watcher.reconcile(canonicalWatchDirs(roots));
+    cachedWatchDirs = canonicalWatchDirs(roots);
+    cachedRootsKey = rootsKeyOf(roots);
+    watcher.reconcile(cachedWatchDirs);
   }
 
   const watcher = createSkillSearchWatcher({
@@ -97,15 +114,16 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
   });
 
   /**
-   * 维护门：watcher clean 且配置摘要未变时跳过（纯内存查询）。config 是单文件
-   * 小读取（~200B），每次查询都重读比对——用户编辑 search-config.toml 后无需
-   * 任何文件事件即可触发全量重建（配置变更改变文件集形状，digest 进信封）。
+   * 维护门：roots 集合未变且 watcher clean 且配置摘要未变时跳过（纯内存查询）。
+   * config 是单文件小读取（~200B），每次查询都重读比对——用户编辑
+   * search-config.toml 后无需任何文件事件即可触发全量重建（digest 进信封）。
    */
   function ensureMaintained(): void {
     const roots = resolveRoots();
+    const rootsChanged = cachedRootsKey !== rootsKeyOf(roots);
     const configChanged =
       config === null || loadSkillSearchConfig().configDigest !== config.configDigest;
-    if (configChanged || !watcher.isClean(canonicalWatchDirs(roots))) {
+    if (rootsChanged || configChanged || !watcher.isClean(cachedWatchDirs)) {
       maintain();
     }
   }
@@ -145,7 +163,7 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
 
 /**
  * 去重后的 canonical watch 目录（realpath；不存在/失败目录由 reconcile 的 watch
- * 失败分支处理——它们保持 unwatched，search 回退扫描）。
+ * 失败分支处理——它们保持 unwatched，search 回退扫描）。仅在 maintain 内调用。
  */
 function canonicalWatchDirs(roots: readonly SkillRoot[]): string[] {
   const dirs = new Set<string>();
@@ -159,14 +177,29 @@ function canonicalWatchDirs(roots: readonly SkillRoot[]): string[] {
   return [...dirs].sort();
 }
 
+/** roots 集合的纯字符串身份键（clean 门用；不做任何文件系统调用）。 */
+function rootsKeyOf(roots: readonly SkillRoot[]): string {
+  return roots
+    .map((root) => `${root.workspaceId}:${root.providerId}:${root.rootPath}`)
+    .sort()
+    .join("|");
+}
+
 /** 读取并解析一个 canonical skill 的实际被索引文件集，组合为完整索引文档（供编排与测试复用）。 */
 export function readSkillSearchDocument(scan: CanonicalSkillScan): SkillSearchDocument {
+  // 身份源按 sourcePath 在文件集里定位（files 是路径序快照，source 不保证首位）。
+  const sourceIdentity = scan.files.find((file) => file.path === scan.sourcePath);
+  if (!sourceIdentity) {
+    throw new SkillSearchDocumentReadError(
+      `The scanned skill identity source is missing from the file set: ${scan.sourcePath}`,
+    );
+  }
   const extras: Array<{ path: string; raw: Buffer }> = [];
   for (const file of scan.files) {
     if (file.path === scan.sourcePath) continue;
     extras.push({ path: file.path, raw: readFileWithIdentity(file.path, file) });
   }
-  const sourceRaw = readFileWithIdentity(scan.sourcePath, scan.files[0]);
+  const sourceRaw = readFileWithIdentity(scan.sourcePath, sourceIdentity);
   const parsed = parseSkillDocumentSet(sourceRaw, extras, path.basename(scan.canonicalPath));
   return {
     id: scan.id,

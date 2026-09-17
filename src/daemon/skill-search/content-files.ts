@@ -74,13 +74,20 @@ function collectDirectory(
   dirents.sort((left, right) => compareString(left.name, right.name));
   for (const dirent of dirents) {
     if (files.length >= MAX_FILES) return;
-    if (dirent.name.startsWith(".") || excludedDirs.has(dirent.name)) {
-      // dot 目录/文件全跳（.git/.SKILL.md 等不在收集面）；排除目录按名匹配。
-      continue;
-    }
     const entryPath = path.join(directory, dirent.name);
     if (dirent.isDirectory()) {
-      // 递归只走真实目录：symlink 目录不进（防环、防逃逸，与 scanner 同纪律）。
+      // dot 目录与排除目录不进（复审 P1：dot 规则只作用于目录；dot 文件另按
+      // 身份源变体规则处理，.notes.md 等合法 dot md 仍可进正文）。
+      if (dirent.name.startsWith(".") || excludedDirs.has(dirent.name)) continue;
+      // 递归前 lstat 复核：readdir 与递归之间目录可能被替换为 symlink
+      // （复审 P2：收窄 TOCTOU 窗口；残余窗口与 scanner 同族，见 design 声明）。
+      let descentStat: fs.Stats;
+      try {
+        descentStat = fs.lstatSync(entryPath);
+      } catch {
+        continue;
+      }
+      if (!descentStat.isDirectory() || descentStat.isSymbolicLink()) continue;
       collectDirectory(entryPath, depth + 1, excludedDirs, files);
       continue;
     }

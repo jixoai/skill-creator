@@ -126,6 +126,16 @@
     if (was === "connected" || status !== "connected") return;
     const q = untrack(() => filterQuery.trim());
     if (q) void searchSkills(q);
+    // 挂载竞态补救：初始 list 若因 WS 未就绪失败且至今无数据，重连时补载
+    // （走查 W5 复盘：无过滤词时 error 态会永久停留，仅手动 Retry 可救）。
+    else if (
+      skillsState.target !== null &&
+      skillsState.skills.length === 0 &&
+      !skillsState.loading &&
+      skillsState.error !== null
+    ) {
+      void loadSkills(skillsState.target);
+    }
   });
 
   // 离开本视图时回收全局检索态（命令面板等消费方各持自己的检索生命周期）。

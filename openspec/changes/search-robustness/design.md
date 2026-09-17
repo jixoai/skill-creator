@@ -20,10 +20,16 @@ skill 目录
 body = skillBody（12k cap 不变） + "\n" + extraJoin（合计 12k cap）
 ```
 
+- dot 规则只作用于**目录**（复审 R1 修正）：`.notes.md` 等合法 dot md 进入正文；
+  文件级排除仅身份源变体（skill.md/.SKILL.md 大小写不敏感）。
 - 文档级额外 md 与 SKILL.md 同源安全级别：`lstat` regular file 才读；fd 读取
-  仍走 `O_NOFOLLOW`（win32 为 0）+ `fstat` 身份（ino+size）。
-- `contentHash = sha256(SKILL.md bytes ‖ 每个额外文件 bytes（路径序）)`——
+  仍走 `O_NOFOLLOW`（win32 为 0）+ `fstat` 身份（ino+size）。目录递归前 lstat
+  复核真实目录（收窄 readdir→递归 的 symlink 替换 TOCTOU 窗口；与 scanner
+  同族的残余窗口为本设计声明的威胁模型边界，不承诺无 race 的目录 fd 行走）。
+- `contentHash = sha256(SKILL.md bytes ‖ 每个额外文件 bytes（额外文件路径序）)`——
   保持「实际被索引文件字节」语义；额外文件增删改全部改变 hash。
+- 两个已冻结序列（复审 R2 修正）：hash 拼接序 = source-first；stat 快照
+  `files` = 全路径升序（读取按 sourcePath 定位身份源，不假设首位）。
 - `PARSER_VERSION` → `matter-mdset-v2`；任何抽提/cap 规则再变更必须递增。
 
 ## D2 stat 形状与信封 v3
@@ -44,7 +50,9 @@ stats[id] = {
 ## D3 排除配置（R2）
 
 - 路径：`<appDir>/search-config.toml`（与 search-index.json 同目录，
-  server-owned）。
+  server-owned）。daemon boot（domain 装配即 engine 构造）预写模板：编辑器
+  入口在任何检索前都指向真实文件；构造期 IO 硬错误 warn 不阻止启动，
+  maintain 中的同类错误按 typed 失败上抛（复审 R1 修正）。
 - 内置默认排除（代码冻结）：dot 目录全跳（独立于配置，不可配置关闭）+
   `node_modules`, `build`, `dist`, `target`, `__pycache__`, `tmp`, `logs`。
 - 配置模板（boot 缺失时原子写；写入带 TOML 注释说明语义与追加语义）：
@@ -90,6 +98,11 @@ search()：
   freshen 实测量级 <100ms（1k 全量 build 319ms，增量远轻），停顿可接受；
   更大语料自动降级 lazy——大语料的后台分片刷新属于 >10k 文档 Tantivy 评估
   同期的工程，不在本 change 偷渡。
+- clean 路径零 realpath（复审 R1 修正）：roots 集合以纯字符串键缓存，键变或
+  dirty/config 变更才走 maintain；canonical watch dirs 只在 maintain 内解析。
+- watch 经可注入 seam（`WatchFactory`）：单测用确定性假句柄（同步事件 + 假
+  计时器），真实 fs.watch 保留一个宽松 deadline 的集成用例——FSEvents 投递
+  时序不作单测依赖（复审实测三项时序抖动）。
 - `persistent:false` + `dispose()` 显式 close 全部句柄；dispose 接入
   `daemon/index.ts` stop coordinator（`settleTeardown("skill search", …)`），
   不阻塞进程退出。
