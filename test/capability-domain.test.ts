@@ -3,7 +3,7 @@
  * focused test 且 authority class 逐项标注；class 清单与 manager-contract-map 的
  * authority 列一致（差异表入 artifacts）。」
  * 正交意图：
- *   [1] authority 逐项标注钉死（19 项领域能力）。
+ *   [1] authority 逐项标注钉死（21 项领域能力）。
  *   [2] 与 manager-contract-map 的 procedure 一一对应（skills/workspace/creator/
  *       repository 四域；daemon/dsh/acp/steward 面不在 MCP 供给范围，见差异表）。
  *   [3] DomainError 归一与真实 handler 冒烟（stub domain，不触文件系统）。
@@ -13,6 +13,23 @@ import { describe, expect, it } from "vitest";
 import { createManagerCapabilityRegistry } from "../src/daemon/capability/index.js";
 import type { DaemonDomain } from "../src/daemon/domain.js";
 import { DomainError } from "../src/daemon/domain-error.js";
+import { SkillSearchResultSchema } from "../src/shared/contracts/search.js";
+
+/** skillSearch 桩的固定结果（经契约 schema parse 过的完整字段 fixture）。 */
+const searchResultFixture = SkillSearchResultSchema.parse({
+  id: `sk_${"a1b2c3d4".repeat(3)}`,
+  name: "fixture-skill",
+  description: "Fixture skill for the search capability stub.",
+  canonicalPath: "/tmp/fixture/fixture-skill",
+  installations: [
+    { path: "/tmp/fixture/fixture-skill", workspaceId: "~", providerId: "claude-code" },
+  ],
+  contentHash: `${"ab".repeat(32)}`,
+  disabled: false,
+  conflict: false,
+  score: 0.5,
+  duplicates: [],
+});
 
 function stubDomain(): DaemonDomain {
   return {
@@ -39,6 +56,9 @@ function stubDomain(): DaemonDomain {
       validate: () => {
         throw new Error("not exercised");
       },
+    },
+    skillSearch: {
+      search: async () => [searchResultFixture],
     },
     skillsUpdate: {
       checkUpdates: () => {
@@ -97,6 +117,7 @@ const DOMAIN_AUTHORITY: Record<string, string> = {
   "skills.info": "readonly",
   "skills.toggle": "approved-mutation",
   "skills.validate": "readonly",
+  "skills.search": "readonly",
   "skills.update.check": "readonly",
   "skills.update.apply": "approved-mutation",
   "creator.load": "readonly",
@@ -129,6 +150,7 @@ describe("manager domain capability registration (tasks 1.2)", () => {
       "skills.info",
       "skills.toggle",
       "skills.validate",
+      "skills.search",
       "skills.update.check",
       "skills.update.apply",
       "workspace.list",
@@ -152,6 +174,11 @@ describe("manager domain capability registration (tasks 1.2)", () => {
   it("executes a readonly capability end to end (workspace.list)", async () => {
     const result = await registry.call("workspace.list", {}, "agent");
     expect(result).toEqual({ kind: "ok", value: { workspaces: [] } });
+  });
+
+  it("executes the readonly skills.search capability end to end (skill-search-integration C2)", async () => {
+    const result = await registry.call("skills.search", { query: "fixture" }, "agent");
+    expect(result).toEqual({ kind: "ok", value: { results: [searchResultFixture] } });
   });
 
   it("normalizes DomainError into typed failed results", async () => {

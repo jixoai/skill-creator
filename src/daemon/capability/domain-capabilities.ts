@@ -7,6 +7,8 @@
  * authority 判定口径：底面真相是否落 Manager 数据/用户磁盘。creator.load/revisions
  * 与 repository.scan 是读/发现面 → readonly（与 4.1「技能文档/快照只读面」一致；
  * tasks 字面「creator 读写（approved-mutation）」窄化为写面，见 artifacts 差异表）。
+ * 修订 [2026-09-17]（skill-search-integration C2）：登记 skills.search（readonly——
+ * BM25 检索不写盘；结果携带稳定 sk_ id 与作用域三元组）。
  *
  * 正交意图：
  *   [1] 领域能力面：Manager RPC procedure 的同名能力登记（输入 schema 与
@@ -24,6 +26,7 @@ import {
   RepositoryScanInputSchema,
   SkillsInfoInputSchema,
   SkillsListInputSchema,
+  SkillsSearchInputSchema,
   SkillsToggleInputSchema,
   WorkspaceAddInputSchema,
   WorkspaceRemoveInputSchema,
@@ -74,7 +77,13 @@ const none = z.object({});
 /** 能力面消费的域模块子集（结构化依赖：解 domain ↔ capability 自引用环）。 */
 export type DomainCapabilityDeps = Pick<
   DaemonDomain,
-  "workspaces" | "skills" | "creator" | "repository" | "sourceRegistry" | "skillsUpdate"
+  | "workspaces"
+  | "skills"
+  | "skillSearch"
+  | "creator"
+  | "repository"
+  | "sourceRegistry"
+  | "skillsUpdate"
 >;
 
 /**
@@ -163,6 +172,22 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
         invoke(async () => {
           const parsed = SkillsInfoInputSchema.parse(input);
           return domain.skills.validate(parsed, parsed.skillId);
+        }),
+    },
+    {
+      name: "skills.search",
+      description:
+        "Search installed local skills across all workspaces; returns stable skill ids with workspace/provider scope.",
+      authority: "readonly",
+      input: SkillsSearchInputSchema,
+      handler: (input) =>
+        invoke(async () => {
+          const parsed = SkillsSearchInputSchema.parse(input);
+          return {
+            results: await domain.skillSearch.search(parsed.query, {
+              limit: parsed.limit ?? 10,
+            }),
+          };
         }),
     },
     {

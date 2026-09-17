@@ -107,6 +107,7 @@ import {
   UpdateCheckInputSchema,
   UpdateCheckResultSchema,
 } from "./contracts/skills-update.js";
+import { SkillSearchOptionsSchema, SkillSearchResultSchema } from "./contracts/search.js";
 import {
   AnalyzeInputSchema,
   AnalyzeResultSchema,
@@ -166,6 +167,13 @@ export const CreatorRemoveInputSchema = z.object({
   skillId: SkillIdSchema,
   expectedRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
 });
+/** skills.search 输入（query min-1 是 RPC 合同；limit 复用检索选项的 1..50 边界与默认值）。 */
+export const SkillsSearchInputSchema = z
+  .object({
+    query: z.string().min(1),
+    limit: SkillSearchOptionsSchema.shape.limit,
+  })
+  .strict();
 /** repository.scan 输入。 */
 export const RepositoryScanInputSchema = z.object({
   source: z.string().trim().min(1),
@@ -190,6 +198,13 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     toggle: oc.input(SkillsToggleInputSchema).output(ToggleSummarySchema),
     /** Validate one Workspace Provider-scoped skill. */
     validate: oc.input(SkillsInfoInputSchema).output(ValidateResultSchema),
+    /**
+     * Search local skills across all workspaces (daemon 长驻检索：canonical 去重 +
+     * BM25 + 冻结 rerank；返回稳定 sk_ id 与 installations 作用域三元组)。
+     */
+    search: oc
+      .input(SkillsSearchInputSchema)
+      .output(z.object({ results: z.array(SkillSearchResultSchema) })),
     update: {
       /** Compare skills-CLI lock hashes against upstream and report outdated skills. */
       check: oc.input(UpdateCheckInputSchema).output(UpdateCheckResultSchema),

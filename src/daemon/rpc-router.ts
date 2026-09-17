@@ -58,6 +58,10 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       validate: rpc.skills.validate.handler(async ({ input }) =>
         domain.skills.validate(input, input.skillId),
       ),
+      // skill-search-integration C1：daemon 长驻检索单例（索引 IO 故障经错误边界透传）。
+      search: rpc.skills.search.handler(async ({ input }) => ({
+        results: await domain.skillSearch.search(input.query, { limit: input.limit ?? 10 }),
+      })),
       update: {
         check: rpc.skills.update.check.handler(async ({ input }) => {
           const discovered = await domain.skills.list(input, true);

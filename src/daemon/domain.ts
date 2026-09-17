@@ -10,7 +10,7 @@
  * Orthogonal intents:
  *   [1] Construct and expose the domain modules.
  *   [2] Keep dependency wiring out of transports and module implementations.
- *   [3] Own the skills-CLI probe + update service instances for the daemon lifetime.
+ *   [3] Own daemon-lifetime service instances: skills-CLI probe/update, skill search.
  *   [4] Own the ACP bridge subprocess pool for the daemon lifetime.
  */
 import { createAcpBridgeService, type AcpBridgeService } from "./acp-bridge-service.js";
@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { appDir } from "../shared/paths.js";
 
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
+import { createSkillSearchService, type SkillSearchService } from "./skill-search/service.js";
 import {
   createSkillIntelligenceService,
   type SkillIntelligenceService,
@@ -73,6 +74,8 @@ export interface DaemonDomain {
   skillsCliProbe: SkillsCliProbe;
   /** skills-CLI 更新检查与应用服务；复用 repository install 流水线。 */
   skillsUpdate: SkillsUpdateService;
+  /** daemon 长驻本地技能检索单例（server-owned roots；索引惰性加载 + stat 增量）。 */
+  skillSearch: SkillSearchService;
   /** ACP 子进程池 + stdio↔WS 帧桥 + 安全门。 */
   acpBridge: AcpBridgeService;
   /** 只读技能分析 + proposal 草稿审批服务。 */
@@ -159,6 +162,7 @@ export function createDaemonDomain(
     sourceRegistry: createSourceRegistry(),
     skillsCliProbe,
     skillsUpdate: createSkillsUpdateService(workspaces, skills, skillsCliProbe, repository),
+    skillSearch: createSkillSearchService(),
     acpBridge: createAcpBridgeService(workspaces),
     skillIntelligence,
     steward: createStewardService(workspaces, skills, skillIntelligence, {

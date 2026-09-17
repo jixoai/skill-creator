@@ -37,9 +37,31 @@ let sandbox = "";
 let domain: DaemonDomain;
 let web: WebServer | null = null;
 
+/** provider catalog 的 Global root env overrides（skills_search 往返需要 HOME 沙箱）。 */
+const PROVIDER_HOME_OVERRIDES = [
+  "CODEX_HOME",
+  "CLAUDE_CONFIG_DIR",
+  "VIBE_HOME",
+  "HERMES_HOME",
+  "AUTOHAND_HOME",
+  "GROK_HOME",
+] as const;
+const previousEnv: Record<string, string | undefined> = {};
+
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "sc-mcp-test-"));
   const isolatedHome = path.join(sandbox, "state");
+  for (const name of [
+    "HOME",
+    "SKILL_CREATOR_HOME",
+    "XDG_CONFIG_HOME",
+    ...PROVIDER_HOME_OVERRIDES,
+  ]) {
+    previousEnv[name] = process.env[name];
+  }
+  for (const name of PROVIDER_HOME_OVERRIDES) delete process.env[name];
+  delete process.env.XDG_CONFIG_HOME;
+  process.env.HOME = path.join(sandbox, "home");
   process.env.SKILL_CREATOR_HOME = isolatedHome;
   setHomeOverride(isolatedHome);
   domain = createDaemonDomain();
@@ -51,6 +73,17 @@ afterEach(async () => {
   await domain.repository.dispose();
   await domain.steward.dispose();
   setHomeOverride(null);
+  for (const name of [
+    "HOME",
+    "SKILL_CREATOR_HOME",
+    "XDG_CONFIG_HOME",
+    ...PROVIDER_HOME_OVERRIDES,
+  ]) {
+    const previous = previousEnv[name];
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+    delete previousEnv[name];
+  }
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
@@ -74,6 +107,7 @@ describe("skill-creator mcp server (task 4.1)", () => {
       // readonly 面在场（capability 名 . → _）。
       expect(names).toContain("workspace_list");
       expect(names).toContain("skills_list");
+      expect(names).toContain("skills_search");
       expect(names).toContain("skills_update_check");
       expect(names).toContain("creator_load");
       expect(names).toContain(mcpToolName("repository.sources.list"));
@@ -81,6 +115,8 @@ describe("skill-creator mcp server (task 4.1)", () => {
       expect(names).not.toContain("skills_toggle");
       expect(names).not.toContain("creator_save");
       expect(names).not.toContain("repository_install");
+      // readonly 检索无 propose 变体（skill-search-integration C2 不扩张 mutation 面）。
+      expect(names).not.toContain("skills_search_propose");
       // schema-faithful：workspace_list 描述符携带输入 schema。
       const listTool = tools.tools.find((tool) => tool.name === "workspace_list");
       expect(listTool?.description).toBeTruthy();
@@ -98,6 +134,48 @@ describe("skill-creator mcp server (task 4.1)", () => {
       const parsed = JSON.parse(text) as { kind: string; value?: { workspaces?: unknown[] } };
       expect(parsed.kind).toBe("ok");
       expect(Array.isArray(parsed.value?.workspaces)).toBe(true);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("searches sandboxed local skills through the stdio face (skill-search-integration)", async () => {
+    const skillDirectory = path.join(
+      sandbox,
+      "home",
+      ".claude",
+      "skills",
+      "react-component-design",
+    );
+    fs.mkdirSync(skillDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDirectory, "SKILL.md"),
+      "---\nname: react-component-design\ndescription: Design React components with care.\n---\n# React component design\n\nComposition over inheritance.\n",
+    );
+
+    const { client, server } = await connectedClient();
+    try {
+      const result = await client.callTool({
+        name: "skills_search",
+        arguments: { query: "react" },
+      });
+      const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+      const parsed = JSON.parse(text) as {
+        kind: string;
+        value?: {
+          results?: Array<{
+            id?: string;
+            installations?: Array<{ path?: string; workspaceId?: string; providerId?: string }>;
+          }>;
+        };
+      };
+      expect(parsed.kind).toBe("ok");
+      const hit = parsed.value?.results?.[0];
+      expect(hit?.id).toMatch(/^sk_[a-f0-9]{24}$/);
+      expect(hit?.installations).toEqual([
+        { path: skillDirectory, workspaceId: "~", providerId: "claude-code" },
+      ]);
     } finally {
       await client.close();
       await server.close();

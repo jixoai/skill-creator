@@ -21,6 +21,7 @@ import { safeParseExternal, safeParseJson } from "../../shared/external-input.js
 import type { SkillInstallation, SkillSearchDocument } from "../../shared/contracts/search.js";
 import { SkillInstallationSchema } from "../../shared/contracts/search.js";
 import { SkillIdSchema } from "../../shared/contracts/skills.js";
+import { DomainError } from "../domain-error.js";
 import { atomicWriteUtf8 } from "../path-safety.js";
 import type { CanonicalSkillScan } from "./canonicalize.js";
 import { PARSER_VERSION } from "./parser.js";
@@ -107,10 +108,13 @@ export interface SkillSearchIndex {
   documentCount: () => number;
 }
 
-/** 索引 IO 故障（EACCES/EIO/ENOSPC/原子 rename 失败等）：hard error，不降级为空索引。 */
-export class SkillSearchIndexError extends Error {
+/**
+ * 索引 IO 故障（EACCES/EIO/ENOSPC/原子 rename 失败等）：hard error，不降级为空索引。
+ * 继承 DomainError(UNAVAILABLE)：RPC 错误边界把它投影为 typed 失败而非 INTERNAL_SERVER_ERROR。
+ */
+export class SkillSearchIndexError extends DomainError {
   constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
+    super("UNAVAILABLE", message, options);
     this.name = "SkillSearchIndexError";
   }
 }

@@ -131,6 +131,7 @@ export const AGENT_MODES: Readonly<Record<DshAgentMode, AgentModeDefinition>> = 
     tools: [
       "workspace_list",
       "skills_list",
+      "skills_search",
       "skills_info",
       "skills_validate",
       "creator_load",
@@ -144,6 +145,7 @@ export const AGENT_MODES: Readonly<Record<DshAgentMode, AgentModeDefinition>> = 
     tools: [
       "workspace_list",
       "skills_list",
+      "skills_search",
       "skills_info",
       "skills_validate",
       "skills_toggle",
@@ -159,6 +161,7 @@ export const AGENT_MODES: Readonly<Record<DshAgentMode, AgentModeDefinition>> = 
     tools: [
       "workspace_list",
       "skills_list",
+      "skills_search",
       "skills_info",
       "skills_validate",
       "repository_scan",

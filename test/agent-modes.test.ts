@@ -39,6 +39,17 @@ describe("agent mode catalog consistency", () => {
       expect(AGENT_MODES[mode].tools!.length).toBeGreaterThan(0);
     }
   });
+
+  it("every focused mode allows the skills_search tool (skill-search-integration C3)", () => {
+    // 「任何模式都能检索本地技能」：capability skills.search 投影基名 skills_search。
+    for (const mode of ["create", "manage", "explore"] as const) {
+      expect(AGENT_MODES[mode].tools).toContain("skills_search");
+      expect(mcpToolAllowedInMode(mode, "mcp__skill-creator__skills_search")).toBe(true);
+    }
+    // free 前缀全放行，不进名单。
+    expect(AGENT_MODES.free.tools).toBeNull();
+    expect(mcpToolAllowedInMode("free", "mcp__skill-creator__skills_search")).toBe(true);
+  });
 });
 
 describe("productToolDenyList native tool policy", () => {

@@ -19,6 +19,7 @@ import {
   type SkillSearchResult,
 } from "../../shared/contracts/search.js";
 import { canonicalizeCandidates, type CanonicalSkillScan } from "./canonicalize.js";
+import { DomainError } from "../domain-error.js";
 import { createSkillSearchIndex } from "./index.js";
 import { rankResults } from "./ranking.js";
 import { parseSkillDocument } from "./parser.js";
@@ -37,9 +38,9 @@ export type SkillSearchService = ReturnType<typeof createSkillSearchEngine>;
  * SKILL.md 在扫描快照后发生替换或变为 symlink 时的读取失败。
  * 该错误宁可终止本轮检索，也不接受无法证明身份的文件字节。
  */
-export class SkillSearchDocumentReadError extends Error {
+export class SkillSearchDocumentReadError extends DomainError {
   constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
+    super("UNAVAILABLE", message, options);
     this.name = "SkillSearchDocumentReadError";
   }
 }
