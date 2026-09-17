@@ -63,6 +63,8 @@ beforeEach(() => {
   for (const name of PROVIDER_HOME_OVERRIDES) delete process.env[name];
   delete process.env.XDG_CONFIG_HOME;
   process.env.HOME = path.join(sandbox, "home");
+  // os.homedir() 在 win32 读 USERPROFILE：子进程继承的隔离集必须同时覆盖。
+  process.env.USERPROFILE = process.env.HOME;
   process.env.SKILL_CREATOR_HOME = isolatedHome;
   setHomeOverride(isolatedHome);
   domain = createDaemonDomain();

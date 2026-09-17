@@ -9,7 +9,12 @@
  *   [2] 错误矩阵（版本不符、损坏 JSON、loadJSON 失败重建；EACCES hard error）。
  *   [3] 串行并发 last-writer-wins 与读回可用性。
  */
-import { blockFileAccess, restoreFileAccess } from "./helpers/fault-injection.js";
+import {
+  blockFileAccess,
+  holdFileForBlockedWrite,
+  releaseHeldFile,
+  restoreFileAccess,
+} from "./helpers/fault-injection.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -257,7 +262,7 @@ describe("skill search index error matrix", () => {
     index.freshen(scans(), readSkillSearchDocument);
     const file = path.join(home, ".skill-creator", "search-index.json");
     const before = fs.readFileSync(file, "utf8");
-    blockFileAccess(file);
+    holdFileForBlockedWrite(file);
 
     try {
       writeSkill("beta", skillContent("beta", "second skill"));
@@ -268,7 +273,7 @@ describe("skill search index error matrix", () => {
       // 保留原文件，不降级为空索引。
       expect(fs.readFileSync(file, "utf8")).toBe(before);
     } finally {
-      restoreFileAccess(file);
+      releaseHeldFile(file);
     }
   });
 });
