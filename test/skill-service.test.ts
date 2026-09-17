@@ -151,3 +151,33 @@ describe("skill service discovery cache (perf-firstscreen B-6)", () => {
     expect(after.disabled).toBe(true);
   });
 });
+
+describe("skill service discovery invalidation (codex perf-review P1-1 core)", () => {
+  it("a read after invalidateDiscovery rescans even while an older discovery is still in flight", async () => {
+    const skillDir = path.join(sandbox, "invalidated-skill");
+    fs.mkdirSync(skillDir);
+    fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# inv\n", "utf8");
+    const seen: boolean[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const workspaces = createWorkspaceRegistry();
+    const skills = createSkillService(workspaces, {
+      // 每次调用记录当时磁盘上是否有新文档；第一次调用被 gate 住（在途）。
+      discoverSkills: async () => {
+        seen.push(fs.existsSync(path.join(skillDir, "SKILL.md")));
+        await gate;
+        return [discoveredSkill(skillDir)];
+      },
+    });
+
+    const stale = skills.list(codexTarget); // 在途（安装前的旧快照语境）
+    fs.writeFileSync(path.join(skillDir, "extra.md"), "installed\n", "utf8");
+    skills.invalidateDiscovery(codexTarget); // repository install 落盘后
+    const fresh = skills.list(codexTarget); // 必须重新 discovery
+    release();
+    await Promise.all([stale, fresh]);
+    expect(seen.length).toBe(2); // 两次独立扫描，无跨请求复用
+  });
+});

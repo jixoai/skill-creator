@@ -183,3 +183,46 @@ describe("creator draft frontmatter projection", () => {
     expect(frontmatter.version).toBe(2);
   });
 });
+
+describe("loadWorkspaces in-flight sharing (perf-firstscreen B-2 / codex P1-2)", () => {
+  it("shares one request across same-generation concurrent callers", async () => {
+    const list = vi.fn(async () => ({
+      workspaces: [makeWorkspace({ id: "~" as const, kind: "global" })],
+    }));
+    rpcClient = { workspace: { list } };
+    const { loadWorkspaces } = await import("../workspaces.svelte");
+    const [a, b] = await Promise.all([loadWorkspaces(), loadWorkspaces()]);
+    expect(a).toBe("loaded");
+    expect(b).toBe("loaded");
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse an in-flight promise across connection generations", async () => {
+    const resolvers: Array<(value: { workspaces: Workspace[] }) => void> = [];
+    const list = vi.fn(
+      () =>
+        new Promise<{ workspaces: Workspace[] }>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    rpcClient = { workspace: { list } };
+    const { loadWorkspaces } = await import("../workspaces.svelte");
+
+    // 旧代发起（不 settle——半开 WS 的悬死请求）
+    const stale = loadWorkspaces();
+    expect(list).toHaveBeenCalledTimes(1);
+
+    // 断线重连：connection owner generation 递增，新调用必须发起新请求
+    connectionGeneration += 1;
+    const fresh = loadWorkspaces();
+    expect(list).toHaveBeenCalledTimes(2);
+
+    // 两代各自 settle；旧代因 generation 失效投影 superseded
+    for (const resolve of resolvers) {
+      resolve({ workspaces: [makeWorkspace({ id: "~" as const, kind: "global" })] });
+    }
+    const outcomes = await Promise.all([stale, fresh]);
+    expect(outcomes[0]).toBe("superseded");
+    expect(outcomes[1]).toBe("loaded");
+  });
+});

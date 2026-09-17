@@ -67,7 +67,7 @@ function providerCountKey(workspaceId: WorkspaceId, providerId: ProviderId): str
  * root 却读 ~/.claude settings/plugins + 遍历插件 installPath」的全局
  * 副作用（真实语料 50 roots 下重复 50 遍）。claude-code 保留默认行为。
  */
-const SKIP_PLUGINS_PATH = path.join(os.tmpdir(), ".skill-creator-skip-plugins");
+const SKIP_PLUGINS_PATH = path.join(os.tmpdir(), `.skill-creator-skip-plugins-${process.pid}`);
 
 /**
  * 单遍扫描一个 immutable snapshot：每个存在的 root 只调一次 lister，

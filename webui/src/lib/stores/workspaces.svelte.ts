@@ -27,7 +27,11 @@ export type WorkspaceLoadOutcome = "loaded" | "superseded" | "failed";
 // （registry 投影全量扫描）；layout connected-effect 与组件挂载会在首屏
 // 并发触发，重复请求会各自占用 daemon 事件循环。后来者共享同一在途
 // Promise；代次门语义不变（新的显式加载仍作废旧响应的提交资格）。
-let inflightWorkspaces: Promise<WorkspaceLoadOutcome> | null = null;
+// codex perf-review P1-2：在途项绑定创建时的 connection owner generation——
+// 断线会让旧请求失去提交资格（且半开 WS 可能让它永不 settle），重连后的
+// 调用不得复用跨代的悬死 Promise，必须发起新加载。
+let inflightWorkspaces: { generation: number; promise: Promise<WorkspaceLoadOutcome> } | null =
+  null;
 
 /** Global 与导入 Workspace 的全局导航状态。 */
 export const workspaceState = $state<{
@@ -37,13 +41,19 @@ export const workspaceState = $state<{
   error: string | null;
 }>({ workspaces: [], activeId: "~", loading: true, error: null });
 
-/** 从 daemon 刷新 workspace registry 投影（在途共享，见 inflightWorkspaces）。 */
+/** 从 daemon 刷新 workspace registry 投影（同代在途共享，见 inflightWorkspaces）。 */
 export async function loadWorkspaces(force = false): Promise<WorkspaceLoadOutcome> {
-  if (!force && inflightWorkspaces !== null) return inflightWorkspaces;
-  inflightWorkspaces = performLoadWorkspaces().finally(() => {
-    inflightWorkspaces = null;
+  const generation = getConnectionGeneration();
+  const reusable =
+    inflightWorkspaces !== null && inflightWorkspaces.generation === generation
+      ? inflightWorkspaces.promise
+      : null;
+  if (!force && reusable !== null) return reusable;
+  const promise = performLoadWorkspaces().finally(() => {
+    if (inflightWorkspaces?.promise === promise) inflightWorkspaces = null;
   });
-  return inflightWorkspaces;
+  inflightWorkspaces = { generation, promise };
+  return promise;
 }
 
 async function performLoadWorkspaces(): Promise<WorkspaceLoadOutcome> {

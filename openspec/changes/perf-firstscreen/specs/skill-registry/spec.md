@@ -21,13 +21,17 @@ root 扫描 MUST 跳过 Claude 插件发现全局副作用；claude-code provide
 - **WHEN** 扫描 ~/.codex 等 root
 - **THEN** 不触发 ~/.claude settings/plugins 的读取与插件目录扫描
 
-### Requirement: skills 读路径的 discovery 复用与 probe 预热
+### Requirement: skills 读路径的 discovery 在途合并与 probe 预热
 
 `skills.list` MUST NOT 阻塞等待 skills-CLI probe 的首次完成；daemon 启动
 后 MUST 后台预热 probe，probe 未到位时 provenance 投影为缺省并在到位后
-的下一次投影中补全。同 target 的 `resolveSkill`/`info`/`validate` MUST
-复用短 TTL 的 discovery 结果；`toggle`/`rename` 等改变磁盘状态的
-mutation 完成后 MUST 使该缓存失效。
+的下一次投影中补全。同 target 的并发读（`list`/`resolveSkill`/`info`/
+`validate` 同时在途时）MUST 共享同一次 discovery；**跨请求不缓存**（曾按
+3s TTL 实现并实测否决：steward/creator/测试 fixture 的「直接写盘→再读」
+对缓存不可见，写后读一致性优先——跨请求缓存留给索引化投影）。所有改变
+磁盘状态的写路径（`toggle`、creator save/delete、steward apply/rollback、
+repository install）完成后 MUST 调用 discovery 失效（invalidateDiscovery），
+使后续读重新扫描。
 
 #### Scenario: 首次进 provider 不等待 npx
 

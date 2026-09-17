@@ -471,6 +471,10 @@ async function installedSkillId(
   target: ExpectedInstallTarget,
   skills: SkillService,
 ): Promise<SkillId> {
+  // codex perf-review P1-1：installer 刚写盘——重发现验证链（resolve/validate）
+  // 之前必须丢弃同 target 的在途 discovery，否则复用安装前的旧快照会把新
+  // 装的技能判成 NOT_FOUND。skills-update 复用同一链路，同样受益。
+  skills.invalidateDiscovery(target.target);
   const canonicalPath = canonicalDirectory(target.expectedPath);
   if (canonicalPath !== target.expectedPath) {
     throw new Error("Installed skill path must not resolve through a symbolic link.");

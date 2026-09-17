@@ -39,3 +39,13 @@ roots / 518 技能目录 / 4.6MB SKILL.md）实测定位三个杀手：
   技能 30-160ms → ~0。
 - 不改：RPC 协议形状、registry 持久态、skill-search 索引语义。
 - 根治路径（skillCount 消费 skill-search 索引、WS 订阅推送）另立 change。
+
+## 复核处置记录（codex perf-review，2026-09-18）
+
+- P1-1/P1-2（repository install 写后失效、in-flight 绑 connection
+  generation）已修复；P2 哨兵路径进程唯一化、probe 预热 catch、本 delta
+  的 TTL→在途合并语义同步均已落地。
+- 已接受的残留：ccski `discoverPluginSkills` 对 pluginsFile 缺失静默跳过，
+  但 `~/.claude/settings.json` 的单文件读取仍发生（ccski API 未暴露
+  settings 隔离口）；成本远小于原插件目录遍历，接受为已知边界，根治随
+  ccski 上游 skipPlugins 透传或 B-7 索引化。
