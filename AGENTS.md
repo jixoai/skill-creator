@@ -101,6 +101,14 @@ Queue Face         = agent.queue.*：内核 ReactLoopInbox 的读写面——lis
                       next-turn/next-step 待处理项，update 按 messageId 行级
                       edit（保留附件块）/remove/steer（仅 running）；真相在内核，
                       QueueDock 混合乐观行渲染
+Skill Search Index = 第一代本地技能索引：Canonical Skill（realpath 去重）+
+                      contentHash 内容分组 + MiniSearch BM25+ 字段加权 +
+                      冻结 rerank；持久信封（五版本 + payloadDigest），
+                      `skill-creator search` 进程内消费（CLI），daemon/GUI 接入留后续
+SkillTokenizer     = 冻结规则的检索分词器：NFKC + Intl.Segmenter(zh) + 连续
+                      单字滑窗 bigram + Latin 标识符切分（camel/kebab/@scope/
+                      URL）；query/doc 同管线，TOKENIZER_VERSION 版本化，
+                      small-ICU 探针降级 pure-bigram；冻结期望表为逐字契约
 Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
 Agent Kernel       = headless DSH 内核：单 dsh-base bundle + 产品 preset（persona/ask-user）
                       + 工具面收窄（专注模式禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
@@ -168,6 +176,7 @@ Tray WebUI        |    |                          |          ^
 Browser (web mode)-+                  |          |
                  |                    +-- Workspace Registry
                  |                    +-- skills (ccski) + skillsUpdate (lock hash)
+                 |                    +-- skill-search (canonicalize + BM25 index + ranking)
                  |                    +-- creator / repository (Git)
                  |                    +-- sourceRegistry (sources.json)
                  |                    +-- capability (capability-core + manager registry)
@@ -475,6 +484,14 @@ src/
 |   |-- domain.ts ------------- [2] domain module composition / dependency wiring
 |   |-- rpc-router.ts ---------- [5] skill+update / workspace+creator / repository+sources / agent+card+proposals / status+acp / error boundary
 |   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
+|   |-- skill-search/
+|   |   |-- tokenizer.ts -------- [3] 冻结规则分词器（Segmenter+滑窗 bigram+Latin 切分；版本化+探针降级）
+|   |   |-- scanner.ts ---------- [2] provider roots 扫描（symlink 入口层跟进 / 递归≤2 / broken 跳过）
+|   |   |-- canonicalize.ts ----- [3] realpath 去重 + installations 作用域 + 双文件规则 + stat 四元组
+|   |   |-- parser.ts ----------- [2] SKILL.md → SearchDocument（frontmatter 容错 + fence 状态机 + 截断）
+|   |   |-- index.ts ------------ [4] MiniSearch 封装 + v2 信封（五版本+payloadDigest）+ stat 增量 + 错误矩阵
+|   |   |-- ranking.ts ---------- [2] 冻结 rerank + content-dup 折叠 + 稳定 tie-break
+|   |   `-- service.ts ---------- [2] server-owned 编排（生产零参 + 显式测试 seam）
 |   |-- creator-service.ts ----- [3] create / round-trip update / revision delete / change log
 |   |-- repository-service.ts -- [3] pinned lifecycle / inspect / preview-install
 |   |-- source-registry.ts ----- [3] curated+user sources / https-only / atomic sources.json
@@ -563,6 +580,8 @@ Install output path -----------> Provider root direct child + SKILL.md -> local 
 sources.json ------------------> JSON parse + safeParse --------------> user sources / empty
 user source gitUrl ------------> https-only + dedupe + user_ id -----> Discover feed
 skills-CLI lock (v3/v1) -------> safeParse ---------------------------> null -> skipped update
+search-index.json -------------> JSON parse + 五版本信封 + payloadDigest + 逐层校验 -> 空索引重建 / IO hard error
+search SKILL.md 读取 ----------> lstat regular + O_NOFOLLOW fd + fstat 身份校验 -> 拒绝候选 / typed read error
 GitHub Trees API response -----> JSON parse + tree parser ------------> unavailable（不抛错）
 npx skills list --json ---------> JSON parse + schema ----------------> empty path map
 ACP agent discovery which -----> exit-code projection ----------------> available/missing
