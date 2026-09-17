@@ -5,4 +5,4 @@
       验证）+ service 编排（共用 freshen）
 - [x] 2.3 webui store（loadSkillDuplicates 代次门 + 状态）+ WorkspacesHome
       区块（组行/跳转/空态/错误态）+ 单测
-- [ ] 2.4 验证门 + 走查（区块真实渲染与跳转）
+- [x] 2.4 验证门 + 走查（区块真实渲染与跳转）

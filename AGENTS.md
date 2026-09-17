@@ -102,13 +102,21 @@ Queue Face         = agent.queue.*：内核 ReactLoopInbox 的读写面——lis
                       edit（保留附件块）/remove/steer（仅 running）；真相在内核，
                       QueueDock 混合乐观行渲染
 Skill Search Index = 第一代本地技能索引：Canonical Skill（realpath 去重）+
-                      contentHash 内容分组 + MiniSearch BM25+ 字段加权 +
-                      冻结 rerank；持久信封（五版本 + payloadDigest）。
+                      文件集正文（SKILL.md 身份源 + 额外 *.md；排除目录 =
+                      内置 ∪ search-config.toml 追加，dot 规则只作用于目录）+
+                      contentHash 文件集字节分组 + MiniSearch BM25+ 字段加权 +
+                      冻结 rerank；持久信封 v3（六版本 + payloadDigest +
+                      searchConfigDigest + 逐文件 stat 四元组）。watcher 事件
+                      驱动新鲜度（clean 查询零 readdir/realpath；≤20k 同步
+                      flush，更大语料 dirty-lazy；WatchFactory seam 可测）。
                       消费方：`skill-creator search` CLI（进程内）+ daemon
-                      skills.search RPC + MCP skills_search（双面 readonly）
-                      + agent 全模式工具面 + GUI 三链路（ProviderView 过滤 /
+                      skills.search / skills.duplicates RPC + MCP
+                      skills_search / skills_duplicates（双面 readonly）+
+                      agent 全模式工具面 + GUI 三链路（ProviderView 过滤 /
                       ⌘K 面板 / composer $ 菜单；store 层 latest-request-wins
-                      searchState 单例，消费方退出各自作废在途检索）
+                      searchState 单例，消费方退出各自作废在途检索）+
+                      WorkspacesHome 同内容技能区块 + search-config.toml
+                      编辑器入口（searchConfig.open，boot 预写模板）
 SkillTokenizer     = 冻结规则的检索分词器：NFKC + Intl.Segmenter(zh) + 连续
                       单字滑窗 bigram + Latin 标识符切分（camel/kebab/@scope/
                       URL）；query/doc 同管线，TOKENIZER_VERSION 版本化，
@@ -491,11 +499,14 @@ src/
 |   |-- skill-search/
 |   |   |-- tokenizer.ts -------- [3] 冻结规则分词器（Segmenter+滑窗 bigram+Latin 切分；版本化+探针降级）
 |   |   |-- scanner.ts ---------- [2] provider roots 扫描（symlink 入口层跟进 / 递归≤2 / broken 跳过）
-|   |   |-- canonicalize.ts ----- [3] realpath 去重 + installations 作用域 + 双文件规则 + stat 四元组
-|   |   |-- parser.ts ----------- [2] SKILL.md → SearchDocument（frontmatter 容错 + fence 状态机 + 截断）
-|   |   |-- index.ts ------------ [4] MiniSearch 封装 + v2 信封（五版本+payloadDigest）+ stat 增量 + 错误矩阵
+|   |   |-- canonicalize.ts ----- [3] realpath 去重 + installations 作用域 + 双文件规则 + 文件集 stat 快照（路径序）
+|   |   |-- content-files.ts ---- [2] 额外 md 收集（dot 目录/排除目录/深度/数量 cap；descent lstat 复核）
+|   |   |-- parser.ts ----------- [2] 文件集 → SearchDocument（身份源 frontmatter + 额外正文 + fence 状态机 + 截断）
+|   |   |-- config.ts ----------- [2] search-config.toml 生命周期（boot 模板/解析收窄/摘要）
+|   |   |-- index.ts ------------ [4] MiniSearch 封装 + v3 信封（六版本+双 digest+文件集 stat）+ 增量 + duplicates 投影
+|   |   |-- watcher.ts ---------- [2] 事件驱动新鲜度（WatchFactory seam/去抖 flush/≥20k lazy）
 |   |   |-- ranking.ts ---------- [2] 冻结 rerank + content-dup 折叠 + 稳定 tie-break
-|   |   `-- service.ts ---------- [2] server-owned 编排（生产零参 + 显式测试 seam）
+|   |   `-- service.ts ---------- [3] server-owned 编排（boot 预写 config/维护门/rootsKey 缓存/测试 seam）
 |   |-- creator-service.ts ----- [3] create / round-trip update / revision delete / change log
 |   |-- repository-service.ts -- [3] pinned lifecycle / inspect / preview-install
 |   |-- source-registry.ts ----- [3] curated+user sources / https-only / atomic sources.json
@@ -523,7 +534,8 @@ src/
 |   |   |-- skill-creator-mcp.ts [3] MCP server（tools / resources / propose 变体）
 |   |   |-- cards.ts ----------- [3] ui:// 卡片模板（escape 强制）+ 资源注册表
 |   |   `-- proposals.ts ------- [2] mutation→proposal 审批链 + 审计
-|   |-- dsh-host-lifecycle.ts -- [2] 内核宿主挂载 / 降级 / 有界停止
+|   |-- search-config-opener.ts  [1] 平台 opener（start/open/xdg-open；退出码 typed 失败，win32 豁免）
+|-- dsh-host-lifecycle.ts -- [2] 内核宿主挂载 / 降级 / 有界停止
 |   |-- dsh-profile-support.ts - [2] heal 镜像 + 传递闭包补全（kernel 共用）
 |   |-- opentray-windows-host.ts [1] win32 native material comparator bridge
 |   |-- web-server.ts ---------- [3] SPA / auth upgrade / bounded oRPC lifecycle
