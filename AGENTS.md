@@ -103,8 +103,11 @@ Queue Face         = agent.queue.*：内核 ReactLoopInbox 的读写面——lis
                       QueueDock 混合乐观行渲染
 Skill Search Index = 第一代本地技能索引：Canonical Skill（realpath 去重）+
                       contentHash 内容分组 + MiniSearch BM25+ 字段加权 +
-                      冻结 rerank；持久信封（五版本 + payloadDigest），
-                      `skill-creator search` 进程内消费（CLI），daemon/GUI 接入留后续
+                      冻结 rerank；持久信封（五版本 + payloadDigest）。
+                      消费方：`skill-creator search` CLI（进程内）+ daemon
+                      skills.search RPC + MCP skills_search（双面 readonly）
+                      + agent 全模式工具面；GUI 三链路（ProviderView 过滤 /
+                      ⌘K 面板 / composer $ 菜单）见 skill-search-gui
 SkillTokenizer     = 冻结规则的检索分词器：NFKC + Intl.Segmenter(zh) + 连续
                       单字滑窗 bigram + Latin 标识符切分（camel/kebab/@scope/
                       URL）；query/doc 同管线，TOKENIZER_VERSION 版本化，
