@@ -15,25 +15,25 @@
   import { goById } from "$lib/shell";
   import {
     installationScopeLabel,
+    openSkillSearchConfig,
+    SEARCH_DEBOUNCE_MS,
+    SEARCH_LIMIT,
     resetSkillSearch,
     searchSkills,
     searchState,
     workspaceEntryPath,
     workspaceState,
   } from "$lib/store.svelte";
-  import type { SkillSearchResult } from "$lib/types";
+  import type { ProviderId, SkillSearchResult, WorkspaceId } from "$lib/types";
   import IconFolder from "@lucide/svelte/icons/folder-open";
   import IconPen from "@lucide/svelte/icons/file-plus-2";
   import IconGlobe from "@lucide/svelte/icons/globe";
+  import IconSliders from "@lucide/svelte/icons/sliders-horizontal";
   import IconGrid from "@lucide/svelte/icons/layout-grid";
   import IconSparkles from "@lucide/svelte/icons/sparkles";
 
   let open = $state(false);
   let query = $state("");
-
-  /** 输入去抖窗口与检索条数上限（GUI 消费方共用约定）。 */
-  const SEARCH_DEBOUNCE_MS = 150;
-  const SEARCH_LIMIT = 20;
 
   $effect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -80,8 +80,8 @@
   interface SkillPaletteRow {
     key: string;
     result: SkillSearchResult;
-    workspaceId: string;
-    providerId: string;
+    workspaceId: WorkspaceId;
+    providerId: ProviderId;
     heading: string;
   }
 
@@ -145,6 +145,13 @@
       >
         <IconGlobe class="h-4 w-4" />
         Repository
+      </Command.Item>
+      <Command.Item
+        onSelect={() => run(() => void openSkillSearchConfig())}
+        value="go search config toml"
+      >
+        <IconSliders class="h-4 w-4" />
+        Open search config
       </Command.Item>
     </Command.Group>
 

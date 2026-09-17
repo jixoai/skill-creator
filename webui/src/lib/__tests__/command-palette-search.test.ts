@@ -15,6 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const store = vi.hoisted(() => ({
   searchSkills: vi.fn(async (_query: string, _limit?: number) => undefined),
   resetSkillSearch: vi.fn(),
+  openSkillSearchConfig: vi.fn(async () => undefined),
+  // 集中常量随 store 导出（复审小包）：mock 提供同值。
+  SEARCH_DEBOUNCE_MS: 150,
+  SEARCH_LIMIT: 20,
   searchState: { query: "", results: [], searching: false, error: null },
   workspaceState: { workspaces: [] },
   installationScopeLabel: vi.fn(() => "WS / P"),

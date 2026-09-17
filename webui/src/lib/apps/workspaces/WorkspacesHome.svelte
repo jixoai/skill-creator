@@ -7,7 +7,10 @@
 -->
 <script lang="ts">
   import {
+    installationScopeLabel,
+    loadSkillDuplicates,
     loadWorkspaces,
+    skillDuplicatesState,
     removeWorkspace,
     workspaceEntryPath,
     workspaceState,
@@ -24,6 +27,7 @@
   import IconCompass from "@lucide/svelte/icons/compass";
   import IconMessage from "@lucide/svelte/icons/message-square";
   import { requestImportWorkspace } from "$lib/stores/import-workspace.svelte";
+  import { goById } from "$lib/shell";
   import { showToast } from "$lib/toast.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -53,6 +57,7 @@
 
   $effect(() => {
     void loadWorkspaces();
+    void loadSkillDuplicates();
     // 首屏 Continue 区需要会话列表（面板未打开时也要有数据）。
     if (!agentSessionsList.loaded && !agentSessionsList.loading) void loadAgentSessions();
   });
@@ -163,6 +168,59 @@
   </header>
 
   <div class="mx-auto mt-5 w-full max-w-3xl space-y-6">
+    {#if skillDuplicatesState.groups.length > 0}
+      <!-- 同内容技能（search-duplicates P3）：索引 contentHash 分组事实；
+           成员行点击直达其 provider 详情。空组不渲染；失败区块内一行文案。 -->
+      <section aria-label="Content-duplicate skills" class="rounded-lg border border-border">
+        <header class="flex items-center justify-between border-b border-border px-3 py-2">
+          <h2 class="text-xs font-medium">同内容技能</h2>
+          <span class="text-[11px] text-muted-foreground">
+            {skillDuplicatesState.groups.length} 组
+          </span>
+        </header>
+        {#if skillDuplicatesState.error}
+          <p class="px-3 py-2 text-xs text-muted-foreground">
+            重复组加载失败：{skillDuplicatesState.error}
+          </p>
+        {:else}
+          <ul class="divide-y divide-border">
+            {#each skillDuplicatesState.groups as group (group.contentHash)}
+              <li class="px-3 py-2">
+                <div class="flex flex-wrap gap-x-3 gap-y-1">
+                  {#each group.members as member (member.id)}
+                    <button
+                      type="button"
+                      class="inline-flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 text-xs hover:bg-accent"
+                      onclick={() =>
+                        goById(
+                          "workspaces.provider",
+                          {
+                            wsId: member.installations[0]?.workspaceId ?? "~",
+                            providerId: member.installations[0]?.providerId ?? "",
+                          },
+                          { skill: member.id, view: "detail" },
+                        )}
+                    >
+                      <span class="truncate font-medium">{member.name}</span>
+                      <span class="shrink-0 text-[11px] text-muted-foreground">
+                        {installationScopeLabel(
+                          member.installations[0]?.workspaceId ?? "~",
+                          member.installations[0]?.providerId ?? "",
+                        )}
+                      </span>
+                      {#if member.disabled}
+                        <Badge variant="outline" class="h-4 px-1 text-[10px]">disabled</Badge>
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
+
     <!-- 快速行动：回答「这个软件能帮我什么」——每个动作直达一个具体行为。 -->
     <section aria-label="Quick actions" class="grid grid-cols-1 gap-2 min-[560px]:grid-cols-2">
       <button

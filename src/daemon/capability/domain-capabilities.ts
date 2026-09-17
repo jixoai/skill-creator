@@ -18,6 +18,7 @@
  * 本清单，authority class 由 registry 统一执行。
  */
 import type { CapabilityCallResult, CapabilityDefinition } from "./core.js";
+import { searchConfigPath } from "../skill-search/config.js";
 import type { DaemonDomain } from "../domain.js";
 import { DomainError } from "../domain-error.js";
 import {
@@ -80,6 +81,7 @@ export type DomainCapabilityDeps = Pick<
   | "workspaces"
   | "skills"
   | "skillSearch"
+  | "searchConfigOpener"
   | "creator"
   | "repository"
   | "sourceRegistry"
@@ -188,6 +190,31 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
               limit: parsed.limit ?? 10,
             }),
           };
+        }),
+    },
+    {
+      name: "skills.duplicates",
+      description:
+        "List content-duplicate skill groups from the search index (contentHash groups with more than one canonical entry).",
+      authority: "readonly",
+      input: z.object({}).strict(),
+      handler: (input) =>
+        invoke(async () => {
+          z.object({}).strict().parse(input);
+          return { groups: await domain.skillSearch.duplicates() };
+        }),
+    },
+    {
+      name: "skills.search_config.open",
+      description:
+        "Open the server-owned skill search config file (search-config.toml) with the system default editor.",
+      authority: "readonly",
+      input: z.object({}).strict(),
+      handler: (input) =>
+        invoke(async () => {
+          z.object({}).strict().parse(input);
+          await domain.searchConfigOpener(searchConfigPath());
+          return { opened: true };
         }),
     },
     {

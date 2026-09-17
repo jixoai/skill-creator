@@ -30,7 +30,11 @@ export type {
   ValidateResult,
 } from "$shared/contracts/skills.js";
 /** 技能检索（skills.search BM25）使用的共享类型。 */
-export type { SkillInstallation, SkillSearchResult } from "$shared/contracts/search.js";
+export type {
+  SkillDuplicateGroup,
+  SkillInstallation,
+  SkillSearchResult,
+} from "$shared/contracts/search.js";
 /** Provider 更新检查/重装使用的共享类型。 */
 export type {
   ApplyUpdateResultEntry,

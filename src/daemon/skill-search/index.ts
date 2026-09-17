@@ -28,8 +28,8 @@ import { PARSER_VERSION } from "./parser.js";
 import { RANKING_VERSION, type RankingCandidate } from "./ranking.js";
 import { createSkillTokenizer, TOKENIZER_VERSION, type SkillTokenizer } from "./tokenizer.js";
 
-/** 信封结构版本（v2 起：payloadDigest 载荷完整性摘要）。 */
-const SCHEMA_VERSION = 2;
+/** 信封结构版本（v3：stat 升级为文件集四元组 + configDigest 进信封）。 */
+const SCHEMA_VERSION = 3;
 /** 引擎名与持久化文件名。 */
 const ENGINE_NAME = "minisearch";
 const SEARCH_INDEX_FILE = "search-index.json";
@@ -75,13 +75,19 @@ export const ENGINE_CONFIG_DIGEST = createHash("sha256")
   .digest("hex")
   .slice(0, 16);
 
-/** 每个索引文档的持久化 stat 元数据（信封 stats 值形状）。 */
-export interface SkillIndexStat {
-  canonicalPath: string;
+/** 文件集身份（无内容读取的新鲜度键；保时保长的替换由 ino/ctimeMs 检出）。 */
+export interface SkillFileIdentity {
+  path: string;
   mtimeMs: number;
   size: number;
   ino: number;
   ctimeMs: number;
+}
+
+/** 每个索引文档的持久化 stat 元数据（信封 stats 值形状：v3 起为文件集）。 */
+export interface SkillIndexStat {
+  canonicalPath: string;
+  files: SkillFileIdentity[];
   installations: SkillInstallation[];
   contentHash: string;
   disabled: boolean;
@@ -105,7 +111,22 @@ export interface SkillSearchIndex {
     readDocument: (scan: CanonicalSkillScan) => SkillSearchDocument,
   ) => FreshenSummary;
   search: (query: string) => RankingCandidate[];
+  /** 无查询的内容重复组投影（contentHash 分组 >1；冻结排序，见 duplicatesOf）。 */
+  duplicates: () => IndexDuplicateGroup[];
   documentCount: () => number;
+}
+
+/** 索引层重复组成员（name 取存储投影）。 */
+export interface IndexDuplicateGroup {
+  contentHash: string;
+  members: Array<{
+    id: string;
+    name: string;
+    canonicalPath: string;
+    installations: SkillInstallation[];
+    disabled: boolean;
+    conflict: boolean;
+  }>;
 }
 
 /**
@@ -119,13 +140,20 @@ export class SkillSearchIndexError extends DomainError {
   }
 }
 
-const StatEnvelopeSchema = z
+const FileIdentitySchema = z
   .object({
-    canonicalPath: z.string().min(1),
+    path: z.string().min(1),
     mtimeMs: z.number(),
     size: z.number(),
     ino: z.number(),
     ctimeMs: z.number(),
+  })
+  .strict();
+
+const StatEnvelopeSchema = z
+  .object({
+    canonicalPath: z.string().min(1),
+    files: z.array(FileIdentitySchema).min(1),
     installations: z.array(SkillInstallationSchema).min(1),
     contentHash: z.string().regex(/^[a-f0-9]{64}$/),
     disabled: z.boolean(),
@@ -136,11 +164,13 @@ const StatEnvelopeSchema = z
 
 const IndexEnvelopeSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
     tokenizerVersion: z.string(),
     parserVersion: z.string(),
     rankingVersion: z.string(),
     engine: z.object({ name: z.string(), version: z.string(), configDigest: z.string() }).strict(),
+    /** 生效排除配置的冻结摘要（配置变更触发全量重建）。 */
+    searchConfigDigest: z.string().min(1),
     /** 载荷完整性摘要：sha256(JSON.stringify({index, stats}))，写入时计算、加载时重算。 */
     payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
     index: z.unknown(),
@@ -213,19 +243,29 @@ function miniSearchOptions(tokenizer: SkillTokenizer): Options<SkillSearchDocume
 /**
  * 创建绑定 appDir 的持久索引。索引文件路径恒由 appDir() 派生（每次 freshen 重新解析，
  * 与 setHomeOverride 测试隔离兼容）；不接受调用方传入的索引路径。
+ * getSearchConfigDigest 在加载校验与落盘时求值（配置可在 daemon 生命周期内被
+ * 用户编辑——摘要变化触发全量重建）；缺省返回「空排除集」的稳定摘要（sha256
+ * of ""），满足信封 searchConfigDigest 的非空约束。
  */
 export function createSkillSearchIndex(
   tokenizer: SkillTokenizer = createSkillTokenizer(),
+  getSearchConfigDigest: () => string = () => UNCONFIGURED_CONFIG_DIGEST,
 ): SkillSearchIndex {
-  return new MiniSearchSkillSearchIndex(tokenizer);
+  return new MiniSearchSkillSearchIndex(tokenizer, getSearchConfigDigest);
 }
+
+/** 空排除集的冻结摘要（与 config 模块对空清单的摘要算法一致：sha256(join("\n")) of []）。 */
+const UNCONFIGURED_CONFIG_DIGEST = createHash("sha256").digest("hex");
 
 class MiniSearchSkillSearchIndex implements SkillSearchIndex {
   private miniSearch: MiniSearch<SkillSearchDocument>;
   private stats = new Map<string, SkillIndexStat>();
   private loaded = false;
 
-  constructor(private readonly tokenizer: SkillTokenizer) {
+  constructor(
+    private readonly tokenizer: SkillTokenizer,
+    private readonly getSearchConfigDigest: () => string,
+  ) {
     this.miniSearch = createSearchMiniSearch(tokenizer);
   }
 
@@ -297,6 +337,44 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
 
   search(query: string): RankingCandidate[] {
     return searchMiniSearchInstance(this.miniSearch, query);
+  }
+
+  duplicates(): IndexDuplicateGroup[] {
+    // 数据源为内存 stats + 存储投影（不发查询）；分组键 contentHash，仅保留
+    // 成员数 >1 的组。排序冻结：组间按成员 canonicalPath 最小值升序，组内按
+    // canonicalPath 升序——与搜索结果 tie-break 同族的稳定可重放次序。
+    const byHash = new Map<string, Array<{ id: string; stat: SkillIndexStat }>>();
+    for (const [id, stat] of this.stats) {
+      const group = byHash.get(stat.contentHash) ?? [];
+      group.push({ id, stat });
+      byHash.set(stat.contentHash, group);
+    }
+    const groups: IndexDuplicateGroup[] = [];
+    for (const [contentHash, entries] of byHash) {
+      if (entries.length < 2) continue;
+      entries.sort((left, right) =>
+        compareCanonicalPath(left.stat.canonicalPath, right.stat.canonicalPath),
+      );
+      const members: IndexDuplicateGroup["members"] = [];
+      for (const { id, stat } of entries) {
+        const stored = this.miniSearch.getStoredFields(id);
+        const name = typeof stored?.name === "string" ? stored.name : null;
+        if (name === null) continue; // 存储投影缺席 = 不变量破坏；跳过而非伪名
+        members.push({
+          id,
+          name,
+          canonicalPath: stat.canonicalPath,
+          installations: stat.installations,
+          disabled: stat.disabled,
+          conflict: stat.conflict,
+        });
+      }
+      if (members.length >= 2) groups.push({ contentHash, members });
+    }
+    groups.sort((left, right) =>
+      compareCanonicalPath(left.members[0].canonicalPath, right.members[0].canonicalPath),
+    );
+    return groups;
   }
 
   documentCount(): number {
@@ -400,7 +478,8 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       envelope.rankingVersion !== RANKING_VERSION ||
       envelope.engine.name !== ENGINE_NAME ||
       envelope.engine.version !== minisearchRuntimeVersion() ||
-      envelope.engine.configDigest !== ENGINE_CONFIG_DIGEST
+      envelope.engine.configDigest !== ENGINE_CONFIG_DIGEST ||
+      envelope.searchConfigDigest !== this.getSearchConfigDigest()
     ) {
       return { kind: "empty", reason: "incompatible" };
     }
@@ -481,6 +560,7 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
         version: minisearchRuntimeVersion(),
         configDigest: ENGINE_CONFIG_DIGEST,
       },
+      searchConfigDigest: this.getSearchConfigDigest(),
       payloadDigest: payloadDigest(index, stats),
       index,
       stats,
@@ -497,6 +577,11 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
   }
 }
 
+/** canonicalPath 升序比较（重复组冻结排序共用）。 */
+function compareCanonicalPath(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 /**
  * 载荷完整性摘要：对 {index, stats} 的 JSON 序列化做 sha256。JSON.stringify 的
  * 键序与数字格式经 stringify→parse→stringify 往返稳定（MiniSearch 载荷只含
@@ -509,24 +594,34 @@ export function payloadDigest(index: unknown, stats: unknown): string {
 }
 
 /**
- * stat 键比较：canonicalPath 与四元组（mtimeMs+size+ino+ctimeMs）全等且
- * installations/disabled/conflict 未漂移时视为新鲜（新增 symlink 入口、启停切换会改变
- * installations/disabled/conflict，即使 SKILL.md 字节未变也需重投影）。
- * scan 不读取内容，因此这里不把 contentHash 与当前字节逐次重算绑定；canonicalPath
- * 加四元组绑定真实扫描对象。持有 app 缓存写权限者仍可篡改合法格式的 hash，这是缓存
- * 威胁模型内的残留风险，完整 hash 绑定需额外内容读取成本。
+ * stat 键比较：canonicalPath 与文件集（路径 + 逐文件四元组）全等且 installations/
+ * disabled/conflict 未漂移时视为新鲜（新增 symlink 入口、启停切换会改变
+ * installations/disabled/conflict，即使文件字节未变也需重投影）。scan 不读取内容，
+ * 因此这里不把 contentHash 与当前字节逐次重算绑定；canonicalPath 加文件集身份绑定
+ * 真实扫描对象。持有 app 缓存写权限者仍可篡改合法格式的 hash，这是缓存威胁模型内
+ * 的残留风险，完整 hash 绑定需额外内容读取成本。
  */
 function statIsCurrent(stat: SkillIndexStat, scan: CanonicalSkillScan): boolean {
   if (
     stat.canonicalPath !== scan.canonicalPath ||
-    stat.mtimeMs !== scan.stat.mtimeMs ||
-    stat.size !== scan.stat.size ||
-    stat.ino !== scan.stat.ino ||
-    stat.ctimeMs !== scan.stat.ctimeMs ||
     stat.disabled !== scan.disabled ||
-    stat.conflict !== scan.conflict
+    stat.conflict !== scan.conflict ||
+    stat.files.length !== scan.files.length
   ) {
     return false;
+  }
+  for (let index = 0; index < stat.files.length; index += 1) {
+    const indexed = stat.files[index];
+    const candidate = scan.files[index];
+    if (
+      indexed.path !== candidate.path ||
+      indexed.mtimeMs !== candidate.mtimeMs ||
+      indexed.size !== candidate.size ||
+      indexed.ino !== candidate.ino ||
+      indexed.ctimeMs !== candidate.ctimeMs
+    ) {
+      return false;
+    }
   }
   return (
     stat.installations.length === scan.installations.length &&
@@ -544,10 +639,7 @@ function statIsCurrent(stat: SkillIndexStat, scan: CanonicalSkillScan): boolean 
 function statEntry(scan: CanonicalSkillScan, document: SkillSearchDocument): SkillIndexStat {
   return {
     canonicalPath: scan.canonicalPath,
-    mtimeMs: scan.stat.mtimeMs,
-    size: scan.stat.size,
-    ino: scan.stat.ino,
-    ctimeMs: scan.stat.ctimeMs,
+    files: scan.files,
     installations: document.installations,
     contentHash: document.contentHash,
     disabled: document.disabled,

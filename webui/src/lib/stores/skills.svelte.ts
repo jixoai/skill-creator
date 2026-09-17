@@ -10,6 +10,7 @@
  */
 import type {
   ProviderId,
+  SkillDuplicateGroup,
   SkillId,
   SkillInfo,
   SkillMetadata,
@@ -20,6 +21,7 @@ import type {
   WorkspaceProviderTarget,
 } from "../types";
 import { untrack } from "svelte";
+import { showToast } from "$lib/toast.svelte";
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 import { workspaceState } from "./workspaces.svelte";
@@ -204,18 +206,18 @@ export const searchState = $state<{
   error: string | null;
 }>({ query: "", results: [], searching: false, error: null });
 
-/** 检索结果条数上限的默认值（契约上限 50；GUI 消费方共用 20）。 */
-const DEFAULT_SEARCH_LIMIT = 20;
+/** 检索输入去抖窗口（ms）：三消费方（ProviderView/⌘K 面板/$ 菜单）共用同一常量。 */
+export const SEARCH_DEBOUNCE_MS = 150;
+
+/** 检索结果条数上限（契约上限 50；GUI 消费方共用 20）。 */
+export const SEARCH_LIMIT = 20;
 
 /**
  * 跨 Workspace 检索技能（镜像 loadSkills 样板：issue → requireRpc → isCurrent 提交
  * → isLatest 清 loading）。空/全空白 query 不发 RPC（输入 schema min-1 是合同），
  * 直接清空结果态；错误保留旧结果并置 error——降级策略由调用方决定。
  */
-export async function searchSkills(
-  query: string,
-  limit: number = DEFAULT_SEARCH_LIMIT,
-): Promise<void> {
+export async function searchSkills(query: string, limit: number = SEARCH_LIMIT): Promise<void> {
   const trimmed = query.trim();
   if (!trimmed) {
     resetSkillSearch();
@@ -233,8 +235,21 @@ export async function searchSkills(
     if (!request.isCurrent()) return;
     // 保留已提交结果（调用方可降级展示）；错误态由调用方决定降级策略。
     searchState.error = error instanceof Error ? error.message : String(error);
+    console.debug("[skill-search] search failed", searchState.error);
   } finally {
     if (request.isLatest()) searchState.searching = false;
+  }
+}
+
+/**
+ * 以系统默认编辑器打开 server-owned search-config.toml（检索排除配置）。
+ * 成功无 toast（OS 打开编辑器即反馈）；失败 toast——入口可见性优先。
+ */
+export async function openSkillSearchConfig(): Promise<void> {
+  try {
+    await requireRpc().skills.searchConfig.open({});
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -253,4 +268,42 @@ export function installationScopeLabel(workspaceId: WorkspaceId, providerId: Pro
   if (!workspace) return `${workspaceId} / ${providerId}`;
   const provider = workspace.providers.find((entry) => entry.id === providerId);
   return `${workspace.label} / ${provider?.label ?? providerId}`;
+}
+
+/** 跨 Workspace 的内容重复组状态（skills.duplicates：索引 contentHash 分组）。 */
+export const skillDuplicatesState = $state<{
+  groups: SkillDuplicateGroup[];
+  loading: boolean;
+  error: string | null;
+}>({ groups: [], loading: false, error: null });
+
+const duplicatesRequests = createRequestGenerationGate(getConnectionGeneration);
+
+/**
+ * 载入内容重复组（WorkspacesHome 区块数据源；latest-request-wins 纪律同族）。
+ * 失败置 error——区块内一行文案，不 toast（非关键路径）。
+ */
+export async function loadSkillDuplicates(): Promise<void> {
+  const request = duplicatesRequests.issue();
+  skillDuplicatesState.loading = true;
+  skillDuplicatesState.error = null;
+  try {
+    const { groups } = await requireRpc().skills.duplicates({});
+    if (!request.isCurrent()) return;
+    skillDuplicatesState.groups = groups;
+  } catch (error) {
+    if (!request.isCurrent()) return;
+    skillDuplicatesState.error = error instanceof Error ? error.message : String(error);
+    console.debug("[skill-search] duplicates load failed", skillDuplicatesState.error);
+  } finally {
+    if (request.isLatest()) skillDuplicatesState.loading = false;
+  }
+}
+
+/** 回收重复组态（路由离开时）。 */
+export function resetSkillDuplicates(): void {
+  duplicatesRequests.invalidate();
+  skillDuplicatesState.groups = [];
+  skillDuplicatesState.loading = false;
+  skillDuplicatesState.error = null;
 }

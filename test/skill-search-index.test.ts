@@ -158,11 +158,14 @@ describe("skill search index freshness", () => {
 
     // 篡改持久化 stats 的 ino/ctimeMs（模拟保时保长替换后 stat 四元组的 inode 侧差异）。
     const envelope = readEnvelopeFile();
-    const stats = envelope.stats as Record<string, { ino: number; ctimeMs: number }>;
+    const stats = envelope.stats as Record<
+      string,
+      { canonicalPath: string; files: Array<{ ino: number; ctimeMs: number }> }
+    >;
     const alphaKey = Object.keys(stats).find((id) => stats[id].canonicalPath.includes("alpha"));
-    if (!alphaKey) throw new Error("alpha stat missing");
-    stats[alphaKey].ino += 1;
-    stats[alphaKey].ctimeMs += 1;
+    if (!alphaKey || !stats[alphaKey].files[0]) throw new Error("alpha stat missing");
+    stats[alphaKey].files[0].ino += 1;
+    stats[alphaKey].files[0].ctimeMs += 1;
     refreshEnvelopeDigest(envelope);
     writeEnvelopeFile(envelope);
     expect(fs.statSync(file).mtimeMs).toBe(statBefore.mtimeMs);
@@ -197,9 +200,9 @@ describe("skill search index freshness", () => {
     const index = createSkillSearchIndex();
     index.freshen(scans(), readSkillSearchDocument);
     const envelope = readEnvelopeFile();
-    expect(envelope.schemaVersion).toBe(2);
+    expect(envelope.schemaVersion).toBe(3);
     expect(envelope.tokenizerVersion).toBe("segmenter-bigram-v1");
-    expect(envelope.parserVersion).toBe("matter-headings-12k-v1");
+    expect(envelope.parserVersion).toBe("matter-mdset-v2");
     expect(envelope.rankingVersion).toBe("rerank-2026-09-17-v1");
     expect(envelope.engine).toEqual({
       name: "minisearch",

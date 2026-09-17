@@ -17,6 +17,8 @@
   import {
     loadSkills,
     skillsState,
+    openSkillSearchConfig,
+    SEARCH_DEBOUNCE_MS,
     searchSkills,
     searchState,
     resetSkillSearch,
@@ -55,6 +57,7 @@
   import IconPower from "@lucide/svelte/icons/power";
   import IconShield from "@lucide/svelte/icons/shield-check";
   import IconSearch from "@lucide/svelte/icons/search";
+  import IconSliders from "@lucide/svelte/icons/sliders-horizontal";
   import IconX from "@lucide/svelte/icons/x";
 
   type ProviderSearch = { q?: string; skill?: string; view?: "list" | "detail" };
@@ -104,9 +107,6 @@
   });
 
   // ---- q 过滤 → BM25 检索（skill-search-gui C2） ----
-
-  /** 输入去抖窗口：URL q 变化后延迟发检索，避免每个键击一次 RPC。 */
-  const SEARCH_DEBOUNCE_MS = 150;
 
   // URL q 是唯一真相源；非空 q 去抖后触发跨域检索（结果按本 provider 作用域过滤）。
   // 空 q 不发请求（全量列表语义）；定时器在 effect cleanup 回收。
@@ -493,12 +493,21 @@
         />
         <input
           bind:this={filterInputEl}
-          class="h-7 w-full rounded-md border border-input bg-input/20 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          class="h-7 w-full rounded-md border border-input bg-input/20 pl-7 pr-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           placeholder="Filter skills"
           aria-label="Filter skills"
           value={filterQuery}
           oninput={(e) => setFilterQuery((e.currentTarget as HTMLInputElement).value)}
         />
+        <button
+          type="button"
+          class="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label="Open search config"
+          title="Open search config (search-config.toml)"
+          onclick={() => void openSkillSearchConfig()}
+        >
+          <IconSliders class="h-3.5 w-3.5" />
+        </button>
       </div>
     </header>
 

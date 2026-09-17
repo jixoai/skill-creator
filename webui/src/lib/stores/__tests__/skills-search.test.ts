@@ -24,7 +24,15 @@ vi.mock("../connection.svelte", () => ({
   },
 }));
 
-import { resetSkillSearch, searchSkills, searchState } from "../skills.svelte";
+import {
+  loadSkillDuplicates,
+  resetSkillDuplicates,
+  resetSkillSearch,
+  searchSkills,
+  searchState,
+  skillDuplicatesState,
+} from "../skills.svelte";
+import type { SkillDuplicateGroup } from "$shared/contracts/search.js";
 import type { SkillSearchResult } from "$shared/contracts/search.js";
 import { SkillIdSchema } from "$shared/contracts/skills.js";
 import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
@@ -60,6 +68,7 @@ beforeEach(() => {
   connectionGeneration = 0;
   rpcClient = null;
   resetSkillSearch();
+  resetSkillDuplicates();
 });
 
 describe("searchSkills (skill-search-gui C1)", () => {
@@ -131,5 +140,58 @@ describe("searchSkills (skill-search-gui C1)", () => {
     await searchSkills("anything");
     expect(searchState.error).toBe("The Skill Creator daemon is not connected.");
     expect(searchState.searching).toBe(false);
+  });
+});
+
+describe("skill duplicates store (search-duplicates 2.3)", () => {
+  function makeGroup(names: string[]): SkillDuplicateGroup {
+    return {
+      contentHash: "b".repeat(64),
+      members: names.map((name, index) => {
+        const base = makeResult("sk_" + String(index).padStart(2, "0").repeat(12), name);
+        return {
+          id: base.id,
+          name,
+          canonicalPath: `/canonical/${name}`,
+          installations: base.installations,
+          disabled: false,
+          conflict: false,
+        };
+      }),
+    };
+  }
+
+  it("loads duplicate groups and clears loading on success", async () => {
+    const groups = [makeGroup(["twin-a", "twin-b"])];
+    rpcClient = { skills: { duplicates: vi.fn().mockResolvedValue({ groups }) } };
+    await loadSkillDuplicates();
+    expect(skillDuplicatesState.groups).toEqual(groups);
+    expect(skillDuplicatesState.loading).toBe(false);
+    expect(skillDuplicatesState.error).toBeNull();
+  });
+
+  it("records the failure inline without toast-grade state", async () => {
+    rpcClient = { skills: { duplicates: vi.fn().mockRejectedValue(new Error("index unavailable")) } };
+    await loadSkillDuplicates();
+    expect(skillDuplicatesState.groups).toEqual([]);
+    expect(skillDuplicatesState.error).toBe("index unavailable");
+    expect(skillDuplicatesState.loading).toBe(false);
+  });
+
+  it("drops superseded responses after a newer load (latest-request-wins)", async () => {
+    let resolveFirst: (value: { groups: SkillDuplicateGroup[] }) => void = () => {};
+    const first = new Promise<{ groups: SkillDuplicateGroup[] }>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const duplicates = vi
+      .fn()
+      .mockImplementationOnce(() => first)
+      .mockResolvedValueOnce({ groups: [] });
+    rpcClient = { skills: { duplicates } };
+    const slow = void loadSkillDuplicates();
+    await loadSkillDuplicates();
+    resolveFirst({ groups: [makeGroup(["stale", "old"])] });
+    await slow;
+    expect(skillDuplicatesState.groups).toEqual([]);
   });
 });

@@ -21,6 +21,7 @@
   import type { ComposerReferenceInput } from "./composer-chips.js";
   import {
     installationScopeLabel,
+    SEARCH_DEBOUNCE_MS,
     resetSkillSearch,
     searchSkills,
     searchState,
@@ -56,7 +57,6 @@
   const needle = $derived(query.startsWith("$") ? query.slice(1).trim() : "");
 
   /** 输入去抖窗口（与 ProviderView / 命令面板共用约定）。 */
-  const SEARCH_DEBOUNCE_MS = 150;
 
   /** 一个 installation 行：引用三元组从此派生（同一技能多安装多行同 target）。 */
   interface SkillRow {

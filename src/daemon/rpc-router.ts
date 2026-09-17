@@ -16,6 +16,7 @@
  * or weaken the single transport boundary.
  */
 import { implement, ORPCError } from "@orpc/server";
+import { searchConfigPath } from "./skill-search/config.js";
 import { RpcErrorDefinitions } from "../shared/contracts/errors.js";
 import { rpcContract } from "../shared/rpc-contract.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
@@ -61,6 +62,17 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       // skill-search-integration C1：daemon 长驻检索单例（索引 IO 故障经错误边界透传）。
       search: rpc.skills.search.handler(async ({ input }) => ({
         results: await domain.skillSearch.search(input.query, { limit: input.limit ?? 10 }),
+      })),
+      // search-robustness R3：在系统默认编辑器打开 server-owned search-config.toml。
+      searchConfig: {
+        open: rpc.skills.searchConfig.open.handler(async () => {
+          await domain.searchConfigOpener(searchConfigPath());
+          return { opened: true };
+        }),
+      },
+      // search-duplicates P1：内容重复组投影（索引事实，排序冻结）。
+      duplicates: rpc.skills.duplicates.handler(async () => ({
+        groups: await domain.skillSearch.duplicates(),
       })),
       update: {
         check: rpc.skills.update.check.handler(async ({ input }) => {

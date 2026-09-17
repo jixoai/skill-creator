@@ -107,7 +107,11 @@ import {
   UpdateCheckInputSchema,
   UpdateCheckResultSchema,
 } from "./contracts/skills-update.js";
-import { SkillSearchOptionsSchema, SkillSearchResultSchema } from "./contracts/search.js";
+import {
+  SkillSearchOptionsSchema,
+  SkillDuplicateGroupSchema,
+  SkillSearchResultSchema,
+} from "./contracts/search.js";
 import {
   AnalyzeInputSchema,
   AnalyzeResultSchema,
@@ -205,6 +209,20 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     search: oc
       .input(SkillsSearchInputSchema)
       .output(z.object({ results: z.array(SkillSearchResultSchema) })),
+    /**
+     * 检索内容配置面：以系统默认编辑器打开 server-owned 的 search-config.toml
+     * （排除目录清单；路径由 daemon 派生，不接受调用方输入）。
+     */
+    searchConfig: {
+      open: oc.input(z.object({})).output(z.object({ opened: z.boolean() })),
+    },
+    /**
+     * 内容重复组（索引 contentHash 分组 >1；无查询维度的全量重复清单，
+     * 排序冻结可重放）。
+     */
+    duplicates: oc
+      .input(z.object({}))
+      .output(z.object({ groups: z.array(SkillDuplicateGroupSchema) })),
     update: {
       /** Compare skills-CLI lock hashes against upstream and report outdated skills. */
       check: oc.input(UpdateCheckInputSchema).output(UpdateCheckResultSchema),

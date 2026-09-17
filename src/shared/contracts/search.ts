@@ -68,6 +68,28 @@ export const SkillSearchDuplicateSchema = z
 /** content-dup 折叠附注成员。 */
 export type SkillSearchDuplicate = z.infer<typeof SkillSearchDuplicateSchema>;
 
+/** 重复组成员（无查询投影：索引事实，含作用域与状态标记）。 */
+export const SkillDuplicateMemberSchema = z
+  .object({
+    id: SkillIdSchema,
+    name: z.string(),
+    canonicalPath: z.string().min(1),
+    installations: z.array(SkillInstallationSchema).min(1),
+    disabled: z.boolean(),
+    conflict: z.boolean(),
+  })
+  .strict();
+export type SkillDuplicateMember = z.infer<typeof SkillDuplicateMemberSchema>;
+
+/** 内容重复组（contentHash 分组 >1 canonical 条目；冻结排序）。 */
+export const SkillDuplicateGroupSchema = z
+  .object({
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+    members: z.array(SkillDuplicateMemberSchema).min(2),
+  })
+  .strict();
+export type SkillDuplicateGroup = z.infer<typeof SkillDuplicateGroupSchema>;
+
 /** 搜索结果：冻结 tie-break（final desc → name asc → canonicalPath asc）后的稳定投影。 */
 export const SkillSearchResultSchema = z
   .object({

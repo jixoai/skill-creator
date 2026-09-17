@@ -119,7 +119,7 @@ describe("skill search parser", () => {
   });
 
   it("freezes the parser version", () => {
-    expect(PARSER_VERSION).toBe("matter-headings-12k-v1");
+    expect(PARSER_VERSION).toBe("matter-mdset-v2");
   });
 
   it("treats malformed yaml frontmatter as invalid frontmatter, keeping the raw text as body", () => {

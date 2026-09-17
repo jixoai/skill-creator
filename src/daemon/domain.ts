@@ -24,6 +24,7 @@ import { appDir } from "../shared/paths.js";
 
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
 import { createSkillSearchService, type SkillSearchService } from "./skill-search/service.js";
+import { platformOpenFile, type SearchConfigOpener } from "./search-config-opener.js";
 import {
   createSkillIntelligenceService,
   type SkillIntelligenceService,
@@ -74,8 +75,10 @@ export interface DaemonDomain {
   skillsCliProbe: SkillsCliProbe;
   /** skills-CLI 更新检查与应用服务；复用 repository install 流水线。 */
   skillsUpdate: SkillsUpdateService;
-  /** daemon 长驻本地技能检索单例（server-owned roots；索引惰性加载 + stat 增量）。 */
+  /** daemon 长驻本地技能检索单例（server-owned roots；索引惰性加载 + 文件集 stat 增量 + watcher）。 */
   skillSearch: SkillSearchService;
+  /** 以系统默认编辑器打开 server-owned search-config.toml（测试可注入 stub）。 */
+  searchConfigOpener: SearchConfigOpener;
   /** ACP 子进程池 + stdio↔WS 帧桥 + 安全门。 */
   acpBridge: AcpBridgeService;
   /** 只读技能分析 + proposal 草稿审批服务。 */
@@ -109,6 +112,8 @@ export function createDaemonDomain(
     stewardAdapters?: HarnessAdapter[];
     /** 测试注入确定性探测：避免真实 `npx skills list` 子进程把用例时序绑到网络与负载。 */
     skillsCliProbe?: SkillsCliProbe;
+    /** 测试注入 search-config 打开 stub：避免真实 OS 副作用。 */
+    searchConfigOpener?: SearchConfigOpener;
   } = {},
 ): DaemonDomain {
   const kernelHostRef: { handle: DshKernelHandle | null } = { handle: null };
@@ -154,6 +159,7 @@ export function createDaemonDomain(
   const repository = createRepositoryService(workspaces, skills);
   const creator = createCreatorService(workspaces, skills);
   const skillIntelligence = createSkillIntelligenceService(skills, creator);
+  const searchConfigOpener = options.searchConfigOpener ?? platformOpenFile;
   const domain: DaemonDomain = {
     workspaces,
     skills,
@@ -163,6 +169,7 @@ export function createDaemonDomain(
     skillsCliProbe,
     skillsUpdate: createSkillsUpdateService(workspaces, skills, skillsCliProbe, repository),
     skillSearch: createSkillSearchService(),
+    searchConfigOpener,
     acpBridge: createAcpBridgeService(workspaces),
     skillIntelligence,
     steward: createStewardService(workspaces, skills, skillIntelligence, {
