@@ -115,7 +115,9 @@ Skill Search Index = 第一代本地技能索引：Canonical Skill（realpath �
                       agent 全模式工具面 + GUI 三链路（ProviderView 过滤 /
                       ⌘K 面板 / composer $ 菜单；store 层 latest-request-wins
                       searchState 单例，消费方退出各自作废在途检索）+
-                      WorkspacesHome 同内容技能区块 + search-config.toml
+                      ProviderView 技能行/搜索行同源小角标（symlink 式，
+                      数据 = skills.duplicates 单发映射；2026-09-18 用户裁决
+                      废除 WorkspacesHome 整屏区块形式）+ search-config.toml
                       编辑器入口（searchConfig.open，boot 预写模板）
 SkillTokenizer     = 冻结规则的检索分词器：NFKC + Intl.Segmenter(zh) + 连续
                       单字滑窗 bigram + Latin 标识符切分（camel/kebab/@scope/
@@ -505,7 +507,7 @@ src/
 |   |   |-- config.ts ----------- [2] search-config.toml 生命周期（boot 模板/解析收窄/摘要）
 |   |   |-- index.ts ------------ [4] MiniSearch 封装 + v3 信封（六版本+双 digest+文件集 stat）+ 增量 + duplicates 投影
 |   |   |-- watcher.ts ---------- [2] 事件驱动新鲜度（WatchFactory seam/去抖 flush/≥20k lazy）
-|   |   |-- ranking.ts ---------- [2] 冻结 rerank + content-dup 折叠 + 稳定 tie-break
+|   |   |-- ranking.ts ---------- [2] 冻结 rerank + 池前 content-dup 折叠（组代表进 top-40 + primary installations 全组合并，v2 2026-09-18）+ 稳定 tie-break
 |   |   `-- service.ts ---------- [3] server-owned 编排（boot 预写 config/维护门/rootsKey 缓存/测试 seam）
 |   |-- creator-service.ts ----- [3] create / round-trip update / revision delete / change log
 |   |-- repository-service.ts -- [3] pinned lifecycle / inspect / preview-install

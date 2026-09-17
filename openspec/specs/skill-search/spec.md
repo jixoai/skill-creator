@@ -77,26 +77,42 @@ canonicalDirectory)`（与 skills.list 的 SkillId 一致）。
   invalidFrontmatter=true；keywords/triggers 只接受 string|string[]，
   其它类型条目丢弃
 
-### Requirement: content hash 识别内容级重复并折叠结果
+### Requirement: content hash 识别内容级重复并在候选池前折叠
 
 每个索引文档 MUST 携带实际被索引 SKILL.md 原始字节的 SHA-256 contentHash。
-搜索 MUST 在 rerank 之后按 contentHash 折叠：同 hash 组内 final 得分最高
-成员为主结果（final 相等时按 name asc → canonicalPath asc 选主，不依赖
-扫描顺序），其余成员以 `{id, canonicalPath}` 按同一稳定次序附着在
-duplicates 字段（不丢弃数据，供未来 duplicate analysis / merge / sync
-使用）。
+搜索 MUST 按 contentHash 在 top-40 竞争池**之前**折叠（2026-09-18 真实语料
+走查修订，v1 的「池后折叠」被 30+ 份跨 agent 副本挤爆）：全量 BM25 候选先按
+contentHash 分组，组代表（bm25 降序、并列时 canonicalPath 升序）进入 top-40
+池参与 rerank——同内容副本不挤占独特内容的池位。折叠后主结果的
+installations MUST 合并组内全部成员的入口（primary 在前、其余按组内冻结
+序追加，按 path+workspaceId+providerId 三元组去重）；其余成员以
+`{id, canonicalPath}` 按组内冻结序附着在 duplicates 字段。排序 tie-break
+不变（final desc → name asc → canonicalPath asc）；无重复语料下输出与
+v1 完全一致。
 
 #### Scenario: 同内容多路径
 
 - **WHEN** 两个不同 canonical 路径的 skill 内容完全相同且同时命中查询
-- **THEN** 结果只出现 final 得分较高的一个，另一个出现在该结果的
-  duplicates 里；组内成员均参与 top-40 竞争
+- **THEN** 结果只出现代表一个，另一个出现在该结果的 duplicates 里；
+  主结果 installations 同时包含两个成员的入口
+
+#### Scenario: 副本不淹没多样性
+
+- **WHEN** 同一内容存在 34 份副本且另有多个不同内容的低分候选
+- **THEN** top-40 池由每组代表构成；limit 内结果覆盖多个不同 contentHash
+
+#### Scenario: provider 作用域可命中
+
+- **WHEN** 消费方按某 provider 作用域过滤搜索结果的 installations
+- **THEN** 只要该 provider 存在此内容的副本，代表结果的 installations
+  即包含该作用域入口（不因代表选择而丢失）
 
 ### Requirement: 字段加权 BM25 排序与冻结 rerank 公式，输出次序确定
 
 检索 MUST 基于 BM25+（MiniSearch）按字段加权评分：name ×10、description
 ×6、keywords ×5、triggers ×5、headings ×3、body ×1（常量集中于 search
-模块），启用 prefix 与 fuzzy（0.2）。BM25 top-40 候选 MUST 逐个计算冻结的
+模块），启用 prefix 与 fuzzy（0.2）。BM25 top-40 候选（contentHash 组代表，
+见上一 requirement）MUST 逐个计算冻结的
 rerank 信号（大小写不敏感、query trim）：exactName 0.9 / namePrefix 0.5 /
 queryInName 0.4 / keywordExact 0.3 / description 覆盖率 ×0.2（上限 1.0）；
 最终分 = 0.7×(bm25/(bm25+8)) + 0.3×rerank；折叠后排序 MUST 以
@@ -402,13 +418,26 @@ conflict}`；组间按成员 canonicalPath 最小值升序、组内按 canonical
 - **WHEN** WebUI 调 RPC 与 stdio MCP 调 `skills_duplicates`
 - **THEN** 两者来自同一 service 实例投影，结果一致
 
-### Requirement: WorkspacesHome 呈现同内容技能区块
+### Requirement: 同源技能以行内小角标呈现
 
-WorkspacesHome MUST 在存在重复组时渲染「同内容技能」区块：成员行含名称、
-作用域标签，点击跳转对应 ProviderView 技能详情；无重复组时区块不渲染；
-加载失败呈现区块内错误文案（不 toast、不阻塞其余区块）。
+WorkspacesHome MUST NOT 渲染「同内容技能」区块（2026-09-18 用户走查裁决
+废除整屏列表形式）。ProviderView MUST 在技能列表行与搜索结果行上，对内容
+与其他安装相同的技能渲染 symlink 式小角标（箭头图标 + 同源计数 + title
+描述）；角标数据来自连接后单次 `skills.duplicates` 查询构建的 id → 组内
+其他成员数映射；查询失败静默（角标缺失不是错误态）。
 
-#### Scenario: 跳转详情
+#### Scenario: 同源技能行角标
 
-- **WHEN** 点击某重复组成员行
-- **THEN** 导航到该成员 installation 作用域的 provider 详情页
+- **WHEN** 当前列表中某技能 id 属于某重复组成员
+- **THEN** 该行名字旁呈现同源角标，title 注明「Same content as N other
+  installations」
+
+#### Scenario: 唯一内容无角标
+
+- **WHEN** 某技能内容唯一
+- **THEN** 该行不呈现同源角标
+
+#### Scenario: 首页无区块
+
+- **WHEN** 存在重复组时进入 WorkspacesHome
+- **THEN** 页面不出现同内容区块；同源信息只在 Provider 行内呈现
