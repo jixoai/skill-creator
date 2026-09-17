@@ -1,26 +1,32 @@
 <!--
-  `$` 技能引用菜单（skill-refs C1）。
+  `$` 技能引用菜单（skill-refs C1；skill-search-gui C4 切 BM25 数据源）。
   用户原始需求 [2026-09-16]：「AgentChatInput 输入要支持 `$` 开头引用 skill（类似
   `@` 的引用能力）。注意我们的 skill 是有 Workspace 概念的，所以要基于 Workspace
   分组，然后要支持模糊的搜索能力。」——与 `/name`（命令触发）语义不同：`$name`
   把技能文档作为引用注入上下文（daemon 展开为 [reference: skill …] 文本块）。
+  修订 [2026-09-17]（skill-search-gui）：去全量拉取与前端子序列匹配——非空
+  needle 经 debounce 走 `skills.search`（BM25 + 中文分词 + typo 容忍）；行从
+  结果 installations 派生；空 needle 显示占位（916+ 技能不可浏览也不该拉）。
   正交意图：
-    [1] 数据面：workspace.list × 每 available provider `skills.list`（排除
-        disabled——对 agent 不可用的技能引用无意义）；懒加载门同 ReferenceMenu
-        （稿文以 `$` 开头才拉），离开 `$` 态即失效缓存（下次触发重拉，不陈旧）。
-    [2] 分组与模糊：组头 = `Workspace label / provider label`（workspace 声明序，
-        Global 在前）；组内经 composer-fuzzy 子序列加权排序。entries 按当前 query
-        预过滤，TriggerMenu 的 matcher 只承担「尾随空白即收起」的自然关闭语义。
-  妥协声明：跨组同名技能并列不去重（occurrence 配对已消歧义）；provider 失败
-    置空组不阻塞其余组（sourceLabel 计数提示）。
+    [1] 数据面：`$` 态 + 非空 needle → debounce(~150ms) `skills.search`；
+        fetchSession 令牌在离开 `$` 态 / 清空 needle 时失效在途回调。
+    [2] 分组与行：结果 × installations 派生（组头 = `Workspace label /
+        provider label` 反查；同一技能多安装 = 多行同引用，key 唯一）；
+        TriggerMenu 的 matcher 只承担「尾随空白即收起」的自然关闭语义。
+  妥协声明：跨组同名技能并列不去重（occurrence 配对已消歧义）；检索错误保留
+    已提交结果，sourceLabel 提示失败（菜单不渲染错误占位行）。
 -->
 <script lang="ts">
   import TriggerMenu, { type MenuEntry } from "./TriggerMenu.svelte";
   import type { ComposerReferenceInput } from "./composer-chips.js";
-  import { fuzzyMatch, fuzzySort } from "./composer-fuzzy.js";
-  import { workspaceState, loadWorkspaces } from "$lib/stores/workspaces.svelte";
+  import {
+    installationScopeLabel,
+    resetSkillSearch,
+    searchSkills,
+    searchState,
+  } from "$lib/stores/skills.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
-  import type { SkillMetadata } from "$shared/contracts/skills.js";
+  import type { SkillId } from "$shared/contracts/skills.js";
   import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
 
   /** 选中落点：与 ReferencePick 同构（token 进稿文 + 引用进 registry）。 */
@@ -46,127 +52,119 @@
   } = $props();
 
   const query = $derived(text.startsWith("$") ? (text.split("\n", 1)[0] ?? "") : "");
+  /** `$` 后的检索词（trim 后非空才发检索；空 = 占位态不拉全量）。 */
+  const needle = $derived(query.startsWith("$") ? query.slice(1).trim() : "");
 
-  /** 一个 provider 组的行数据（key 跨组同名技能唯一）。 */
+  /** 输入去抖窗口（与 ProviderView / 命令面板共用约定）。 */
+  const SEARCH_DEBOUNCE_MS = 150;
+
+  /** 一个 installation 行：引用三元组从此派生（同一技能多安装多行同 target）。 */
   interface SkillRow {
-    skill: SkillMetadata;
-    workspaceId: WorkspaceId;
-    providerId: ProviderId;
+    key: string;
+    name: string;
+    token: string;
     entry: MenuEntry;
-  }
-  interface ProviderGroup {
-    group: string;
-    rows: SkillRow[];
+    target: { workspaceId: WorkspaceId; providerId: ProviderId; skillId: SkillId };
   }
 
-  /** null = 未加载（本菜单会话）；组序 = workspace 声明序。 */
-  let groups = $state<ProviderGroup[] | null>(null);
-  let loading = $state(false);
   let failure = $state<string | null>(null);
-  /** 加载会话令牌：离开 `$` 态自增，过期响应不入场。 */
+  /** 加载会话令牌：离开 `$` 态 / 清空 needle 自增，过期去抖回调不发包。 */
   let fetchSession = 0;
+  /** needle 转换门：离开 `$` 态只在「曾有过检索」时作废共享 searchState。 */
+  let hadNeedle = false;
 
-  // 懒加载门 + 会话失效：稿文以 `$` 开头才拉；离开 `$` 态清缓存（下次触发重拉）。
+  // 懒加载门：`$` 态 + 非空 needle 去抖后走 BM25 检索；断线沿 getRpc() 优雅失败
+  // 先例（failure 提示，不抛错）。空 needle 只显示占位，绝不全量拉取。
   $effect(() => {
-    if (!query.startsWith("$")) {
-      if (groups !== null || loading) fetchSession += 1;
-      groups = null;
-      failure = null;
+    const current = needle;
+    if (!current) {
+      if (hadNeedle) {
+        // 离开 `$` 态：fetchSession 只挡住未发包的去抖，挡不住已发出的 RPC——
+        // 经 resetSkillSearch 作废在途请求并回收共享 searchState，迟到响应
+        // 被 searchRequests.invalidate 拦下，无处提交（复审边界修复）。
+        resetSkillSearch();
+        hadNeedle = false;
+      }
+      fetchSession += 1;
+      failure = query.startsWith("$") && getRpc() === null ? "Not connected" : null;
       return;
     }
-    if (groups === null && !loading) void loadSkillGroups();
-  });
-
-  async function loadSkillGroups(): Promise<void> {
+    hadNeedle = true;
     const session = fetchSession;
-    const rpc = getRpc();
-    if (rpc === null) {
+    if (getRpc() === null) {
       failure = "Not connected";
       return;
     }
-    loading = true;
-    try {
-      // workspace 骨架：shell 级 store 已有投影就复用；空投影（未加载/出错）重拉。
-      if (workspaceState.workspaces.length === 0) {
-        await loadWorkspaces();
-        if (session !== fetchSession) return;
-      }
-      const workspaces = workspaceState.workspaces;
-      if (workspaces.length === 0) {
-        failure = workspaceState.error ?? "No workspaces";
-        groups = [];
-        return;
-      }
-      const settled = await Promise.allSettled(
-        workspaces.flatMap((workspace) =>
-          workspace.providers
-            .filter((provider) => provider.available)
-            .map((provider) =>
-              rpc.skills
-                .list({
-                  workspaceId: workspace.id,
-                  providerId: provider.id,
-                  includeDisabled: false,
-                })
-                .then((result) => ({ workspace, provider, skills: result.skills })),
-            ),
-        ),
-      );
+    failure = null;
+    const timer = setTimeout(() => {
       if (session !== fetchSession) return;
-      let failedProviders = 0;
-      const out: ProviderGroup[] = [];
-      for (const outcome of settled) {
-        if (outcome.status === "rejected") {
-          failedProviders += 1;
-          continue;
-        }
-        const { workspace, provider, skills } = outcome.value;
-        const header = `${workspace.label} / ${provider.label}`;
-        const rows: SkillRow[] = skills.map((skill) => ({
-          skill,
-          workspaceId: workspace.id,
-          providerId: provider.id,
-          entry: {
-            value: `$${skill.name}`,
-            description: skill.description,
-            group: header,
-            key: `${workspace.id}:${provider.id}:${skill.id}`,
-          },
-        }));
-        if (rows.length > 0) out.push({ group: header, rows });
-      }
-      failure = failedProviders > 0 ? `${failedProviders} provider group(s) unavailable` : null;
-      groups = out;
-    } finally {
-      if (session === fetchSession) loading = false;
-    }
-  }
+      void searchSkills(current);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  });
 
-  /** 当前 query 的预过滤 + 组内模糊排序投影（组序保持 workspace 声明序）。 */
-  const entries = $derived.by(() => {
-    if (groups === null) return [];
-    const needle = query.slice(1);
-    const out: MenuEntry[] = [];
-    for (const providerGroup of groups) {
-      const scored = providerGroup.rows
-        .map((row) => ({ row, match: fuzzyMatch(needle, row.skill.name, row.skill.description) }))
-        .filter((item): item is { row: SkillRow; match: { score: number } } => item.match !== null);
-      for (const item of fuzzySort(scored, (entry) => entry.match.score)) {
-        out.push(item.row.entry);
+  // 组件卸载（ComposerCard 随面板拆除）：同样作废在途检索——常驻实例的退出
+  // 主路径是 needle 转换，这里是兜底。
+  $effect(() => {
+    return () => resetSkillSearch();
+  });
+
+  /** 检索态是否属于当前 needle（searchState 是全局单例，可能被其他消费方接管）。 */
+  const searchFresh = $derived(searchState.query === needle);
+  /** 失败投影：本地断线门（getRpc）优先，其次 store 的检索错误（仅 fresh 时归属本菜单）。 */
+  const menuFailure = $derived(failure ?? (searchFresh ? searchState.error : null));
+  /** 去抖窗口或在途：占位显示检索中，不闪「无匹配」；失败优先于 pending。 */
+  const searchPending = $derived(
+    needle !== "" && menuFailure === null && (!searchFresh || searchState.searching),
+  );
+
+  /** 结果 × installations 派生行（组头 = workspace/provider label 反查兜底 id）。 */
+  const rows = $derived.by(() => {
+    if (!needle || !searchFresh) return [];
+    const out: SkillRow[] = [];
+    for (const result of searchState.results) {
+      for (const installation of result.installations) {
+        const key = `${installation.workspaceId}:${installation.providerId}:${result.id}`;
+        const token = `$${result.name}`;
+        out.push({
+          key,
+          name: result.name,
+          token,
+          entry: {
+            value: token,
+            description: result.description,
+            group: installationScopeLabel(installation.workspaceId, installation.providerId),
+            key,
+          },
+          target: {
+            workspaceId: installation.workspaceId,
+            providerId: installation.providerId,
+            skillId: result.id,
+          },
+        });
       }
     }
     return out;
   });
 
-  /** 行索引（key 反查优先；value 回退兼容无 entry 的旧调用路径）。 */
-  function rowOf(value: string, entry: MenuEntry | undefined): SkillRow | undefined {
-    if (groups === null) return undefined;
-    const rows = groups.flatMap((providerGroup) => providerGroup.rows);
-    if (entry?.key !== undefined) {
-      const byKey = rows.find((row) => row.entry.key === entry.key);
-      if (byKey !== undefined) return byKey;
-    }
-    return rows.find((row) => row.entry.value === value);
+  const entries = $derived(rows.map((row) => row.entry));
+
+  /** 选中路由：按 key 反查唯一行 → `$name` token + skill 作用域引用。 */
+  function onSelect(value: string, entry?: MenuEntry): void {
+    const row = rows.find((candidate) =>
+      entry?.key !== undefined ? candidate.key === entry.key : candidate.entry.value === value,
+    );
+    if (row === undefined) return;
+    onPick({
+      token: row.token,
+      reference: {
+        kind: "skill",
+        token: row.token,
+        target: row.target.skillId,
+        label: row.name,
+        skill: row.target,
+      },
+    });
   }
 
   let menu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
@@ -176,34 +174,15 @@
     return menu?.handleKeydown(event) ?? false;
   }
 
-  /** 选中路由：按 key 反查唯一行 → `$name` token + skill 作用域引用。 */
-  function onSelect(value: string, entry?: MenuEntry): void {
-    const row = rowOf(value, entry);
-    if (row === undefined) return;
-    const token = `$${row.skill.name}`;
-    onPick({
-      token,
-      reference: {
-        kind: "skill",
-        token,
-        target: row.skill.id,
-        label: row.skill.name,
-        skill: {
-          workspaceId: row.workspaceId,
-          providerId: row.providerId,
-          skillId: row.skill.id,
-        },
-      },
-    });
-  }
-
   const sourceLabel = $derived.by(() => {
-    if (loading) return "Loading skills…";
-    if (groups === null) return failure ?? "Skills across workspaces";
-    const providers = groups.length;
-    const skills = groups.reduce((total, providerGroup) => total + providerGroup.rows.length, 0);
-    const suffix = failure !== null ? ` · ${failure}` : "";
-    return `${skills} skills · ${providers} provider groups${suffix}`;
+    if (!needle) return "输入关键词检索技能";
+    if (menuFailure !== null) return menuFailure;
+    if (searchPending) return "Searching skills…";
+    if (searchFresh && searchState.results.length > 0) {
+      const groups = new Set(rows.map((row) => row.entry.group)).size;
+      return `${searchState.results.length} skills · ${groups} provider groups`;
+    }
+    return "Skills across workspaces";
   });
 </script>
 
@@ -217,7 +196,13 @@
   menuLabel="Skills — across workspaces"
   {sourceLabel}
   dataSlot="skill-menu"
-  emptyMessage="No matching skill"
+  emptyMessage={menuFailure !== null
+    ? "Search unavailable"
+    : searchPending
+      ? "Searching skills…"
+      : needle
+        ? "No matching skill"
+        : "输入关键词检索技能…"}
   {onSelect}
   bind:this={menu}
 />

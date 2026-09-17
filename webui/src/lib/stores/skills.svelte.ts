@@ -1,26 +1,34 @@
 /**
  * 用户原始需求 [2026-07-22]：「一个 Workspace 下，是可以包含多个 providers 的。」
+ * 修订 [2026-09-17]（skill-search-gui）：「任何需要搜索 skills 的地方都吃到
+ * BM25 + 中文分词 + typo 容忍」——新增跨 Workspace 检索态（skills.search RPC）。
  * 正交意图：
  *   [1] 按 Workspace Provider 对投影技能列表与详情。
  *   [2] 编排同一 Provider 根目录内的启停和校验命令。
  *   [3] 派生查询过滤与统计数据。
+ *   [4] 持有跨 Workspace 的 BM25 检索态（latest-request-wins + 断线代次失效）。
  */
 import type {
+  ProviderId,
   SkillId,
   SkillInfo,
   SkillMetadata,
+  SkillSearchResult,
   ToggleSummary,
   ValidateResult,
+  WorkspaceId,
   WorkspaceProviderTarget,
 } from "../types";
 import { untrack } from "svelte";
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
+import { workspaceState } from "./workspaces.svelte";
 
 const listRequests = createRequestGenerationGate(getConnectionGeneration);
 const selectionRequests = createRequestGenerationGate(getConnectionGeneration);
 const mutationRequests = createRequestGenerationGate(getConnectionGeneration);
 const validationRequests = createRequestGenerationGate(getConnectionGeneration);
+const searchRequests = createRequestGenerationGate(getConnectionGeneration);
 
 /** 当前 Workspace Provider 的技能列表、选中项与加载状态。 */
 export const skillsState = $state<{
@@ -186,4 +194,63 @@ export function targetsEqual(
   right: WorkspaceProviderTarget | null,
 ): boolean {
   return left?.workspaceId === right?.workspaceId && left?.providerId === right?.providerId;
+}
+
+/** 跨 Workspace 的技能检索状态（skills.search：BM25 + 中文分词 + typo 容忍）。 */
+export const searchState = $state<{
+  query: string;
+  results: SkillSearchResult[];
+  searching: boolean;
+  error: string | null;
+}>({ query: "", results: [], searching: false, error: null });
+
+/** 检索结果条数上限的默认值（契约上限 50；GUI 消费方共用 20）。 */
+const DEFAULT_SEARCH_LIMIT = 20;
+
+/**
+ * 跨 Workspace 检索技能（镜像 loadSkills 样板：issue → requireRpc → isCurrent 提交
+ * → isLatest 清 loading）。空/全空白 query 不发 RPC（输入 schema min-1 是合同），
+ * 直接清空结果态；错误保留旧结果并置 error——降级策略由调用方决定。
+ */
+export async function searchSkills(
+  query: string,
+  limit: number = DEFAULT_SEARCH_LIMIT,
+): Promise<void> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    resetSkillSearch();
+    return;
+  }
+  const request = searchRequests.issue();
+  searchState.query = trimmed;
+  searchState.searching = true;
+  try {
+    const { results } = await requireRpc().skills.search({ query: trimmed, limit });
+    if (!request.isCurrent()) return;
+    searchState.results = results;
+    searchState.error = null;
+  } catch (error) {
+    if (!request.isCurrent()) return;
+    // 保留已提交结果（调用方可降级展示）；错误态由调用方决定降级策略。
+    searchState.error = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (request.isLatest()) searchState.searching = false;
+  }
+}
+
+/** 清空检索态（路由离开 / 消费方关闭时回收全局 searchState）。 */
+export function resetSkillSearch(): void {
+  searchRequests.invalidate();
+  searchState.query = "";
+  searchState.results = [];
+  searchState.searching = false;
+  searchState.error = null;
+}
+
+/** 检索结果 installation 的作用域显示名（workspace/providers label 反查，查不到用 id 兜底）。 */
+export function installationScopeLabel(workspaceId: WorkspaceId, providerId: ProviderId): string {
+  const workspace = workspaceState.workspaces.find((entry) => entry.id === workspaceId);
+  if (!workspace) return `${workspaceId} / ${providerId}`;
+  const provider = workspace.providers.find((entry) => entry.id === providerId);
+  return `${workspace.label} / ${provider?.label ?? providerId}`;
 }

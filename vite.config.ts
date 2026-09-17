@@ -69,6 +69,15 @@ export default defineConfig({
           alias: [
             { find: "$shared", replacement: path.join(projectRoot, "src/shared") },
             { find: "$lib", replacement: path.join(projectRoot, "webui/src/lib") },
+            // $app/navigation 是 SvelteKit 虚拟模块（root vitest 管线解析不了）；
+            // alias 到物理 stub 使解析成立，具体行为由测试内 vi.mock 提供。
+            {
+              find: "$app/navigation",
+              replacement: path.join(
+                projectRoot,
+                "webui/src/lib/__tests__/stubs/app-navigation-stub.ts",
+              ),
+            },
             // @lucide/svelte 图标是 node_modules 的 .svelte——root vitest 管线
             // 不编译它们；统一替换为空壳 stub（组件面测试不判读图标形状）。
             {

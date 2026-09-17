@@ -1,7 +1,10 @@
 <!--
   用户原始需求 [2026-07-27]：「看不到技能正文是当前最大的产品缺口」。
+  修订 [2026-09-17]（skill-search-gui）：`q` 过滤升级为 daemon BM25 检索
+  （skills.search RPC + debounce），检索失败降级前端 includes——断线不空白。
   正交意图：
-  1. 列出当前 Workspace.Provider 的技能（数据来自 skills.list RPC）。
+  1. 列出当前 Workspace.Provider 的技能（空 q 走 skills.list 全量；非空 q 经
+     skills.search BM25 检索，按本 provider 作用域过滤投影；失败降级前端 includes）。
   2. 选中技能后渲染 frontmatter 元数据表 + markdown 正文（正文来自 skills.info RPC，组件级 $state，不跨渲染周期缓存）。
   3. 可写 Provider 下 name/description 行内轻量编辑（草稿存组件 $state，保存走 creator.save revision-safe）。
   4. 视图状态（选中技能 / 筛选词 / 子视图）全部编码在 URL search params。
@@ -10,10 +13,13 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { useParams, useSearch, goById } from "$lib/shell";
-  import { getConnectionGeneration } from "$lib/store.svelte";
+  import { connectionState, getConnectionGeneration } from "$lib/store.svelte";
   import {
     loadSkills,
     skillsState,
+    searchSkills,
+    searchState,
+    resetSkillSearch,
     fetchSkillInfo,
     toggleSkills,
     validateSkill,
@@ -41,6 +47,7 @@
   import { Input } from "$lib/components/ui/input";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconCheck from "@lucide/svelte/icons/circle-check";
+  import IconPause from "@lucide/svelte/icons/circle-pause";
   import IconDownload from "@lucide/svelte/icons/arrow-down-to-line";
   import IconFile from "@lucide/svelte/icons/file-text";
   import IconGraph from "@lucide/svelte/icons/network";
@@ -96,6 +103,67 @@
     if (providerTarget) void loadSkills(providerTarget);
   });
 
+  // ---- q 过滤 → BM25 检索（skill-search-gui C2） ----
+
+  /** 输入去抖窗口：URL q 变化后延迟发检索，避免每个键击一次 RPC。 */
+  const SEARCH_DEBOUNCE_MS = 150;
+
+  // URL q 是唯一真相源；非空 q 去抖后触发跨域检索（结果按本 provider 作用域过滤）。
+  // 空 q 不发请求（全量列表语义）；定时器在 effect cleanup 回收。
+  $effect(() => {
+    const q = filterQuery.trim();
+    if (!q) return;
+    const timer = setTimeout(() => void searchSkills(q), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  });
+
+  // 断线降级后的自动恢复：重连即重发当前过滤词的检索（恢复后自动回到 BM25）。
+  let lastConnectionStatus = $state(connectionState.status);
+  $effect(() => {
+    const status = connectionState.status;
+    const was = untrack(() => lastConnectionStatus);
+    lastConnectionStatus = status;
+    if (was === "connected" || status !== "connected") return;
+    const q = untrack(() => filterQuery.trim());
+    if (q) void searchSkills(q);
+  });
+
+  // 离开本视图时回收全局检索态（命令面板等消费方各持自己的检索生命周期）。
+  $effect(() => {
+    return () => resetSkillSearch();
+  });
+
+  /** 检索态是否属于本视图当前查询（store 是全局单例，可能被命令面板接管）。 */
+  const searchFresh = $derived(searchState.query === filterQuery.trim());
+
+  /** 检索投影：结果里过滤出 installations 命中当前 target 的条目（provider 内作用域）。 */
+  const scopedSearchResults = $derived.by(() => {
+    const target = providerTarget;
+    if (!target) return [];
+    return searchState.results.filter((result) =>
+      result.installations.some(
+        (installation) =>
+          installation.workspaceId === target.workspaceId &&
+          installation.providerId === target.providerId,
+      ),
+    );
+  });
+
+  /** 非空 q 下列表的数据源判定（discriminated：骨架 / 结果 / 降级）。 */
+  const searchProjection = $derived.by(() => {
+    if (!filterQuery.trim()) return { mode: "full" } as const;
+    if (searchState.searching) return { mode: "searching" } as const;
+    if (searchFresh && searchState.error) return { mode: "fallback" } as const;
+    if (searchFresh) return { mode: "results", rows: scopedSearchResults } as const;
+    // 去抖窗口 / store 被其他消费方接管后回收：先用已载页数据的前端过滤兜底。
+    return { mode: "fallback" } as const;
+  });
+
+  /** 检索降级提示条文案（仅 error 驱动的降级显示；Retry 重发当前查询）。 */
+  const searchFallbackError = $derived(
+    searchProjection.mode === "fallback" && searchFresh ? searchState.error : null,
+  );
+
   // 选中技能变化时拉取详情（来自 skills.info RPC，存组件 $state）。
   $effect(() => {
     const target = providerTarget;
@@ -150,6 +218,11 @@
       ),
     );
   });
+
+  /** 列表计数徽章：结果态用作用域命中数，其余（全量/降级）沿用前端过滤计数。 */
+  const listCount = $derived(
+    searchProjection.mode === "results" ? searchProjection.rows.length : visibleSkills.length,
+  );
 
   const split = $derived(detail ? splitSkillContent(detail.content) : null);
   const renderedBody = $derived(split ? renderSkillBody(split.body) : "");
@@ -374,13 +447,13 @@
            h1（overflow:hidden → flex min-width 归零）塌陷为 0，按钮越界画到详情栏。 -->
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
         <h1 class="min-w-0 truncate text-base font-semibold">{providerId ?? "—"}</h1>
-        {#if skillsState.refreshing}
+        {#if skillsState.refreshing || searchProjection.mode === "searching"}
           <IconLoader
             class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
             title="Refreshing skills"
           />
         {:else}
-          <Badge variant="secondary">{visibleSkills.length}</Badge>
+          <Badge variant="secondary">{listCount}</Badge>
         {/if}
         <div class="ml-auto flex flex-wrap items-center gap-1">
           <Button
@@ -428,6 +501,26 @@
         />
       </div>
     </header>
+
+    {#if searchFallbackError}
+      <!-- 检索降级提示条（样式照 skillsUpdateState.checkError 区块）：列表已回退
+           前端 includes 过滤，Retry 重发当前查询的 BM25 检索。 -->
+      <div
+        class="flex shrink-0 items-start gap-2 border-b border-border px-4 py-2 text-xs text-destructive"
+        role="alert"
+        data-testid="search-fallback"
+      >
+        <span class="min-w-0 flex-1 break-words">
+          Search unavailable — filtering loaded skills. {searchFallbackError}
+        </span>
+        <button
+          class="shrink-0 underline underline-offset-2"
+          onclick={() => void searchSkills(filterQuery.trim())}
+        >
+          Retry
+        </button>
+      </div>
+    {/if}
 
     {#if skillsUpdateState.checking}
       <p
@@ -555,6 +648,65 @@
             </Button>
           {/if}
         </div>
+      {:else if searchProjection.mode === "searching"}
+        <!-- 检索骨架：BM25 结果到场前的加载态。 -->
+        <div
+          class="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground"
+          role="status"
+          data-testid="search-loading"
+        >
+          <IconLoader class="h-3.5 w-3.5 animate-spin" /> Searching skills…
+        </div>
+      {:else if searchProjection.mode === "results" && searchProjection.rows.length === 0}
+        {#if searchState.results.length > 0}
+          <!-- 全局有命中但不在本 provider：指向命令面板的全局发现入口。 -->
+          <p class="px-4 py-6 text-xs text-muted-foreground" data-testid="search-scoped-empty">
+            No skills match in this provider.
+            <button
+              class="underline underline-offset-2"
+              onclick={() =>
+                globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+            >
+              Search all workspaces (⌘K)
+            </button>
+          </p>
+        {:else}
+          <p class="px-4 py-6 text-xs text-muted-foreground">No skills match.</p>
+        {/if}
+      {:else if searchProjection.mode === "results"}
+        <!-- 检索结果行（SkillSearchResult：BM25 序；结构仿 SkillCard 但数据契约不同）。 -->
+        {#each searchProjection.rows as result (result.id)}
+          <button
+            type="button"
+            data-skill-id={result.id}
+            aria-pressed={result.id === selectedSkillId}
+            onclick={() => selectSkill(result.id)}
+            class="group flex min-h-14 w-full items-start gap-2.5 border-b border-border/70 px-3 py-2.5 text-left transition-colors {result.id ===
+            selectedSkillId
+              ? 'bg-accent text-foreground'
+              : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
+          >
+            {#if result.disabled}
+              <IconPause class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            {:else}
+              <IconFile class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            {/if}
+            <span class="min-w-0 flex-1">
+              <span class="flex items-center gap-2">
+                <span class="truncate text-[13px] font-medium text-foreground">{result.name}</span>
+                {#if result.disabled}
+                  <span
+                    class="shrink-0 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                    >disabled</span
+                  >
+                {/if}
+              </span>
+              <span class="mt-0.5 line-clamp-2 text-[11px] leading-4"
+                >{result.description || "No description"}</span
+              >
+            </span>
+          </button>
+        {/each}
       {:else if visibleSkills.length === 0}
         <p class="px-4 py-6 text-xs text-muted-foreground">No skills match.</p>
       {:else}
