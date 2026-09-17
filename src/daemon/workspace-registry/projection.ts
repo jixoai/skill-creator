@@ -12,6 +12,7 @@
  *   [2] Project availability, active state, and counts for the WebUI.
  *   [3] De-duplicate Workspace-level skill counts by canonical provider root + dir.
  */
+import os from "node:os";
 import path from "node:path";
 import type { ListOptions } from "ccski";
 import {
@@ -32,9 +33,6 @@ import {
 import { canonicalDirectory } from "../path-safety.js";
 import type { StoredWorkspace, WorkspaceRegistryState } from "./state.js";
 
-/** Dynamic ccski count adapter used to project an immutable Registry snapshot. */
-export type WorkspaceSkillCounter = (options: ListOptions) => Promise<number>;
-
 /** 单个技能目录项的最小观测（用于去重，不携带敏感字段）。 */
 export interface ObservedSkillEntry {
   /** 技能目录名（同一性判据之一）。 */
@@ -44,21 +42,48 @@ export interface ObservedSkillEntry {
 /**
  * 动态技能列表适配器：返回某 Provider 根目录下观测到的技能目录项。
  *
- * 用于 Workspace 级按 (canonicalRoot, directoryName) 去重的聚合计数。
- * 未提供时回退到不去重的 `sumProviderCounts`（保持向后兼容）。
+ * 单次扫描同时产出 Provider 级计数与 Workspace 级去重集合
+ * （perf-firstscreen：此前 counter 与 lister 各跑一遍 ccski 全量扫描，
+ * 真实语料下单次 registry.list 放大到 ~1.8s 同步 IO）。
  */
 export type WorkspaceSkillLister = (options: ListOptions) => Promise<readonly ObservedSkillEntry[]>;
+
+/** 单遍扫描产物：Provider 计数 + Workspace 去重键集合。 */
+export interface WorkspaceScanResult {
+  /** `workspaceId:providerId` → 该 Provider root 观测到的技能数。 */
+  counts: ReadonlyMap<string, number>;
+  /** workspaceId → (canonicalRoot, directoryName) 去重键集合。 */
+  skillKeys: ReadonlyMap<WorkspaceId, ReadonlySet<string>>;
+}
 
 function providerCountKey(workspaceId: WorkspaceId, providerId: ProviderId): string {
   return `${workspaceId}:${providerId}`;
 }
 
-/** Count Home and Imported Workspace skills for one immutable state snapshot. */
-export async function countWorkspaceSnapshot(
+/**
+ * 非 claude-code Provider 的插件发现重定向目标（永不存在的路径）：
+ * ccski 的 list API 不透传 skipPlugins（buildRegistryOptions 白名单），
+ * 但 pluginsFile/pluginsRoot 缺失时插件发现静默跳过——以此消除「扫一个
+ * root 却读 ~/.claude settings/plugins + 遍历插件 installPath」的全局
+ * 副作用（真实语料 50 roots 下重复 50 遍）。claude-code 保留默认行为。
+ */
+const SKIP_PLUGINS_PATH = path.join(os.tmpdir(), ".skill-creator-skip-plugins");
+
+/**
+ * 单遍扫描一个 immutable snapshot：每个存在的 root 只调一次 lister，
+ * 同一份 entries 同时产出 Provider 计数与 Workspace 去重集合。
+ *
+ * 非 claude-code Provider 传 `n: true` 跳过 ccski 的 Claude 插件全局
+ * 发现副作用（读 ~/.claude settings + 扫插件 installPath——与该 root 的
+ * 技能发现无关，真实语料 50 roots 循环下重复执行 50 遍）；claude-code
+ * 保留插件技能语义。
+ */
+export async function scanWorkspaceSnapshot(
   state: WorkspaceRegistryState,
-  countSkills: WorkspaceSkillCounter,
-): Promise<ReadonlyMap<string, number>> {
-  const tasks: Array<Promise<readonly [string, number]>> = [];
+  listSkills: WorkspaceSkillLister,
+): Promise<WorkspaceScanResult> {
+  const counts = new Map<string, number>();
+  const skillKeys = new Map<WorkspaceId, ReadonlySet<string>>();
   const workspaces: Array<{ id: WorkspaceId; directory: string | null; global: boolean }> = [
     { id: GLOBAL_WORKSPACE_ID, directory: null, global: true },
     ...state.workspaces.map((workspace) => ({
@@ -67,7 +92,10 @@ export async function countWorkspaceSnapshot(
       global: false,
     })),
   ];
+  const tasks: Array<Promise<void>> = [];
   for (const workspace of workspaces) {
+    const keySet = new Set<string>();
+    skillKeys.set(workspace.id, keySet);
     for (const provider of PROVIDER_CATALOG) {
       const root = workspace.global
         ? globalProviderRoot(provider)
@@ -75,76 +103,32 @@ export async function countWorkspaceSnapshot(
           ? importedProviderRoot(workspace.directory, provider)
           : null;
       const providerId = provider.id as ProviderId;
-      const count =
+      const scan =
         root && providerRootAvailable(root)
-          ? countSkills({
+          ? listSkills({
               customDirs: [root],
               customProvider: providerId,
               scanDefaultDirs: false,
               all: true,
+              ...(provider.id === "claude-code"
+                ? {}
+                : { claudePluginsFile: SKIP_PLUGINS_PATH, claudePluginsRoot: SKIP_PLUGINS_PATH }),
             })
-          : Promise.resolve(0);
+          : Promise.resolve([]);
       tasks.push(
-        count.then((value) => [providerCountKey(workspace.id, providerId), value] as const),
+        scan.then((entries) => {
+          counts.set(providerCountKey(workspace.id, providerId), entries.length);
+          const canonicalRoot = root === null ? "" : (safeCanonical(root) ?? root);
+          for (const entry of entries) {
+            // 去重键：canonical 根 + 平台分隔符 + 目录名（跨 Provider 共享路径下同一技能只计一次）。
+            keySet.add(`${canonicalRoot}${path.sep}${entry.directoryName}`);
+          }
+        }),
       );
     }
   }
-  return new Map(await Promise.all(tasks));
-}
-
-/**
- * 为每个 Workspace 收集按 canonical provider root 去重的技能标识集合。
- *
- * 去重键 = `canonical(providerRoot) + path.sep + directoryName`。
- * 返回 `Map<workspaceId, ReadonlySet<dedupKey>>`；未提供 lister 时返回空 Map
- * （调用方回退到 sumProviderCounts）。
- */
-export async function collectWorkspaceSkillKeys(
-  state: WorkspaceRegistryState,
-  listSkills: WorkspaceSkillLister,
-): Promise<ReadonlyMap<WorkspaceId, ReadonlySet<string>>> {
-  const tasks: Array<Promise<readonly [WorkspaceId, ReadonlySet<string>]>> = [];
-  const workspaces: Array<{ id: WorkspaceId; directory: string | null; global: boolean }> = [
-    { id: GLOBAL_WORKSPACE_ID, directory: null, global: true },
-    ...state.workspaces.map((workspace) => ({
-      id: workspace.id,
-      directory: availableDirectory(workspace.path),
-      global: false,
-    })),
-  ];
-  for (const workspace of workspaces) {
-    const keySet = new Set<string>();
-    tasks.push(listWorkspaceKeys(workspace, listSkills, keySet));
-  }
-  return new Map(await Promise.all(tasks));
-}
-
-async function listWorkspaceKeys(
-  workspace: { id: WorkspaceId; directory: string | null; global: boolean },
-  listSkills: WorkspaceSkillLister,
-  keySet: Set<string>,
-): Promise<readonly [WorkspaceId, ReadonlySet<string>]> {
-  for (const provider of PROVIDER_CATALOG) {
-    const root = workspace.global
-      ? globalProviderRoot(provider)
-      : workspace.directory
-        ? importedProviderRoot(workspace.directory, provider)
-        : null;
-    if (!root || !providerRootAvailable(root)) continue;
-    const providerId = provider.id as ProviderId;
-    const entries = await listSkills({
-      customDirs: [root],
-      customProvider: providerId,
-      scanDefaultDirs: false,
-      all: true,
-    });
-    const canonicalRoot = safeCanonical(root) ?? root;
-    for (const entry of entries) {
-      // 去重键：canonical 根 + 平台分隔符 + 目录名（跨 Provider 共享路径下同一技能只计一次）。
-      keySet.add(`${canonicalRoot}${path.sep}${entry.directoryName}`);
-    }
-  }
-  return [workspace.id, keySet] as const;
+  await Promise.all(tasks);
+  return { counts, skillKeys };
 }
 
 /** Combine authoritative identity with dynamic counts and availability. */

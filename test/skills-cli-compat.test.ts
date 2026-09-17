@@ -196,6 +196,35 @@ describe("skills-CLI probe", () => {
     expect(parseSkillsCliList(JSON.stringify({ not: "array" })).size).toBe(0);
   });
 
+  it("peek returns null before the first probe and the map afterwards (perf B-5)", async () => {
+    const probe = createSkillsCliProbe({
+      run: async () => ({ stdout: JSON.stringify([{ name: "x", path: "/x" }]) }),
+    });
+    expect(probe.peek()).toBeNull();
+    await probe.probe();
+    expect(probe.peek()?.get("/x")?.name).toBe("x");
+  });
+
+  it("shares one shell-out across concurrent probes", async () => {
+    let calls = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const probe = createSkillsCliProbe({
+      run: async () => {
+        calls += 1;
+        await gate;
+        return { stdout: JSON.stringify([{ name: "x", path: "/x" }]) };
+      },
+    });
+    const first = probe.probe();
+    const second = probe.probe();
+    release();
+    await Promise.all([first, second]);
+    expect(calls).toBe(1);
+  });
+
   it("caches the probe result for the module lifetime", async () => {
     let calls = 0;
     const runner: SkillsCliRunner = async () => {
@@ -256,6 +285,8 @@ describe("skills-CLI provenance projection", () => {
         stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "global" }]),
       }),
     });
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: canonical }]),
@@ -274,6 +305,8 @@ describe("skills-CLI provenance projection", () => {
       }),
     });
     const workspaces = createWorkspaceRegistry();
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: fs.realpathSync(inScope) }]),
@@ -302,6 +335,8 @@ describe("skills-CLI provenance projection", () => {
         throw new Error("npx missing");
       },
     });
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: fs.realpathSync(skillDir) }]),
@@ -366,7 +401,7 @@ describe("skills-CLI update-check", () => {
    * 构造一个完整的 update-service + skills/probe/repo 桩，方便各场景复用。
    * `globalLock` / `projectLock` 直接以字符串注入；fetch / clone 可覆盖。
    */
-  function buildUpdateService(args: {
+  async function buildUpdateService(args: {
     skillDirectory: string;
     skillName?: string;
     globalLock?: string | null;
@@ -386,6 +421,8 @@ describe("skills-CLI update-check", () => {
           ]),
         })),
     });
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: canonical, name: args.skillName }]),
@@ -402,7 +439,7 @@ describe("skills-CLI update-check", () => {
 
   it("reports updated when the GitHub tree SHA differs from the lock hash", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
-    const { service, skills } = buildUpdateService({
+    const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
         version: 3,
@@ -438,7 +475,7 @@ describe("skills-CLI update-check", () => {
 
   it("reports already-current when the tree SHA equals the lock hash", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
-    const { service, skills } = buildUpdateService({
+    const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
         version: 3,
@@ -467,7 +504,7 @@ describe("skills-CLI update-check", () => {
 
   it("reports unavailable when GitHub API returns 403 rate limit", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
-    const { service, skills } = buildUpdateService({
+    const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
         version: 3,
@@ -492,7 +529,7 @@ describe("skills-CLI update-check", () => {
 
   it("reports unavailable when fetch throws (no network)", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
-    const { service, skills } = buildUpdateService({
+    const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
         version: 3,
@@ -523,7 +560,7 @@ describe("skills-CLI update-check", () => {
     const cloneDir = path.join(sandbox, "clone-src");
     writeSkillDocument(path.join(cloneDir, "demo-skill"), "demo-skill", "d", "# Different\n");
     const upstreamHash = computeSkillFolderHash(path.join(cloneDir, "demo-skill"));
-    const { service, skills } = buildUpdateService({
+    const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
         version: 3,
@@ -549,7 +586,7 @@ describe("skills-CLI update-check", () => {
 
   it("reports unavailable when no lock entry exists for a probe-matched skill", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
-    const { service, skills } = buildUpdateService({
+    const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: null,
       projectLock: null,
@@ -561,7 +598,7 @@ describe("skills-CLI update-check", () => {
 
   it("returns empty results (no throw) when probe finds nothing and lock is missing", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
-    const { service, skills } = buildUpdateService({
+    const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: null,
       projectLock: null,
@@ -574,7 +611,7 @@ describe("skills-CLI update-check", () => {
 
   it("reports failed when a non-GitHub clone throws", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
-    const { service, skills } = buildUpdateService({
+    const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
         version: 3,
@@ -630,6 +667,8 @@ describe("skills-CLI apply-update", () => {
       providerId: openclawProviderId,
     };
     const probe = createSkillsCliProbe({ run: async () => ({ stdout: "[]" }) });
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: canonical }]),
@@ -669,6 +708,8 @@ describe("skills-CLI apply-update", () => {
         stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
       }),
     });
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: canonical }]),
@@ -723,6 +764,8 @@ describe("skills-CLI apply-update", () => {
         stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
       }),
     });
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: canonical }]),
@@ -792,6 +835,8 @@ describe("skills-CLI apply-update", () => {
         stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
       }),
     });
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: canonical }]),
@@ -859,6 +904,8 @@ describe("skills-CLI apply-update", () => {
         stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
       }),
     });
+    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+    await probe.probe();
     const skills = createSkillService(workspaces, {
       skillsCliProbe: probe,
       discoverSkills: discovererFor([{ directory: canonical }]),

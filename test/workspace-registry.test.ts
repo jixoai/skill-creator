@@ -55,8 +55,9 @@ function directory(...segments: string[]): string {
   return result;
 }
 
-function zeroCount(): Promise<number> {
-  return Promise.resolve(0);
+/** 零技能 lister 桩（合一后计数与去重键都来自它）。 */
+function zeroList(): Promise<readonly { directoryName: string }[]> {
+  return Promise.resolve([]);
 }
 
 function target(workspaceId: WorkspaceId): WorkspaceProviderTarget {
@@ -87,13 +88,14 @@ function deferredCounter(): {
   return {
     started,
     release: signalRelease,
-    count: async (options) => {
+    list: async (options) => {
       if (shouldPause && options.customDirs?.[0]) {
         shouldPause = false;
         signalStarted();
         await released;
       }
-      return options.customDirs?.[0]?.length ?? 7;
+      const size = options.customDirs?.[0]?.length ?? 7;
+      return Array.from({ length: size }, (_, index) => ({ directoryName: `skill-${index}` }));
     },
   };
 }
@@ -116,20 +118,20 @@ function deferredRejectingCounter(directory: string): {
   return {
     started,
     reject: () => rejectCount(new Error("Forgotten Workspace is unavailable.")),
-    count: async (options) => {
+    list: async (options) => {
       if (shouldReject && options.customDirs?.[0] === directory) {
         shouldReject = false;
         signalStarted();
         return rejected;
       }
-      return 0;
+      return [];
     },
   };
 }
 
 describe("Workspace Registry", () => {
   it("assigns unique IDs and resolves Global/Imported Provider scopes", async () => {
-    const registry = createWorkspaceRegistry({ countSkills: zeroCount });
+    const registry = createWorkspaceRegistry({ listSkills: zeroList });
     const commonRoot = ["organizations", "engineering", "skills"];
     const firstPath = directory(...commonRoot, "frontend");
     const secondPath = directory(...commonRoot, "backend");
@@ -163,7 +165,7 @@ describe("Workspace Registry", () => {
   });
 
   it("persists active state across restart and forgets without deleting files", async () => {
-    const firstRegistry = createWorkspaceRegistry({ countSkills: zeroCount });
+    const firstRegistry = createWorkspaceRegistry({ listSkills: zeroList });
     const firstPath = directory("first");
     const secondPath = directory("second");
     const marker = path.join(firstPath, "keep.txt");
@@ -172,7 +174,7 @@ describe("Workspace Registry", () => {
     const second = firstRegistry.import(secondPath, "Second");
     firstRegistry.activate(first.id);
 
-    const restarted = createWorkspaceRegistry({ countSkills: zeroCount });
+    const restarted = createWorkspaceRegistry({ listSkills: zeroList });
     expect(activeId(await restarted.list())).toBe(first.id);
     expect(restarted.resolve(target(second.id)).directory).toBe(
       path.join(fs.realpathSync(secondPath), "skills"),
@@ -193,7 +195,7 @@ describe("Workspace Registry", () => {
     const registryFile = path.join(appDir(), "workspaces.json");
     fs.writeFileSync(registryFile, legacySource, "utf8");
 
-    const registry = createWorkspaceRegistry({ countSkills: zeroCount });
+    const registry = createWorkspaceRegistry({ listSkills: zeroList });
     expect((await registry.list()).map((workspace) => workspace.id)).toEqual([GLOBAL_WORKSPACE_ID]);
     expect(fs.readFileSync(registryFile, "utf8")).toBe(legacySource);
 
@@ -209,7 +211,7 @@ describe("Workspace Registry", () => {
     fs.mkdirSync(appDir(), { recursive: true });
     fs.writeFileSync(path.join(appDir(), "workspaces.json"), "{", "utf8");
 
-    const registry = createWorkspaceRegistry({ countSkills: zeroCount });
+    const registry = createWorkspaceRegistry({ listSkills: zeroList });
     expect((await registry.list()).map((workspace) => workspace.id)).toEqual([GLOBAL_WORKSPACE_ID]);
   });
 
@@ -226,7 +228,7 @@ describe("Workspace Registry", () => {
     fs.chmodSync(registryFile, 0o000);
 
     try {
-      expect(() => createWorkspaceRegistry({ countSkills: zeroCount })).toThrow(
+      expect(() => createWorkspaceRegistry({ listSkills: zeroList })).toThrow(
         /Cannot read workspace registry/,
       );
       // 原文件必须原样保留：数据不兼容才会投影为空 Registry，I/O 故障不能伪装。
@@ -238,7 +240,7 @@ describe("Workspace Registry", () => {
   });
 
   it("rejects unknown IDs without changing the active Workspace", async () => {
-    const registry = createWorkspaceRegistry({ countSkills: zeroCount });
+    const registry = createWorkspaceRegistry({ listSkills: zeroList });
     const known = registry.import(directory("known"));
     const unknownId = ImportedWorkspaceIdSchema.parse("ws_000000000000000000000000");
 
@@ -249,7 +251,7 @@ describe("Workspace Registry", () => {
   });
 
   it("discards a persisted Workspace ID that does not belong to its path", async () => {
-    const registry = createWorkspaceRegistry({ countSkills: zeroCount });
+    const registry = createWorkspaceRegistry({ listSkills: zeroList });
     const known = registry.import(directory("known"));
     const forgedId = ImportedWorkspaceIdSchema.parse("ws_000000000000000000000000");
     fs.writeFileSync(
@@ -262,7 +264,7 @@ describe("Workspace Registry", () => {
       "utf8",
     );
 
-    const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
+    const recovered = createWorkspaceRegistry({ listSkills: zeroList });
     expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([
       GLOBAL_WORKSPACE_ID,
     ]);
@@ -281,7 +283,7 @@ describe("Workspace Registry", () => {
       "utf8",
     );
 
-    const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
+    const recovered = createWorkspaceRegistry({ listSkills: zeroList });
     expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([
       GLOBAL_WORKSPACE_ID,
     ]);
@@ -304,7 +306,7 @@ describe("Workspace Registry", () => {
       "utf8",
     );
 
-    const recovered = createWorkspaceRegistry({ countSkills: zeroCount });
+    const recovered = createWorkspaceRegistry({ listSkills: zeroList });
     expect((await recovered.list()).map((workspace) => workspace.id)).toEqual([
       GLOBAL_WORKSPACE_ID,
     ]);
@@ -312,7 +314,7 @@ describe("Workspace Registry", () => {
 
   it("restarts a projection when a Workspace is imported while counts are pending", async () => {
     const counter = deferredCounter();
-    const registry = createWorkspaceRegistry({ countSkills: counter.count });
+    const registry = createWorkspaceRegistry({ listSkills: counter.list });
     const firstPath = directory("first");
     fs.mkdirSync(path.join(firstPath, "skills"));
     const first = registry.import(firstPath);
@@ -330,13 +332,13 @@ describe("Workspace Registry", () => {
     ]);
     expect(activeId(projected)).toBe(second.id);
 
-    const restarted = createWorkspaceRegistry({ countSkills: zeroCount });
+    const restarted = createWorkspaceRegistry({ listSkills: zeroList });
     expect((await restarted.list()).map((workspace) => workspace.id)).toContain(second.id);
   });
 
   it("projects the latest forget and activation while counts are pending", async () => {
     const counter = deferredCounter();
-    const registry = createWorkspaceRegistry({ countSkills: counter.count });
+    const registry = createWorkspaceRegistry({ listSkills: counter.list });
     const firstPath = directory("first");
     fs.mkdirSync(path.join(firstPath, "skills"));
     const first = registry.import(firstPath);
@@ -360,7 +362,7 @@ describe("Workspace Registry", () => {
     const firstSkillsPath = path.join(firstPath, "skills");
     fs.mkdirSync(firstSkillsPath);
     const counter = deferredRejectingCounter(fs.realpathSync(firstSkillsPath));
-    const registry = createWorkspaceRegistry({ countSkills: counter.count });
+    const registry = createWorkspaceRegistry({ listSkills: counter.list });
     const first = registry.import(firstPath);
     const second = registry.import(directory("second"));
 
@@ -395,12 +397,7 @@ describe("Workspace Registry de-duplicated skill counts", () => {
     };
   }
 
-  function counterFromList(
-    skillsByRoot: Record<string, string[]>,
-  ): (options: ListOptions) => Promise<number> {
-    const list = listerReturning(skillsByRoot);
-    return async (options) => (await list(options)).length;
-  }
+  /** 单遍合一后计数的旧行为等价性由 listerReturning 直接覆盖（entries.length）。 */
 
   it("counts a shared-root skill once at Workspace level but in each Provider", async () => {
     // cline 与 codex 都把 workspacePath 解析到 .agents/skills —— 共享同一物理根。
@@ -414,7 +411,6 @@ describe("Workspace Registry de-duplicated skill counts", () => {
     };
 
     const registry = createWorkspaceRegistry({
-      countSkills: counterFromList(skillsByRoot),
       listSkills: listerReturning(skillsByRoot),
     });
     registry.import(workspacePath, "Shared");
@@ -446,7 +442,6 @@ describe("Workspace Registry de-duplicated skill counts", () => {
     };
 
     const registry = createWorkspaceRegistry({
-      countSkills: counterFromList(skillsByRoot),
       listSkills: listerReturning(skillsByRoot),
     });
     registry.import(workspacePath, "Distinct");
@@ -459,26 +454,43 @@ describe("Workspace Registry de-duplicated skill counts", () => {
     expect(imported.skillCount).toBe(2);
   });
 
-  it("falls back to non-deduplicated sum when no lister is provided", async () => {
-    const workspacePath = directory("fallback-sum");
+  // （perf-firstscreen 合一后「仅 counter 无 lister → 回退不去重 sum」的路径
+  // 退役：单一 lister 总是同时产出计数与去重键，去重语义恒定。）
+});
+
+describe("Workspace Registry single-pass scan (perf-firstscreen B-3)", () => {
+  /**
+   * 用户原始需求 [2026-09-18]：「性能很差，经常 loading」——此前 counter 与
+   * lister 各跑一遍 ccski 全量扫描；合一后每个存在的 root 只允许一次
+   * discovery，计数与去重键来自同一份结果。
+   */
+  it("scans each root exactly once per list()", async () => {
+    const workspacePath = directory("single-pass");
     fs.mkdirSync(path.join(workspacePath, ".agents", "skills"), { recursive: true });
     const agentsRoot = fs.realpathSync(path.join(workspacePath, ".agents", "skills"));
-
-    const skillsByRoot: Record<string, string[]> = {
-      [agentsRoot]: ["solo"],
-    };
-
-    // 仅提供 countSkills（覆盖默认），不提供 lister —— 回退到 sum。
+    // 键含 provider：多 provider 共享同一物理根是 per-provider 扫描（customProvider
+    // 参与投影语义）；合一消除的是「count 遍 + lister 遍」的双遍，不是合并 provider。
+    const callsByProviderRoot = new Map<string, number>();
     const registry = createWorkspaceRegistry({
-      countSkills: counterFromList(skillsByRoot),
+      listSkills: async (options) => {
+        const key = `${options.customProvider ?? "?"}:${path.resolve(options.customDirs?.[0] ?? "")}`;
+        callsByProviderRoot.set(key, (callsByProviderRoot.get(key) ?? 0) + 1);
+        return [{ directoryName: "only-skill" }];
+      },
     });
-    registry.import(workspacePath, "Fallback");
+    registry.import(workspacePath, "SinglePass");
 
     const projected = await registry.list();
     const imported = projected.find((ws) => ws.kind === "directory");
-    if (!imported || imported.kind !== "directory") throw new Error("Expected imported Workspace.");
+    if (!imported || imported.kind !== "directory") throw new Error("Expected imported.");
 
-    // cline 与 codex 共享根，各计 1；不去重时 Workspace 级为两者之和（≥ 2）。
-    expect(imported.skillCount).toBeGreaterThanOrEqual(2);
+    // 每个 (provider, root) 组合恰好一次（v1 会是两次：counter 遍 + lister 遍）。
+    for (const calls of callsByProviderRoot.values()) {
+      expect(calls).toBe(1);
+    }
+    expect(callsByProviderRoot.size).toBeGreaterThan(0);
+    // shared root（.agents/skills 同时映射 cline 与 codex）按 provider 各一次。
+    expect(callsByProviderRoot.get(`cline:${path.resolve(agentsRoot)}`)).toBe(1);
+    expect(callsByProviderRoot.get(`codex:${path.resolve(agentsRoot)}`)).toBe(1);
   });
 });

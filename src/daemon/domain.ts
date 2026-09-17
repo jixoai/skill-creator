@@ -125,6 +125,10 @@ export function createDaemonDomain(
   const agentFiles = createAgentFilesService();
   // skills 先于 agentSessions 装配（skill-refs C1 的 `$` 引用展开需要注入）。
   const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();
+  // npx probe 后台预热（perf-firstscreen B-5）：shell out 一次 `npx skills
+  // list --json`（冷启动 0-15s），不让首个 skills.list 阻塞在它后面；探测
+  // 就绪前的列表 provenance 投影为缺省，就绪后自动补全。
+  void skillsCliProbe.probe();
   const skills = createSkillService(workspaces, { skillsCliProbe });
   const agentSessions = createAgentSessionsService({
     kernel: () => kernelHostRef.handle,

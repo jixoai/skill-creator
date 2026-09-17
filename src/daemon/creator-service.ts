@@ -143,6 +143,9 @@ async function save(
   const frontmatter = SkillFrontmatterSchema.parse(input.frontmatter);
   const content = matter.stringify(input.body, frontmatter);
   atomicWriteUtf8(targetFile, content.endsWith("\n") ? content : `${content}\n`);
+  // perf B-6 写后失效：rediscover 验证必须看到刚写入的文档，而不是 TTL 内的
+  // 旧 discovery（否则新建技能被判「could not be rediscovered」）。
+  skills.invalidateDiscovery(target);
 
   const skillId =
     input.mode === "create"
@@ -241,6 +244,7 @@ async function remove(
     throw new DomainError("CONFLICT", "This skill changed on disk. Reload it before deleting.");
   }
   fs.rmSync(skill.path, { recursive: true, force: false });
+  skills.invalidateDiscovery(target);
 }
 
 function writableDirectory(workspaces: WorkspaceRegistry, target: WorkspaceProviderTarget): string {

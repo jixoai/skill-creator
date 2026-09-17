@@ -145,18 +145,55 @@ export function createSkillService(
   const discoverSkills = options.discoverSkills ?? listSkills;
   const validateSkill = options.validateSkill ?? validateCcskiSkill;
   const skillsCliProbe = options.skillsCliProbe;
+
+  // 同 target discovery 在途合并（perf-firstscreen B-6）：进 provider 后同一
+  // 交互簇内的 list/resolve/info/toggle/validate 并发共享一次扫描。曾试过 3s
+  // TTL 缓存，但 steward/creator/测试 fixture 的「直接写盘 → 再读」路径对缓存
+  // 不可见（实测 skill-steward-runtime 40 例 compensated），写后读一致性优先，
+  // 降级为仅合并「同时在途」的请求；写路径通过 invalidateDiscovery 主动失效。
+  // （跨请求缓存留给 skill-search 索引化，见 perf-firstscreen proposal B-7。）
+  const discoveryInflight = new Map<string, Promise<SkillMetadata[]>>();
+
+  const discoveryKey = (target: WorkspaceProviderTarget, includeDisabled: boolean): string =>
+    `${target.workspaceId}:${target.providerId}:${includeDisabled}`;
+
+  const cachedList = (
+    target: WorkspaceProviderTarget,
+    includeDisabled = true,
+  ): Promise<SkillMetadata[]> => {
+    const key = discoveryKey(target, includeDisabled);
+    const existing = discoveryInflight.get(key);
+    if (existing) return existing;
+    const promise = list(workspaces, discoverSkills, target, includeDisabled, skillsCliProbe);
+    discoveryInflight.set(key, promise);
+    // settle 后移除在途记录（失败不缓存，成功也不跨请求缓存）。
+    const forget = () => discoveryInflight.delete(key);
+    promise.then(forget, forget);
+    return promise;
+  };
+
+  const invalidateTarget = (target: WorkspaceProviderTarget): void => {
+    discoveryInflight.delete(discoveryKey(target, true));
+    discoveryInflight.delete(discoveryKey(target, false));
+  };
+
   return {
     list: (target: WorkspaceProviderTarget, includeDisabled = true) =>
-      list(workspaces, discoverSkills, target, includeDisabled, skillsCliProbe),
+      cachedList(target, includeDisabled),
     resolve: (target: WorkspaceProviderTarget, skillId: SkillId) =>
-      resolveSkill(workspaces, discoverSkills, target, skillId, skillsCliProbe),
+      resolveSkill(cachedList, target, skillId),
     skillFile,
-    info: (target: WorkspaceProviderTarget, skillId: SkillId) =>
-      info(workspaces, discoverSkills, target, skillId, skillsCliProbe),
+    info: (target: WorkspaceProviderTarget, skillId: SkillId) => info(cachedList, target, skillId),
     toggle: (target: WorkspaceProviderTarget, skillIds: SkillId[], mode: "enable" | "disable") =>
-      toggle(workspaces, discoverSkills, target, skillIds, mode, skillsCliProbe),
+      toggle(cachedList, target, skillIds, mode).finally(() => invalidateTarget(target)),
     validate: (target: WorkspaceProviderTarget, skillId: SkillId) =>
-      validate(workspaces, discoverSkills, validateSkill, target, skillId, skillsCliProbe),
+      validate(cachedList, validateSkill, workspaces, target, skillId),
+    /**
+     * 丢弃该 target 的 discovery 缓存（写事务用）：apply/rollback 等绕过
+     * 本 service 直接写盘后，验证读必须看到新磁盘态（perf B-6 的 TTL 缓存
+     * 不知道外部写入）。
+     */
+    invalidateDiscovery: invalidateTarget,
   };
 }
 
@@ -173,8 +210,9 @@ async function list(
 ): Promise<SkillMetadata[]> {
   const scope = workspaces.resolve(target, includeDisabled);
   const skills = await discoverSkills(scope.options);
-  // 探测失败 / 无 npx 时返回空 map；按 D6，缓存命中避免每次 list 重跑 npx。
-  const probeMap = skillsCliProbe ? await skillsCliProbe.probe() : null;
+  // probe 非阻塞快照（perf-firstscreen B-5）：未就绪时 provenance 投影为缺省，
+  // 不让 npx 冷启动（0-15s）阻塞 skills.list；daemon boot 后台预热补全。
+  const probeMap = skillsCliProbe?.peek() ?? null;
   const byId = new Map<SkillId, SkillMetadata>();
   for (const skill of skills) {
     const projected = projectMetadata(skill, probeMap);
@@ -185,17 +223,19 @@ async function list(
   return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
+/** 同 target 列表装载器（createSkillService 的 TTL 缓存包装）。 */
+export type SkillListLoader = (
+  target: WorkspaceProviderTarget,
+  includeDisabled?: boolean,
+) => Promise<SkillMetadata[]>;
+
 /** Resolve an opaque skill ID only within its requested Workspace Provider. */
 async function resolveSkill(
-  workspaces: WorkspaceRegistry,
-  discoverSkills: SkillDiscoverer,
+  loadList: SkillListLoader,
   target: WorkspaceProviderTarget,
   skillId: SkillId,
-  skillsCliProbe?: SkillsCliProbe,
 ): Promise<SkillMetadata> {
-  const skill = (await list(workspaces, discoverSkills, target, true, skillsCliProbe)).find(
-    (candidate) => candidate.id === skillId,
-  );
+  const skill = (await loadList(target, true)).find((candidate) => candidate.id === skillId);
   if (!skill)
     throw new DomainError("NOT_FOUND", `Skill not found in Workspace Provider: ${skillId}`);
   return skill;
@@ -214,13 +254,11 @@ function skillFile(skill: SkillMetadata): string {
 
 /** Read one Workspace Provider skill document and its current content revision. */
 async function info(
-  workspaces: WorkspaceRegistry,
-  discoverSkills: SkillDiscoverer,
+  loadList: SkillListLoader,
   target: WorkspaceProviderTarget,
   skillId: SkillId,
-  skillsCliProbe?: SkillsCliProbe,
 ): Promise<SkillInfo> {
-  const skill = await resolveSkill(workspaces, discoverSkills, target, skillId, skillsCliProbe);
+  const skill = await resolveSkill(loadList, target, skillId);
   const file = skillFile(skill);
   const content = fs.readFileSync(file, "utf8");
   return {
@@ -233,19 +271,12 @@ async function info(
 
 /** Enable or disable selected skills without overwriting file conflicts. */
 async function toggle(
-  workspaces: WorkspaceRegistry,
-  discoverSkills: SkillDiscoverer,
+  loadList: SkillListLoader,
   target: WorkspaceProviderTarget,
   skillIds: SkillId[],
   mode: "enable" | "disable",
-  skillsCliProbe?: SkillsCliProbe,
 ): Promise<ToggleSummary> {
-  const discovered = new Map(
-    (await list(workspaces, discoverSkills, target, true, skillsCliProbe)).map((skill) => [
-      skill.id,
-      skill,
-    ]),
-  );
+  const discovered = new Map((await loadList(target, true)).map((skill) => [skill.id, skill]));
   const results: ToggleSummary["results"] = [];
 
   for (const skillId of skillIds) {
@@ -299,16 +330,13 @@ async function toggle(
 
 /** Validate one Workspace Provider-scoped skill through ccski. */
 async function validate(
-  workspaces: WorkspaceRegistry,
-  discoverSkills: SkillDiscoverer,
+  loadList: SkillListLoader,
   validateSkill: SkillValidator,
+  workspaces: WorkspaceRegistry,
   target: WorkspaceProviderTarget,
   skillId: SkillId,
-  skillsCliProbe?: SkillsCliProbe,
 ): Promise<ValidateResult> {
-  const skill = (await list(workspaces, discoverSkills, target, true, skillsCliProbe)).find(
-    (candidate) => candidate.id === skillId,
-  );
+  const skill = (await loadList(target, true)).find((candidate) => candidate.id === skillId);
   if (!skill)
     throw new DomainError("NOT_FOUND", `Skill not found in Workspace Provider: ${skillId}`);
   const result = safeParseExternal(

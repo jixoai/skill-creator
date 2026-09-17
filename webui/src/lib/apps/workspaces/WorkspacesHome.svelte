@@ -53,8 +53,13 @@
   let removeOpen = $state(false);
   let removeBusy = $state(false);
 
+  // 挂载各发一次（perf-firstscreen B-1：拆分 effect——单一 effect 读
+  // agentSessionsList 会在 loaded/loading 翻转时重跑并重复 loadWorkspaces，
+  // 首屏把 1.76s 的列表 RPC 放大 3-4 倍）。
   $effect(() => {
     void loadWorkspaces();
+  });
+  $effect(() => {
     // 首屏 Continue 区需要会话列表（面板未打开时也要有数据）。
     if (!agentSessionsList.loaded && !agentSessionsList.loading) void loadAgentSessions();
   });

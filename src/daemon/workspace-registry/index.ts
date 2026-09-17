@@ -30,11 +30,9 @@ import { globalProviderRoot, importedProviderRoot, requireProvider } from "../pr
 import { createWorkspaceRegistryPersistence } from "./persistence.js";
 import {
   availableDirectory,
-  collectWorkspaceSkillKeys,
-  countWorkspaceSnapshot,
   projectImportedWorkspace,
   projectWorkspaceSnapshot,
-  type WorkspaceSkillCounter,
+  scanWorkspaceSnapshot,
   type WorkspaceSkillLister,
 } from "./projection.js";
 import {
@@ -64,13 +62,8 @@ export interface WorkspaceRegistry {
   resolveWritable: (target: WorkspaceProviderTarget) => WorkspaceProviderScope;
 }
 
-/** Test seam for replacing ccski's dynamic skill counter and lister. */
+/** Test seam for replacing ccski's dynamic skill scan（单遍产出计数与去重键）。 */
 export interface WorkspaceRegistryOptions {
-  countSkills?: WorkspaceSkillCounter;
-  /**
-   * 可选技能列表适配器：返回某 Provider 根目录下的技能目录项，用于 Workspace 级
-   * 按 canonical path 去重的聚合计数。未提供时回退到不去重的 sum（向后兼容）。
-   */
   listSkills?: WorkspaceSkillLister;
 }
 
@@ -79,13 +72,8 @@ export function createWorkspaceRegistry(options: WorkspaceRegistryOptions = {}):
   const persistence = createWorkspaceRegistryPersistence();
   let state = persistence.load();
   let revision = 0;
-  // 默认计数器与默认 lister 耦合：调用方未覆盖计数器（用默认 ccski）时，
-  // 自动启用 ccski lister 做去重；调用方覆盖计数器（测试桩）时 lister 保持
-  // 调用方提供的值或关闭（保持既有测试的零扫描与不去重语义）。
-  const usingDefaultCounter = options.countSkills === undefined;
-  const countSkills = options.countSkills ?? countCcskiSkills;
-  const listSkills: WorkspaceSkillLister | undefined =
-    options.listSkills ?? (usingDefaultCounter ? listCcskiSkills : undefined);
+  // 默认 ccski 扫描器：未注入桩时用于生产（计数与去重同源单遍）。
+  const listSkills: WorkspaceSkillLister = options.listSkills ?? listCcskiSkills;
 
   const commit = (next: WorkspaceRegistryState): void => {
     if (next === state) return;
@@ -100,12 +88,7 @@ export function createWorkspaceRegistry(options: WorkspaceRegistryOptions = {}):
         const observedRevision = revision;
         const snapshot = state;
         try {
-          const counts = await countWorkspaceSnapshot(snapshot, countSkills);
-          if (revision !== observedRevision) continue;
-          // 仅当提供 lister 时计算去重集合；否则跳过，回退到 sumProviderCounts。
-          const skillKeys = listSkills
-            ? await collectWorkspaceSkillKeys(snapshot, listSkills)
-            : undefined;
+          const { counts, skillKeys } = await scanWorkspaceSnapshot(snapshot, listSkills);
           if (revision !== observedRevision) continue;
           return projectWorkspaceSnapshot(snapshot, counts, skillKeys);
         } catch (error) {
@@ -188,11 +171,7 @@ export function createWorkspaceRegistry(options: WorkspaceRegistryOptions = {}):
   };
 }
 
-async function countCcskiSkills(options: ListOptions): Promise<number> {
-  return (await listSkills(options)).length;
-}
-
-/** 默认 ccski 技能列表适配器：投影技能目录名（物理目录 basename）供 Workspace 级去重。 */
+/** 默认 ccski 技能扫描适配器：单遍 listSkills 同时供计数与去重键。 */
 async function listCcskiSkills(options: ListOptions) {
   const skills = await listSkills(options);
   return skills.map((skill) => ({ directoryName: path.basename(skill.path) }));

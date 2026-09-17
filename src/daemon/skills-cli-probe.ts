@@ -87,6 +87,8 @@ export function parseSkillsCliList(stdout: unknown): SkillsCliProbeMap {
 export function createSkillsCliProbe(options: SkillsCliProbeOptions = {}) {
   const run = options.run ?? runNpxSkillsList;
   let cached: SkillsCliProbeMap | null = null;
+  // 在途合并：并发 probe 共享同一次 shell out（perf-firstscreen B-5）。
+  let inflight: Promise<SkillsCliProbeMap> | null = null;
 
   const probeOnce = async (): Promise<SkillsCliProbeMap> => {
     try {
@@ -99,10 +101,26 @@ export function createSkillsCliProbe(options: SkillsCliProbeOptions = {}) {
   };
 
   return {
-    /** 返回缓存的探测映射；首次调用 shell out，后续命中缓存。 */
+    /** 返回缓存的探测映射；首次调用 shell out（在途共享），后续命中缓存。 */
     async probe(): Promise<SkillsCliProbeMap> {
       if (cached) return cached;
-      cached = await probeOnce();
+      if (inflight) return inflight;
+      inflight = probeOnce().then((result) => {
+        cached = result;
+        return result;
+      });
+      try {
+        return await inflight;
+      } finally {
+        inflight = null;
+      }
+    },
+    /**
+     * 同步快照（perf-firstscreen B-5）：缓存命中返回映射，未就绪返回 null——
+     * 调用方（skills.list）不阻塞等待 npx（冷启动 0-15s）；daemon boot 后
+     * 台预热 probe，就绪后的下一次投影自然补全 provenance。
+     */
+    peek(): SkillsCliProbeMap | null {
       return cached;
     },
     /** 失效缓存；指定路径时仅移除对应条目，否则清空全部。 */

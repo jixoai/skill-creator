@@ -23,6 +23,12 @@ const workspaceMutationRequests = createRequestGenerationGate(getConnectionGener
 /** 一次 Workspace 投影请求对调用方可见的终态。 */
 export type WorkspaceLoadOutcome = "loaded" | "superseded" | "failed";
 
+// 在途合并（perf-firstscreen B-2）：workspace.list 在真实语料下是重 RPC
+// （registry 投影全量扫描）；layout connected-effect 与组件挂载会在首屏
+// 并发触发，重复请求会各自占用 daemon 事件循环。后来者共享同一在途
+// Promise；代次门语义不变（新的显式加载仍作废旧响应的提交资格）。
+let inflightWorkspaces: Promise<WorkspaceLoadOutcome> | null = null;
+
 /** Global 与导入 Workspace 的全局导航状态。 */
 export const workspaceState = $state<{
   workspaces: Workspace[];
@@ -31,8 +37,16 @@ export const workspaceState = $state<{
   error: string | null;
 }>({ workspaces: [], activeId: "~", loading: true, error: null });
 
-/** 从 daemon 刷新 workspace registry 投影。 */
-export async function loadWorkspaces(): Promise<WorkspaceLoadOutcome> {
+/** 从 daemon 刷新 workspace registry 投影（在途共享，见 inflightWorkspaces）。 */
+export async function loadWorkspaces(force = false): Promise<WorkspaceLoadOutcome> {
+  if (!force && inflightWorkspaces !== null) return inflightWorkspaces;
+  inflightWorkspaces = performLoadWorkspaces().finally(() => {
+    inflightWorkspaces = null;
+  });
+  return inflightWorkspaces;
+}
+
+async function performLoadWorkspaces(): Promise<WorkspaceLoadOutcome> {
   const request = workspaceRequests.issue();
   const rpc = getRpc();
   if (!rpc) {
@@ -71,10 +85,10 @@ export async function addWorkspace(
   }
   if (!request.isCurrent()) {
     // mutation 已成功落盘：stale 只取消返回值的提交资格，不让 UI 与盘失联。
-    await loadWorkspaces();
+    await loadWorkspaces(true);
     return null;
   }
-  await loadWorkspaces();
+  await loadWorkspaces(true);
   return workspace;
 }
 
@@ -91,7 +105,7 @@ export async function removeWorkspace(id: string): Promise<boolean> {
   }
   if (!request.isCurrent()) return false;
   workspaceState.activeId = activeId;
-  await loadWorkspaces();
+  await loadWorkspaces(true);
   return request.isCurrent();
 }
 

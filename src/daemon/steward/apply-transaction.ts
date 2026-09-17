@@ -127,6 +127,9 @@ export async function applyProposalTransaction(
   };
 
   const root = deps.workspaces.resolveWritable(snapshot.target).directory;
+  // perf B-6 写事务一致性：事务读必须基于当前磁盘态——入口失效一次，且每个
+  // patch 分支的写步骤完成后再次失效（直接 fs 写对 skill-service 缓存不可见）。
+  deps.skills.invalidateDiscovery(snapshot.target);
 
   /** 补偿：逆序回滚已完成步骤；外部漂移 → recovery-required。 */
   const compensate = async (failure: string): Promise<ApplyOutcome> => {
@@ -151,6 +154,7 @@ export async function applyProposalTransaction(
         };
       }
     }
+    deps.skills.invalidateDiscovery(snapshot.target);
     return { status: "compensated", mutations, failure };
   };
 
@@ -470,6 +474,7 @@ export async function applyProposalTransaction(
         break;
       }
     }
+    deps.skills.invalidateDiscovery(snapshot.target);
     // Codex R7 P1-3：全部成功后追加 commit 终态行——回放闸（无 commit 行的 journal
     // 是崩溃/截断事实，只能 recovery，不得宣称 rolled-back）。
     await recordStep("commit", {

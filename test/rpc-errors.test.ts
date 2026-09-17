@@ -118,7 +118,7 @@ describe("RPC domain-error boundary", () => {
     const workspaceDirectory = path.join(sandbox, "projection-workspace");
     fs.mkdirSync(path.join(workspaceDirectory, "skills"), { recursive: true });
     const workspaces = createWorkspaceRegistry({
-      countSkills: () => Promise.reject(new Error("count adapter failed")),
+      listSkills: () => Promise.reject(new Error("count adapter failed")),
     });
     const client = createClient(
       createDaemonDomain(workspaces, { skillsCliProbe: deterministicSkillsCliProbe() }),
