@@ -273,6 +273,16 @@ describe("v2 pool-level folding (real-corpus walkthrough fix)", () => {
     expect(results.map((result) => result.name)).toContain("unique-skill-0");
   });
 
+  it("merges installations from group members beyond the top-40 pool cut", () => {
+    // codex R3 P2-1：组内 45 个成员 > TOP_CANDIDATES=40——池外成员不进池竞争，
+    // 但其 installations/duplicates 仍必须并入 primary（合并不依赖池成员资格）。
+    const replicas = Array.from({ length: 45 }, (_, index) => replica(index, "a".repeat(64)));
+    const results = rankResults(replicas, "cloudflare", 5, tokenize);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.installations).toHaveLength(45);
+    expect(results[0]?.duplicates).toHaveLength(44);
+  });
+
   it("merges every group member's installations into the primary result", () => {
     const primary = replica(0, "a".repeat(64), 20);
     const other = replica(1, "a".repeat(64), 12);
