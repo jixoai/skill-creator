@@ -34,6 +34,17 @@ export interface SkillSearchStateSource {
 export type SkillSearchService = ReturnType<typeof createSkillSearchEngine>;
 
 /**
+ * SKILL.md 在扫描快照后发生替换或变为 symlink 时的读取失败。
+ * 该错误宁可终止本轮检索，也不接受无法证明身份的文件字节。
+ */
+export class SkillSearchDocumentReadError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "SkillSearchDocumentReadError";
+  }
+}
+
+/**
  * 创建 skill 搜索服务（生产入口）。roots 只来自 provider catalog globalPath 与
  * workspace registry 持久态的 server 侧解析——生产构造不接受任何调用方路径。
  * 索引文件恒由 appDir() 派生（server-owned）。
@@ -76,23 +87,57 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
 
 /** 读取并解析一个 canonical skill 的实际被索引文件，组合为完整索引文档（供编排与测试复用）。 */
 export function readSkillSearchDocument(scan: CanonicalSkillScan): SkillSearchDocument {
-  const raw = fs.readFileSync(scan.sourcePath);
-  const parsed = parseSkillDocument(raw, path.basename(scan.canonicalPath));
-  return {
-    id: scan.id,
-    name: parsed.name,
-    description: parsed.description,
-    keywords: parsed.keywords,
-    triggers: parsed.triggers,
-    headings: parsed.headings,
-    body: parsed.body,
-    canonicalPath: scan.canonicalPath,
-    installations: scan.installations,
-    contentHash: parsed.contentHash,
-    disabled: scan.disabled,
-    conflict: scan.conflict,
-    invalidFrontmatter: parsed.invalidFrontmatter,
-  };
+  let fd: number | null = null;
+  try {
+    try {
+      // POSIX 用 O_NOFOLLOW 关闭末端 symlink 跟随；Windows 不支持该 flag，仍由
+      // fstat 的 inode/size 身份校验拒绝扫描快照后的替换。
+      const noFollow = process.platform === "win32" ? 0 : fs.constants.O_NOFOLLOW;
+      fd = fs.openSync(scan.sourcePath, fs.constants.O_RDONLY | noFollow);
+    } catch (error) {
+      throw new SkillSearchDocumentReadError(
+        `Cannot open the scanned skill document ${scan.sourcePath} without following a symlink.`,
+        { cause: error },
+      );
+    }
+
+    const descriptorStat = fs.fstatSync(fd);
+    if (
+      !descriptorStat.isFile() ||
+      descriptorStat.ino !== scan.stat.ino ||
+      descriptorStat.size !== scan.stat.size
+    ) {
+      throw new SkillSearchDocumentReadError(
+        `The scanned skill document identity changed before read: ${scan.sourcePath}`,
+      );
+    }
+
+    const raw = fs.readFileSync(fd);
+    const parsed = parseSkillDocument(raw, path.basename(scan.canonicalPath));
+    return {
+      id: scan.id,
+      name: parsed.name,
+      description: parsed.description,
+      keywords: parsed.keywords,
+      triggers: parsed.triggers,
+      headings: parsed.headings,
+      body: parsed.body,
+      canonicalPath: scan.canonicalPath,
+      installations: scan.installations,
+      contentHash: parsed.contentHash,
+      disabled: scan.disabled,
+      conflict: scan.conflict,
+      invalidFrontmatter: parsed.invalidFrontmatter,
+    };
+  } catch (error) {
+    if (error instanceof SkillSearchDocumentReadError) throw error;
+    throw new SkillSearchDocumentReadError(
+      `Cannot read the scanned skill document ${scan.sourcePath}.`,
+      { cause: error },
+    );
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
 }
 
 /**

@@ -24,7 +24,10 @@ import {
   SkillSearchIndexError,
   type FreshenSummary,
 } from "../src/daemon/skill-search/index.js";
-import { readSkillSearchDocument } from "../src/daemon/skill-search/service.js";
+import {
+  readSkillSearchDocument,
+  SkillSearchDocumentReadError,
+} from "../src/daemon/skill-search/service.js";
 import { scanSkillRoots, type SkillRoot } from "../src/daemon/skill-search/scanner.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 import { GLOBAL_WORKSPACE_ID, ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
@@ -351,6 +354,45 @@ describe("skill search index load validation (external input boundary)", () => {
 });
 
 describe("skill search index adversarial envelopes", () => {
+  it("rechecks canonical path before accepting a jointly tampered fresh stat", () => {
+    for (const name of ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]) {
+      writeSkill(name, skillContent(name, `${name} skill body`));
+    }
+    const first = createSkillSearchIndex();
+    const allScans = scans();
+    first.freshen(allScans, readSkillSearchDocument);
+    const alphaScan = allScans.find((scan) => scan.canonicalPath.endsWith("alpha"));
+    if (!alphaScan) throw new Error("alpha scan missing");
+    const alphaId = alphaScan.id as string;
+
+    const envelope = readEnvelopeFile();
+    const index = envelope.index as {
+      documentIds: Record<string, string>;
+      storedFields: Record<string, { canonicalPath: string; contentHash: string }>;
+    };
+    const alphaShortId = Object.entries(index.documentIds).find(
+      ([, documentId]) => documentId === alphaId,
+    )?.[0];
+    if (!alphaShortId) throw new Error("alpha short id missing");
+    const stats = envelope.stats as Record<string, { canonicalPath: string; contentHash: string }>;
+    // 两份外部元数据同步篡改为合法格式，旧实现会把这次 freshen 错判为 fresh。
+    stats[alphaId]!.canonicalPath = "/etc/passwd";
+    stats[alphaId]!.contentHash = "b".repeat(64);
+    index.storedFields[alphaShortId]!.canonicalPath = "/etc/passwd";
+    index.storedFields[alphaShortId]!.contentHash = "b".repeat(64);
+    writeEnvelopeFile(envelope);
+
+    const second = createSkillSearchIndex();
+    const counter = { calls: [] as string[] };
+    const summary = second.freshen(scans(), countingReader(counter));
+    expect(summary.mode).toBe("incremental");
+    expect(counter.calls).toEqual([alphaScan.canonicalPath]);
+    const expected = readSkillSearchDocument(alphaScan);
+    const hit = second.search("alpha skill").find((candidate) => candidate.id === alphaId);
+    expect(hit?.canonicalPath).toBe(alphaScan.canonicalPath);
+    expect(hit?.contentHash).toBe(expected.contentHash);
+  });
+
   it("rejects format-valid tampering that contradicts stats metadata", () => {
     writeSkill("target", "---\nname: target\ndescription: real skill\n---\nbody");
     const first = createSkillSearchIndex();
@@ -407,6 +449,59 @@ describe("skill search index adversarial envelopes", () => {
     expect(summary.mode).toBe("rebuilt");
     expect(second.search("beta")).toHaveLength(0);
     expect(second.search("alpha")).toHaveLength(1);
+  });
+
+  it("rejects duplicate active ids and their forged inverted projection", () => {
+    writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nalpha body");
+    writeSkill("beta", "---\nname: beta\ndescription: beta skill\n---\nbeta body");
+    const first = createSkillSearchIndex();
+    const allScans = scans();
+    first.freshen(allScans, readSkillSearchDocument);
+    const alphaScan = allScans.find((scan) => scan.canonicalPath.endsWith("alpha"));
+    const betaScan = allScans.find((scan) => scan.canonicalPath.endsWith("beta"));
+    if (!alphaScan || !betaScan) throw new Error("alpha/beta scan missing");
+    const alphaId = alphaScan.id as string;
+    const betaId = betaScan.id as string;
+
+    const envelope = readEnvelopeFile();
+    const index = envelope.index as {
+      documentIds: Record<string, string>;
+      storedFields: Record<string, Record<string, unknown>>;
+    };
+    const alphaShortId = Object.entries(index.documentIds).find(
+      ([, documentId]) => documentId === alphaId,
+    )?.[0];
+    const betaShortId = Object.entries(index.documentIds).find(
+      ([, documentId]) => documentId === betaId,
+    )?.[0];
+    if (!alphaShortId || !betaShortId) throw new Error("alpha/beta short id missing");
+    // beta 的短 id 复用 alpha，stored projection 也复制 alpha，同时裁剪 beta stats；
+    // 其 beta 倒排词仍留在 MiniSearch payload 中，正是重复值 Set 的绕过向量。
+    index.documentIds[betaShortId] = alphaId;
+    index.storedFields[betaShortId] = index.storedFields[alphaShortId]!;
+    delete (envelope.stats as Record<string, unknown>)[betaId];
+    writeEnvelopeFile(envelope);
+
+    const second = createSkillSearchIndex();
+    const summary = second.freshen([alphaScan], readSkillSearchDocument);
+    expect(summary.mode).toBe("rebuilt");
+    expect(summary.rebuildReason).toBe("corrupt");
+    expect(second.documentCount()).toBe(1);
+    expect(second.search("beta")).toEqual([]);
+    expect(second.search("alpha")).toHaveLength(1);
+  });
+
+  it("rejects a SKILL.md replaced by an external symlink after the scan snapshot", () => {
+    if (process.platform === "win32") return;
+    writeSkill("target", "---\nname: target\ndescription: real skill\n---\nbody");
+    const scan = scans()[0];
+    if (!scan) throw new Error("target scan missing");
+    const outside = path.join(sandbox, "outside.md");
+    fs.writeFileSync(outside, "---\nname: outside\ndescription: secret marker\n---\noutside body");
+    fs.rmSync(scan.sourcePath);
+    fs.symlinkSync(outside, scan.sourcePath);
+
+    expect(() => readSkillSearchDocument(scan)).toThrow(SkillSearchDocumentReadError);
   });
 
   it("does not fake freshness after a failed first rebuild persist", () => {

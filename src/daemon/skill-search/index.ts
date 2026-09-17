@@ -276,9 +276,7 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       this.save();
     } catch (error) {
       // 落盘失败：内存已偏离磁盘真相，作废内存状态并强制下次从磁盘重建后重抛。
-      this.loaded = false;
-      this.miniSearch = createSearchMiniSearch(this.tokenizer);
-      this.stats = new Map();
+      this.invalidateAfterSaveFailure();
       throw error;
     }
     return {
@@ -314,9 +312,7 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       this.save();
     } catch (error) {
       // 与增量路径同一事务语义：落盘失败作废内存状态，长生命周期实例下次从磁盘重来。
-      this.loaded = false;
-      this.miniSearch = createSearchMiniSearch(this.tokenizer);
-      this.stats = new Map();
+      this.invalidateAfterSaveFailure();
       throw error;
     }
     return {
@@ -326,6 +322,13 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       discarded,
       rebuildReason: reason,
     };
+  }
+
+  /** 落盘失败后清空不可持久化的内存快照，下一次调用必须重新读取磁盘真相。 */
+  private invalidateAfterSaveFailure(): void {
+    this.loaded = false;
+    this.miniSearch = createSearchMiniSearch(this.tokenizer);
+    this.stats = new Map();
   }
 
   private discardIndexed(id: string): void {
@@ -370,14 +373,30 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       // 活跃文档集合等值校验：MiniSearch 7 的 discard() 立即移除 active id 记录
       // （序列化 documentIds 只含活跃文档），因此序列化活跃 id 与 stats 键必须
       // 互为镜像——stats 被裁剪的「幽灵文档」或 stats 多出的悬空条目都按损坏重建。
+      // documentIds 的值与 storedFields 的键也必须保持一一映射；仅比较去重后的
+      // active id 集合会让重复 id 把一个文档的倒排词伪装成另一个文档。
       const serialized = safeParseExternal(
-        z.object({ documentIds: z.record(z.string(), z.string()) }).passthrough(),
+        z
+          .object({
+            documentIds: z.record(z.string(), z.string()),
+            storedFields: z.record(z.string(), z.unknown()),
+          })
+          .passthrough(),
         envelope.index,
       );
       if (!serialized) return { kind: "empty", reason: "corrupt" };
-      const activeIds = new Set(Object.values(serialized.documentIds));
+      const shortIds = Object.keys(serialized.documentIds);
+      const activeIdValues = Object.values(serialized.documentIds);
+      const activeIds = new Set(activeIdValues);
       const statIds = new Set(Object.keys(envelope.stats));
-      if (activeIds.size !== statIds.size || [...activeIds].some((id) => !statIds.has(id))) {
+      const storedFieldIds = Object.keys(serialized.storedFields);
+      if (
+        activeIds.size !== activeIdValues.length ||
+        activeIds.size !== statIds.size ||
+        activeIdValues.some((id) => !statIds.has(id)) ||
+        storedFieldIds.length !== shortIds.length ||
+        shortIds.some((shortId) => !Object.hasOwn(serialized.storedFields, shortId))
+      ) {
         return { kind: "empty", reason: "corrupt" };
       }
 
@@ -437,12 +456,16 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
 }
 
 /**
- * stat 键比较：四元组（mtimeMs+size+ino+ctimeMs）全等且 installations/disabled/conflict
- * 未漂移时视为新鲜（新增 symlink 入口、启停切换会改变 installations/disabled/conflict，
- * 即使 SKILL.md 字节未变也需重投影）。
+ * stat 键比较：canonicalPath 与四元组（mtimeMs+size+ino+ctimeMs）全等且
+ * installations/disabled/conflict 未漂移时视为新鲜（新增 symlink 入口、启停切换会改变
+ * installations/disabled/conflict，即使 SKILL.md 字节未变也需重投影）。
+ * scan 不读取内容，因此这里不把 contentHash 与当前字节逐次重算绑定；canonicalPath
+ * 加四元组绑定真实扫描对象。持有 app 缓存写权限者仍可篡改合法格式的 hash，这是缓存
+ * 威胁模型内的残留风险，完整 hash 绑定需额外内容读取成本。
  */
 function statIsCurrent(stat: SkillIndexStat, scan: CanonicalSkillScan): boolean {
   if (
+    stat.canonicalPath !== scan.canonicalPath ||
     stat.mtimeMs !== scan.stat.mtimeMs ||
     stat.size !== scan.stat.size ||
     stat.ino !== scan.stat.ino ||

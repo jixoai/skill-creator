@@ -66,8 +66,15 @@ src/cli/cli.ts  COMMANDS.search         （+1 意图：query/flag 解析与输�
   不变量；安全不变量 = 生产装配（CLI/daemon/RPC）只经零参
   `createSkillSearchService()`，不存在调用方 root 传参路径。索引外部输入
   边界：加载时序列化活跃 id 集与 stats 键等值 + 存储投影与 stats 逐字段
-  交叉校验（stats 为唯一可重放元数据源），矛盾即损坏重建；文档级
-  SKILL.md symlink 以 lstat 拒绝（symlink 跟进仅限入口层目录）。
+  交叉校验（stats 为唯一可重放元数据源），矛盾即损坏重建；documentIds 值
+  唯一 + 与 storedFields 键一一对应（防倒排词伪装）；statIsCurrent 额外绑定
+  canonicalPath（联合篡改 stats+projection 时按真实 scan 重解析恢复真相）。
+  文档级 SKILL.md symlink 以 lstat 拒绝（symlink 跟进仅限入口层目录），
+  读取走 open(O_NOFOLLOW, POSIX) + fstat 身份校验（ino+size 对扫描快照）
+  - 从 fd 读字节（TOCTOU 替换抛 typed 错误，不接受无法证明身份的字节）。
+    已知残留（缓存威胁模型内，代码注释同步声明）：持有 app 缓存写权限者
+    仍可同步篡改合法格式的 contentHash（完整字节绑定需每次 fresh 重读，
+    违反 stat 零内容读取原则；canonicalPath+四元组绑定已闭合路径注入向量）。
 
 ## 数据流
 
