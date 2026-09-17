@@ -254,32 +254,33 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       return this.rebuild(scans, readDocument, "dirty-ratio");
     }
 
-    for (const id of removed) {
-      this.discardIndexed(id);
-      this.stats.delete(id);
+    if (removed.length === 0 && changed.length === 0) {
+      return { mode: "fresh", documents: this.stats.size, parsed: 0, discarded: 0 };
     }
+
+    // 批量前置读取：任何文档读取失败（含 TOCTOU 身份错误）发生在内存被触碰
+    // 之前——typed error 原样上抛，本轮不留下部分状态。
+    const documents = changed.map((scan) => ({ scan, document: readDocument(scan) }));
+
+    // 变更阶段快照：discard/add/save 任一失败时回滚到本轮开始前的完整成员状态。
+    const snapshotIndex = this.miniSearch.toJSON();
+    const snapshotStats = new Map(this.stats);
     let parsed = 0;
     try {
-      for (const scan of changed) {
+      for (const id of removed) {
+        this.discardIndexed(id);
+        this.stats.delete(id);
+      }
+      for (const { scan, document } of documents) {
         if (indexedIds.has(scan.id as string)) this.discardIndexed(scan.id as string);
-        const document = readDocument(scan);
         this.miniSearch.add(document);
         this.stats.set(scan.id as string, statEntry(scan, document));
         parsed += 1;
       }
-    } catch {
-      // 索引内部状态与磁盘视角不一致（如加载校验漏网的重复 id）：按损坏自愈重建。
-      return this.rebuild(scans, readDocument, "corrupt");
-    }
-
-    if (removed.length === 0 && changed.length === 0) {
-      return { mode: "fresh", documents: this.stats.size, parsed: 0, discarded: 0 };
-    }
-    try {
       this.save();
     } catch (error) {
-      // 落盘失败：内存已偏离磁盘真相，作废内存状态并强制下次从磁盘重建后重抛。
-      this.invalidateAfterSaveFailure();
+      this.restoreSnapshot(snapshotIndex, snapshotStats);
+      if (error instanceof SkillSearchIndexError) this.invalidateAfterSaveFailure();
       throw error;
     }
     return {
@@ -337,6 +338,23 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
     this.loaded = false;
     this.miniSearch = createSearchMiniSearch(this.tokenizer);
     this.stats = new Map();
+  }
+
+  /** 增量变更阶段失败后恢复本轮开始前的完整成员状态（索引原子一致性）。 */
+  private restoreSnapshot(
+    snapshotIndex: unknown,
+    snapshotStats: Map<string, SkillIndexStat>,
+  ): void {
+    try {
+      this.miniSearch = MiniSearch.loadJSON<SkillSearchDocument>(
+        JSON.stringify(snapshotIndex),
+        miniSearchOptions(this.tokenizer),
+      );
+      this.stats = snapshotStats;
+    } catch {
+      // 快照恢复失败（不应发生）：退化为作废内存状态，下次调用从磁盘重来。
+      this.invalidateAfterSaveFailure();
+    }
   }
 
   private discardIndexed(id: string): void {
@@ -480,9 +498,9 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
  * 键序与数字格式经 stringify→parse→stringify 往返稳定（MiniSearch 载荷只含
  * 字符串/整数/有限浮点）。摘要让一切「不重算摘要的篡改」（控制面元数据、
  * 倒排、投影文本、stats）在加载时整体失效；持有缓存写权限且重算摘要的完整
- * 伪造是无密钥模型的不可约边界（design.md 声明）。
+ * 伪造是无密钥模型的不可约边界（design.md 声明）。导出供测试镜像复用。
  */
-function payloadDigest(index: unknown, stats: unknown): string {
+export function payloadDigest(index: unknown, stats: unknown): string {
   return createHash("sha256").update(JSON.stringify({ index, stats })).digest("hex");
 }
 

@@ -22,6 +22,7 @@ import {
   createSkillSearchIndex,
   ENGINE_CONFIG_DIGEST,
   minisearchRuntimeVersion,
+  payloadDigest,
   SkillSearchIndexError,
   type FreshenSummary,
 } from "../src/daemon/skill-search/index.js";
@@ -30,6 +31,7 @@ import {
   SkillSearchDocumentReadError,
 } from "../src/daemon/skill-search/service.js";
 import { scanSkillRoots, type SkillRoot } from "../src/daemon/skill-search/scanner.js";
+import type { SkillSearchDocument } from "../src/shared/contracts/search.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 import { GLOBAL_WORKSPACE_ID, ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
 
@@ -94,11 +96,14 @@ function writeEnvelopeFile(value: unknown): void {
   fs.writeFileSync(file, typeof value === "string" ? value : JSON.stringify(value), "utf8");
 }
 
-/** 篡改后重算载荷摘要（镜像生产 payloadDigest），使测试穿透摘要层验证更深处的校验。 */
+/** 篡改后重算载荷摘要（生产 payloadDigest 镜像），使测试穿透摘要层验证更深处的校验。 */
 function refreshEnvelopeDigest(envelope: Record<string, unknown>): void {
-  const digest = crypto.createHash("sha256");
-  digest.update(JSON.stringify({ index: envelope.index, stats: envelope.stats }));
-  envelope.payloadDigest = digest.digest("hex");
+  envelope.payloadDigest = payloadDigest(envelope.index, envelope.stats);
+}
+
+function refreshedEnvelope(envelope: Record<string, unknown>): Record<string, unknown> {
+  refreshEnvelopeDigest(envelope);
+  return envelope;
 }
 
 describe("skill search index freshness", () => {
@@ -423,7 +428,7 @@ describe("skill search index adversarial envelopes", () => {
     )?.[0]!;
     envelope.index.storedFields[shortId]!.canonicalPath = "/etc/passwd";
     envelope.index.storedFields[shortId]!.contentHash = "a".repeat(64);
-    fs.writeFileSync(file, JSON.stringify(envelope));
+    fs.writeFileSync(file, JSON.stringify(refreshedEnvelope(envelope)));
 
     const second = createSkillSearchIndex();
     const summary = second.freshen(scans, readSkillSearchDocument);
@@ -554,5 +559,38 @@ describe("skill search index payload digest", () => {
     const hits = second.search("alpha skill");
     expect(hits).toHaveLength(1);
     expect(Number.isFinite(hits[0]!.bm25)).toBe(true);
+  });
+});
+
+describe("skill search index incremental atomicity", () => {
+  it("leaves no partial state when a changed document fails identity verification", () => {
+    for (const name of ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]) {
+      writeSkill(name, skillContent(name, `${name} skill body`));
+    }
+    const index = createSkillSearchIndex();
+    const firstScans = canonicalizeCandidates(scanSkillRoots([root()]));
+    index.freshen(firstScans, readSkillSearchDocument);
+    expect(index.documentCount()).toBe(6);
+
+    // 低脏度（1/6）变更 + 读取失败：touch alpha 使其进入 changed，reader 对 alpha
+    // 抛 typed 身份错误（等价于 TOCTOU 替换在读取瞬间被 fstat 拒绝）。
+    const alphaScan = firstScans.find((scan) => scan.canonicalPath.includes("alpha"));
+    if (!alphaScan) throw new Error("alpha scan missing");
+    const now = new Date();
+    fs.utimesSync(alphaScan.sourcePath, now, now);
+    const failingReader = (scan: CanonicalSkillScan): SkillSearchDocument => {
+      if (scan.canonicalPath.includes("alpha")) {
+        throw new SkillSearchDocumentReadError("identity verification failed (simulated)");
+      }
+      return readSkillSearchDocument(scan);
+    };
+
+    expect(() =>
+      index.freshen(canonicalizeCandidates(scanSkillRoots([root()])), failingReader),
+    ).toThrow(SkillSearchDocumentReadError);
+
+    // 原子一致性：失败后成员保持本轮开始前的完整状态（无 discard 残留、无半更新）。
+    expect(index.documentCount()).toBe(6);
+    expect(index.search("alpha").length).toBeGreaterThanOrEqual(1);
   });
 });

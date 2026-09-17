@@ -366,7 +366,7 @@ rerank 只保留少量可解释的 skill 语义信号。
 
 ```text
 <appDir>/search-index.json = {
-  schemaVersion: 1,                            // 信封结构变更
+  schemaVersion: 2,                            // 信封结构变更（v2 起 payloadDigest）
   tokenizerVersion: "segmenter-bigram-v1",     // 分词行为变更
   parserVersion: "matter-headings-12k-v1",     // frontmatter/headings/body 抽提规则变更
   rankingVersion: "rerank-2026-09-17-v1",      // rerank 公式/权重变更
@@ -374,6 +374,7 @@ rerank 只保留少量可解释的 skill 语义信号。
                                    非通配；版本不符即重建）,
             configDigest: sha256(fields/boost/fuzzy/prefix/processTerm 常量的
                                    JSON 序列化) },
+  payloadDigest: sha256(JSON.stringify({index, stats})),  // 写入时算、加载时重算
   index: <MiniSearch.toJSON()>,
   stats: { [id]: { canonicalPath, mtimeMs, size, ino, ctimeMs, installations,
                    contentHash, disabled, conflict, invalidFrontmatter } }
@@ -381,6 +382,10 @@ rerank 只保留少量可解释的 skill 语义信号。
 ```
 
 任一 version/digest 不符 → 全量重建（防「stat 相同但语义已变」的假新鲜）。
+payloadDigest（实现期经复核对抗轮固化）：一切不重算摘要的篡改——控制面
+元数据（documentCount 等可注入 NaN/乱序）、倒排、投影文本、stats——在加载时
+整体失效；威胁模型边界为「持有 app 缓存写权限且重算摘要的 envelope 级伪造」
+（无密钥不可约；若未来纳入可写缓存攻击者，需改带密钥认证或每次重读源文件）。
 stat 新鲜度键 = `mtimeMs + size + ino + ctimeMs`（inode/ctime 防保时保长
 的替换 false negative）。**错误矩阵（冻结）**：
 
