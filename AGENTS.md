@@ -106,8 +106,9 @@ Skill Search Index = 第一代本地技能索引：Canonical Skill（realpath �
                       冻结 rerank；持久信封（五版本 + payloadDigest）。
                       消费方：`skill-creator search` CLI（进程内）+ daemon
                       skills.search RPC + MCP skills_search（双面 readonly）
-                      + agent 全模式工具面；GUI 三链路（ProviderView 过滤 /
-                      ⌘K 面板 / composer $ 菜单）见 skill-search-gui
+                      + agent 全模式工具面 + GUI 三链路（ProviderView 过滤 /
+                      ⌘K 面板 / composer $ 菜单；store 层 latest-request-wins
+                      searchState 单例，消费方退出各自作废在途检索）
 SkillTokenizer     = 冻结规则的检索分词器：NFKC + Intl.Segmenter(zh) + 连续
                       单字滑窗 bigram + Latin 标识符切分（camel/kebab/@scope/
                       URL）；query/doc 同管线，TOKENIZER_VERSION 版本化，
