@@ -30,6 +30,11 @@ function writeFile(relative: string, content = "text"): string {
   return file;
 }
 
+/** 断言统一 posix 形态（Windows path.relative 返回反斜杠）。 */
+function relPosix(file: string): string {
+  return path.relative(sandbox, file).split(path.sep).join("/");
+}
+
 describe("extra markdown collection (search-robustness R1)", () => {
   it("collects nested markdown files in deterministic path order", () => {
     writeFile("SKILL.md", "skill");
@@ -37,7 +42,7 @@ describe("extra markdown collection (search-robustness R1)", () => {
     writeFile("advanced/deep/topic.md");
     writeFile("a-top.md");
     const files = collectExtraMarkdownFiles(sandbox, new Set());
-    expect(files.map((file) => path.relative(sandbox, file.path))).toEqual([
+    expect(files.map((file) => relPosix(file.path))).toEqual([
       "a-top.md",
       "advanced/deep/topic.md",
       "reference/guide.md",
@@ -51,7 +56,7 @@ describe("extra markdown collection (search-robustness R1)", () => {
     writeFile("build/out.md");
     writeFile("vendor/asset.md");
     const builtinOnly = collectExtraMarkdownFiles(sandbox, new Set());
-    expect(builtinOnly.map((file) => path.relative(sandbox, file.path))).toEqual(["vendor/asset.md"]);
+    expect(builtinOnly.map((file) => relPosix(file.path))).toEqual(["vendor/asset.md"]);
     const withConfig = collectExtraMarkdownFiles(sandbox, new Set(["vendor"]));
     expect(withConfig).toHaveLength(0);
   });
@@ -67,7 +72,7 @@ describe("extra markdown collection (search-robustness R1)", () => {
     fs.writeFileSync(path.join(sandbox, "realdir", "inner.md"), "inner");
     fs.symlinkSync(path.join(sandbox, "realdir"), path.join(sandbox, "linkdir"));
     const files = collectExtraMarkdownFiles(sandbox, new Set());
-    expect(files.map((file) => path.relative(sandbox, file.path))).toEqual(["realdir/inner.md"]);
+    expect(files.map((file) => relPosix(file.path))).toEqual(["realdir/inner.md"]);
   });
 
   it("caps collection at 32 files and depth 4", () => {

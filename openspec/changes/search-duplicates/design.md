@@ -27,7 +27,7 @@ capability：`skills.duplicates` readonly（无 mutation 面）；MCP 投影
 ## D3 WorkspacesHome 区块
 
 - 数据：`loadSkillDuplicates()`（独立代次门 + `$state {groups, loading,
-  error}`）；与 workspaces 列表同生命周期加载，断线/失败静默收起区块
+error}`）；与 workspaces 列表同生命周期加载，断线/失败静默收起区块
   （错误信息在区块内一行文案，不 toast——非关键路径）。
 - 渲染：区块标题「同内容技能 N 组」；每组成员行：name（重名省略）、
   作用域标签（installationScopeLabel 既有函数）、行点击 goById 到

@@ -53,6 +53,7 @@ beforeEach(() => {
   const isolatedHome = path.join(sandbox, "state");
   for (const name of [
     "HOME",
+    "USERPROFILE",
     "SKILL_CREATOR_HOME",
     "XDG_CONFIG_HOME",
     ...PROVIDER_HOME_OVERRIDES,
@@ -75,6 +76,7 @@ afterEach(async () => {
   setHomeOverride(null);
   for (const name of [
     "HOME",
+    "USERPROFILE",
     "SKILL_CREATOR_HOME",
     "XDG_CONFIG_HOME",
     ...PROVIDER_HOME_OVERRIDES,

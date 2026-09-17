@@ -15,7 +15,7 @@
 
 - **P1 `duplicates()` 服务面**：index/service 暴露无查询的重复组投影——
   contentHash 分组 >1 canonical 条目的组，每成员携带 `{id, name,
-  canonicalPath, installations, disabled, conflict}`；经 freshen 保证与
+canonicalPath, installations, disabled, conflict}`；经 freshen 保证与
   磁盘一致（与 search 同一新鲜度语义）。
 - **P2 RPC + capability**：`skills.duplicates`（readonly，无输入）；
   capability 登记后 MCP 面自动投影 `skills_duplicates`（agent 可查）。

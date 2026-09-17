@@ -70,7 +70,7 @@ describe("skill search config (search-robustness R2)", () => {
   });
 
   it("falls back to builtin-only defaults on malformed TOML or unknown keys without touching the file", () => {
-    for (const content of ["excludeDirs = [", 'unknownKey = 1\n', 'excludeDirs = "not-a-list"\n']) {
+    for (const content of ["excludeDirs = [", "unknownKey = 1\n", 'excludeDirs = "not-a-list"\n']) {
       fs.writeFileSync(searchConfigPath(), content, "utf8");
       const before = fs.readFileSync(searchConfigPath(), "utf8");
       const config = loadSkillSearchConfig();
@@ -93,12 +93,24 @@ describe("skill search config (search-robustness R2)", () => {
 
   it("hard-errors on unreadable config instead of faking empty defaults", () => {
     const file = searchConfigPath();
-    fs.writeFileSync(file, 'excludeDirs = []\n', "utf8");
-    fs.chmodSync(file, 0o000);
-    try {
-      expect(() => loadSkillSearchConfig()).toThrow(SkillSearchIndexError);
-    } finally {
-      fs.chmodSync(file, 0o644);
+    fs.writeFileSync(file, "excludeDirs = []\n", "utf8");
+    // 文件级读阻断（与持久化写阻断不同）：POSIX chmod 文件 0o000；Windows
+    // chmod 不生效，替换为同名目录 → readFileSync EISDIR。
+    if (process.platform === "win32") {
+      fs.rmSync(file, { force: true });
+      fs.mkdirSync(file);
+      try {
+        expect(() => loadSkillSearchConfig()).toThrow(SkillSearchIndexError);
+      } finally {
+        fs.rmSync(file, { recursive: true, force: true });
+      }
+    } else {
+      fs.chmodSync(file, 0o000);
+      try {
+        expect(() => loadSkillSearchConfig()).toThrow(SkillSearchIndexError);
+      } finally {
+        fs.chmodSync(file, 0o644);
+      }
     }
   });
 

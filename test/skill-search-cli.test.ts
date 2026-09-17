@@ -61,6 +61,7 @@ async function runCli(
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
+    USERPROFILE: home,
     SKILL_CREATOR_HOME: stateHome,
     XDG_CONFIG_HOME: path.join(home, ".config"),
   };

@@ -15,13 +15,17 @@ import { setHomeOverride } from "../src/shared/paths.js";
 
 let sandbox = "";
 let previousHome: string | undefined;
+let previousUserProfile: string | undefined;
 let previousAppHome: string | undefined;
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "skill-search-service-test-"));
   previousHome = process.env.HOME;
+  previousUserProfile = process.env.USERPROFILE;
   previousAppHome = process.env.SKILL_CREATOR_HOME;
   process.env.HOME = path.join(sandbox, "home");
+  // os.homedir() 在 win32 读 USERPROFILE：隔离集必须同时覆盖。
+  process.env.USERPROFILE = process.env.HOME;
   process.env.SKILL_CREATOR_HOME = path.join(sandbox, "state");
   setHomeOverride(path.join(sandbox, "state"));
 });
@@ -30,6 +34,8 @@ afterEach(() => {
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
+  if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = previousUserProfile;
   if (previousAppHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousAppHome;
   fs.rmSync(sandbox, { recursive: true, force: true });

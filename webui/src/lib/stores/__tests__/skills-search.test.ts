@@ -171,7 +171,9 @@ describe("skill duplicates store (search-duplicates 2.3)", () => {
   });
 
   it("records the failure inline without toast-grade state", async () => {
-    rpcClient = { skills: { duplicates: vi.fn().mockRejectedValue(new Error("index unavailable")) } };
+    rpcClient = {
+      skills: { duplicates: vi.fn().mockRejectedValue(new Error("index unavailable")) },
+    };
     await loadSkillDuplicates();
     expect(skillDuplicatesState.groups).toEqual([]);
     expect(skillDuplicatesState.error).toBe("index unavailable");

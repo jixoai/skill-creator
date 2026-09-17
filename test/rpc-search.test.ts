@@ -10,6 +10,7 @@
  *   [2] 输入合同：空 query = 输入校验 typed 错误（schema min(1)，不产生伪成功）。
  *   [3] limit 透传边界。
  */
+import { blockFileAccess, restoreFileAccess } from "./helpers/fault-injection.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -39,6 +40,7 @@ beforeEach(() => {
   const isolatedState = path.join(sandbox, "state");
   for (const name of [
     "HOME",
+    "USERPROFILE",
     "SKILL_CREATOR_HOME",
     "XDG_CONFIG_HOME",
     ...PROVIDER_HOME_OVERRIDES,
@@ -47,6 +49,8 @@ beforeEach(() => {
   }
   for (const name of PROVIDER_HOME_OVERRIDES) delete process.env[name];
   process.env.HOME = home;
+  // os.homedir() 在 win32 读 USERPROFILE：隔离集必须同时覆盖，否则沙箱泄漏到真实用户目录。
+  process.env.USERPROFILE = home;
   process.env.SKILL_CREATOR_HOME = isolatedState;
   process.env.XDG_CONFIG_HOME = path.join(home, ".config");
   setHomeOverride(isolatedState);
@@ -56,6 +60,7 @@ afterEach(() => {
   setHomeOverride(null);
   for (const name of [
     "HOME",
+    "USERPROFILE",
     "SKILL_CREATOR_HOME",
     "XDG_CONFIG_HOME",
     ...PROVIDER_HOME_OVERRIDES,
@@ -158,13 +163,13 @@ describe("skills.search typed IO failure boundary", () => {
     const appDataDir = path.join(sandbox, "state", ".skill-creator");
     fs.mkdirSync(appDataDir, { recursive: true });
     fs.writeFileSync(path.join(appDataDir, "search-index.json"), "{ not json");
-    fs.chmodSync(appDataDir, 0o500);
+    blockFileAccess(path.join(appDataDir, "search-index.json"));
     try {
       await expect(client.skills.search({ query: "alpha" })).rejects.toMatchObject({
         code: "UNAVAILABLE",
       });
     } finally {
-      fs.chmodSync(appDataDir, 0o700);
+      restoreFileAccess(path.join(appDataDir, "search-index.json"));
     }
   });
 });

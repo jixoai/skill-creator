@@ -9,7 +9,7 @@
 1. **Q2 内容范围（真缺口）**：当前只索引 `SKILL.md` 单文件。用户预期为中间
    档——skill 文件夹内的全部 Markdown 进入正文索引；同时需要可注释的排除
    配置（TOML），默认清单覆盖 `node_modules/.git/build/dist/target/.cargo/
-   .cache/.npm/__pycache__/tmp/logs/.pnpm-store/.bun/.rustup/.local` 等特殊
+.cache/.npm/__pycache__/tmp/logs/.pnpm-store/.bun/.rustup/.local` 等特殊
    目录；暂无 GUI，但界面要提供「在编辑器中打开配置文件」入口。
 2. **Q3 实时性（真缺口）**：当前每次 search 都全量 stat 扫描 + realpath
    canonicalize（每次查询的固定成本）。需要高性能监听：fs.watch 事件驱动，

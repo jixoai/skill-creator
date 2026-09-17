@@ -9,6 +9,7 @@
  *   [2] 错误矩阵（版本不符、损坏 JSON、loadJSON 失败重建；EACCES hard error）。
  *   [3] 串行并发 last-writer-wins 与读回可用性。
  */
+import { blockFileAccess, restoreFileAccess } from "./helpers/fault-injection.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -82,6 +83,11 @@ function countingReader(counter: { calls: string[] }) {
     counter.calls.push(scan.canonicalPath);
     return readSkillSearchDocument(scan);
   };
+}
+
+/** appDataDir → search-index.json 路径（故障注入助手的目标文件）。 */
+function indexFileFor(appDataDir: string): string {
+  return path.join(appDataDir, "search-index.json");
 }
 
 function readEnvelopeFile(): Record<string, unknown> {
@@ -245,14 +251,13 @@ describe("skill search index error matrix", () => {
     expect(counter.calls).toHaveLength(1);
   });
 
-  it("hard-errors on EACCES during save and preserves the previous index file", () => {
-    if (process.platform === "win32") return; // chmod 语义在 Windows 不可移植。
+  it("hard-errors on a blocked save and preserves the previous index file", () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
     const index = createSkillSearchIndex();
     index.freshen(scans(), readSkillSearchDocument);
     const file = path.join(home, ".skill-creator", "search-index.json");
     const before = fs.readFileSync(file, "utf8");
-    fs.chmodSync(path.dirname(file), 0o500);
+    blockFileAccess(file);
 
     try {
       writeSkill("beta", skillContent("beta", "second skill"));
@@ -263,7 +268,7 @@ describe("skill search index error matrix", () => {
       // 保留原文件，不降级为空索引。
       expect(fs.readFileSync(file, "utf8")).toBe(before);
     } finally {
-      fs.chmodSync(path.dirname(file), 0o700);
+      restoreFileAccess(file);
     }
   });
 });
@@ -354,13 +359,13 @@ describe("skill search index load validation (external input boundary)", () => {
     writeSkill("beta", "---\nname: beta\ndescription: beta skill\n---\nbody");
     const scansWithBeta = canonicalizeCandidates(scanSkillRoots([root()]));
     const appDataDir = path.join(home, ".skill-creator");
-    fs.chmodSync(appDataDir, 0o500);
+    blockFileAccess(indexFileFor(appDataDir));
     try {
       expect(() => index.freshen(scansWithBeta, readSkillSearchDocument)).toThrow(
         SkillSearchIndexError,
       );
     } finally {
-      fs.chmodSync(appDataDir, 0o700);
+      restoreFileAccess(indexFileFor(appDataDir));
     }
 
     // 下一次调用从磁盘重新加载并自愈（磁盘索引缺 beta → 增量补齐）。
@@ -528,11 +533,11 @@ describe("skill search index adversarial envelopes", () => {
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
     const appDataDir = path.join(home, ".skill-creator");
     fs.mkdirSync(appDataDir, { recursive: true });
-    fs.chmodSync(appDataDir, 0o500);
+    blockFileAccess(indexFileFor(appDataDir));
     try {
       expect(() => index.freshen(scans, readSkillSearchDocument)).toThrow(SkillSearchIndexError);
     } finally {
-      fs.chmodSync(appDataDir, 0o700);
+      restoreFileAccess(indexFileFor(appDataDir));
     }
     expect(fs.existsSync(path.join(appDataDir, "search-index.json"))).toBe(false);
 

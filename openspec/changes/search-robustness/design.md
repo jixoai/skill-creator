@@ -58,8 +58,9 @@ excludeDirs = [
 ]
 ```
 
-  模板默认值即用户清单中未被内置 dot 规则覆盖的具名 dot 目录——显式写出
-  便于用户理解与追加；dot 全跳规则独立生效。
+模板默认值即用户清单中未被内置 dot 规则覆盖的具名 dot 目录——显式写出
+便于用户理解与追加；dot 全跳规则独立生效。
+
 - 解析：读文本 → `smol-toml` parse（外部输入，`unknown`）→ Zod
   `SearchConfigSchema = { excludeDirs: string[] (min-1 条目，dedupe，排序) }`
   → 失败按领域空值 = 仅内置默认（safeParse 语义，不迁移不写回）；IO 硬错误

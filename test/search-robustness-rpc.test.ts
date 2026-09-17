@@ -40,11 +40,19 @@ beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "sc-search-robustness-"));
   const home = path.join(sandbox, "home");
   const isolatedState = path.join(sandbox, "state");
-  for (const name of ["HOME", "SKILL_CREATOR_HOME", "XDG_CONFIG_HOME", ...PROVIDER_HOME_OVERRIDES]) {
+  for (const name of [
+    "HOME",
+    "USERPROFILE",
+    "SKILL_CREATOR_HOME",
+    "XDG_CONFIG_HOME",
+    ...PROVIDER_HOME_OVERRIDES,
+  ]) {
     previousEnv[name] = process.env[name];
   }
   for (const name of PROVIDER_HOME_OVERRIDES) delete process.env[name];
   process.env.HOME = home;
+  // os.homedir() 在 win32 读 USERPROFILE：隔离集必须同时覆盖，否则沙箱泄漏到真实用户目录。
+  process.env.USERPROFILE = home;
   process.env.SKILL_CREATOR_HOME = isolatedState;
   process.env.XDG_CONFIG_HOME = path.join(home, ".config");
   setHomeOverride(isolatedState);
@@ -52,7 +60,13 @@ beforeEach(() => {
 
 afterEach(() => {
   setHomeOverride(null);
-  for (const name of ["HOME", "SKILL_CREATOR_HOME", "XDG_CONFIG_HOME", ...PROVIDER_HOME_OVERRIDES]) {
+  for (const name of [
+    "HOME",
+    "USERPROFILE",
+    "SKILL_CREATOR_HOME",
+    "XDG_CONFIG_HOME",
+    ...PROVIDER_HOME_OVERRIDES,
+  ]) {
     const previous = previousEnv[name];
     if (previous === undefined) delete process.env[name];
     else process.env[name] = previous;
@@ -62,7 +76,11 @@ afterEach(() => {
   domain = null;
 });
 
-function writeGlobalSkill(name: string, skillBody: string, extras: Record<string, string> = {}): string {
+function writeGlobalSkill(
+  name: string,
+  skillBody: string,
+  extras: Record<string, string> = {},
+): string {
   const directory = path.join(sandbox, "home", ".claude", "skills", name);
   fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(path.join(directory, "SKILL.md"), skillBody);
@@ -135,7 +153,10 @@ describe("search robustness RPC surface", () => {
     const sameBody = "---\nname: twin-a\ndescription: Same content twins.\n---\n# twin\n";
     writeGlobalSkill("twin-a", sameBody);
     writeGlobalSkill("twin-b", sameBody);
-    writeGlobalSkill("unique-one", "---\nname: unique-one\ndescription: Unique skill.\n---\n# unique\n");
+    writeGlobalSkill(
+      "unique-one",
+      "---\nname: unique-one\ndescription: Unique skill.\n---\n# unique\n",
+    );
     const client = makeClient(async () => {});
     const { groups } = await client.skills.duplicates({});
     expect(groups).toHaveLength(1);
@@ -164,7 +185,10 @@ describe("search robustness RPC surface", () => {
 
   it("finds a newly written skill immediately without recreating the service (R6)", async () => {
     makeClient(async () => {});
-    writeGlobalSkill("late-arrival", "---\nname: late-arrival\ndescription: Arrives after boot.\n---\n# late\n");
+    writeGlobalSkill(
+      "late-arrival",
+      "---\nname: late-arrival\ndescription: Arrives after boot.\n---\n# late\n",
+    );
     const first = await domain!.skillSearch.search("late arrival");
     expect(first.map((result) => result.name)).toContain("late-arrival");
     // 二次查询（watcher clean 路径或再扫描）仍然命中。
