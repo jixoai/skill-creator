@@ -9,6 +9,7 @@
  *   [2] 错误矩阵（版本不符、损坏 JSON、loadJSON 失败重建；EACCES hard error）。
  *   [3] 串行并发 last-writer-wins 与读回可用性。
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -93,6 +94,13 @@ function writeEnvelopeFile(value: unknown): void {
   fs.writeFileSync(file, typeof value === "string" ? value : JSON.stringify(value), "utf8");
 }
 
+/** 篡改后重算载荷摘要（镜像生产 payloadDigest），使测试穿透摘要层验证更深处的校验。 */
+function refreshEnvelopeDigest(envelope: Record<string, unknown>): void {
+  const digest = crypto.createHash("sha256");
+  digest.update(JSON.stringify({ index: envelope.index, stats: envelope.stats }));
+  envelope.payloadDigest = digest.digest("hex");
+}
+
 describe("skill search index freshness", () => {
   const SIX_SKILLS = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"];
 
@@ -150,6 +158,7 @@ describe("skill search index freshness", () => {
     if (!alphaKey) throw new Error("alpha stat missing");
     stats[alphaKey].ino += 1;
     stats[alphaKey].ctimeMs += 1;
+    refreshEnvelopeDigest(envelope);
     writeEnvelopeFile(envelope);
     expect(fs.statSync(file).mtimeMs).toBe(statBefore.mtimeMs);
 
@@ -183,7 +192,7 @@ describe("skill search index freshness", () => {
     const index = createSkillSearchIndex();
     index.freshen(scans(), readSkillSearchDocument);
     const envelope = readEnvelopeFile();
-    expect(envelope.schemaVersion).toBe(1);
+    expect(envelope.schemaVersion).toBe(2);
     expect(envelope.tokenizerVersion).toBe("segmenter-bigram-v1");
     expect(envelope.parserVersion).toBe("matter-headings-12k-v1");
     expect(envelope.rankingVersion).toBe("rerank-2026-09-17-v1");
@@ -380,6 +389,7 @@ describe("skill search index adversarial envelopes", () => {
     stats[alphaId]!.contentHash = "b".repeat(64);
     index.storedFields[alphaShortId]!.canonicalPath = "/etc/passwd";
     index.storedFields[alphaShortId]!.contentHash = "b".repeat(64);
+    refreshEnvelopeDigest(envelope);
     writeEnvelopeFile(envelope);
 
     const second = createSkillSearchIndex();
@@ -522,5 +532,27 @@ describe("skill search index adversarial envelopes", () => {
     const summary = index.freshen(scans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
     expect(fs.existsSync(path.join(appDataDir, "search-index.json"))).toBe(true);
+  });
+});
+
+describe("skill search index payload digest", () => {
+  it("rejects control-plane tampering that keeps every other field intact", () => {
+    writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
+    const first = createSkillSearchIndex();
+    const scans = canonicalizeCandidates(scanSkillRoots([root()]));
+    first.freshen(scans, readSkillSearchDocument);
+
+    // R4 复现向量：仅改 documentCount = -1（合法 JSON、其余不变、不重算摘要）。
+    const envelope = readEnvelopeFile() as { index: { documentCount: number } };
+    envelope.index.documentCount = -1;
+    writeEnvelopeFile(envelope);
+
+    const second = createSkillSearchIndex();
+    const summary = second.freshen(scans, readSkillSearchDocument);
+    expect(summary.mode).toBe("rebuilt");
+    expect(summary.rebuildReason).toBe("corrupt");
+    const hits = second.search("alpha skill");
+    expect(hits).toHaveLength(1);
+    expect(Number.isFinite(hits[0]!.bm25)).toBe(true);
   });
 });

@@ -27,8 +27,8 @@ import { PARSER_VERSION } from "./parser.js";
 import { RANKING_VERSION, type RankingCandidate } from "./ranking.js";
 import { createSkillTokenizer, TOKENIZER_VERSION, type SkillTokenizer } from "./tokenizer.js";
 
-/** 信封结构版本。 */
-const SCHEMA_VERSION = 1;
+/** 信封结构版本（v2 起：payloadDigest 载荷完整性摘要）。 */
+const SCHEMA_VERSION = 2;
 /** 引擎名与持久化文件名。 */
 const ENGINE_NAME = "minisearch";
 const SEARCH_INDEX_FILE = "search-index.json";
@@ -132,11 +132,13 @@ const StatEnvelopeSchema = z
 
 const IndexEnvelopeSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     tokenizerVersion: z.string(),
     parserVersion: z.string(),
     rankingVersion: z.string(),
     engine: z.object({ name: z.string(), version: z.string(), configDigest: z.string() }).strict(),
+    /** 载荷完整性摘要：sha256(JSON.stringify({index, stats}))，写入时计算、加载时重算。 */
+    payloadDigest: z.string().regex(/^[a-f0-9]{64}$/),
     index: z.unknown(),
     stats: z.record(SkillIdSchema, StatEnvelopeSchema),
   })
@@ -156,6 +158,7 @@ const StoredProjectionSchema = z.object({
   contentHash: z.string().regex(/^[a-f0-9]{64}$/),
   disabled: z.boolean(),
   conflict: z.boolean(),
+  invalidFrontmatter: z.boolean(),
 });
 
 /** 创建生产 MiniSearch 配置（tokenize 全注入、processTerm 恒等、autoVacuum 关闭由脏度阈值接管）。 */
@@ -301,23 +304,28 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
     reason: FreshenSummary["rebuildReason"],
   ): FreshenSummary {
     const discarded = this.stats.size;
-    this.miniSearch = createSearchMiniSearch(this.tokenizer);
-    this.stats = new Map();
+    // 事务式重建：在局部状态上构建，save 成功后才交换成员——中途读取失败或落盘
+    // 失败都不留下部分索引。
+    const miniSearch = createSearchMiniSearch(this.tokenizer);
+    const stats = new Map<string, SkillIndexStat>();
     for (const scan of scans) {
       const document = readDocument(scan);
-      this.miniSearch.add(document);
-      this.stats.set(scan.id as string, statEntry(scan, document));
+      miniSearch.add(document);
+      stats.set(scan.id as string, statEntry(scan, document));
     }
+    const envelopeIndex = miniSearch.toJSON();
+    const envelopeStats = Object.fromEntries(stats);
     try {
-      this.save();
+      this.persist(envelopeIndex, envelopeStats);
     } catch (error) {
-      // 与增量路径同一事务语义：落盘失败作废内存状态，长生命周期实例下次从磁盘重来。
       this.invalidateAfterSaveFailure();
       throw error;
     }
+    this.miniSearch = miniSearch;
+    this.stats = stats;
     return {
       mode: "rebuilt",
-      documents: this.stats.size,
+      documents: stats.size,
       parsed: scans.length,
       discarded,
       rebuildReason: reason,
@@ -359,6 +367,11 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
     }
     const envelope = safeParseJson(source, IndexEnvelopeSchema);
     if (!envelope) return { kind: "empty", reason: "corrupt" };
+    // 载荷摘要优先校验：控制面元数据、倒排、投影文本、stats 的任何未重算摘要的
+    // 篡改在此整体失效（含 NaN 注入与合法格式伪造向量）。
+    if (payloadDigest(envelope.index, envelope.stats) !== envelope.payloadDigest) {
+      return { kind: "empty", reason: "corrupt" };
+    }
     if (
       envelope.tokenizerVersion !== TOKENIZER_VERSION ||
       envelope.parserVersion !== PARSER_VERSION ||
@@ -417,6 +430,7 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
           projection.contentHash !== stat.contentHash ||
           projection.disabled !== stat.disabled ||
           projection.conflict !== stat.conflict ||
+          projection.invalidFrontmatter !== stat.invalidFrontmatter ||
           JSON.stringify(projection.installations) !== JSON.stringify(stat.installations)
         ) {
           return { kind: "empty", reason: "corrupt" };
@@ -429,6 +443,11 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
   }
 
   private save(): void {
+    this.persist(this.miniSearch.toJSON(), Object.fromEntries(this.stats));
+  }
+
+  /** 组装五版本信封并原子落盘；载荷摘要随写计算。 */
+  private persist(index: unknown, stats: Record<string, SkillIndexStat>): void {
     const file = path.join(appDir(), SEARCH_INDEX_FILE);
     const envelope = {
       schemaVersion: SCHEMA_VERSION,
@@ -440,8 +459,9 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
         version: minisearchRuntimeVersion(),
         configDigest: ENGINE_CONFIG_DIGEST,
       },
-      index: this.miniSearch.toJSON(),
-      stats: Object.fromEntries(this.stats),
+      payloadDigest: payloadDigest(index, stats),
+      index,
+      stats,
     };
     try {
       atomicWriteUtf8(file, JSON.stringify(envelope));
@@ -453,6 +473,17 @@ class MiniSearchSkillSearchIndex implements SkillSearchIndex {
       );
     }
   }
+}
+
+/**
+ * 载荷完整性摘要：对 {index, stats} 的 JSON 序列化做 sha256。JSON.stringify 的
+ * 键序与数字格式经 stringify→parse→stringify 往返稳定（MiniSearch 载荷只含
+ * 字符串/整数/有限浮点）。摘要让一切「不重算摘要的篡改」（控制面元数据、
+ * 倒排、投影文本、stats）在加载时整体失效；持有缓存写权限且重算摘要的完整
+ * 伪造是无密钥模型的不可约边界（design.md 声明）。
+ */
+function payloadDigest(index: unknown, stats: unknown): string {
+  return createHash("sha256").update(JSON.stringify({ index, stats })).digest("hex");
 }
 
 /**

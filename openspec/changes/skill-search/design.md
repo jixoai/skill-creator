@@ -72,9 +72,12 @@ src/cli/cli.ts  COMMANDS.search         （+1 意图：query/flag 解析与输�
   文档级 SKILL.md symlink 以 lstat 拒绝（symlink 跟进仅限入口层目录），
   读取走 open(O_NOFOLLOW, POSIX) + fstat 身份校验（ino+size 对扫描快照）
   - 从 fd 读字节（TOCTOU 替换抛 typed 错误，不接受无法证明身份的字节）。
-    已知残留（缓存威胁模型内，代码注释同步声明）：持有 app 缓存写权限者
-    仍可同步篡改合法格式的 contentHash（完整字节绑定需每次 fresh 重读，
-    违反 stat 零内容读取原则；canonicalPath+四元组绑定已闭合路径注入向量）。
+    v2 信封新增 payloadDigest（sha256(JSON.stringify({index, stats}))，写入
+    时计算、加载时重算）：一切不重算摘要的篡改——控制面元数据（documentCount
+    等 NaN/排序注入向量）、倒排、投影文本、stats——在加载整体失效。已知残留
+    （无密钥模型不可约边界）：持有 app 缓存写权限且重算摘要的完整伪造——stat
+    零内容读取原则下不做每次字节重读；canonicalPath+四元组绑定与 digest 已
+    闭合全部「部分篡改」向量。
 
 ## 数据流
 
