@@ -69,6 +69,7 @@
   import IconListPlus from "@lucide/svelte/icons/list-plus";
   import IconSplit from "@lucide/svelte/icons/split";
   import IconFileUp from "@lucide/svelte/icons/file-up";
+  import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconSend from "@lucide/svelte/icons/arrow-up";
   import IconStop from "@lucide/svelte/icons/square";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -355,7 +356,9 @@
     clearComposerEdit();
   }
 
-  let picking = $state(false);
+  // picker 在途目标（2026-09-20 用户走查：图片/文档选择需要 loading 反馈，
+  // spinner 叠在触发 icon 上；按 target 精确——点图片时文档按钮不转）。
+  let picking = $state<"image" | "file" | null>(null);
 
   /**
    * R18 用户裁决：「在后端（nodejs）这边，唤醒 native 级别的 file-picker」——
@@ -364,8 +367,8 @@
    * store 层 toast（2.0.1：失败必须可感知）。
    */
   async function openPicker(target: "image" | "file"): Promise<void> {
-    if (picking) return;
-    picking = true;
+    if (picking !== null) return;
+    picking = target;
     try {
       const result = await pickAgentFiles(target);
       if (result === null || result.paths.length === 0) return;
@@ -385,7 +388,7 @@
         addPickedComposerDocs(picks);
       }
     } finally {
-      picking = false;
+      picking = null;
     }
   }
 
@@ -747,18 +750,32 @@
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
       title="Attach images (paste or pick, ≤4 MiB each)"
       aria-label="Attach images (paste or pick, ≤4 MiB each)"
+      aria-busy={picking === "image"}
+      disabled={picking !== null}
       onclick={() => void openPicker("image")}
     >
-      <IconImage class="h-4 w-4" />
+      <span class="relative flex items-center justify-center">
+        <IconImage class="h-4 w-4 {picking === 'image' ? 'opacity-0' : ''}" />
+        {#if picking === "image"}
+          <IconLoader class="absolute inset-0 m-auto h-4 w-4 animate-spin" aria-hidden="true" />
+        {/if}
+      </span>
     </button>
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
       title="Attach files (text inlined, binary as refs, ≤512 KiB each)"
       aria-label="Attach files (text inlined, binary as refs, ≤512 KiB each)"
+      aria-busy={picking === "file"}
+      disabled={picking !== null}
       onclick={() => void openPicker("file")}
     >
-      <IconFileUp class="h-4 w-4" />
+      <span class="relative flex items-center justify-center">
+        <IconFileUp class="h-4 w-4 {picking === 'file' ? 'opacity-0' : ''}" />
+        {#if picking === "file"}
+          <IconLoader class="absolute inset-0 m-auto h-4 w-4 animate-spin" aria-hidden="true" />
+        {/if}
+      </span>
     </button>
     <div class="flex-1"></div>
     <!-- 右簇：model chip + ContextMeter + 主按钮 -->
