@@ -1,5 +1,65 @@
 # Changelog
 
+## 2.2.0 (2026-09-20)
+
+A local BM25 skill-search index under the whole product, a first screen that
+loads in ~1s instead of ~7s, and native OS pickers for choosing directories.
+
+### Added
+
+- **Local skill search everywhere** — a daemon-owned search index (canonical
+  `realpath` dedup, CJK-aware frozen tokenizer, MiniSearch BM25 with frozen
+  rerank weights, persisted under a versioned envelope with per-file stat
+  freshness and event-driven watching) now backs four faces: `skill-creator
+  search` on the CLI, `skills.search` / `skills.duplicates` over RPC, the
+  `skills_search` / `skills_duplicates` MCP tools, and three GUI entry points
+  — the ProviderView filter box (URL-`q` truth), the ⌘K command palette, and
+  the composer `$` menu. Exclusion dirs are tunable via a `search-config.toml`
+  written next to the index, with an in-UI shortcut to open it in your editor.
+- **Same-content badges on skill rows** — skills whose indexed bytes are
+  identical across installations show a Finder-style link badge (`↗N`,
+  "Same content as N other installations") in list and search rows, replacing
+  the old full-screen duplicate-groups block on the Workspaces home (owner
+  ruling: a badge is the honest signal, a wall of groups is noise).
+- **Native directory picker for workspace import** — the Import dialog's new
+  Browse… button routes through `@opentray/ext-dialog` (upgraded the opentray
+  family to 0.32.0, whose osascript bridge made real-host dialogs clickable —
+  two upstream bugs found and fixed along the way, jixoai/opentray#8 and #10).
+  Unsupported platforms or headless daemons hide the button; a picked
+  directory backfills the path and seeds the display name.
+- **Attachment pickers show loading** — the composer's image and document
+  buttons now spin their own icon while the native file-picker is up (each
+  target separately), matching the import Browse feedback.
+
+### Fixed
+
+- **Search returned nothing on real libraries** — the ranking pool folded
+  duplicate content *after* the top-40 cut, so 30+ byte-identical copies of
+  one skill drowned every other result, and the surviving representative only
+  carried its own installation scope, which made provider-filtered views match
+  nothing. Folding now happens before the pool (one representative per content
+  hash) and the primary merges the group's full installation list.
+- **First screen took 5–7 seconds** — `workspace.list` ran two full discovery
+  sweeps over ~50 agent roots per call and the WebUI fired it 3–4× per load;
+  the registry now scans each `(provider, root)` exactly once (counts and
+  dedup keys from the same pass, Claude-plugin side effects skipped for
+  non-claude roots), the WebUI shares one in-flight request per connection
+  generation, the `npx skills` provenance probe warms in the background
+  instead of blocking the first `skills.list`, and same-target reads share
+  one in-flight discovery with explicit invalidation after every disk write.
+  Measured cold first paint: ~5–7s → ~1.07s; opening a skill: 27–156ms → 40ms.
+- Search-row clicks opened "Skill not found" — the global canonical id was
+  passed to the provider-scoped detail RPC; the row now resolves the local
+  skill by name.
+
+### Changed
+
+- **Visual polish pass over Workspaces** — a two-round reviewed rework: 22rem
+  list column with a width-capped centered detail pane, a 12px text floor,
+  unified hover/nesting card language, icon-only header actions, neutralized
+  row icons, an icon-rail active state, and layered not-found messaging that
+  keeps the opaque id out of the headline.
+
 ## 2.1.0 (2026-09-16)
 
 The `$` skill-reference composer surface, the dual-era MCP fix that revives the
