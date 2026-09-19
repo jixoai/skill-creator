@@ -4,12 +4,14 @@
    * 正交意图：
    * 1. 收集并校验 workspace 目录与显示名称。
    * 2. 导入成功后进入新 workspace。
+   * 修订 [2026-09-19]（ext-dialog 集成）：路径输入旁的原生目录选择器
+   *（workspace.pickDirectory RPC；平台不支持/未挂载时静默隐藏 Browse）。
    */
   import * as Dialog from "$lib/components/ui/dialog";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
   import { Button } from "$lib/components/ui/button";
-  import { addWorkspace, workspaceEntryPath } from "$lib/store.svelte";
+  import { addWorkspace, pickWorkspaceDirectory, workspaceEntryPath } from "$lib/store.svelte";
   import { importWorkspaceUi } from "$lib/stores/import-workspace.svelte";
   import { goto } from "$app/navigation";
   import IconFolder from "@lucide/svelte/icons/folder-open";
@@ -35,6 +37,27 @@
   let label = $state("");
   let busy = $state(false);
   let error = $state<string | null>(null);
+  // 原生选择器可用性（daemon tray 挂载 + 平台支持）；一次探测不支持即隐藏。
+  let browseSupported = $state(true);
+  let browsing = $state(false);
+
+  async function browse(): Promise<void> {
+    browsing = true;
+    try {
+      const result = await pickWorkspaceDirectory();
+      if (!result.supported) {
+        browseSupported = false;
+        return;
+      }
+      if (result.path !== null) {
+        dirPath = result.path;
+        // label 留空时用目录名做默认值，减少一次输入。
+        if (!label.trim()) label = result.path.split("/").filter(Boolean).pop() ?? "";
+      }
+    } finally {
+      browsing = false;
+    }
+  }
 
   async function submit(): Promise<void> {
     if (!dirPath.trim()) {
@@ -78,13 +101,27 @@
     <div class="space-y-3">
       <div class="space-y-1.5">
         <Label for="ws-path">Directory path</Label>
-        <Input
-          id="ws-path"
-          bind:value={dirPath}
-          placeholder="/Users/me/.claude/skills"
-          class="font-mono text-xs"
-        />
-        <p class="text-[11px] text-muted-foreground">
+        <div class="flex gap-2">
+          <Input
+            id="ws-path"
+            bind:value={dirPath}
+            placeholder="/Users/me/.claude/skills"
+            class="font-mono text-xs"
+          />
+          {#if browseSupported}
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-8 shrink-0 gap-1.5"
+              disabled={browsing || busy}
+              onclick={() => void browse()}
+            >
+              {#if browsing}<IconLoader class="h-3.5 w-3.5 animate-spin" />{/if}
+              Browse…
+            </Button>
+          {/if}
+        </div>
+        <p class="text-xs text-muted-foreground">
           Absolute path to a directory containing skill folders.
         </p>
       </div>

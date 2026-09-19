@@ -17,6 +17,25 @@ allowBuilds:
   protobufjs: false
 
 minimumReleaseAgeExclude:
+  # opentray 家族为自有信任源（jixoai），同 dsh 白名单语义；0.32.0 为
+  # ext-dialog osascript 桥修复（jixoai/opentray#10）当日发版。
+  - "opentray@0.32.0"
+  - "@opentray/darwin-arm64@0.32.0"
+  - "@opentray/darwin-x64@0.32.0"
+  - "@opentray/linux-arm64@0.32.0"
+  - "@opentray/linux-x64@0.32.0"
+  - "@opentray/windows-arm64@0.32.0"
+  - "@opentray/windows-x64@0.32.0"
+  - "@opentray/ext-webview@0.32.0"
+  - "@opentray/ext-webview-darwin-arm64@0.32.0"
+  - "@opentray/ext-webview-darwin-x64@0.32.0"
+  - "@opentray/ext-webview-windows-arm64@0.32.0"
+  - "@opentray/ext-webview-windows-x64@0.32.0"
+  - "@opentray/ext-dialog@0.32.0"
+  - "@opentray/icon@0.32.0"
+  - "@opentray/packaging@0.32.0"
+  - "@opentray/spec@0.32.0"
+  - "@opentray/vite-plugin@0.32.0"
   - "@deepseek-ai/dsh-agent-default-model@0.1.5-rc.2 || 0.1.6-alpha.1"
   - "@deepseek-ai/dsh-agent-instructions@0.1.5-rc.2 || 0.1.6-alpha.1"
   - "@deepseek-ai/dsh-agent-loop@0.1.5-rc.2 || 0.1.6-alpha.1"

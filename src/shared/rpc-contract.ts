@@ -241,6 +241,13 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     setActive: oc
       .input(WorkspaceSetActiveInputSchema)
       .output(z.object({ activeId: WorkspaceIdSchema })),
+    /**
+     * 原生目录选择器（ext-dialog；tray 挂载后可用）。用户取消 → path:null；
+     * 平台不支持 / headless → supported:false（WebUI 以此隐藏 Browse 入口）。
+     */
+    pickDirectory: oc
+      .input(z.object({}))
+      .output(z.object({ supported: z.boolean(), path: z.string().nullable() })),
   },
   creator: {
     /** Create or revision-check and update a skill. */

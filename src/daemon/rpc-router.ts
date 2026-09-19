@@ -97,6 +97,7 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       setActive: rpc.workspace.setActive.handler(({ input }) => ({
         activeId: domain.workspaces.activate(input.id),
       })),
+      pickDirectory: rpc.workspace.pickDirectory.handler(async () => domain.dialog.pickDirectory()),
     },
     creator: {
       save: rpc.creator.save.handler(({ input }) => domain.creator.save(input)),

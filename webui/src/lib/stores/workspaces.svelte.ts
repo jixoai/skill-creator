@@ -161,3 +161,29 @@ export function writableWorkspaceProviders(): WritableWorkspaceProvider[] {
 
 /** Workspace 在 Workspaces App 内的默认落点路径（纯逻辑见 workspace-targets.ts）。 */
 export { workspaceEntryPath } from "./workspace-targets";
+
+/** 原生目录选择结果（supported=false 表示平台/挂载不可用，调用方隐藏入口）。 */
+export interface WorkspaceDirectoryPick {
+  supported: boolean;
+  path: string | null;
+}
+
+/**
+ * 打开原生目录选择器（ext-dialog 集成，2026-09-19）。
+ *
+ * 在途共享：原生面板是模态的——同 session 的第二个 show 会被上游以
+ * dialog_session_busy 拒绝，重复触发共享同一次请求。断线/typed 失败向上抛，
+ * 由调用方决定降级（对话框保持 Browse 按钮或隐藏由 supported 驱动）。
+ */
+let inflightPick: Promise<WorkspaceDirectoryPick> | null = null;
+
+export function pickWorkspaceDirectory(): Promise<WorkspaceDirectoryPick> {
+  if (inflightPick !== null) return inflightPick;
+  inflightPick = (async (): Promise<WorkspaceDirectoryPick> => {
+    const rpc = requireRpc();
+    return rpc.workspace.pickDirectory({});
+  })().finally(() => {
+    inflightPick = null;
+  });
+  return inflightPick;
+}

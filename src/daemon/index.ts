@@ -342,6 +342,9 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
       await Promise.allSettled([settleTeardown("late tray host", async () => host?.destroy())]);
     } else {
       handlesRef.trayHost = host;
+      // 原生目录选择器（ext-dialog）：tray handle 存在（mounted/web）即挂载；
+      // headless 保持未挂载 → pickDirectory 投影 supported:false。
+      if (result.tray) domain.dialog.attach(result.tray);
       // windowed 成功 → mounted；web 模式 tray 挂载 → web；否则 headless。
       status.tray = result.window ? "mounted" : webMode && result.tray ? "web" : "headless";
       if (result.failure) {

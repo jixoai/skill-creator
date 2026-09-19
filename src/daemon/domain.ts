@@ -25,6 +25,7 @@ import { appDir } from "../shared/paths.js";
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
 import { createSkillSearchService, type SkillSearchService } from "./skill-search/service.js";
 import { platformOpenFile, type SearchConfigOpener } from "./search-config-opener.js";
+import { createDialogService, type DialogService } from "./dialog-service.js";
 import {
   createSkillIntelligenceService,
   type SkillIntelligenceService,
@@ -79,6 +80,8 @@ export interface DaemonDomain {
   skillSearch: SkillSearchService;
   /** 以系统默认编辑器打开 server-owned search-config.toml（测试可注入 stub）。 */
   searchConfigOpener: SearchConfigOpener;
+  /** 原生目录选择器（tray 挂载后 attach；ext-dialog 集成）。 */
+  dialog: DialogService;
   /** ACP 子进程池 + stdio↔WS 帧桥 + 安全门。 */
   acpBridge: AcpBridgeService;
   /** 只读技能分析 + proposal 草稿审批服务。 */
@@ -114,6 +117,7 @@ export function createDaemonDomain(
     skillsCliProbe?: SkillsCliProbe;
     /** 测试注入 search-config 打开 stub：避免真实 OS 副作用。 */
     searchConfigOpener?: SearchConfigOpener;
+    dialog?: DialogService;
   } = {},
 ): DaemonDomain {
   const kernelHostRef: { handle: DshKernelHandle | null } = { handle: null };
@@ -164,6 +168,7 @@ export function createDaemonDomain(
   const creator = createCreatorService(workspaces, skills);
   const skillIntelligence = createSkillIntelligenceService(skills, creator);
   const searchConfigOpener = options.searchConfigOpener ?? platformOpenFile;
+  const dialog = options.dialog ?? createDialogService();
   const domain: DaemonDomain = {
     workspaces,
     skills,
@@ -174,6 +179,7 @@ export function createDaemonDomain(
     skillsUpdate: createSkillsUpdateService(workspaces, skills, skillsCliProbe, repository),
     skillSearch: createSkillSearchService(),
     searchConfigOpener,
+    dialog,
     acpBridge: createAcpBridgeService(workspaces),
     skillIntelligence,
     steward: createStewardService(workspaces, skills, skillIntelligence, {
