@@ -28,6 +28,7 @@
     "src/**/*.ts",
     "scripts/**/*.ts",
     "packages/skill-wiki/src/**/*.ts",
+    "packages/search/src/**/*.ts",
     "packages/skill-creator-dsh-client/lib/**/*.d.ts"
   ],
   "exclude": ["node_modules", "dist", "webui"]

@@ -56,7 +56,7 @@ WIKI_INVALID_SCOPE、4 WIKI_INVALID_PATTERN、5 WIKI_PATCH_FAILED。
 
 - **WHEN** 同正文重复 add
 - **THEN** 输出 `Already captured`，exit 0，`--json` 携带
-`deduplicated: true`
+  `deduplicated: true`
 
 #### Scenario: patch 原子失败的退出码
 

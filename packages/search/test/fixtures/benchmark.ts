@@ -1,0 +1,1302 @@
+/**
+ * 搜索质量对拍 fixture（结构常量；冻结 2026-09-21）。
+ *
+ * 来源：主仓 test/fixtures/search-corpus/{corpus,synthetic,queries}.json
+ * （test/skill-search-benchmark.test.ts 与 docs/search-design.md §4/§11 基准方法论
+ * 的同一组语料与标注；/tmp/tantivy-smoke/ D1 冒烟对拍亦复用）。
+ * 本文件是逐字节快照：语料或标注演进必须先改主仓 fixture 再同步此处并重跑地板。
+ * 用途：@jixoai/search 后端资格测试（sqlite / tantivy 接入后同一 fixture 复用），
+ * 地板与主仓基准一致：R@5 ≥ 0.95、typo 类 R@5 = 1.00、MRR ≥ 0.95。
+ */
+
+/** 语料 manifest 快照（119 条：真实形态 name/description/bodyHead）。 */
+export interface BenchmarkCorpusEntry {
+  directoryName: string;
+  name: string;
+  description: string;
+  bodyHead: string;
+}
+
+/** 合成 skill（11 条：含 keywords/triggers/headings/body 完整字段形态）。 */
+export interface BenchmarkSyntheticSkill {
+  name: string;
+  description: string;
+  keywords: string[];
+  triggers: string[];
+  headings: string[];
+  body: string;
+}
+
+/** 标注 query（45 条；expect 为 any-of 语义；category 分 en/mixed/zh/ident/typo）。 */
+export interface BenchmarkLabeledQuery {
+  q: string;
+  expect: string[];
+  category: "en" | "mixed" | "zh" | "ident" | "typo";
+}
+
+export const BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
+  {
+    directoryName: "ui-screenshot",
+    name: "",
+    description: "",
+    bodyHead:
+      "# ui-screenshot — the UI-library screenshot standard UI 库的截图（文档站、博客发布文、registry 展示、验收走查）必须用本技能的 工具与标准执行。核心原则：**截图是确定性产物**——同一命令在任何机器上产出 同一张图；动画内容必须冻结在**选定的相位**上，而不是碰运气按快门。 ## 工具 `ui-shot.mjs`（本目录）。从**目标仓库根目录**运行（playwright-core 从目标 仓库解析）： ```bash node ~/.agents/skills/ui-screenshot/ui-shot.mjs \\",
+  },
+  {
+    directoryName: "acp",
+    name: "acp",
+    description:
+      "Expert guide for Agent Client Protocol (ACP) - official specifications, TypeScript/Zod implementation, role-based guides for integrating agents (Claude Code, Codex, Gemini) or developing custom agents (user)",
+    bodyHead:
+      " You are a specialized ACP (Agent Client Protocol) expert assistant, providing comprehensive technical support and documentation services. ## About ACP **Agent Client Protocol (ACP)** 是一个开放的标准化协议，用于连接代码编辑器/IDE 与 AI 编码代理。类似于 Language Server Protocol (LSP)，ACP 让任何编辑器都能连接任何 AI Agent，实现生态解耦。 本技能提供： -",
+  },
+  {
+    directoryName: "agent-browser",
+    name: "agent-browser",
+    description:
+      'Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to "open a website", "fill out a form", "click a button", "take a screenshot", "scrape data from a page", "test this web app", "login to a site", "automate browser actions", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.',
+    bodyHead:
+      " # agent-browser Fast browser automation CLI for AI agents. Chrome/Chromium via CDP with accessibility-tree snapshots and compact `@eN` element refs. Install: `npm i -g agent-browser && agent-browser install` ## Start here This file is a discovery stub, not the usage guide. Before running any `a",
+  },
+  {
+    directoryName: "agent-search-engine",
+    name: "agent-search-engine",
+    description:
+      '多引擎 AI 搜索（Exa 语义搜索 + OpenAI codex/gpt-5.6-luna + Google agy/Gemini）。任何需要联网查证的场景都用它：查最新版本/发布日期、技术调研、新闻检索、事实核查、竞品对比、找文档和 changelog——即使用户没说"搜索"二字，只要答案依赖互联网上的最新信息就应触发本技能。',
+    bodyHead:
+      " # Agent Search Engine 三路搜索引擎，`--engine` **必填**——按问题特征由使用者显式决策（三维度见下），不设默认。 ## 三维度选型（用户裁决 2026-09-09） 每个引擎各占一个维度的冠军，按问题主导维度选： | 维度 | 首选引擎 | 依据（本机实测 2026-09-09） | |---|---|---| | **速度与成本** | `exa` | 秒级返回（2-3s）、~$0.005/次；适合快速事实、批量查证、调研前探路 | | **广度与新鲜** | `google` | Google 索引最广最新（新闻/生态动态/时间线/趋势）；lo",
+  },
+  {
+    directoryName: "agents-md",
+    name: "agents-md",
+    description:
+      "Reference library backing the concise index entries in ~/.agents/AGENTS.md. Full instructions for tech-stack entries (zod, mbx) and domain rule blocks (imagegen orchestration, crypto DoS prevention, CSS generation constraints) live in references/<topic>.md instead of inline in AGENTS.md. Read the matching reference file before doing non-trivial work on a topic that AGENTS.md links here, and follow the maintenance rules when adding new topics.",
+    bodyHead:
+      " # AGENTS.md 参考指令库 `~/.agents/AGENTS.md` 只承载一行级索引（结论 + 链接）；技术条目细节与领域规则块全文（含原始需求与时间戳）全部收敛到本目录的 `references/`。 ## 目录 - [references/zod-compile.md](references/zod-compile.md) — zod v4.5+ AOT 编译：全局开启、热路径显式编译、回退边界、CSP 限制 - [references/mbx.md](references/mbx.md) — mbx（mr-boxington）替代 cargo：透传实测、保留命令、ta",
+  },
+  {
+    directoryName: "agents-sdk",
+    name: "agents-sdk",
+    description:
+      "Build AI agents on Cloudflare Workers using the Agents SDK. Load when creating stateful agents, durable workflows, real-time WebSocket apps, scheduled tasks, MCP servers, chat applications, voice agents, or browser automation. Covers Agent class, state management, callable RPC, Workflows, durable execution, queues, retries, observability, and React hooks. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Agents SDK Your knowledge of the Agents SDK may be outdated. **Prefer retrieval over pre-training** for any Agents SDK task. ## Retrieval Sources Cloudflare docs: https://developers.cloudflare.com/agents/ | Topic | Docs URL | Use for | |-------|----------|---------| | Getting start",
+  },
+  {
+    directoryName: "agents-sdk--2",
+    name: "agents-sdk",
+    description:
+      "Build AI agents on Cloudflare Workers using the Agents SDK. Load when creating stateful agents, durable workflows, real-time WebSocket apps, scheduled tasks, MCP servers, chat applications, voice agents, or browser automation. Covers Agent class, state management, callable RPC, Workflows, durable execution, queues, retries, observability, and React hooks. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Agents SDK Your knowledge of the Agents SDK may be outdated. **Prefer retrieval over pre-training** for any Agents SDK task. ## Retrieval Sources Cloudflare docs: https://developers.cloudflare.com/agents/ | Topic | Docs URL | Use for | |-------|----------|---------| | Getting start",
+  },
+  {
+    directoryName: "agents-sdk--3",
+    name: "agents-sdk",
+    description:
+      "Build AI agents on Cloudflare Workers using the Agents SDK. Load when creating stateful agents, durable workflows, real-time WebSocket apps, scheduled tasks, MCP servers, chat applications, voice agents, or browser automation. Covers Agent class, state management, callable RPC, Workflows, durable execution, queues, retries, observability, and React hooks. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Agents SDK Your knowledge of the Agents SDK may be outdated. **Prefer retrieval over pre-training** for any Agents SDK task. ## Retrieval Sources Cloudflare docs: https://developers.cloudflare.com/agents/ | Topic | Docs URL | Use for | |-------|----------|---------| | Getting start",
+  },
+  {
+    directoryName: "agents-sdk--4",
+    name: "agents-sdk",
+    description:
+      "Build AI agents on Cloudflare Workers using the Agents SDK. Load when creating stateful agents, durable workflows, real-time WebSocket apps, scheduled tasks, MCP servers, chat applications, voice agents, or browser automation. Covers Agent class, state management, callable RPC, Workflows, durable execution, queues, retries, observability, and React hooks. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Agents SDK Your knowledge of the Agents SDK may be outdated. **Prefer retrieval over pre-training** for any Agents SDK task. ## Retrieval Sources Cloudflare docs: https://developers.cloudflare.com/agents/ | Topic | Docs URL | Use for | |-------|----------|---------| | Getting start",
+  },
+  {
+    directoryName: "animation-vocabulary",
+    name: "animation-vocabulary",
+    description:
+      'Reverse-lookup glossary that turns a vague description of a web animation or motion effect into its exact term ("the bouncy thing when a popover opens" → Pop in; "the iOS rubber-band scroll" → Rubber-banding). Use when the user asks "what\'s it called when…", or describes a motion effect without knowing its name and wants the right word to prompt an AI or designer with. For naming an effect, not designing or building one.',
+    bodyHead:
+      " # Animation Vocabulary Turn a vague description of a motion or effect into the precise term, so the user knows what to ask for. ## Quick Start The user describes an effect loosely. You return the matching term(s) in this format: ``` **Stagger** — Animate several items one after another with a s",
+  },
+  {
+    directoryName: "apple-design",
+    name: "apple-design",
+    description:
+      "Apple's approach to interface design and fluid, physical motion, translated for the web. Use when building or reviewing gesture-driven UI, spring animations, drag/swipe/sheet interactions, momentum and interruptible transitions, translucent materials and depth, typography (optical sizing, tracking, leading), reduced-motion, or the design foundations (feedback, spatial consistency, restraint) behind Apple-style interfaces.",
+    bodyHead:
+      " # Apple Design How Apple builds interfaces that stop feeling like a computer and start feeling like an extension of you. This knowledge comes from Apple's WWDC design talks — chiefly *Designing Fluid Interfaces* (WWDC 2018) — distilled and translated into the web platform (CSS, Pointer Events, `re",
+  },
+  {
+    directoryName: "ask-matt",
+    name: "ask-matt",
+    description:
+      "Ask which skill or flow fits your situation. A router over the skills in this repo.",
+    bodyHead:
+      " # Ask Matt You don't remember every skill, so ask. A **flow** is a path through the skills. Most paths run along one **main flow**, and two **on-ramps** merge onto it. Everything else is standalone, or a vocabulary layer that runs underneath. ## The main flow: idea → ship The route most work tr",
+  },
+  {
+    directoryName: "claude-handoff",
+    name: "claude-handoff",
+    description:
+      "Hand the current conversation off to a fresh background agent that picks up the work immediately.",
+    bodyHead:
+      ' Write a handoff summary of the current conversation so a fresh agent can continue the work. Instead of saving it, launch a background agent seeded with the summary as its prompt: `claude --bg --name "<descriptive name>" "<handoff summary>"`. It starts in the current working directory and returns im',
+  },
+  {
+    directoryName: "cloudflare",
+    name: "cloudflare",
+    description:
+      "Comprehensive Cloudflare platform skill covering Workers, Pages, storage (KV, D1, R2), AI (Workers AI, Vectorize, Agents SDK), feature flags (Flagship), networking (Tunnel, Spectrum), security (WAF, DDoS), and infrastructure-as-code (Terraform, Pulumi). Use for any Cloudflare development task. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Platform Skill Consolidated skill for building on the Cloudflare platform. Use decision trees below to find the right product, then load detailed references. Your knowledge of Cloudflare APIs, types, limits, and pricing may be outdated. **Prefer retrieval over pre-training** — the re",
+  },
+  {
+    directoryName: "cloudflare--2",
+    name: "cloudflare",
+    description:
+      "Comprehensive Cloudflare platform skill covering Workers, Pages, storage (KV, D1, R2), AI (Workers AI, Vectorize, Agents SDK), feature flags (Flagship), networking (Tunnel, Spectrum), security (WAF, DDoS), and infrastructure-as-code (Terraform, Pulumi). Use for any Cloudflare development task. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Platform Skill Consolidated skill for building on the Cloudflare platform. Use decision trees below to find the right product, then load detailed references. Your knowledge of Cloudflare APIs, types, limits, and pricing may be outdated. **Prefer retrieval over pre-training** — the re",
+  },
+  {
+    directoryName: "cloudflare--3",
+    name: "cloudflare",
+    description:
+      "Comprehensive Cloudflare platform skill covering Workers, Pages, storage (KV, D1, R2), AI (Workers AI, Vectorize, Agents SDK), feature flags (Flagship), networking (Tunnel, Spectrum), security (WAF, DDoS), and infrastructure-as-code (Terraform, Pulumi). Use for any Cloudflare development task. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Platform Skill Consolidated skill for building on the Cloudflare platform. Use decision trees below to find the right product, then load detailed references. Your knowledge of Cloudflare APIs, types, limits, and pricing may be outdated. **Prefer retrieval over pre-training** — the re",
+  },
+  {
+    directoryName: "cloudflare--4",
+    name: "cloudflare",
+    description:
+      "Comprehensive Cloudflare platform skill covering Workers, Pages, storage (KV, D1, R2), AI (Workers AI, Vectorize, Agents SDK), feature flags (Flagship), networking (Tunnel, Spectrum), security (WAF, DDoS), and infrastructure-as-code (Terraform, Pulumi). Use for any Cloudflare development task. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Platform Skill Consolidated skill for building on the Cloudflare platform. Use decision trees below to find the right product, then load detailed references. Your knowledge of Cloudflare APIs, types, limits, and pricing may be outdated. **Prefer retrieval over pre-training** — the re",
+  },
+  {
+    directoryName: "cloudflare-email-service",
+    name: "cloudflare-email-service",
+    description:
+      'Send and receive transactional emails with Cloudflare Email Service (Email Sending + Email Routing). Use when building email sending (Workers binding or REST API), email routing, Agents SDK email handling, or integrating email into any app — Workers, Node.js, Python, Go, etc. Also use for email deliverability, SPF/DKIM/DMARC, wrangler email setup, MCP email tools, or when a coding agent needs to send emails. Even for simple requests like "add email to my Worker" — this skill has critical config details.',
+    bodyHead:
+      " # Cloudflare Email Service Your knowledge of the Cloudflare Email Service, Email Routing or Email Sending may be outdated. **Prefer retrieval over pre-training** for any Cloudflare Email Service task. Cloudflare Email Service lets you send transactional emails and route incoming emails, all withi",
+  },
+  {
+    directoryName: "cloudflare-email-service--2",
+    name: "cloudflare-email-service",
+    description:
+      'Send and receive transactional emails with Cloudflare Email Service (Email Sending + Email Routing). Use when building email sending (Workers binding or REST API), email routing, Agents SDK email handling, or integrating email into any app — Workers, Node.js, Python, Go, etc. Also use for email deliverability, SPF/DKIM/DMARC, wrangler email setup, MCP email tools, or when a coding agent needs to send emails. Even for simple requests like "add email to my Worker" — this skill has critical config details.',
+    bodyHead:
+      " # Cloudflare Email Service Your knowledge of the Cloudflare Email Service, Email Routing or Email Sending may be outdated. **Prefer retrieval over pre-training** for any Cloudflare Email Service task. Cloudflare Email Service lets you send transactional emails and route incoming emails, all withi",
+  },
+  {
+    directoryName: "cloudflare-email-service--3",
+    name: "cloudflare-email-service",
+    description:
+      'Send and receive transactional emails with Cloudflare Email Service (Email Sending + Email Routing). Use when building email sending (Workers binding or REST API), email routing, Agents SDK email handling, or integrating email into any app — Workers, Node.js, Python, Go, etc. Also use for email deliverability, SPF/DKIM/DMARC, wrangler email setup, MCP email tools, or when a coding agent needs to send emails. Even for simple requests like "add email to my Worker" — this skill has critical config details.',
+    bodyHead:
+      " # Cloudflare Email Service Your knowledge of the Cloudflare Email Service, Email Routing or Email Sending may be outdated. **Prefer retrieval over pre-training** for any Cloudflare Email Service task. Cloudflare Email Service lets you send transactional emails and route incoming emails, all withi",
+  },
+  {
+    directoryName: "cloudflare-email-service--4",
+    name: "cloudflare-email-service",
+    description:
+      'Send and receive transactional emails with Cloudflare Email Service (Email Sending + Email Routing). Use when building email sending (Workers binding or REST API), email routing, Agents SDK email handling, or integrating email into any app — Workers, Node.js, Python, Go, etc. Also use for email deliverability, SPF/DKIM/DMARC, wrangler email setup, MCP email tools, or when a coding agent needs to send emails. Even for simple requests like "add email to my Worker" — this skill has critical config details.',
+    bodyHead:
+      " # Cloudflare Email Service Your knowledge of the Cloudflare Email Service, Email Routing or Email Sending may be outdated. **Prefer retrieval over pre-training** for any Cloudflare Email Service task. Cloudflare Email Service lets you send transactional emails and route incoming emails, all withi",
+  },
+  {
+    directoryName: "cloudflare-one",
+    name: "cloudflare-one",
+    description:
+      "Guides Cloudflare One Zero Trust and SASE work across Access, Gateway, WARP, Tunnel, Cloudflare WAN, DLP, CASB, device posture, and identity. Use when designing, configuring, troubleshooting, or reviewing Cloudflare One deployments. Retrieval-first: use current Cloudflare docs/API schemas instead of embedded product docs.",
+    bodyHead:
+      " # Cloudflare One Before citing limits, settings, API fields, category IDs, or exact UI paths, retrieve current information from the [Cloudflare One docs](https://developers.cloudflare.com/cloudflare-one/), the Cloudflare docs MCP server, or the Cloudflare API schema. ## Workflow 1. Classify the ",
+  },
+  {
+    directoryName: "cloudflare-one--2",
+    name: "cloudflare-one",
+    description:
+      "Guides Cloudflare One Zero Trust and SASE work across Access, Gateway, WARP, Tunnel, Cloudflare WAN, DLP, CASB, device posture, and identity. Use when designing, configuring, troubleshooting, or reviewing Cloudflare One deployments. Retrieval-first: use current Cloudflare docs/API schemas instead of embedded product docs.",
+    bodyHead:
+      " # Cloudflare One Before citing limits, settings, API fields, category IDs, or exact UI paths, retrieve current information from the [Cloudflare One docs](https://developers.cloudflare.com/cloudflare-one/), the Cloudflare docs MCP server, or the Cloudflare API schema. ## Workflow 1. Classify the ",
+  },
+  {
+    directoryName: "cloudflare-one--3",
+    name: "cloudflare-one",
+    description:
+      "Guides Cloudflare One Zero Trust and SASE work across Access, Gateway, WARP, Tunnel, Cloudflare WAN, DLP, CASB, device posture, and identity. Use when designing, configuring, troubleshooting, or reviewing Cloudflare One deployments. Retrieval-first: use current Cloudflare docs/API schemas instead of embedded product docs.",
+    bodyHead:
+      " # Cloudflare One Before citing limits, settings, API fields, category IDs, or exact UI paths, retrieve current information from the [Cloudflare One docs](https://developers.cloudflare.com/cloudflare-one/), the Cloudflare docs MCP server, or the Cloudflare API schema. ## Workflow 1. Classify the ",
+  },
+  {
+    directoryName: "cloudflare-one--4",
+    name: "cloudflare-one",
+    description:
+      "Guides Cloudflare One Zero Trust and SASE work across Access, Gateway, WARP, Tunnel, Cloudflare WAN, DLP, CASB, device posture, and identity. Use when designing, configuring, troubleshooting, or reviewing Cloudflare One deployments. Retrieval-first: use current Cloudflare docs/API schemas instead of embedded product docs.",
+    bodyHead:
+      " # Cloudflare One Before citing limits, settings, API fields, category IDs, or exact UI paths, retrieve current information from the [Cloudflare One docs](https://developers.cloudflare.com/cloudflare-one/), the Cloudflare docs MCP server, or the Cloudflare API schema. ## Workflow 1. Classify the ",
+  },
+  {
+    directoryName: "cloudflare-one-migrations",
+    name: "cloudflare-one-migrations",
+    description:
+      "Plans migrations from Zscaler ZIA/ZPA, Palo Alto, legacy VPN, SWG, or SASE stacks to Cloudflare One. Use for migration assessments, policy mapping, rollout plans, and parity/gap analysis.",
+    bodyHead:
+      " # Cloudflare One Migrations Retrieve current Cloudflare docs, Cloudflare API schemas, and source-vendor export docs before generating exact configuration. ## Workflow 1. Identify the source stack: Zscaler ZIA, Zscaler ZPA, Palo Alto NGFW/Prisma/GlobalProtect, legacy VPN/SWG/SD-WAN, or other. 2. ",
+  },
+  {
+    directoryName: "cloudflare-one-migrations--2",
+    name: "cloudflare-one-migrations",
+    description:
+      "Plans migrations from Zscaler ZIA/ZPA, Palo Alto, legacy VPN, SWG, or SASE stacks to Cloudflare One. Use for migration assessments, policy mapping, rollout plans, and parity/gap analysis.",
+    bodyHead:
+      " # Cloudflare One Migrations Retrieve current Cloudflare docs, Cloudflare API schemas, and source-vendor export docs before generating exact configuration. ## Workflow 1. Identify the source stack: Zscaler ZIA, Zscaler ZPA, Palo Alto NGFW/Prisma/GlobalProtect, legacy VPN/SWG/SD-WAN, or other. 2. ",
+  },
+  {
+    directoryName: "cloudflare-one-migrations--3",
+    name: "cloudflare-one-migrations",
+    description:
+      "Plans migrations from Zscaler ZIA/ZPA, Palo Alto, legacy VPN, SWG, or SASE stacks to Cloudflare One. Use for migration assessments, policy mapping, rollout plans, and parity/gap analysis.",
+    bodyHead:
+      " # Cloudflare One Migrations Retrieve current Cloudflare docs, Cloudflare API schemas, and source-vendor export docs before generating exact configuration. ## Workflow 1. Identify the source stack: Zscaler ZIA, Zscaler ZPA, Palo Alto NGFW/Prisma/GlobalProtect, legacy VPN/SWG/SD-WAN, or other. 2. ",
+  },
+  {
+    directoryName: "cloudflare-one-migrations--4",
+    name: "cloudflare-one-migrations",
+    description:
+      "Plans migrations from Zscaler ZIA/ZPA, Palo Alto, legacy VPN, SWG, or SASE stacks to Cloudflare One. Use for migration assessments, policy mapping, rollout plans, and parity/gap analysis.",
+    bodyHead:
+      " # Cloudflare One Migrations Retrieve current Cloudflare docs, Cloudflare API schemas, and source-vendor export docs before generating exact configuration. ## Workflow 1. Identify the source stack: Zscaler ZIA, Zscaler ZPA, Palo Alto NGFW/Prisma/GlobalProtect, legacy VPN/SWG/SD-WAN, or other. 2. ",
+  },
+  {
+    directoryName: "code-review",
+    name: "code-review",
+    description:
+      'Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo\'s documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to "review since X".',
+    bodyHead:
+      " Two-axis review of the diff between `HEAD` and a fixed point the user supplies: - **Standards**: does the code conform to this repo's documented coding standards? - **Spec**: does the code faithfully implement the originating issue / spec? Both axes run as **parallel sub-agents** so they don't po",
+  },
+  {
+    directoryName: "codebase-design",
+    name: "codebase-design",
+    description:
+      "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.",
+    bodyHead:
+      " # Codebase Design Design **deep modules**: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface. Use this language and these principles wherever code is being designed or restructured. The aim is leverage for callers, locality for maintainers, and te",
+  },
+  {
+    directoryName: "context7",
+    name: "context7",
+    description:
+      "Use when looking up library documentation, API references, framework patterns, or code examples for ANY library (React, Next.js, Vue, Django, Laravel, etc.) and the Context7 MCP server is unavailable or not configured. Fetches the same current docs directly via the Context7 REST API as a fallback. Triggers on: how to use library, API docs, framework pattern, import usage, library example.",
+    bodyHead:
+      ' # Context7 Documentation Lookup Skill Fetch current library documentation, API references, and code examples via the Context7 REST API. ## When to Use Use this skill when the user asks about library APIs, framework patterns, or version-specific behavior. Trigger on: - Library questions: "How do',
+  },
+  {
+    directoryName: "context7-mcp",
+    name: "context7-mcp",
+    description:
+      "This skill should be used when the user asks about libraries, frameworks, API references, or needs code examples. Activates for setup questions, code generation involving libraries, or mentions of specific frameworks like React, Vue, Next.js, Prisma, Supabase, etc.",
+    bodyHead:
+      ' When the user asks about libraries, frameworks, or needs code examples, use Context7 to fetch current documentation instead of relying on training data. ## When to Use This Skill Activate this skill when the user: - Asks setup or configuration questions ("How do I configure Next.js middleware?")',
+  },
+  {
+    directoryName: "design-taste-frontend",
+    name: "design-taste-frontend",
+    description:
+      "Senior UI/UX Engineer. Architect digital interfaces overriding default LLM biases. Enforces metric-based rules, strict component architecture, CSS hardware acceleration, and balanced design engineering.",
+    bodyHead:
+      " # High-Agency Frontend Skill ## 1. ACTIVE BASELINE CONFIGURATION * DESIGN_VARIANCE: 8 (1=Perfect Symmetry, 10=Artsy Chaos) * MOTION_INTENSITY: 6 (1=Static/No movement, 10=Cinematic/Magic Physics) * VISUAL_DENSITY: 4 (1=Art Gallery/Airy, 10=Pilot Cockpit/Packed Data) **AI Instruction:** The standa",
+  },
+  {
+    directoryName: "diagnosing-bugs",
+    name: "diagnosing-bugs",
+    description:
+      'Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.',
+    bodyHead:
+      " # Diagnosing Bugs A discipline for hard bugs. Skip phases only when explicitly justified. When exploring the codebase, read `CONTEXT.md` (if it exists) to get a clear mental model of the relevant modules, and check ADRs in the area you're touching. ## Redact This skill has you show commands, ou",
+  },
+  {
+    directoryName: "domain-modeling",
+    name: "domain-modeling",
+    description:
+      "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR.",
+    bodyHead:
+      " # Domain Modeling Actively build and sharpen the project's domain model as you design. This is the *active* discipline: challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down the moment they crystallise. (Merely *reading* `CONTEXT.md` for vocabulary is not th",
+  },
+  {
+    directoryName: "durable-objects",
+    name: "durable-objects",
+    description:
+      "Create and review Cloudflare Durable Objects. Use when building stateful coordination (chat rooms, multiplayer games, booking systems), implementing RPC methods, SQLite storage, alarms, WebSockets, or reviewing DO code for best practices. Covers Workers integration, wrangler config, and testing with Vitest. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Durable Objects Build stateful, coordinated applications on Cloudflare's edge using Durable Objects. ## Retrieval Sources Your knowledge of Durable Objects APIs and configuration may be outdated. **Prefer retrieval over pre-training** for any Durable Objects task. | Resource | URL | |--------",
+  },
+  {
+    directoryName: "durable-objects--2",
+    name: "durable-objects",
+    description:
+      "Create and review Cloudflare Durable Objects. Use when building stateful coordination (chat rooms, multiplayer games, booking systems), implementing RPC methods, SQLite storage, alarms, WebSockets, or reviewing DO code for best practices. Covers Workers integration, wrangler config, and testing with Vitest. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Durable Objects Build stateful, coordinated applications on Cloudflare's edge using Durable Objects. ## Retrieval Sources Your knowledge of Durable Objects APIs and configuration may be outdated. **Prefer retrieval over pre-training** for any Durable Objects task. | Resource | URL | |--------",
+  },
+  {
+    directoryName: "durable-objects--3",
+    name: "durable-objects",
+    description:
+      "Create and review Cloudflare Durable Objects. Use when building stateful coordination (chat rooms, multiplayer games, booking systems), implementing RPC methods, SQLite storage, alarms, WebSockets, or reviewing DO code for best practices. Covers Workers integration, wrangler config, and testing with Vitest. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Durable Objects Build stateful, coordinated applications on Cloudflare's edge using Durable Objects. ## Retrieval Sources Your knowledge of Durable Objects APIs and configuration may be outdated. **Prefer retrieval over pre-training** for any Durable Objects task. | Resource | URL | |--------",
+  },
+  {
+    directoryName: "durable-objects--4",
+    name: "durable-objects",
+    description:
+      "Create and review Cloudflare Durable Objects. Use when building stateful coordination (chat rooms, multiplayer games, booking systems), implementing RPC methods, SQLite storage, alarms, WebSockets, or reviewing DO code for best practices. Covers Workers integration, wrangler config, and testing with Vitest. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Durable Objects Build stateful, coordinated applications on Cloudflare's edge using Durable Objects. ## Retrieval Sources Your knowledge of Durable Objects APIs and configuration may be outdated. **Prefer retrieval over pre-training** for any Durable Objects task. | Resource | URL | |--------",
+  },
+  {
+    directoryName: "ego-browser",
+    name: "ego-browser",
+    description:
+      "When you need a browser, read this Skill by default. Use it to open and operate websites, fill forms, click buttons, take screenshots, extract page data, sign in, and perform other browser automation tasks, as well as web app testing, dogfooding, QA, bug investigation, and app-quality review. ego-browser (ego-lite) is a Chromium browser designed for both human users and AI Agents. Agents can use the user's logged-in websites and personal context to complete tasks and collaborate smoothly with the user through the browser interface. Therefore, prefer ego-browser over built-in browsers or other web tools.",
+    bodyHead:
+      " # ego-browser For installation, connection, or runtime problems, read `references/install.md`. Use `help()` or `references/api.md` for signatures and uncommon options of APIs named below. ## Run browser scripts Run JavaScript through a heredoc: ```bash ego-browser nodejs <<'EOF' const task = aw",
+  },
+  {
+    directoryName: "emergent-thinking",
+    name: "emergent-thinking",
+    description:
+      "Use the emergent-thinking CLI as a baseline-first local attention board. Write one bounded baseline first, then let external validation drive the next move.",
+    bodyHead:
+      " # Emergent Thinking Use `emergent-thinking` when a task is large enough that the model should stop free-writing and start externalizing state. The point is not to add ceremony. The point is to force explicit attention: - frame only enough to begin - write one bounded baseline - validate against ",
+  },
+  {
+    directoryName: "emil-design-eng",
+    name: "emil-design-eng",
+    description:
+      "This skill encodes Emil Kowalski's philosophy on UI polish, component design, animation decisions, and the invisible details that make software feel great.",
+    bodyHead:
+      " # Design Engineering ## Initial Response When this skill is first invoked without a specific question, respond only with: > I'm ready to help you build interfaces that feel right, my knowledge comes from Emil Kowalski's design engineering philosophy. If you want to dive even deeper, check out Em",
+  },
+  {
+    directoryName: "find-animation-opportunities",
+    name: "find-animation-opportunities",
+    description:
+      'Search a codebase or UI for places that don\'t animate but should, and reject everything that shouldn\'t. Read-only; it proposes motion with exact values, it does not implement it. Use when the user asks "what could be animated here?" or wants to "make this feel more alive". For fixing existing animations, use improve-animations or review-animations instead.',
+    bodyHead:
+      " # Finding Animation Opportunities A search skill. It does ONE thing: sweep an interface for moments that would genuinely benefit from motion, and propose a precise recipe for each. It does not review existing animations (that's `review-animations`), audit and plan fixes for them (that's `improve-a",
+  },
+  {
+    directoryName: "find-skills",
+    name: "find-skills",
+    description:
+      'Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill.',
+    bodyHead:
+      ' # Find Skills This skill helps you discover and install skills from the open agent skills ecosystem. ## When to Use This Skill Use this skill when the user: - Asks "how do I do X" where X might be a common task with an existing skill - Says "find a skill for X" or "is there a skill for X" - Ask',
+  },
+  {
+    directoryName: "gaubee-writer",
+    name: "gaubee-writer",
+    description:
+      "以 Gaubee 的认知路径、技术判断和中文声音进行写作、改写与审校。用于撰写技术文章、短评或事件记录、产品与架构思考、体验评测、未来推演，或将 AI 草稿去模板化并校准为 Gaubee 风格；也用于检查文本是否符合其事实边界、论证方式与表达习惯。",
+    bodyHead:
+      " <!-- 正交意图：1. 选择写作模式；2. 建立事实与观点边界；3. 按 Gaubee 的认知链组织内容；4. 清理 AI 模板；5. 交付可发表文本。 原始需求：2026-07-22，创建 gaubee-writer；结合 Humanizer 与 gaubee.com 内容提炼底层思维、哲学和写作习惯。 --> # Gaubee Writer 把风格理解为一套可重复的认知动作，而不是口头禅。先形成可追溯的判断，再让语言保留 Gaubee 的力度、技术密度和个人位置。 ## 载入参考 - 新写、改写或续写时，先读 [references/voice-model.md](refere",
+  },
+  {
+    directoryName: "git-commit",
+    name: "git-commit",
+    description: "(no description)",
+    bodyHead:
+      " 对于生成git-commit-message任务，需要客观基于文件的变更内容得到一个客观的变更认知。 然后基于历史提交记录的风格，来生成风格一致的git-commit-message ",
+  },
+  {
+    directoryName: "git-guardrails-claude-code",
+    name: "git-guardrails-claude-code",
+    description:
+      "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code.",
+    bodyHead:
+      " # Setup Git Guardrails Sets up a PreToolUse hook that intercepts and blocks dangerous git commands before Claude executes them. ## What Gets Blocked - `git push` (all variants including `--force`) - `git reset --hard` - `git clean -f` / `git clean -fd` - `git branch -D` - `git checkout .` / `git",
+  },
+  {
+    directoryName: "grill-me",
+    name: "grill-me",
+    description: "A relentless interview to sharpen a plan or design.",
+    bodyHead: ' Call the Skill tool with "grilling". ',
+  },
+  {
+    directoryName: "grill-with-docs",
+    name: "grill-with-docs",
+    description:
+      "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.",
+    bodyHead: ' Call the Skill tool twice, for "grilling" and "domain-modeling". ',
+  },
+  {
+    directoryName: "grilling",
+    name: "grilling",
+    description:
+      "Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.",
+    bodyHead:
+      " Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it. Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _no",
+  },
+  {
+    directoryName: "habitat-usage",
+    name: "habitat-usage",
+    description:
+      "Guidance on using Habitat to manage multi-repo source and asset dependencies via .habitat/DEPS and hab sync, plus troubleshooting common sync failures.",
+    bodyHead:
+      " # Habitat Usage Guide Habitat is a dependency-sync tool for mono-repo-like layouts built from multiple Git repos and asset downloads. This skill provides setup guidance, copy-pastable config snippets, and a troubleshooting checklist for common sync failures. ## When to Apply - Setting up a “main",
+  },
+  {
+    directoryName: "handoff",
+    name: "handoff",
+    description:
+      "Compact the current conversation into a handoff document for another agent to pick up.",
+    bodyHead:
+      ' Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save to the temporary directory of the user\'s OS - not the current workspace. Include a "suggested skills" section in the document, naming which skills the next agent should call the Skill tool fo',
+  },
+  {
+    directoryName: "handoff--2",
+    name: "handoff",
+    description:
+      "Write or update a schema-agnostic handoff document so the next agent with fresh context can continue work. Use when the user asks for a handoff, continuation note, fresh-context summary, transfer document, or wants future AI agents to pick up an in-progress task, including OpenSpec changes with any workflow schema.",
+    bodyHead:
+      " # Handoff ## Core Law Produce an external continuation map for a fresh agent. Do not treat the handoff as a project workflow artifact, and do not hardcode knowledge of any particular OpenSpec schema. For OpenSpec work, the skill provides a meta-capability: ```txt discover active schema -> read ",
+  },
+  {
+    directoryName: "herdr",
+    name: "herdr",
+    description:
+      "Control Herdr, a terminal multiplexer for coding agents. Use only when the user explicitly mentions Herdr or asks to use Herdr to inspect or control panes, tabs, workspaces, commands, or another agent. Do not use merely because a task could benefit from a background terminal, delegation, or parallel work. Requires HERDR_ENV=1.",
+    bodyHead:
+      ' # Herdr Herdr organizes terminals into workspaces, tabs, and panes, recognizes coding agents running inside panes, and exposes the current session through the `herdr` CLI. Before issuing any control command, verify that this agent is running inside a Herdr-managed pane: ```bash test "${HERDR_ENV',
+  },
+  {
+    directoryName: "imagegen2",
+    name: "imagegen2",
+    description:
+      "Generate raster images through the local OpenAI-compatible image proxy, routing from ~/.codex/config.toml and writing project assets under ./.agents/images by default.",
+    bodyHead:
+      " # ImageGen 2 Use this skill for image generation when a project needs a raster asset, especially logos, icons, illustrations, or visual candidates. ## Provider routing Run `scripts/image_gen.py`. It uses the bundled `image_gen_wrapper.py` and reads `~/.codex/config.toml` with Python `tomllib`: ",
+  },
+  {
+    directoryName: "img2threejs",
+    name: "img2threejs",
+    description:
+      "Turn an object or character reference image into a quality-gated, animation-ready procedural Three.js model built in code. Use for image-to-3D reconstruction, detail-accurate object rebuilds, stylized/likeness-maximized human characters, sculpt specs, and staged code generation.",
+    bodyHead:
+      " # img2threejs — Image to procedural Three.js Rebuild the object visible in a reference image as a **code-only** procedural Three.js model, gated by a staged sculpting pipeline and an AI-vision self-correction loop. This is reconstruction-by-code, **not** photogrammetry, mesh extraction, or downloa",
+  },
+  {
+    directoryName: "impeccable",
+    name: "impeccable",
+    description:
+      "Use when the user wants to design, redesign, shape, critique, audit, polish, clarify, distill, harden, optimize, adapt, animate, colorize, extract, or otherwise improve a frontend interface. Covers websites, landing pages, dashboards, product UI, app shells, components, forms, settings, onboarding, and empty states. Handles UX review, visual hierarchy, information architecture, cognitive load, accessibility, performance, responsive behavior, theming, anti-patterns, typography, fonts, spacing, layout, alignment, color, motion, micro-interactions, UX copy, error states, edge cases, i18n, and reusable design systems or tokens. Also use for bland designs that need to become bolder or more delightful, loud designs that should become quieter, live browser iteration on UI elements, or ambitious visual effects that should feel technically extraordinary. Not for backend-only or non-UI tasks.",
+    bodyHead:
+      " This skill gives you the tools and permission to create design that earns to be called out-of-distribution craft: Whereas before, your design work would have been safe, timid and measured, you now approach every design task as an award-winning design director with impeccable understanding for what ",
+  },
+  {
+    directoryName: "implement",
+    name: "implement",
+    description: "Implement a piece of work based on a spec or set of tickets.",
+    bodyHead:
+      " Implement the work described by the user in the spec or tickets. Use /tdd where possible, at pre-agreed seams. Run typechecking regularly, single test files regularly, and the full test suite once at the end. Once done, use /code-review to review the work. Commit your work to the current branch",
+  },
+  {
+    directoryName: "improve-animations",
+    name: "improve-animations",
+    description:
+      'Survey a codebase\'s animation and motion code as a senior motion advisor, then produce a prioritized audit and self-contained implementation plans for other agents (or cheaper models) to execute. Read-only on source code — it plans improvements, it does not apply them. Use when the user asks to "improve the animations", "audit the motion", "make this app feel better", or wants a roadmap of animation fixes rather than a review of a single diff.',
+    bodyHead:
+      " # Improving Animations An advisor skill modeled on the audit-then-plan workflow: use the capable model for the part where judgment compounds — understanding the codebase's motion, deciding what's worth fixing, writing the spec — and hand execution to any agent, including cheaper models. It does O",
+  },
+  {
+    directoryName: "improve-codebase-architecture",
+    name: "improve-codebase-architecture",
+    description:
+      "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.",
+    bodyHead:
+      " # Improve Codebase Architecture Surface architectural friction and propose **deepening opportunities**: refactors that turn shallow modules into deep ones. The aim is testability and AI-navigability. This command is _informed_ by the project's domain model and built on a shared design vocabulary:",
+  },
+  {
+    directoryName: "jixoai-website",
+    name: "jixoai-website",
+    description:
+      'Build or restyle any jixoai project website (unipty, openspecui, future projects) in the shared jixoai visual identity — terminal/neo-brutalist mono-first design with SvelteKit + Tailwind v4. Use whenever the user asks to create, redesign, restyle, or improve a project website, landing page, docs site, or compatibility/evidence page for any jixoai-labs project, or mentions "jixoai website style", "官网", or asks for a site matching openspecui\'s look.',
+    bodyHead:
+      " # jixoai Website Style All jixoai project websites share ONE identity: a terminal / neo-brutalist, mono-first design delivered by the `@jixoai` registry (publisher `jixoai-ui`, canonical site <https://ui.jixoai.com>). **The only per-project variable is the brand hue.** Everything else — tech stack",
+  },
+  {
+    directoryName: "lieflat-less-ai-tone",
+    name: "lieflat-less-ai-tone",
+    description:
+      "按 SKILL.md 明确列出的规则识别并改写写作中的 AI 痕迹。只能处理清单内的问题；未命中规则的文字必须原样保留，也不能改变文章框架。适用于写作完成后的成稿清理。 Remove AI writing tells using an explicit whitelist of rules; leaves unmatched text untouched.",
+    bodyHead:
+      " # 去AI味 识别并改写文本中的 AI 写作痕迹。规则基于人类文章与多个模型输出的实测对比整理，每条都有可定位的触发标记。先判断体裁，再处理 AI 味。不能为了“像人写的”强加人称、口语或短段落。 ## 有风格参考时先读它 本 skill 的多条规则需要判断“原语体”。第 7 条对文学体裁按原有风格判断，第 4 条和第 5 条要看作者本来的标点习惯，第 8 条要看原文有没有给出具体数据。 如果同一目录下有描述目标风格的文档（写作风格指南、语言特征分析、`语言DNA.md` 一类的产物），先读它再改写，把它的句长分布、标点习惯和用词偏好作为判断依据。 **风格文档与本规则冲突时，以风",
+  },
+  {
+    directoryName: "loop-me",
+    name: "loop-me",
+    description: "Grill me about specs for the workflows I want to build, within this workspace.",
+    bodyHead:
+      " Run a stateful `/grilling` session whose only output is **workflow** specs. Use the grilling discipline (relentless, a round of questions at a time, a recommended answer attached to each) aimed at the vocabulary and goal below. Create, edit, and delete specs as the grilling resolves things. ## The",
+  },
+  {
+    directoryName: "lynx-debug-info-remapping",
+    name: "lynx-debug-info-remapping",
+    description:
+      "Remap the function_id:pc_index to the original source code position by provided debug info json file.",
+    bodyHead:
+      " # Debug Info Remapping ## Description In Lynx, main thread script is encoded to bytecode and uses an external debugging information scheme. Under this scheme, the row and column numbers in the runtime error messages are not the actual row and column numbers. The row and column numbers need to be ",
+  },
+  {
+    directoryName: "lynx-devtool",
+    name: "lynx-devtool",
+    description:
+      "Use when working with Lynx DevTool or debugging a Lynx app, page, or device, especially when the task mentions clients or sessions, CDP or App commands, DOM/CSS inspection, runtime or console logs, evaluating JavaScript on a device, screenshots, heap snapshots, performance traces, Page.reload or App.openPage, global switches, interactive snapshot refs and taps/fills/scrolls, inspecting or searching a ReactLynx component tree, linking DOM Snapshot refs to ReactLynx components (`reactlynx link`), or mutating ReactLynx props/state/context on Android, iOS, or Desktop.",
+    bodyHead:
+      " # Agent Lynx DevTool Skill This skill allows you to interact with Lynx applications running on connected devices (Android, iOS, Desktop) using the `agent-lynx` CLI. ## Usage Use the `agent-lynx` CLI. The published package is `agent-lynx`. This package, `@lynx-js/skill-lynx-devtool`, is the canon",
+  },
+  {
+    directoryName: "lynx-trace-analysis",
+    name: "lynx-trace-analysis",
+    description:
+      "Specializes in analyzing Lynx trace data to diagnose performance issues and provide actionable optimization strategies.\nKey Scenarios:\n  - Loading Performance: Diagnosing slow startup metrics (FCP, FMP, TTI) and white screen issues.\n  - Smoothness Analysis: Investigating root causes for scroll jank, frame drops, and interaction lag.\n  - Regression Detection: Comparing traces to identify performance degradation or verify optimization gains between versions.\n  - Pipeline Deep Dive: Pinpointing bottlenecks in specific rendering stages like Layout, Paint, JS execution, and background threads.\n  - Native Module Analysis: Investigating performance issues related to native module calls.\n",
+    bodyHead:
+      " ## Role You are a Lynx Trace Analysis Expert. Your job is to diagnose performance issues using the provided tools. ## Process For every user request, you MUST follow this **Think-Plan-Act** loop: 1. **THOUGHT**: Analyze the current situation. What do we know? What data is missing? 2. **PLAN**: Li",
+  },
+  {
+    directoryName: "lynx-trace-record",
+    name: "lynx-trace-record",
+    description:
+      "This guide provides step-by-step instructions for recording Lynx performance traces. Use this guide when the user asks how to record a trace.",
+    bodyHead:
+      " ## 1. Workflow Example The recording process requires using the `trace_record` CLI tool. **The order of operations is critical**. ### Step 1. List connected clients: First, list all connected clients to get the client ID. This helps you identify which app to trace. - If you have multiple connecte",
+  },
+  {
+    directoryName: "lynx-typescript",
+    name: "lynx-typescript",
+    description:
+      "This Skill summarizes common TypeScript issues and their solutions in Lynx development, mainly covering environment configuration, type extending, event handling, components, and ReactLynx advanced usages.\n\nTrigger Scenarios:\n- User inputs TypeScript error messages related to Lynx and seeks fix suggestions\n- LSP diagnoses Lynx-related TypeScript errors, proactively invoke query to get fix solutions\n- User asks about TypeScript best practices or common errors related to Lynx, proactively invoke query to provide guidance\n- User requests to configure the TypeScript environment of the current project to support Lynx development, proactively invoke query to provide configuration steps\n",
+    bodyHead:
+      " # TypeScript @ Lynx This Skill summarizes common TypeScript issues and their solutions in Lynx development, mainly covering environment configuration, type extending, event handling, components, and ReactLynx advanced usages. ## 1. Configuration (Environment Configuration) ### 1.1 `tsconfig.json",
+  },
+  {
+    directoryName: "migrate-to-shoehorn",
+    name: "migrate-to-shoehorn",
+    description:
+      "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.",
+    bodyHead:
+      " # Migrate to Shoehorn ## Why shoehorn? `shoehorn` lets you pass partial data in tests while keeping TypeScript happy. It replaces `as` assertions with type-safe alternatives. **Test code only.** Never use shoehorn in production code. Problems with `as` in tests: - Trained not to use it - Must ",
+  },
+  {
+    directoryName: "native-sdk",
+    name: "native-sdk",
+    description:
+      "Discovery skill for the Native SDK, the complete toolkit for building native desktop applications. Apps are authored in TypeScript + declarative Native markup (.native) by default and compiled to native code with no JS runtime in the binary; Zig cores are an explicit alternative, and WebViews are the optional web-content path. Use when the user asks what the Native SDK is, how to build a Native SDK app, author native UI, scaffold an app, configure app.json or legacy app.zon, add bridge commands, embed web content, package an app, test a running app, or automate a Native SDK app.",
+    bodyHead:
+      " # Native SDK The Native SDK is the complete toolkit for building native desktop applications. **The primary authoring path is TypeScript app logic in `src/core.ts` plus declarative Native markup in `.native` files.** The TypeScript core is checked and compiled ahead of time to native code, so the ",
+  },
+  {
+    directoryName: "open-pencil",
+    name: "open-pencil",
+    description:
+      "Work with Figma .fig design files and the running OpenPencil editor — inspect structure, query nodes, analyze design tokens, export PNG/SVG/PDF/JSX, and modify designs programmatically. Use when asked to open, inspect, export, analyze, or edit .fig files, or to control the running OpenPencil app.",
+    bodyHead:
+      " # OpenPencil OpenPencil provides a CLI and MCP server for `.fig` design files and the running OpenPencil editor. Use two modes: - **App mode** — connect to the running OpenPencil editor by omitting the file argument. - **Headless mode** — work with `.fig` files directly by passing a file path. ",
+  },
+  {
+    directoryName: "opentray",
+    name: "opentray",
+    description:
+      "OpenTray package-consumer guide for installing `opentray`, creating trays, loading official extensions such as `@opentray/ext-webview`, choosing ordinary `style.appMode` windows versus tray utilities, implementing warm Dock reopen and cold `appLaunch` flows, packaging applications, validating consumer behavior, and troubleshooting installed runtime graphs. Use when developing an application that consumes published OpenTray packages, not when modifying or linking the OpenTray source repository.",
+    bodyHead:
+      " <!-- Orthogonal intents (maintained 2026-07-21; original user requests: publish detailed appMode adaptation guidance for projects such as skill-creator-v2, and keep OpenTray source/link instructions exclusively in repository-internal .agents skills): 1. Route package consumers to the smallest relev",
+  },
+  {
+    directoryName: "opentui",
+    name: "opentui",
+    description:
+      "OpenTUI skill for building terminal user interfaces with the Core, React, or Solid APIs. Use for any TUI task including components, layout, keyboard and keymap handling, animations, and testing.",
+    bodyHead:
+      " # OpenTUI Platform Skill Consolidated skill for building terminal user interfaces with OpenTUI. Use decision trees below to find the right framework and components, then load detailed references. ## Critical Rules **Follow these rules in all OpenTUI code:** 1. **Use `create-tui` for new project",
+  },
+  {
+    directoryName: "portless-oauth-dev",
+    name: "portless-oauth-dev",
+    description:
+      'Configure and debug local dev environments that combine portless (stable .localhost HTTPS URLs), a vite dev server, and a separate OAuth/auth Worker (Cloudflare Workers / wrangler dev). Use whenever the user mentions portless, local OAuth login not working, secure cookies disappearing in dev, vite proxy for a backend Worker, CORS/SameSite issues between a portless frontend and a backend, or "登录失败/未登录/cookie 丢失" in a portless setup — even if they don\'t name portless explicitly. Also covers GitHub OAuth App callback URL configuration and the GitHub API User-Agent requirement.',
+    bodyHead:
+      " # portless + OAuth Worker 本地开发联调 处理「portless 前端 + 独立 auth Worker + OAuth 登录」本地开发环境的配置与排障。 这套组合有几个反直觉的硬坑，每个都会让登录静默失败。 ## 何时使用 - 用户提到 portless、`.localhost` 域名、本地 OAuth 登录不工作 - 前端（vite）和 auth Worker（wrangler dev）是两个独立服务，本地联调 - secure cookie 在 dev 环境存不下来 / 登录后仍显示未登录 - vite proxy 转发后端 Worker 的配置 - Gi",
+  },
+  {
+    directoryName: "prototype",
+    name: "prototype",
+    description:
+      "Build multiple genuinely different versions of a UI piece you describe, rendered behind a visual picker so you can flip through them live and promote the one that feels right. Only runs when explicitly invoked; it does not trigger on its own.",
+    bodyHead:
+      ' # Prototyping Variants A divergence skill. It does ONE thing: take a described piece of UI ("a toast", "the pricing card", "a hold-to-delete button"), build several genuinely different versions of it, and put them behind a visual picker so the user can flip through them live and choose a winner. I',
+  },
+  {
+    directoryName: "reactlynx-best-practices",
+    name: "reactlynx-best-practices",
+    description:
+      "Reviews, writes, and refactors ReactLynx code and component libraries for Lynx dual-thread best practices. Applies when writing ReactLynx components, or handling background-only, useLayoutEffect, bindtap/catchtap, main-thread:*, runOnMainThread/runOnBackground, lazy/Suspense, globalPropsMode/__globalProps, component-library publishing (preserved JSX vs React.createElement), or render/diff/commit performance traces. Excludes vanilla Lynx Element PAPI without ReactLynx JSX (use vanilla-lynx), running-app debugging via DevTool/CDP (use lynx-devtool), or Rspeedy/tsconfig config (use lynx-typescript).",
+    bodyHead:
+      " # ReactLynx Best Practices Use this skill when writing, reviewing, or refactoring ReactLynx code. ReactLynx follows the React programming model, but Lynx's dual-thread runtime changes how side effects, lifecycle timing, event handlers, and main-thread scripts should be reasoned about. This skill ",
+  },
+  {
+    directoryName: "research",
+    name: "research",
+    description:
+      "Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.",
+    bodyHead:
+      " Spin up a **background agent** to do the research, so you keep working while it reads. Its job: 1. Investigate the question against **primary sources** (official docs, source code, specs, first-party APIs), not a secondary write-up of them. Follow every claim back to the source that owns it. 2. W",
+  },
+  {
+    directoryName: "resolving-merge-conflicts",
+    name: "resolving-merge-conflicts",
+    description: "Use when you need to resolve an in-progress git merge/rebase conflict.",
+    bodyHead:
+      " 1. **See the current state** of the merge/rebase. Check git history, and the conflicting files. 2. **Find the primary sources** for each conflict. Understand deeply why each change was made, and what the original intent was. Read the commit messages, check the PRs, check original issues/tickets. ",
+  },
+  {
+    directoryName: "resume-modern",
+    name: "resume-modern",
+    description: "Modern minimal resume, single A4 page, ready for print or PDF export.",
+    bodyHead:
+      " 【模板: 现代极简简历】 - 容器宽度模拟 A4: `w-[210mm] min-h-[297mm] mx-auto`, 内边距 16-20mm。 - 顶部姓名巨大 (text-4xl), 底下一行 contact (邮箱 / 电话 / 城市 / GitHub / LinkedIn), 中间用细竖线分隔。 - 主体两栏可选: 左 60% 主线（经历/项目/教育）, 右 40% 副线（技能/语言/获奖）。 - 章节标题: small caps 风格, 上方一条短 accent 线 (w-8 h-0.5)。 - 经历每条: 公司 + 职位 + 时间区间 (右对齐), 下方 1-3 条 bulle",
+  },
+  {
+    directoryName: "review-animations",
+    name: "review-animations",
+    description:
+      "Reviews animation and motion code against a high craft bar derived from Emil Kowalski's design engineering philosophy. Default to flagging; approval is earned.",
+    bodyHead:
+      " # Reviewing Animations A specialized review skill. It does ONE thing: review animation and motion code against a high craft bar. It does not write features, fix unrelated bugs, or review non-motion code. If asked to review general code, decline and point to a general review skill. ## Operating Po",
+  },
+  {
+    directoryName: "ripgrep",
+    name: "ripgrep",
+    description:
+      '用 rg (ripgrep) 替代 grep 做文本/代码搜索的选型与用法指南。只要涉及在文件内容中搜索、书写 grep/rg 命令、从 grep 迁移脚本、排查"搜索没找到结果"、需要 gitignore 感知搜索/文本替换/多行匹配/PCRE2 环视/JSON 输出/压缩包内搜索时都应触发——即使用户只说了 grep。包含 grep→rg 的致命陷阱（rg -r 是替换不是递归）与本机环境事实（shell 里的 grep 实为 ugrep）。',
+    bodyHead:
+      ' <!-- 文件意图（正交意图清单）： - [2026-09-03] 原始需求："我安装了 ripgrep（rg），研究一下和 grep 的区别，还有 rg 自身独有的功能。如果有区别，就用 skill-creator 在 ~/.agents/skills 创建一个 skill。" - 1. 选型决策：rg vs grep 何时用哪个（含本机环境事实） - 2. grep→rg 迁移陷阱（致命：rg -r 是替换不是递归） - 3. rg 独有功能速查（实例 → references/power-features.md） - 4. flag 完整对照（→ references/migratio',
+  },
+  {
+    directoryName: "sandbox-sdk",
+    name: "sandbox-sdk",
+    description:
+      "Build sandboxed applications for secure code execution. Load when building AI code execution, code interpreters, CI/CD systems, interactive dev environments, or executing untrusted code. Covers Sandbox SDK lifecycle, commands, files, code interpreter, and preview URLs. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Sandbox SDK Build secure, isolated code execution environments on Cloudflare Workers. ## FIRST: Verify Installation ```bash npm install @cloudflare/sandbox docker info # Must succeed - Docker required for local dev ``` ## Retrieval Sources Your knowledge of the Sandbox SDK may be",
+  },
+  {
+    directoryName: "sandbox-sdk--2",
+    name: "sandbox-sdk",
+    description:
+      "Build sandboxed applications for secure code execution. Load when building AI code execution, code interpreters, CI/CD systems, interactive dev environments, or executing untrusted code. Covers Sandbox SDK lifecycle, commands, files, code interpreter, and preview URLs. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Sandbox SDK Build secure, isolated code execution environments on Cloudflare Workers. ## FIRST: Verify Installation ```bash npm install @cloudflare/sandbox docker info # Must succeed - Docker required for local dev ``` ## Retrieval Sources Your knowledge of the Sandbox SDK may be",
+  },
+  {
+    directoryName: "sandbox-sdk--3",
+    name: "sandbox-sdk",
+    description:
+      "Build sandboxed applications for secure code execution. Load when building AI code execution, code interpreters, CI/CD systems, interactive dev environments, or executing untrusted code. Covers Sandbox SDK lifecycle, commands, files, code interpreter, and preview URLs. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Sandbox SDK Build secure, isolated code execution environments on Cloudflare Workers. ## FIRST: Verify Installation ```bash npm install @cloudflare/sandbox docker info # Must succeed - Docker required for local dev ``` ## Retrieval Sources Your knowledge of the Sandbox SDK may be",
+  },
+  {
+    directoryName: "sandbox-sdk--4",
+    name: "sandbox-sdk",
+    description:
+      "Build sandboxed applications for secure code execution. Load when building AI code execution, code interpreters, CI/CD systems, interactive dev environments, or executing untrusted code. Covers Sandbox SDK lifecycle, commands, files, code interpreter, and preview URLs. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Cloudflare Sandbox SDK Build secure, isolated code execution environments on Cloudflare Workers. ## FIRST: Verify Installation ```bash npm install @cloudflare/sandbox docker info # Must succeed - Docker required for local dev ``` ## Retrieval Sources Your knowledge of the Sandbox SDK may be",
+  },
+  {
+    directoryName: "scaffold-exercises",
+    name: "scaffold-exercises",
+    description:
+      "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section.",
+    bodyHead:
+      " # Scaffold Exercises Create exercise directory structures that pass `pnpm ai-hero-cli internal lint`, then commit with `git commit`. ## Directory naming - **Sections**: `XX-section-name/` inside `exercises/` (e.g., `01-retrieval-skill-building`) - **Exercises**: `XX.YY-exercise-name/` inside a s",
+  },
+  {
+    directoryName: "setup-matt-pocock-skills",
+    name: "setup-matt-pocock-skills",
+    description:
+      "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.",
+    bodyHead:
+      " # Setup Matt Pocock's Skills Scaffold the per-repo configuration that the engineering skills assume: - **Issue tracker**: where issues live (GitHub by default; local markdown is also supported out of the box) - **Triage labels**: the strings used for the five canonical triage roles - **Domain doc",
+  },
+  {
+    directoryName: "setup-pre-commit",
+    name: "setup-pre-commit",
+    description:
+      "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing.",
+    bodyHead:
+      " # Setup Pre-Commit Hooks ## What This Sets Up - **Husky** pre-commit hook - **lint-staged** running Prettier on all staged files - **Prettier** config (if missing) - **typecheck** and **test** scripts in the pre-commit hook ## Steps ### 1. Detect package manager Check for `package-lock.json` (",
+  },
+  {
+    directoryName: "setup-ts-deep-modules",
+    name: "setup-ts-deep-modules",
+    description:
+      "Wire dependency-cruiser into a TypeScript repo so each package is a deep module, with implementation hidden in subfolders and reachable only through its entry-point files. User-invoked.",
+    bodyHead:
+      " # Setup TS Deep Modules Make every package in this repo a **deep module**: a lot of behaviour behind a small interface. A package's public surface is its **entry points** (the files at the package root), and everything in its subfolders is hidden. This skill installs [dependency-cruiser](https://g",
+  },
+  {
+    directoryName: "shadcn-svelte",
+    name: "shadcn-svelte",
+    description:
+      'Manages shadcn-svelte components and projects — adding, updating, fixing, debugging, styling, and composing UI. Provides project context, component docs, and usage examples. Applies when working with shadcn-svelte, the CLI, design-system presets, or any project with a components.json file. Also triggers for "shadcn-svelte init", "add component", or registry URLs.',
+    bodyHead:
+      " # shadcn-svelte A framework for building UI, components, and design systems for Svelte. Components are added as source to the user's project via the CLI. > **IMPORTANT:** Run all CLI commands using the project's package runner: `npx shadcn-svelte@latest`, `pnpm dlx shadcn-svelte@latest`, or `bunx",
+  },
+  {
+    directoryName: "tdd",
+    name: "tdd",
+    description:
+      'Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions "red-green-refactor", or wants integration tests.',
+    bodyHead:
+      " # Test-Driven Development TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle: consult them before and during the loop, not",
+  },
+  {
+    directoryName: "teach",
+    name: "teach",
+    description: "Teach the user a new skill or concept, within this workspace.",
+    bodyHead:
+      " The user has asked you to teach them something. This is a stateful request - they intend to learn the topic over multiple sessions. ## Teaching Workspace Treat the current directory as a teaching workspace. The state of their learning is captured in this directory in several files: - `MISSION.md",
+  },
+  {
+    directoryName: "to-spec",
+    name: "to-spec",
+    description:
+      "Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.",
+    bodyHead:
+      " This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know. The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skill",
+  },
+  {
+    directoryName: "to-tickets",
+    name: "to-tickets",
+    description:
+      "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).",
+    bodyHead:
+      " # To Tickets Break a plan, spec, or conversation into a set of **tickets**: tracer-bullet vertical slices, each declaring the tickets that **block** it. The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`. ## Pr",
+  },
+  {
+    directoryName: "triage",
+    name: "triage",
+    description:
+      "Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.",
+    bodyHead:
+      " # Triage Move issues on the project issue tracker through a small state machine of triage roles. If this repo treats external pull requests as a request surface (see the issue-tracker config), triage covers them too: **a PR is an issue with attached code**, using the same roles, same states, and ",
+  },
+  {
+    directoryName: "turnstile-spin",
+    name: "turnstile-spin",
+    description:
+      "Set up Cloudflare Turnstile end-to-end in a project. Scan the codebase, create the widget via the Cloudflare API, embed it on the right forms, wire canonical server-side siteverify in the customer's existing backend, validate, and persist the skill. Load this when a user asks to add Turnstile, set up CAPTCHA, protect a form from bots, or fix a Turnstile integration. Mirrors developers.cloudflare.com/turnstile/spin.",
+    bodyHead:
+      ' # Turnstile Spin skill Turns the prompt "set up Turnstile" into a working end-to-end integration: a widget, frontend snippets at every chosen insertion point, canonical server-side siteverify in the customer\'s existing backend, and a real validation pass before reporting success. You are the agen',
+  },
+  {
+    directoryName: "turnstile-spin--2",
+    name: "turnstile-spin",
+    description:
+      "Set up Cloudflare Turnstile end-to-end in a project. Scan the codebase, create the widget via the Cloudflare API, embed it on the right forms, wire canonical server-side siteverify in the customer's existing backend, validate, and persist the skill. Load this when a user asks to add Turnstile, set up CAPTCHA, protect a form from bots, or fix a Turnstile integration. Mirrors developers.cloudflare.com/turnstile/spin.",
+    bodyHead:
+      ' # Turnstile Spin skill Turns the prompt "set up Turnstile" into a working end-to-end integration: a widget, frontend snippets at every chosen insertion point, canonical server-side siteverify in the customer\'s existing backend, and a real validation pass before reporting success. You are the agen',
+  },
+  {
+    directoryName: "turnstile-spin--3",
+    name: "turnstile-spin",
+    description:
+      "Set up Cloudflare Turnstile end-to-end in a project. Scan the codebase, create the widget via the Cloudflare API, embed it on the right forms, wire canonical server-side siteverify in the customer's existing backend, validate, and persist the skill. Load this when a user asks to add Turnstile, set up CAPTCHA, protect a form from bots, or fix a Turnstile integration. Mirrors developers.cloudflare.com/turnstile/spin.",
+    bodyHead:
+      ' # Turnstile Spin skill Turns the prompt "set up Turnstile" into a working end-to-end integration: a widget, frontend snippets at every chosen insertion point, canonical server-side siteverify in the customer\'s existing backend, and a real validation pass before reporting success. You are the agen',
+  },
+  {
+    directoryName: "turnstile-spin--4",
+    name: "turnstile-spin",
+    description:
+      "Set up Cloudflare Turnstile end-to-end in a project. Scan the codebase, create the widget via the Cloudflare API, embed it on the right forms, wire canonical server-side siteverify in the customer's existing backend, validate, and persist the skill. Load this when a user asks to add Turnstile, set up CAPTCHA, protect a form from bots, or fix a Turnstile integration. Mirrors developers.cloudflare.com/turnstile/spin.",
+    bodyHead:
+      ' # Turnstile Spin skill Turns the prompt "set up Turnstile" into a working end-to-end integration: a widget, frontend snippets at every chosen insertion point, canonical server-side siteverify in the customer\'s existing backend, and a real validation pass before reporting success. You are the agen',
+  },
+  {
+    directoryName: "typography-system",
+    name: "typography-system",
+    description:
+      "Build or repair a typography system: a modular type scale, font choices and loading, hierarchy, line-height/line-length, and fluid sizing — delivered as tokens (Tailwind fontSize config or CSS variables) applied to real components. Use when the user says 'the text looks off', 'fonts are inconsistent', 'headings don't stand out', 'pick fonts for me', 'it's hard to read', 'too many font sizes', or when an audit finds font-size sprawl. Chooses the scale ratio from product density (dense app vs marketing vs editorial), verifies contrast and measure, and produces the type tokens plus a migration map from existing rogue sizes.",
+    bodyHead:
+      " # Typography System Produce a working type scale for this codebase — tokens wired into the existing styling system and applied to real headings/body/UI text — not an essay about type. Governing principle: **sizes come from a modular scale chosen for the product's density; readability constraints (",
+  },
+  {
+    directoryName: "view-transitions-toolkit",
+    name: "view-transitions-toolkit",
+    description:
+      "Use when working with GoogleChromeLabs' `view-transitions-toolkit` to add, inspect, optimize, or debug native View Transitions. Trigger this skill for tasks involving `document.startViewTransition`, cross-document VT, `document.activeViewTransition`, route-based transition types, shared-element VT, VT animation inspection or optimization, playback scrubbing, feature detection, or temporary `view-transition-name` assignment.",
+    bodyHead:
+      " # View Transitions Toolkit Use this skill when working with GoogleChromeLabs' `view-transitions-toolkit`. In this skill, `VT` is the shorthand for `view-transition`. ## Core Rule - Treat the toolkit as a narrow companion to native VT, not as a router wrapper or animation framework. - Let the br",
+  },
+  {
+    directoryName: "wayfinder",
+    name: "wayfinder",
+    description:
+      "Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.",
+    bodyHead:
+      " A loose idea has arrived, too big for one agent session, and wrapped in fog: the way from here to the **destination** isn't visible yet. Wayfinding is about finding that way, not charging at the destination. This skill charts the way as a **shared map** on the repo's issue tracker, then works its *",
+  },
+  {
+    directoryName: "web-perf",
+    name: "web-perf",
+    description:
+      "Analyzes web performance using Chrome DevTools MCP. Measures Core Web Vitals (LCP, INP, CLS) and supplementary metrics (FCP, TBT, Speed Index), identifies render-blocking resources, network dependency chains, layout shifts, caching issues, and accessibility gaps. Use when asked to audit, profile, debug, or optimize page load performance, Lighthouse scores, or site speed. Biases towards retrieval from current documentation over pre-trained knowledge.",
+    bodyHead:
+      " # Web Performance Audit Your knowledge of web performance metrics, thresholds, and tooling APIs may be outdated. **Prefer retrieval over pre-training** when citing specific numbers or recommendations. ## Retrieval Sources | Source | How to retrieve | Use for | |--------|----------------|--------",
+  },
+  {
+    directoryName: "web-perf--2",
+    name: "web-perf",
+    description:
+      "Analyzes web performance using Chrome DevTools MCP. Measures Core Web Vitals (LCP, INP, CLS) and supplementary metrics (FCP, TBT, Speed Index), identifies render-blocking resources, network dependency chains, layout shifts, caching issues, and accessibility gaps. Use when asked to audit, profile, debug, or optimize page load performance, Lighthouse scores, or site speed. Biases towards retrieval from current documentation over pre-trained knowledge.",
+    bodyHead:
+      " # Web Performance Audit Your knowledge of web performance metrics, thresholds, and tooling APIs may be outdated. **Prefer retrieval over pre-training** when citing specific numbers or recommendations. ## Retrieval Sources | Source | How to retrieve | Use for | |--------|----------------|--------",
+  },
+  {
+    directoryName: "web-perf--3",
+    name: "web-perf",
+    description:
+      "Analyzes web performance using Chrome DevTools MCP. Measures Core Web Vitals (LCP, INP, CLS) and supplementary metrics (FCP, TBT, Speed Index), identifies render-blocking resources, network dependency chains, layout shifts, caching issues, and accessibility gaps. Use when asked to audit, profile, debug, or optimize page load performance, Lighthouse scores, or site speed. Biases towards retrieval from current documentation over pre-trained knowledge.",
+    bodyHead:
+      " # Web Performance Audit Your knowledge of web performance metrics, thresholds, and tooling APIs may be outdated. **Prefer retrieval over pre-training** when citing specific numbers or recommendations. ## Retrieval Sources | Source | How to retrieve | Use for | |--------|----------------|--------",
+  },
+  {
+    directoryName: "web-perf--4",
+    name: "web-perf",
+    description:
+      "Analyzes web performance using Chrome DevTools MCP. Measures Core Web Vitals (LCP, INP, CLS) and supplementary metrics (FCP, TBT, Speed Index), identifies render-blocking resources, network dependency chains, layout shifts, caching issues, and accessibility gaps. Use when asked to audit, profile, debug, or optimize page load performance, Lighthouse scores, or site speed. Biases towards retrieval from current documentation over pre-trained knowledge.",
+    bodyHead:
+      " # Web Performance Audit Your knowledge of web performance metrics, thresholds, and tooling APIs may be outdated. **Prefer retrieval over pre-training** when citing specific numbers or recommendations. ## Retrieval Sources | Source | How to retrieve | Use for | |--------|----------------|--------",
+  },
+  {
+    directoryName: "wizard",
+    name: "wizard",
+    description:
+      "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself.",
+    bodyHead:
+      " # Wizard A **wizard** is a bash script that walks a human, step by step, through a manual procedure that's tedious to do by hand and tedious to re-explain to an AI every time. It opens each URL, says exactly what to click and copy, captures the values, writes them where they belong (`.env`, GitHub",
+  },
+  {
+    directoryName: "workers-best-practices",
+    name: "workers-best-practices",
+    description:
+      "Reviews and authors Cloudflare Workers code against production best practices. Load when writing new Workers, reviewing Worker code, configuring wrangler.jsonc, or checking for common Workers anti-patterns (streaming, floating promises, global state, secrets, bindings, observability). Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " Your knowledge of Cloudflare Workers APIs, types, and configuration may be outdated. **Prefer retrieval over pre-training** for any Workers code task — writing or reviewing. ## Retrieval Sources Fetch the **latest** versions before writing or reviewing Workers code. Do not rely on baked-in knowle",
+  },
+  {
+    directoryName: "workers-best-practices--2",
+    name: "workers-best-practices",
+    description:
+      "Reviews and authors Cloudflare Workers code against production best practices. Load when writing new Workers, reviewing Worker code, configuring wrangler.jsonc, or checking for common Workers anti-patterns (streaming, floating promises, global state, secrets, bindings, observability). Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " Your knowledge of Cloudflare Workers APIs, types, and configuration may be outdated. **Prefer retrieval over pre-training** for any Workers code task — writing or reviewing. ## Retrieval Sources Fetch the **latest** versions before writing or reviewing Workers code. Do not rely on baked-in knowle",
+  },
+  {
+    directoryName: "workers-best-practices--3",
+    name: "workers-best-practices",
+    description:
+      "Reviews and authors Cloudflare Workers code against production best practices. Load when writing new Workers, reviewing Worker code, configuring wrangler.jsonc, or checking for common Workers anti-patterns (streaming, floating promises, global state, secrets, bindings, observability). Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " Your knowledge of Cloudflare Workers APIs, types, and configuration may be outdated. **Prefer retrieval over pre-training** for any Workers code task — writing or reviewing. ## Retrieval Sources Fetch the **latest** versions before writing or reviewing Workers code. Do not rely on baked-in knowle",
+  },
+  {
+    directoryName: "workers-best-practices--4",
+    name: "workers-best-practices",
+    description:
+      "Reviews and authors Cloudflare Workers code against production best practices. Load when writing new Workers, reviewing Worker code, configuring wrangler.jsonc, or checking for common Workers anti-patterns (streaming, floating promises, global state, secrets, bindings, observability). Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " Your knowledge of Cloudflare Workers APIs, types, and configuration may be outdated. **Prefer retrieval over pre-training** for any Workers code task — writing or reviewing. ## Retrieval Sources Fetch the **latest** versions before writing or reviewing Workers code. Do not rely on baked-in knowle",
+  },
+  {
+    directoryName: "wrangler",
+    name: "wrangler",
+    description:
+      "Cloudflare Workers CLI for deploying, developing, and managing Workers, KV, R2, D1, Vectorize, Hyperdrive, Workers AI, Containers, Queues, Workflows, Pipelines, and Secrets Store. Load before running wrangler commands to ensure correct syntax and best practices. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Wrangler CLI Your knowledge of Wrangler CLI flags, config fields, and subcommands may be outdated. **Prefer retrieval over pre-training** for any Wrangler task. ## Retrieval Sources Fetch the **latest** information before writing or reviewing Wrangler commands and config. Do not rely on baked-",
+  },
+  {
+    directoryName: "wrangler--2",
+    name: "wrangler",
+    description:
+      "Cloudflare Workers CLI for deploying, developing, and managing Workers, KV, R2, D1, Vectorize, Hyperdrive, Workers AI, Containers, Queues, Workflows, Pipelines, and Secrets Store. Load before running wrangler commands to ensure correct syntax and best practices. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Wrangler CLI Your knowledge of Wrangler CLI flags, config fields, and subcommands may be outdated. **Prefer retrieval over pre-training** for any Wrangler task. ## Retrieval Sources Fetch the **latest** information before writing or reviewing Wrangler commands and config. Do not rely on baked-",
+  },
+  {
+    directoryName: "wrangler--3",
+    name: "wrangler",
+    description:
+      "Cloudflare Workers CLI for deploying, developing, and managing Workers, KV, R2, D1, Vectorize, Hyperdrive, Workers AI, Containers, Queues, Workflows, Pipelines, and Secrets Store. Load before running wrangler commands to ensure correct syntax and best practices. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Wrangler CLI Your knowledge of Wrangler CLI flags, config fields, and subcommands may be outdated. **Prefer retrieval over pre-training** for any Wrangler task. ## Retrieval Sources Fetch the **latest** information before writing or reviewing Wrangler commands and config. Do not rely on baked-",
+  },
+  {
+    directoryName: "wrangler--4",
+    name: "wrangler",
+    description:
+      "Cloudflare Workers CLI for deploying, developing, and managing Workers, KV, R2, D1, Vectorize, Hyperdrive, Workers AI, Containers, Queues, Workflows, Pipelines, and Secrets Store. Load before running wrangler commands to ensure correct syntax and best practices. Biases towards retrieval from Cloudflare docs over pre-trained knowledge.",
+    bodyHead:
+      " # Wrangler CLI Your knowledge of Wrangler CLI flags, config fields, and subcommands may be outdated. **Prefer retrieval over pre-training** for any Wrangler task. ## Retrieval Sources Fetch the **latest** information before writing or reviewing Wrangler commands and config. Do not rely on baked-",
+  },
+  {
+    directoryName: "writing-beats",
+    name: "writing-beats",
+    description:
+      "Writing, exploit; assemble raw material into a journey of beats, grounding each term before a beat leans on it.",
+    bodyHead:
+      " <what-to-do> The user has passed (or will pass) a markdown file of raw material. This is **exploit**: the exploring is done, the pile is fixed. Commit to a path through it and mine the pile to fill each beat. If the user did not say where to save the article, ask once and remember the path. Then",
+  },
+  {
+    directoryName: "writing-fragments",
+    name: "writing-fragments",
+    description: "Writing, explore: mine raw fragments, no structure yet.",
+    bodyHead:
+      " <what-to-do> This is pure **explore**: widen the space of what could be written without committing to structure. Committing is _exploit_, a separate skill's job. Run a grilling session that produces fragments, interviewing the user relentlessly about whatever they want to write about. Imposing pha",
+  },
+  {
+    directoryName: "writing-shape",
+    name: "writing-shape",
+    description: "Writing, exploit: shape raw material into an article, paragraph by paragraph.",
+    bodyHead:
+      " <what-to-do> The user has passed (or will pass) a markdown file of raw material. Treat it as the input pile: anything from a tidy list of fragments to a wall of unstructured prose to a transcript. The format does not matter. Read it end-to-end before doing anything else. Then run a shaping sessio",
+  },
+];
+
+export const BENCHMARK_SYNTHETIC_SKILLS: readonly BenchmarkSyntheticSkill[] = [
+  {
+    name: "react-component-design",
+    description:
+      "Design and review production React components: composition, props boundaries, render performance and accessibility.",
+    keywords: ["react", "component", "jsx", "tsx", "fiber"],
+    triggers: ["design a react component", "review component hierarchy"],
+    headings: ["Component boundaries", "State colocation", "Re-render analysis"],
+    body: "React 组件设计指南。Composition over inheritance; lift state only when needed. Use React.memo sparingly. @testing-library/react for behavior tests. Prefer server components for data-heavy pages; keep client components at the leaves. react-component-design checklist: props contract, error boundaries, suspense fallbacks.",
+  },
+  {
+    name: "typescript-type-safety",
+    description:
+      "TypeScript 类型安全：unknown 收窄、discriminated union、zod safeParse 边界与 no any 法则。",
+    keywords: ["typescript", "类型安全", "zod", "strict"],
+    triggers: ["make types safe", "类型检查"],
+    headings: ["Unknown narrowing", "Discriminated unions", "Runtime boundaries"],
+    body: "TypeScript type safety practices: every external input starts as unknown; safeParse at trust boundaries; discriminated unions with exhaustive switch; never use as any. 类型检查先行，runtime-safe 才算 type-safe。",
+  },
+  {
+    name: "svelte-component-dev",
+    description:
+      "Svelte component development: runes, snippets, transitions and store patterns for Svelte 5.",
+    keywords: ["svelte", "sveltekit", "runes"],
+    triggers: ["create a svelte component", "如何创建Svelte组件"],
+    headings: ["Runes ($state/$derived)", "Snippets vs slots", "Transitions"],
+    body: "Svelte 组件开发：$state/$derived/$effect runes; snippets replace slots in Svelte 5. SvelteKit load functions and +page.ts. Transitions use tweened/spring. 编译期剥离行内元素边界空格，注意排版。",
+  },
+  {
+    name: "mcp-server-guide",
+    description:
+      "Build Model Context Protocol (MCP) servers: tools, resources, prompts, stdio vs HTTP transports.",
+    keywords: ["mcp", "model context protocol", "server"],
+    triggers: ["build an mcp server"],
+    headings: ["Tool schema", "Transports", "Bearer auth"],
+    body: "MCP server implementation guide with @modelcontextprotocol/server. Tools vs resources vs prompts; stdio for local, streamable HTTP for remote. Zod schemas for tool input validation.",
+  },
+  {
+    name: "jixoai-ui-registry",
+    description:
+      "@jixoai/jixoai-ui 组件 registry 的使用：shadcn 风格 CLI、CSS laws 与 vendor 约定。",
+    keywords: ["@jixoai/jixoai-ui", "registry", "shadcn"],
+    triggers: [],
+    headings: ["Registry add", "CSS laws"],
+    body: "使用 @jixoai/jixoai-ui 的 registry item（如 code-card、highlight）。依赖边走 registry.json；shadcn-add 镜像桥处理 CLI 兼容。CSS 法则：separator INK law、减色墨律。",
+  },
+  {
+    name: "opendweb-routing",
+    description: "OpenDweb 路由系统：文件路由、布局嵌套与 dweb 路由参数约定。",
+    keywords: ["opendweb", "dweb", "routing", "路由"],
+    triggers: ["dweb 路由"],
+    headings: ["File routes", "Layout nesting"],
+    body: "OpenDweb 路由（dweb 路由）基于文件系统：routes/ 目录映射路径段，layout 文件嵌套。参数用 [param] 约定。支持 http3 传输层与离线 service worker。",
+  },
+  {
+    name: "http3-quic-notes",
+    description: "HTTP3/QUIC 传输要点：0-RTT、连接迁移与流优先级。",
+    keywords: ["http3", "quic", "transport"],
+    triggers: [],
+    headings: ["0-RTT", "Connection migration"],
+    body: "http3 overview: QUIC handshake, 0-RTT resumption, connection migration via connection IDs, stream prioritization. Compare with TCP+TLS.",
+  },
+  {
+    name: "skill-creator-guide",
+    description: "skill-creator 使用指南：创建、管理与搜索 Agent Skills。",
+    keywords: ["skill-creator", "skills"],
+    triggers: [],
+    headings: ["Create", "Search"],
+    body: "skill-creator 命令行：创建技能、管理 workspace providers、search 检索本地技能索引。",
+  },
+  {
+    name: "中文技术写作",
+    description: "中文技术写作规范：术语一致性、中英混排空格、标点与段落节奏。",
+    keywords: ["写作", "中文", "排版"],
+    triggers: ["润色中文文档"],
+    headings: ["术语表", "中英混排"],
+    body: "中文技术写作要点：术语统一；中英之间加空格；避免翻译腔。段落节奏以信息密度优先。",
+  },
+  {
+    name: "react-hook-patterns",
+    description: "React hooks 模式：自定义 hook 抽取、useEffect 依赖治理与并发特性。",
+    keywords: ["react", "hooks"],
+    triggers: [],
+    headings: ["Custom hooks", "Effect hygiene"],
+    body: "React hooks: extract custom hooks for reuse; treat useEffect as synchronization, not lifecycle. useSyncExternalStore for stores.",
+  },
+  {
+    name: "glass-morphism-css",
+    description: "玻璃拟态 CSS：backdrop-filter、渐进模糊与减色墨律。",
+    keywords: ["css", "backdrop-filter", "毛玻璃"],
+    triggers: [],
+    headings: ["Progressive blur"],
+    body: "玻璃拟态实现：backdrop-filter: blur + saturate；遮罩禁止加黑，用 contrast(0.5) 减色（减色墨律）。",
+  },
+];
+
+export const BENCHMARK_LABELED_QUERIES: readonly BenchmarkLabeledQuery[] = [
+  {
+    q: "React component design",
+    expect: ["react-component-design"],
+    category: "en",
+  },
+  {
+    q: "test driven development",
+    expect: ["tdd"],
+    category: "en",
+  },
+  {
+    q: "how to hand off conversation to another agent",
+    expect: ["claude-handoff", "handoff"],
+    category: "en",
+  },
+  {
+    q: "resolve git merge conflict",
+    expect: ["resolving-merge-conflicts"],
+    category: "en",
+  },
+  {
+    q: "deploy cloudflare workers",
+    expect: ["wrangler", "workers-best-practices", "cloudflare"],
+    category: "en",
+  },
+  {
+    q: "durable objects chat room",
+    expect: ["durable-objects"],
+    category: "en",
+  },
+  {
+    q: "review my pull request changes",
+    expect: ["code-review"],
+    category: "en",
+  },
+  {
+    q: "browser automation CLI for agents",
+    expect: ["agent-browser", "ego-browser"],
+    category: "en",
+  },
+  {
+    q: "terminal user interface",
+    expect: ["opentui"],
+    category: "en",
+  },
+  {
+    q: "view transitions",
+    expect: ["view-transitions-toolkit"],
+    category: "en",
+  },
+  {
+    q: "typography system",
+    expect: ["typography-system"],
+    category: "en",
+  },
+  {
+    q: "shadcn svelte components",
+    expect: ["shadcn-svelte"],
+    category: "en",
+  },
+  {
+    q: "pre-commit lint hooks",
+    expect: ["setup-pre-commit"],
+    category: "en",
+  },
+  {
+    q: "grill me about my plan",
+    expect: ["grill-me", "grilling", "grill-with-docs"],
+    category: "en",
+  },
+  {
+    q: "lynx performance trace",
+    expect: ["lynx-trace-analysis", "lynx-trace-record"],
+    category: "en",
+  },
+  {
+    q: "figma design file inspection",
+    expect: ["open-pencil"],
+    category: "en",
+  },
+  {
+    q: "agent client protocol",
+    expect: ["acp"],
+    category: "en",
+  },
+  {
+    q: "three.js model from image",
+    expect: ["img2threejs"],
+    category: "en",
+  },
+  {
+    q: "find and install agent skills",
+    expect: ["find-skills"],
+    category: "en",
+  },
+  {
+    q: "TypeScript type safety",
+    expect: ["typescript-type-safety"],
+    category: "en",
+  },
+  {
+    q: "React组件设计",
+    expect: ["react-component-design"],
+    category: "mixed",
+  },
+  {
+    q: "如何创建Svelte组件",
+    expect: ["svelte-component-dev"],
+    category: "mixed",
+  },
+  {
+    q: "TypeScript类型检查",
+    expect: ["typescript-type-safety"],
+    category: "mixed",
+  },
+  {
+    q: "中文写作 术语一致",
+    expect: ["中文技术写作"],
+    category: "mixed",
+  },
+  {
+    q: "多引擎AI搜索 联网查证",
+    expect: ["agent-search-engine"],
+    category: "mixed",
+  },
+  {
+    q: "用ripgrep搜索代码",
+    expect: ["ripgrep"],
+    category: "mixed",
+  },
+  {
+    q: "去模板化写作风格",
+    expect: ["gaubee-writer", "lieflat-less-ai-tone"],
+    category: "zh",
+  },
+  {
+    q: "玻璃拟态",
+    expect: ["glass-morphism-css"],
+    category: "zh",
+  },
+  {
+    q: "中文排版规范",
+    expect: ["中文技术写作"],
+    category: "zh",
+  },
+  {
+    q: "多引擎搜索",
+    expect: ["agent-search-engine"],
+    category: "zh",
+  },
+  {
+    q: "React 组件设计",
+    expect: ["react-component-design"],
+    category: "mixed",
+  },
+  {
+    q: "SvelteKit UI 组件",
+    expect: ["svelte-component-dev"],
+    category: "mixed",
+  },
+  {
+    q: "AI Agent Skill 开发",
+    expect: ["skill-creator-guide", "find-skills", "skill-creator"],
+    category: "mixed",
+  },
+  {
+    q: "dweb 路由",
+    expect: ["opendweb-routing"],
+    category: "mixed",
+  },
+  {
+    q: "玻璃拟态 毛玻璃效果",
+    expect: ["glass-morphism-css"],
+    category: "mixed",
+  },
+  {
+    q: "@jixoai/jixoai-ui",
+    expect: ["jixoai-ui-registry"],
+    category: "ident",
+  },
+  {
+    q: "shadcn-svelte",
+    expect: ["shadcn-svelte"],
+    category: "ident",
+  },
+  {
+    q: "http3",
+    expect: ["http3-quic-notes"],
+    category: "ident",
+  },
+  {
+    q: "opentui",
+    expect: ["opentui"],
+    category: "ident",
+  },
+  {
+    q: "reactlynx 最佳实践",
+    expect: ["reactlynx-best-practices"],
+    category: "mixed",
+  },
+  {
+    q: "react componet design",
+    expect: ["react-component-design"],
+    category: "typo",
+  },
+  {
+    q: "sveltte component",
+    expect: ["svelte-component-dev", "shadcn-svelte"],
+    category: "typo",
+  },
+  {
+    q: "shadcn-svlete",
+    expect: ["shadcn-svelte"],
+    category: "typo",
+  },
+  {
+    q: "typograpyh",
+    expect: ["typography-system"],
+    category: "typo",
+  },
+  {
+    q: "cloudflare workrs deploy",
+    expect: ["wrangler", "workers-best-practices", "cloudflare"],
+    category: "typo",
+  },
+];

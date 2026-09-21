@@ -51,6 +51,7 @@ export default defineConfig({
             "test/**/*.test.ts",
             "webui/config/**/*.test.ts",
             "packages/skill-wiki/test/**/*.test.ts",
+            "packages/search/test/**/*.test.ts",
           ],
           exclude: ["webui/src/**"],
           globals: false,
