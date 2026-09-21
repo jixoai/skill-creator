@@ -17,7 +17,7 @@
 - [x] 1.6 通用 API 契约层：文档/命中/字段声明类型 + openIndex/upsert/
       remove/search/close 全 async 签名
 - [x] 1.7 sqlite 后端（node:sqlite FTS5，预分词 token 入库）
-- [ ] 1.8 tantivy 后端（whitespace 注入 + 目录锁生命周期封装）
+- [x] 1.8 tantivy 后端（whitespace 注入 + 目录锁生命周期封装）
 - [x] 1.9 信封版本化 + 不匹配自动重建
 - [x] 1.10 包级单测：幂等 upsert/分页/两后端同一组语义测试/中文对拍
       语料复用/信封重建

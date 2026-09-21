@@ -211,6 +211,9 @@ importers:
       '@orpc/server':
         specifier: 1.14.6
         version: 1.14.6(@opentelemetry/api@1.9.1)(ws@8.21.3)
+      '@oxdev03/node-tantivy-binding':
+        specifier: 0.3.3
+        version: 0.3.3
       '@xmorse/rfd':
         specifier: ^2.3.0
         version: 2.3.0
@@ -2664,6 +2667,92 @@ packages:
 
   '@oxc-project/types@0.148.0':
     resolution: {integrity: sha512-Nm4s/jB+4FpFsPhWGEC4h7rzksesmtnMXomo6rCMcg/b8zLQuOziRgkCS1fxDCXOlJB/6Q8oABOZ/OP6RIPj9A==}
+
+  '@oxdev03/node-tantivy-binding-android-arm-eabi@0.3.3':
+    resolution: {integrity: sha512-G1Z5XCmckin+lkXk+h1U0XeNMy2uzUC0XDMabSzX7kVVj3LMRfMCbLtF15tkWQBApzXTH2wIad2SoiZ+WvdSJw==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [arm]
+    os: [android]
+
+  '@oxdev03/node-tantivy-binding-android-arm64@0.3.3':
+    resolution: {integrity: sha512-6KxIztZT9QYrCjIqmeep2tHodlKfaouPZgBD1RN+7AcVNzo/LLD7OWcXhloLcakmGgmqi44vi9gNzlD31lh39Q==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [arm64]
+    os: [android]
+
+  '@oxdev03/node-tantivy-binding-darwin-arm64@0.3.3':
+    resolution: {integrity: sha512-lYUMRB14AYUXkWAf0+BMR6ybAFUbHz/UI3EZDvyYAdF689v4dh1Elpw9PFx1+EXoMwJj2NAllkPc7FJxXD4ZfQ==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@oxdev03/node-tantivy-binding-darwin-x64@0.3.3':
+    resolution: {integrity: sha512-SAoYHKvnokVVH4e2Q+wizMWMPIh+JuTP5ueib8kyx2B++JFUS3xclPdyG+C2c+GmEHq6F2wlKTlJtWP1dMo15Q==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@oxdev03/node-tantivy-binding-freebsd-x64@0.3.3':
+    resolution: {integrity: sha512-3/TVPQn0iG7T4cZ7sDFa3aUO+Gh7v1OdxgYEPQoGpCZ5mtgEstvXKRTW2QBj39Lj1l6lSUL2uMNl9IAnEYnUpA==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [x64]
+    os: [freebsd]
+
+  '@oxdev03/node-tantivy-binding-linux-arm-gnueabihf@0.3.3':
+    resolution: {integrity: sha512-3msxTQ9CbLdu7c+WGaaFTKwqlRMmtZFYElsbnFi5kHm532yd2vlT60MyKxXL7qWhRbQx7N1qCo+2PJ8FijRjhw==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [arm]
+    os: [linux]
+
+  '@oxdev03/node-tantivy-binding-linux-arm64-gnu@0.3.3':
+    resolution: {integrity: sha512-4ib1GiFvur2yMiyraAeMgzMVaDMANJJrCb8LYSz60o1uQonNge85o8W99DNZP8LnOgUqP//nb8voRXaQH01k3A==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@oxdev03/node-tantivy-binding-linux-arm64-musl@0.3.3':
+    resolution: {integrity: sha512-sJJGdVzXLFBwUNYUZQfy9MYSUOy604r1kWdT2MS5fgVftTz2qv2iSOoNI3grp3eobsKqNOpH1FOn39Pl6YYqoQ==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@oxdev03/node-tantivy-binding-linux-x64-gnu@0.3.3':
+    resolution: {integrity: sha512-T/ObJ3iHrCBsD1+KMTFT3piJyqZiPisrV+6rZP5G5+1eCN/EuYtWmoPs8ksJQxekA4kHPvFNPQBs9rnh24zUcA==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@oxdev03/node-tantivy-binding-linux-x64-musl@0.3.3':
+    resolution: {integrity: sha512-OIkuq2c2EtjtSMl/zlVK2apMx8oHei0F2UIKtHu968gV1hc4bJBCjEvf4mAVqWmsAQMSjMDrNrGzHctEzb9ZLA==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@oxdev03/node-tantivy-binding-win32-arm64-msvc@0.3.3':
+    resolution: {integrity: sha512-JhFo/FzXQEw8YMvUkffij5TuTjSa7Yxl5kUOIdqXZPxudJvOFVwE7eRPiKIMDqz7h9eZdRlV1fyAdFv4+T+0wQ==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@oxdev03/node-tantivy-binding-win32-ia32-msvc@0.3.3':
+    resolution: {integrity: sha512-h1M+ts3NhcdvR+/8mofzShyNZLqqiVNyNfr5EoCmdZszMKv1KI026fqdCTHldw/GtBvDcJJWTT4b5lejgMLvhA==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [ia32]
+    os: [win32]
+
+  '@oxdev03/node-tantivy-binding-win32-x64-msvc@0.3.3':
+    resolution: {integrity: sha512-H5Ry2ViEZsdngPnMbe6e42lUwLcNF0dDrlYM1MnYEhjKJC5y1i8K/SdITN7KrDxI076VlJmSmuzdhIGua/KzsQ==}
+    engines: {node: '>= 22.15.1'}
+    cpu: [x64]
+    os: [win32]
+
+  '@oxdev03/node-tantivy-binding@0.3.3':
+    resolution: {integrity: sha512-30R97gI2yWFuE2m+qD+9PvhKKna7axtcuoJ0wyHb1xaNjoNasThY3IvZtlehWGJwS9w41oC6bmDxh8WN5m9hjw==}
+    engines: {node: '>= 22.15.1'}
 
   '@oxfmt/binding-android-arm-eabi@0.62.0':
     resolution: {integrity: sha512-pdsv0C4gPjJ8H1+sd8u0BDx+yLACTL+rgeMIOL1ln4ihSnhw8CWXtYWgvcSkyTfgGBIzFKab+d8rx9Xl4en/Kw==}
@@ -7801,6 +7890,61 @@ snapshots:
   '@oxc-project/types@0.143.0': {}
 
   '@oxc-project/types@0.148.0': {}
+
+  '@oxdev03/node-tantivy-binding-android-arm-eabi@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-android-arm64@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-darwin-arm64@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-darwin-x64@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-freebsd-x64@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-linux-arm-gnueabihf@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-linux-arm64-gnu@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-linux-arm64-musl@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-linux-x64-gnu@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-linux-x64-musl@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-win32-arm64-msvc@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-win32-ia32-msvc@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding-win32-x64-msvc@0.3.3':
+    optional: true
+
+  '@oxdev03/node-tantivy-binding@0.3.3':
+    optionalDependencies:
+      '@oxdev03/node-tantivy-binding-android-arm-eabi': 0.3.3
+      '@oxdev03/node-tantivy-binding-android-arm64': 0.3.3
+      '@oxdev03/node-tantivy-binding-darwin-arm64': 0.3.3
+      '@oxdev03/node-tantivy-binding-darwin-x64': 0.3.3
+      '@oxdev03/node-tantivy-binding-freebsd-x64': 0.3.3
+      '@oxdev03/node-tantivy-binding-linux-arm-gnueabihf': 0.3.3
+      '@oxdev03/node-tantivy-binding-linux-arm64-gnu': 0.3.3
+      '@oxdev03/node-tantivy-binding-linux-arm64-musl': 0.3.3
+      '@oxdev03/node-tantivy-binding-linux-x64-gnu': 0.3.3
+      '@oxdev03/node-tantivy-binding-linux-x64-musl': 0.3.3
+      '@oxdev03/node-tantivy-binding-win32-arm64-msvc': 0.3.3
+      '@oxdev03/node-tantivy-binding-win32-ia32-msvc': 0.3.3
+      '@oxdev03/node-tantivy-binding-win32-x64-msvc': 0.3.3
 
   '@oxfmt/binding-android-arm-eabi@0.62.0':
     optional: true

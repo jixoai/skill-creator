@@ -93,6 +93,7 @@
     "@opentray/vite-plugin": "0.32.0",
     "@orpc/contract": "1.14.6",
     "@orpc/server": "1.14.6",
+    "@oxdev03/node-tantivy-binding": "0.3.3",
     "@xmorse/rfd": "^2.3.0",
     "execa": "^9.6.1",
     "gray-matter": "^4.0.3",

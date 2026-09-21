@@ -43,7 +43,11 @@ export interface SearchQueryOptions {
   offset?: number;
 }
 
-/** 打开索引的选项；fuzzy 为编辑距离比例（MiniSearch 兼容语义，默认 0.2），prefix 默认 true。 */
+/**
+ * 打开索引的选项；fuzzy 为编辑距离比例（MiniSearch 兼容语义，默认 0.2），prefix 默认 true。
+ * backend 默认 "tantivy"（native binding 动态 import；加载失败/平台缺失 → typed
+ * SEARCH_BACKEND_UNAVAILABLE，消息含原因；调用方可显式回落 "sqlite"）。
+ */
 export interface OpenIndexOptions {
   directory: string;
   fields: Record<string, SearchFieldSpec>;

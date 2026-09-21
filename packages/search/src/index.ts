@@ -5,9 +5,11 @@
  * 正交意图：
  *   [1] 公共面出口：契约类型 + typed 错误 + openIndex（含 zod 参数收窄）。
  *   [2] 信封编排：目录存在且信封匹配 → 复用；缺失/不兼容/不匹配 → 删除重建空索引。
- *   [3] 后端分派：sqlite 默认（本阶段）；tantivy 占位 typed 拒绝（tasks 1.8 接入）。
- * 妥协声明：目录由索引独占拥有（信封不匹配整目录删除重建）；字段名限于
- * [A-Za-z0-9_]{1,64}（sqlite 列名安全性），消费者用语义化短名声明字段。
+ *   [3] 后端分派：tantivy 默认（native binding 动态 import，缺失/平台不支持
+ *       typed SEARCH_BACKEND_UNAVAILABLE）；sqlite 回落（Node 24 内置 FTS5）。
+ * 妥协声明：目录由索引独占拥有（信封不匹配整目录删除重建；backend 名进信封，
+ * 切换 backend = 信封不匹配 = 重建）；字段名限于 [A-Za-z0-9_]{1,64}
+ * （sqlite 列名安全性），消费者用语义化短名声明字段。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -23,7 +25,7 @@ import {
 import { scoringOptionsDigest, type ScoringOptions } from "./scoring.js";
 import { TOKENIZER_VERSION } from "./tokenizer.js";
 import { openSqliteIndex } from "./backends/sqlite.js";
-import { openTantivyIndex } from "./backends/tantivy.js";
+import { assertTantivyBackendAvailable, openTantivyIndex } from "./backends/tantivy.js";
 
 export * from "./api.js";
 export { TOKENIZER_VERSION, createSkillTokenizer, type SkillTokenizer } from "./tokenizer.js";
@@ -44,7 +46,7 @@ const FieldsSchema = z
 const OpenOptionsSchema = z.object({
   directory: z.string().min(1),
   fields: FieldsSchema,
-  backend: z.enum(["tantivy", "sqlite"]).default("sqlite"),
+  backend: z.enum(["tantivy", "sqlite"]).default("tantivy"),
   fuzzy: z.number().min(0).max(1).default(0.2),
   prefix: z.boolean().default(true),
 });
@@ -135,9 +137,9 @@ export async function openIndex(options: OpenIndexOptions): Promise<SearchIndex>
     fieldsDigest,
   };
 
-  // tantivy 占位：在触碰目录之前 typed 拒绝（不可用后端不得产生重建副作用）。
+  // tantivy 可用性预检：在触碰目录之前 typed 拒绝（不可用后端不得产生重建副作用）。
   if (parsed.backend === "tantivy") {
-    openTantivyIndex();
+    await assertTantivyBackendAvailable();
   }
 
   let fresh = true;
@@ -167,11 +169,18 @@ export async function openIndex(options: OpenIndexOptions): Promise<SearchIndex>
     throw new SearchError("SEARCH_IO", "failed to prepare index directory", { cause: error });
   }
 
-  const index: SearchIndex = openSqliteIndex({
-    directory: parsed.directory,
-    fields: parsed.fields,
-    scoring,
-  });
+  const index: SearchIndex =
+    parsed.backend === "tantivy"
+      ? await openTantivyIndex({
+          directory: parsed.directory,
+          fields: parsed.fields,
+          scoring,
+        })
+      : openSqliteIndex({
+          directory: parsed.directory,
+          fields: parsed.fields,
+          scoring,
+        });
 
   if (fresh) {
     try {
