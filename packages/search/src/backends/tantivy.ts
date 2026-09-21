@@ -22,9 +22,10 @@
  * 词表分桶与大语料优化与 sqlite 后端同口径留给后续。mutation 失败语义（冻结）：
  * writer.commit 返回前的失败 → 引擎 rollback + 镜像逆序回放；commit 成功后
  * reload 失败 → 盘面已提交，不回滚不撤销（镜像保留 = 已对齐已提交内容），
- * reader 标记 stale，抛 SEARCH_IO；后续 mutation 前强制 reload 门（codex r2
- * R2-1：旧 reader 上做同 id 查找会漏 delete → 同 id 双版本），刷新仍失败则
- * hard error，由调用方 close 重开（镜像自盘面重建，二者不可分裂）。
+ * reader 标记 stale，抛 SEARCH_IO；后续读写前强制 reload 门（codex r2
+ * R2-1：旧 reader 上做同 id 查找会漏 delete → 同 id 双版本；codex r3 P2：
+ * 读面同门——search 不得带着旧 reader + 已更新镜像静默返回旧视图），刷新仍
+ * 失败则 hard error，由调用方 close 重开（镜像自盘面重建，二者不可分裂）。
  */
 import { z } from "zod";
 import {
@@ -175,8 +176,8 @@ class TantivySearchIndex implements SearchIndex {
   /**
    * reader 停留在旧提交之前的视图（codex r2 R2-1）：commit 成功后 reload 失败
    * 置位。带病继续会让同 id upsert/remove 的 fetchFieldTokens 查不到已提交
-   * 版本（漏发 delete / 重复 retract 镜像）。后续 mutation 经 ensureFreshReader
-   * 强制刷新后才可继续。
+   * 版本（漏发 delete / 重复 retract 镜像），或让 search 召回落在旧快照上
+   * （codex r3 P2）。后续任何读/写操作经 ensureFreshReader 强制刷新后才可继续。
    */
   private readerStale = false;
   /** 打分统计镜像：docCount 含全空文档（MiniSearch avgFieldLength 口径）。 */
@@ -353,9 +354,9 @@ class TantivySearchIndex implements SearchIndex {
         this.runSeamed(this.mutationSeam?.reload, () => this.index.reload());
       } catch (error) {
         // 盘面已提交持久化（不得回滚、镜像不撤销）；reader 未刷新 → 标记
-        // stale，异常继续上抛（外层 SEARCH_IO），后续 mutation 先经
+        // stale，异常继续上抛（外层 SEARCH_IO），后续读/写操作先经
         // ensureFreshReader 强制刷新（codex r2 R2-1：旧 reader 上做同 id
-        // 查找会漏 delete → 同 id 双版本残留盘面）。
+        // 查找会漏 delete → 同 id 双版本残留盘面；codex r3 P2：读面同门）。
         this.readerStale = true;
         throw error;
       }
@@ -363,10 +364,11 @@ class TantivySearchIndex implements SearchIndex {
   }
 
   /**
-   * stale reader 门（codex r2 R2-1）：任何 mutation（upsert/remove）开始前，
-   * 若上一次 commit 后 reload 失败过，先强制 index.reload()——成功清标志继续；
-   * 失败抛 SEARCH_IO（磁盘/引擎异常本应 hard error，不带着旧视图继续累积
-   * 同 id 双版本）。同 id 查找（fetchFieldTokens）因此不可能落在旧 reader 上。
+   * stale reader 门（codex r2 R2-1 / r3 P2）：任何操作（upsert/remove/search）
+   * 开始前，若上一次 commit 后 reload 失败过，先强制 index.reload()——成功清
+   * 标志继续；失败抛 SEARCH_IO（磁盘/引擎异常本应 hard error，不带着旧视图
+   * 继续累积同 id 双版本或静默返回旧快照）。同 id 查找（fetchFieldTokens）与
+   * 召回（search）因此都不可能落在旧 reader 上。
    */
   private ensureFreshReader(): void {
     if (!this.readerStale) return;
@@ -461,6 +463,11 @@ class TantivySearchIndex implements SearchIndex {
 
   async search(query: string, options: SearchQueryOptions = {}): Promise<SearchResult> {
     this.assertOpen();
+    // 读面同门（codex r3 P2）：stale 时先强制刷新——否则旧 reader 召回 +
+    // 已更新镜像统计的分裂状态会静默返回旧视图（漏掉已提交内容）；刷新
+    // 仍失败 → SEARCH_IO，不带病读取。语义统一为「reload 失败后的第一个
+    // 操作（读或写）都先强制刷新」（api.ts SearchIndex 契约声明）。
+    this.ensureFreshReader();
     const limit = options.limit ?? 10;
     const offset = options.offset ?? 0;
     const tokens = this.tokenizer.tokenize(query);

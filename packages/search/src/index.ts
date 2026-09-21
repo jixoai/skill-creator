@@ -5,8 +5,9 @@
  * 正交意图：
  *   [1] 公共面出口：契约类型 + typed 错误 + openIndex（含 zod 参数收窄）。
  *   [2] 信封编排：目录存在且信封匹配 → 复用；缺失/invalid/不匹配 → 目录内容
- *       审计（仅信封 + backend 已知产物）通过才删除重建空索引，未知内容
- *       SEARCH_IO 拒删；信封读取的 IO 异常在 envelope 层 hard error（三态）。
+ *       审计（仅信封 + backend 已知产物，且必须是普通文件——目录/符号链接
+ *       一律未知）通过才删除重建空索引，未知内容 SEARCH_IO 拒删；信封读取的
+ *       IO 异常在 envelope 层 hard error（三态）。
  *   [3] 后端分派：tantivy 默认（native binding 动态 import，缺失/平台不支持
  *       typed SEARCH_BACKEND_UNAVAILABLE）；sqlite 回落（Node 24 内置 FTS5）。
  * 妥协声明：目录由索引独占拥有（重建仅删除 backend 已知产物 + 信封 + OS 元数据
@@ -145,19 +146,27 @@ const BACKEND_ARTIFACT_TESTS: Record<SearchBackend, (name: string) => boolean> =
 };
 
 /**
- * 重建前目录内容审计（P1-1 数据安全）：每个条目必须是信封产物或给定 backend
- * 集的已知产物；发现未知内容 → SEARCH_IO（消息列出未知文件），不删任何东西。
- * 信封读取层的 EACCES/EIO 已先行 hard error，此处拦截的是「目录里混有非索引
- * 文件」的误删（如 sentinel/用户数据）。
+ * 重建前目录内容审计（P1-1 数据安全）：每个条目必须是普通文件，且名字是信封
+ * 产物或给定 backend 集的已知产物；发现未知内容 → SEARCH_IO（消息列出未知
+ * 条目），在任何 rmSync 前完成全量审计、不删任何东西。信封读取层的 EACCES/
+ * EIO 已先行 hard error，此处拦截的是「目录里混有非索引文件」的误删（如
+ * sentinel/用户数据）。
+ * fail-closed 类型绑定（codex r3 R2-2）：allowlist 只认 Dirent.isFile() 的
+ * 普通文件（lstat 口径，符号链接不算）——目录/符号链接/任何特殊文件即使名字
+ * 恰好命中 backend 产物模式（如 `.tmpwuMelD/`、`meta.json/` 目录）也一律按
+ * 未知内容拒删；否则递归 rmSync 会把合法命名的子目录连同未知内容整目录删除。
  */
 function assertDirectoryOwnedByIndex(directory: string, backends: readonly SearchBackend[]): void {
   const unknown = fs
     .readdirSync(directory, { withFileTypes: true })
     .filter(
       (entry) =>
-        !ENVELOPE_ARTIFACT_NAMES.has(entry.name) &&
-        !IGNORABLE_OS_METADATA_NAMES.has(entry.name) &&
-        !backends.some((backend) => BACKEND_ARTIFACT_TESTS[backend](entry.name)),
+        // 名字白名单必须与「普通文件」类型同时成立（fail-closed：非普通文件
+        // 一律 unknown，不交给名字判定）。
+        !entry.isFile() ||
+        (!ENVELOPE_ARTIFACT_NAMES.has(entry.name) &&
+          !IGNORABLE_OS_METADATA_NAMES.has(entry.name) &&
+          !backends.some((backend) => BACKEND_ARTIFACT_TESTS[backend](entry.name))),
     )
     .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name));
   if (unknown.length > 0) {

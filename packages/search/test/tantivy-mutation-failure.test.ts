@@ -15,6 +15,9 @@
  *       mutation 前强制刷新 reader——旧 reader 查不到已提交版本会漏发 delete
  *       （upsert 同 id 双版本）或跳过删除（remove 旧内容跨 reopen 存活）；
  *       门内刷新仍失败 → SEARCH_IO 不带病继续。
+ *   [5] 读面同门（codex r3 P2）：reload 失败后立即 search——要么强制刷新成功
+ *       后命中已提交内容（新 reader），要么刷新仍失败 → SEARCH_IO；绝不带着
+ *       旧 reader + 已更新镜像统计的分裂状态静默返回旧视图（漏掉已提交内容）。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -247,5 +250,47 @@ describe("tantivy mutation failure states (injected seam)", () => {
     const reopened = await assertReplayConsistency(search, path.join(sandbox, "idx"));
     expect((await reopened.search("gamma")).total).toBe(0);
     expect((await reopened.search("alpha")).total).toBe(1);
+  });
+
+  it("forces a reader refresh before a search that follows a failed reload", async () => {
+    const seam = failingSeam({ failReloadAt: 2 });
+    const search = await open(seam);
+    await search.upsert([{ id: "a", fields: { name: "alpha beta", body: "" } }]);
+    // b 的 commit 成功、reload（#2）注入失败 → SEARCH_IO，盘面已有 b:gamma。
+    await expect(
+      search.upsert([{ id: "b", fields: { name: "gamma delta", body: "" } }]),
+    ).rejects.toMatchObject({ code: "SEARCH_IO" });
+
+    // codex r3 复现序列（无读面门时 stale_gamma=0，同时镜像统计已含 b）：立即
+    // search——门先强制 reload（#3 成功）→ 召回落在新 reader 上：已提交的
+    // gamma 必须命中，绝不静默返回旧视图。
+    expect((await search.search("gamma")).total).toBe(1);
+
+    // 门已清零：后续 mutation 与 reopen 重放正常（镜像与盘面保持一致）。
+    await search.upsert([{ id: "c", fields: { name: "epsilon zeta", body: "" } }]);
+    const reopened = await assertReplayConsistency(search, path.join(sandbox, "idx"));
+    expect((await reopened.search("gamma")).total).toBe(1);
+    expect((await reopened.search("epsilon")).total).toBe(1);
+  });
+
+  it("surfaces SEARCH_IO when a search follows a failed reload and the forced refresh also fails", async () => {
+    // failReloadFrom：从第 2 次起持续失败——commit 后 reload（#2）与读面门内
+    // 强制 reload（#3）双双失败。
+    const seam = failingSeam({ failReloadFrom: 2 });
+    const search = await open(seam);
+    await search.upsert([{ id: "a", fields: { name: "alpha beta", body: "" } }]);
+    await expect(
+      search.upsert([{ id: "b", fields: { name: "gamma theta", body: "" } }]),
+    ).rejects.toMatchObject({ code: "SEARCH_IO" });
+
+    // 读面门内刷新仍失败 → SEARCH_IO，绝不让旧 reader + 已更新镜像的分裂
+    // 状态静默产出旧视图（空结果也是结果——必须以 typed 错误显式失败）。
+    await expect(search.search("gamma")).rejects.toMatchObject({ code: "SEARCH_IO" });
+
+    // 盘面 truth：close 重开（无 seam）自盘面重建——已提交的 gamma 完好。
+    await search.close();
+    index = null;
+    const reopened = await open(undefined, path.join(sandbox, "idx"));
+    expect((await reopened.search("gamma")).total).toBe(1);
   });
 });

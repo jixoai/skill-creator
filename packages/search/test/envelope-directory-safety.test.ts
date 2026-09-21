@@ -15,6 +15,10 @@
  *       用户文件 `.tmp-user-data` 按未知内容拒删；仅探针实证的合并瞬态命名
  *       `.tmp` + 6 位 [A-Za-z0-9]（tantivy 0.25.0 tempfile crate，
  *       /tmp/tantivy-tmpfile-probe.ts 三轮共 158 个瞬态名零偏离）放行重建。
+ *   [4] 审计类型绑定（codex r3 R2-2 P1）：白名单只认普通文件——合法命名的
+ *       目录（`.tmpwuMelD/secret`、`meta.json/secret`）与符号链接即使名字
+ *       命中 backend 产物模式也按未知内容拒删，目录内字节/外部目标原样保留
+ *       （重建删除是递归 rmSync，类型盲区会把子目录连同未知内容整目录删除）。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -178,6 +182,88 @@ describe("envelope three-state read and tightened rebuild", () => {
       await index.close();
       // 重建是目录级删除重建：残留临时文件必须随之消失。
       expect(fs.existsSync(path.join(directory(), tempName))).toBe(false);
+    });
+  });
+
+  describe("(ownership audit binds allowlist to plain files)", () => {
+    it("refuses to rebuild over a directory named like a tantivy merge temp file", async () => {
+      // codex r3 复现：`.tmpwuMelD` 名字命中瞬态白名单，但作为目录携带未知
+      // 内容（secret）——类型盲区的名字匹配会把它连同内容整目录递归删除。
+      seedInvalidEnvelope("meta.json");
+      const secretPath = path.join(directory(), ".tmpwuMelD", "secret");
+      fs.mkdirSync(path.dirname(secretPath));
+      fs.writeFileSync(secretPath, "directory secret bytes", "utf8");
+      const before = snapshotListing();
+
+      const error = await openIndex({
+        directory: directory(),
+        fields: FIELDS,
+        backend: "tantivy",
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SearchError);
+      expect(error).toMatchObject({ code: "SEARCH_IO" });
+      expect((error as Error).message).toContain(".tmpwuMelD");
+      expect(snapshotListing()).toBe(before);
+      // 目录内部字节原样保留（不是只留下空壳目录）。
+      expect(fs.readFileSync(secretPath, "utf8")).toBe("directory secret bytes");
+    });
+
+    it("refuses to rebuild over a directory named meta.json (backend artifact name as a directory)", async () => {
+      // meta.json 是 tantivy 的元数据产物名（invalid 信封按两后端并集审计）；
+      // 同名目录同样必须按未知内容拒删，不能因名字合法而放行递归删除。
+      seedInvalidEnvelope(null);
+      const secretPath = path.join(directory(), "meta.json", "secret");
+      fs.mkdirSync(path.dirname(secretPath));
+      fs.writeFileSync(secretPath, "sqlite-shape secret bytes", "utf8");
+      const before = snapshotListing();
+
+      const error = await openIndex({
+        directory: directory(),
+        fields: FIELDS,
+        backend: "sqlite",
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SearchError);
+      expect(error).toMatchObject({ code: "SEARCH_IO" });
+      expect((error as Error).message).toContain("meta.json");
+      expect(snapshotListing()).toBe(before);
+      expect(fs.readFileSync(secretPath, "utf8")).toBe("sqlite-shape secret bytes");
+    });
+
+    it("refuses a mismatch rebuild over a directory named like a tantivy merge temp file", async () => {
+      // mismatch 路径（合法信封、指纹不符）：owners 按 envelope.backend 收窄为
+      // tantivy——`.tmpwuMelD` 仍在白名单内，类型绑定是它被拒删的唯一理由。
+      await seedMismatchedEnvelope("tantivy");
+      const secretPath = path.join(directory(), ".tmpwuMelD", "secret");
+      fs.mkdirSync(path.dirname(secretPath));
+      fs.writeFileSync(secretPath, "mismatch secret bytes", "utf8");
+      const before = snapshotListing();
+
+      await expect(
+        openIndex({ directory: directory(), fields: FIELDS, backend: "tantivy" }),
+      ).rejects.toMatchObject({ code: "SEARCH_IO" });
+      expect(snapshotListing()).toBe(before);
+      expect(fs.readFileSync(secretPath, "utf8")).toBe("mismatch secret bytes");
+    });
+
+    it("refuses a symlink with an allowlisted name and leaves the external target untouched", async () => {
+      // 符号链接按非普通文件拒删（lstat 口径）：即使名字命中瞬态白名单也不得
+      // 进入重建删除集合；外部目标字节不因链接的存在而被波及。
+      seedInvalidEnvelope("meta.json");
+      const targetPath = path.join(sandbox, "outside-target.bin");
+      fs.writeFileSync(targetPath, "external payload bytes", "utf8");
+      fs.symlinkSync(targetPath, path.join(directory(), ".tmpwuMelD"));
+      const before = snapshotListing();
+
+      const error = await openIndex({
+        directory: directory(),
+        fields: FIELDS,
+        backend: "tantivy",
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SearchError);
+      expect(error).toMatchObject({ code: "SEARCH_IO" });
+      expect((error as Error).message).toContain(".tmpwuMelD");
+      expect(snapshotListing()).toBe(before);
+      expect(fs.readFileSync(targetPath, "utf8")).toBe("external payload bytes");
     });
   });
 });

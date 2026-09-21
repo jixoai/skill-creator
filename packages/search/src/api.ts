@@ -56,7 +56,12 @@ export interface OpenIndexOptions {
   prefix?: boolean;
 }
 
-/** 索引实例：同 id upsert 覆盖（幂等）；close 后再使用返回 SEARCH_IO。 */
+/**
+ * 索引实例：同 id upsert 覆盖（幂等）；close 后再使用返回 SEARCH_IO。
+ * 读一致性声明（codex r3）：任何内部视图过旧故障（如 commit 后 reload 失败）
+ * 之后的第一个操作——读或写——都必须先强制刷新视图，刷新失败返回 SEARCH_IO，
+ * 绝不静默返回旧视图（读取与打分镜像统计不可分裂）。
+ */
 export interface SearchIndex {
   upsert(docs: SearchDocument[]): Promise<void>;
   remove(ids: string[]): Promise<void>;
