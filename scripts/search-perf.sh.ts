@@ -1,16 +1,22 @@
 /**
- * 正交意图（2026-09-17）
+ * 正交意图（2026-09-17；2026-09-21 Phase 2 迁移 @jixoai/search）
  * 用户原始需求：「性能脚本：1k/10k/50k 构建/体积/延迟测量（手动跑，结果记 docs/search-design.md §11）。」
- * 1. 以生产引擎配置（真 SkillTokenizer + 字段/boost/fuzzy/prefix 常量）测合成语料的构建耗时与索引 JSON 体积。
- * 2. 测搜索延迟分布（p50/p95 多轮）与单文档增量更新（discard+add）成本。
+ * 1. 以生产引擎配置（SKILL_SEARCH_FIELD_SPECS + fuzzy/prefix 常量 + toSearchDocument）测合成语料的构建耗时与索引目录体积。
+ * 2. 测搜索延迟分布（p50/p95 多轮）与单文档增量更新（同 id upsert 覆盖）成本。
  * 运行：`bun scripts/search-perf.sh.ts`（手动工具，不进回归门；结果人工回填 docs）。
  */
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
-  createSearchMiniSearch,
-  minisearchRuntimeVersion,
+  SKILL_SEARCH_ENGINE_LIMIT,
+  SKILL_SEARCH_FIELD_SPECS,
+  SKILL_SEARCH_FUZZY,
+  SKILL_SEARCH_PREFIX,
+  resolveSkillSearchBackend,
+  toSearchDocument,
 } from "../src/daemon/skill-search/index.js";
-import { createSkillTokenizer } from "../src/daemon/skill-search/tokenizer.js";
 import type { SkillSearchDocument } from "../src/shared/contracts/search.js";
 import { SkillIdSchema } from "../src/shared/contracts/skills.js";
 import { ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
@@ -117,20 +123,23 @@ interface Latency {
   mean: number;
 }
 
-function measureSearchLatency(search: (query: string) => number, rounds: number): Latency {
+function measureSearchLatency(search: (query: string) => Promise<number>, rounds: number) {
   const samples: number[] = [];
-  for (let i = 0; i < rounds; i += 1) {
-    const query = LATENCY_QUERIES[i % LATENCY_QUERIES.length];
-    const started = performance.now();
-    search(query);
-    samples.push(performance.now() - started);
-  }
-  samples.sort((left, right) => left - right);
-  return {
-    p50: samples[Math.floor(samples.length / 2)],
-    p95: samples[Math.floor(samples.length * 0.95)],
-    mean: samples.reduce((sum, value) => sum + value, 0) / samples.length,
-  };
+  return (async () => {
+    for (let i = 0; i < rounds; i += 1) {
+      const query = LATENCY_QUERIES[i % LATENCY_QUERIES.length];
+      const started = performance.now();
+      const hits = await search(query);
+      samples.push(performance.now() - started);
+      if (hits < 0) throw new Error("unreachable");
+    }
+    samples.sort((left, right) => left - right);
+    return {
+      p50: samples[Math.floor(samples.length / 2)],
+      p95: samples[Math.floor(samples.length * 0.95)],
+      mean: samples.reduce((sum, value) => sum + value, 0) / samples.length,
+    } satisfies Latency;
+  })();
 }
 
 function forceGc(): void {
@@ -138,41 +147,56 @@ function forceGc(): void {
   globals.gc?.();
 }
 
-function run(scale: number): void {
+/** 索引目录磁盘占用（字节；递归汇总普通文件）。 */
+function directoryBytes(directory: string): number {
+  let total = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const child = path.join(directory, entry.name);
+    if (entry.isDirectory()) total += directoryBytes(child);
+    else if (entry.isFile()) total += fs.statSync(child).size;
+  }
+  return total;
+}
+
+async function run(scale: number): Promise<void> {
   const documents = Array.from({ length: scale }, (_, index) => makeDocument(index));
-  const tokenizer = createSkillTokenizer();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "skill-search-perf-"));
   forceGc();
   const heapBefore = process.memoryUsage().heapUsed;
-  const miniSearch = createSearchMiniSearch(tokenizer);
+  const { openIndex } = await import("@jixoai/search");
   const buildStarted = performance.now();
-  miniSearch.addAll(documents);
+  const index = await openIndex({
+    directory,
+    fields: SKILL_SEARCH_FIELD_SPECS,
+    backend: resolveSkillSearchBackend(),
+    fuzzy: SKILL_SEARCH_FUZZY,
+    prefix: SKILL_SEARCH_PREFIX,
+  });
+  await index.upsert(documents.map(toSearchDocument));
   const buildMs = performance.now() - buildStarted;
   const heapAfter = process.memoryUsage().heapUsed;
-  const jsonBytes = JSON.stringify(miniSearch.toJSON()).length;
+  const bytes = directoryBytes(directory);
 
-  const searchOne = (query: string): number => {
-    const results = miniSearch.search(query, {
-      boost: { name: 10, description: 6, keywords: 5, triggers: 5, headings: 3, body: 1 },
-      prefix: true,
-      fuzzy: 0.2,
-    });
-    return results.length;
-  };
-  const latency = measureSearchLatency(searchOne, 40);
+  const latency = await measureSearchLatency(async (query) => {
+    const result = await index.search(query, { limit: SKILL_SEARCH_ENGINE_LIMIT });
+    return result.hits.length;
+  }, 40);
 
   const updateStarted = performance.now();
   const first = documents[0];
   if (!first) throw new Error("perf corpus must not be empty");
-  miniSearch.discard(first.id);
-  miniSearch.add({ ...first, description: `${first.description} updated` });
+  await index.upsert([toSearchDocument({ ...first, description: `${first.description} updated` })]);
   const updateMs = performance.now() - updateStarted;
 
+  await index.close();
+  fs.rmSync(directory, { recursive: true, force: true });
+
   console.log(
-    `${String(scale).padStart(6)} docs | build ${buildMs.toFixed(0).padStart(6)}ms | json ${(jsonBytes / 1e6).toFixed(1).padStart(6)}MB | heapΔ ${((heapAfter - heapBefore) / 1e6).toFixed(0).padStart(5)}MB | search p50/p95 ${latency.p50.toFixed(1)}/${latency.p95.toFixed(1)}ms | update1 ${updateMs.toFixed(2)}ms`,
+    `${String(scale).padStart(6)} docs | build ${buildMs.toFixed(0).padStart(6)}ms | disk ${(bytes / 1e6).toFixed(1).padStart(6)}MB | heapΔ ${((heapAfter - heapBefore) / 1e6).toFixed(0).padStart(5)}MB | search p50/p95 ${latency.p50.toFixed(1)}/${latency.p95.toFixed(1)}ms | update1 ${updateMs.toFixed(2)}ms`,
   );
 }
 
 console.log(
-  `minisearch ${minisearchRuntimeVersion()} | node ${process.version} | ${process.platform}-${process.arch}`,
+  `@jixoai/search (backend ${resolveSkillSearchBackend()}) | node ${process.version} | ${process.platform}-${process.arch}`,
 );
-for (const scale of [1_000, 10_000, 50_000]) run(scale);
+for (const scale of [1_000, 10_000, 50_000]) await run(scale);

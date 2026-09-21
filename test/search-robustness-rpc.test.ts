@@ -216,9 +216,9 @@ describe("search robustness RPC surface", () => {
     // 触发一次检索：freshen 落盘后才存在可断言的信封。
     await client.skills.search({ query: "ordering" });
     const envelope = JSON.parse(
-      fs.readFileSync(path.join(sandbox, "state", ".skill-creator", "search-index.json"), "utf8"),
-    ) as { stats: Record<string, { canonicalPath: string; files: Array<{ path: string }> }> };
-    const entry = Object.values(envelope.stats).find((stat) =>
+      fs.readFileSync(path.join(sandbox, "state", ".skill-creator", "search", "meta.json"), "utf8"),
+    ) as { documents: Record<string, { canonicalPath: string; files: Array<{ path: string }> }> };
+    const entry = Object.values(envelope.documents).find((stat) =>
       stat.canonicalPath.endsWith("ordering-skill"),
     );
     expect(entry).toBeDefined();

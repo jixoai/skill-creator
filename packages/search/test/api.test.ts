@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openIndex, SearchError, type SearchBackend, type SearchIndex } from "../src/index.js";
+import { rmSandboxRetry } from "./helpers/rm-sandbox.js";
 
 const FIELDS = { name: { weight: 10 }, body: { weight: 1 } };
 
@@ -43,7 +44,7 @@ beforeEach(() => {
 afterEach(async () => {
   await index?.close();
   index = null;
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  rmSandboxRetry(sandbox);
 });
 
 function indexDirectory(): string {

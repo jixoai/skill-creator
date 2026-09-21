@@ -97,7 +97,6 @@
     "@xmorse/rfd": "^2.3.0",
     "execa": "^9.6.1",
     "gray-matter": "^4.0.3",
-    "minisearch": "^7.2.0",
     "opentray": "0.32.0",
     "smol-toml": "^1.8.0",
     "ws": "^8.18.1",

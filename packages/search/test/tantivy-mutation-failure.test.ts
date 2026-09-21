@@ -25,6 +25,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openTantivyIndex, type TantivyMutationSeam } from "../src/backends/tantivy.js";
 import type { SearchIndex } from "../src/index.js";
+import { rmSandboxRetry } from "./helpers/rm-sandbox.js";
 
 const FIELDS = { name: { weight: 5 }, body: { weight: 1 } };
 const SCORING = { fuzzy: 0.2, prefix: true } as const;
@@ -39,7 +40,7 @@ beforeEach(() => {
 afterEach(async () => {
   await index?.close();
   index = null;
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  rmSandboxRetry(sandbox);
 });
 
 /** 可编程 seam：在 write/commit/reload 的第 N 次调用上一次性注入失败（后续恢复）；

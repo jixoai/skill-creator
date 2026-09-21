@@ -568,3 +568,84 @@ distance 上限 2；`regexQuery` 拒绝可空算子（不能当 prefix 用）；
 `termSetQuery` 常数分无 BM25 权重（前缀扩展须逐 term `termQuery`）；
 `Index` 要求目录已存在；`garbageCollectFiles` 是 no-op（增量删除的膨胀
 风险由信封重建兜底）。
+
+## 16. Phase 2 迁移记录：skill-search 消费 @jixoai/search，MiniSearch 退役（2026-09-21）
+
+### 引擎替换与两层信封
+
+`src/daemon/skill-search/index.ts` 的 MiniSearch 三层封装（createSearchMiniSearch /
+searchMiniSearchInstance / MiniSearchSkillSearchIndex）替换为 `@jixoai/search`
+消费；根 package.json 移除 minisearch 依赖。ranking v2（池前折叠 + rerank +
+tie-break）、watcher、canonicalize、scanner、parser、config 的语义全部冻结未动。
+
+```text
+<appDir>/search/                       ← searchHome（检索自有子目录）
+├── index/                             ← @jixoai/search 目录（包信封 envelope.json 自管）
+└── meta.json                          ← skill-search 登记表（skill-search 自有状态）
+    { schemaVersion: 4,
+      configDigest,                    ← sha256({引擎名/字段权重/fuzzy/prefix/RANKING/
+      │                                   PARSER/双侧 TOKENIZER/SCORING_CONSTANTS/backend/
+      │                                   searchConfigDigest})——旧 ENGINE_CONFIG_DIGEST 与
+      │                                   searchConfigDigest 两摘要的合并
+      payloadDigest,                   ← sha256(JSON.stringify(documents))
+      documents: id → { canonicalPath, files[stat 四元组], installations,
+                        contentHash, disabled, conflict, invalidFrontmatter, name } }
+```
+
+旧 `search-index.json`（v3）不再读取——在场即等价空重建（与 safeParse 失败
+同语义）。文档映射：name/description/keywords/triggers/headings/body → 包
+fields（数组字段 join(" ")）；name/description/keywords/canonicalPath/
+installations/contentHash/disabled/conflict/invalidFrontmatter → stored（命中
+还原 RankingCandidate 所需的完整投影，JSON safeParse 收窄读回）。duplicates()
+与 documentCount() 是登记表纯内存投影（不依赖包枚举 API，保持同步——watcher
+维护门零改动）。引擎候选窗口 = 包 limit 上限 100（≥ TOP_CANDIDATES 40，为
+池前折叠留副本余量；折叠仍在 rankResults 内做）。REBUILD_DISCARD_RATIO=0.2
+语义保留：超阈值 close + 删 index 目录与 meta + 重新 openIndex 灌全量。
+
+### backend 默认偏离决策 #6 的实证（tantivy 目录锁）
+
+决策 #6 原定默认走包默认（tantivy）；实测（/tmp/tantivy-lock-probe.mts 留存）
+同目录第二个 writer 持锁失败——而 skill-search 的既定持有者是多进程并发的：
+常驻 daemon + `skill-creator search` CLI（AGENTS.md：不要求 daemon）+ stdio
+MCP 形态。tantivy 默认会让「daemon 运行时终端跑 CLI search」直接 typed 失败，
+属产品回归。故 **daemon 侧默认 sqlite**（事务级文件锁，串行多持有者安全）；
+`SKILL_CREATOR_SEARCH_BACKEND=tantivy|sqlite` 为显式覆盖（单持有者高语料
+部署/CI 无 binary 环境各自取用；非法取值回落默认）。backend 名进 configDigest，
+切换 backend = 摘要不符 = 全量重建，与包信封的 backend 重建语义对齐。
+
+### 引擎金丝雀（包静默重建的消费方防线）
+
+包信封缺失/不匹配时 openIndex 会静默删除重建空索引——登记表完好而引擎空，
+搜索会永久静默空结果。消费侧防线：加载时以登记表首个名字可分词的条目做
+金丝雀探针（引擎 search(name) 的 total 必须 > 0），失败按 corrupt 全量重建
+（test/skill-search-index.test.ts「silently wiped」用例钉死）。configDigest
+额外纳入包 TOKENIZER_VERSION 与 SCORING_CONSTANTS，使包侧口径漂移也走显式
+重建而非静默清空。
+
+### 异步化与并发语义
+
+包 API 全 async：SkillSearchIndex 的 freshen/search 转 Promise，service.ts
+微量适配（maintain/ensureMaintained async 化，编排路径不变；watcher 回调契约
+语义冻结——onFlush 同步返回后失败态由 service 侧 flushFailed 标记接管，下次
+search 重走完整路径自愈；索引实例内部操作链串行化 + 登记表原子交换，同步
+读者（duplicates/documentCount/watcher 维护门）不见半更新状态）。RPC/CLI/
+WebUI 契约零改动（service.search/duplicates 本就是 async）。「upsert 已提交
+而 meta 落盘失败」的分裂由下一轮 freshen 的 stat diff 幂等收敛（同 id upsert
+覆盖、remove 缺席幂等）。
+
+### 指标结论（迁移门禁）
+
+- **质量（test/skill-search-benchmark.test.ts，消费方真实门禁）**：
+  R@5=0.993 / R@10=0.993 / MRR=0.959 / typo R@5=1.00——与 §11 实现版 receipt
+  （MiniSearch 现役：R@5=0.993 / typo=1.00 / MRR=0.959）**逐位持平，零回退**；
+  新进程视角逐字节重放、contentHash 折叠端到端用例均过。
+- **性能（scripts/search-perf.sh.ts，node v26.3.0 / darwin-arm64，单轮采样）**：
+  sqlite：1k build 322ms / p50·p95 12.3·30.0ms；10k 3.1s / 155·266ms；
+  50k 16.6s / 1404·8118ms（磁盘 135.7MB）。tantivy：1k 461ms / 19.6·38.6ms；
+  10k 2.7s / 238·353ms；50k 13.9s / 2082·10489ms（磁盘 59.2MB）。对比
+  MiniSearch（§11：1k p50 0.7ms / 50k 34ms）：单查询延迟上升一个量级——
+  包冻结口径为逐 query 全量装载词表 + JS 层重打分（与 sqlite 后端同口径的
+  已声明妥协，词表分桶属包侧后续优化）；真实语料规模（119–130 文档）下
+  检索全链路（含 ranking）仍在 ~14ms/query 量级（benchmark 45 query 645ms），
+  产品体验无感。内存面显著改善（sqlite heapΔ 1k 仅 2MB vs MiniSearch 10MB；
+  tantivy 常驻 native mmap）。

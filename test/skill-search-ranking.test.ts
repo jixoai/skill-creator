@@ -44,8 +44,8 @@ function candidate(
 }
 
 describe("frozen ranking end-to-end ordering (production engine config)", () => {
-  it("ranks a name hit above a description hit above a body-only hit", () => {
-    const index = buildIndexWithDocuments([
+  it("ranks a name hit above a description hit above a body-only hit", async () => {
+    const index = await buildIndexWithDocuments([
       createSkillSearchDocument({
         name: "reactive-forms",
         description: "unrelated description about cooking recipes",
@@ -65,16 +65,25 @@ describe("frozen ranking end-to-end ordering (production engine config)", () => 
         contentHash: createHash("sha256").update("body-doc").digest("hex"),
       }),
     ]);
-    const results = rankResults(index.search("reactive forms"), "reactive forms", 10, tokenize);
-    expect(results.map((result) => result.name)).toEqual([
-      "reactive-forms",
-      "unrelated-name",
-      "totally-other",
-    ]);
+    try {
+      const results = rankResults(
+        await index.search("reactive forms"),
+        "reactive forms",
+        10,
+        tokenize,
+      );
+      expect(results.map((result) => result.name)).toEqual([
+        "reactive-forms",
+        "unrelated-name",
+        "totally-other",
+      ]);
+    } finally {
+      await index.close();
+    }
   });
 
-  it("recalls a 1-edit typo target through the fuzzy path", () => {
-    const index = buildIndexWithDocuments([
+  it("recalls a 1-edit typo target through the fuzzy path", async () => {
+    const index = await buildIndexWithDocuments([
       createSkillSearchDocument({
         name: "svelte-component-dev",
         description: "Svelte component development",
@@ -86,13 +95,17 @@ describe("frozen ranking end-to-end ordering (production engine config)", () => 
         contentHash: createHash("sha256").update("react-doc").digest("hex"),
       }),
     ]);
-    const results = rankResults(
-      index.search("sveltte component"),
-      "sveltte component",
-      5,
-      tokenize,
-    );
-    expect(results.map((result) => result.name)).toContain("svelte-component-dev");
+    try {
+      const results = rankResults(
+        await index.search("sveltte component"),
+        "sveltte component",
+        5,
+        tokenize,
+      );
+      expect(results.map((result) => result.name)).toContain("svelte-component-dev");
+    } finally {
+      await index.close();
+    }
   });
 });
 

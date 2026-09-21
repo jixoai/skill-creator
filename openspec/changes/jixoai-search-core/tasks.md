@@ -24,11 +24,11 @@
 
 ## Phase 2 — skill-search 迁移（MiniSearch 退役）
 
-- [ ] 2.1 src/daemon/skill-search 改造为 @jixoai/search 消费方
+- [x] 2.1 src/daemon/skill-search 改造为 @jixoai/search 消费方
       （ranking v2 / 持久信封 / watcher / rootsKey 缓存语义不变）
-- [ ] 2.2 对拍基准作迁移门禁（现网指标不回退）+ 根 package.json
+- [x] 2.2 对拍基准作迁移门禁（现网指标不回退）+ 根 package.json
       移除 minisearch 依赖
-- [ ] 2.3 全量回归（skill-search 现有测试全绿）
+- [x] 2.3 全量回归（skill-search 现有测试全绿）
 
 ## Phase 3 — skill-wiki 松绑 + CLI
 

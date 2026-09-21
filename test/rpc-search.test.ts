@@ -160,16 +160,16 @@ describe("skills.search typed IO failure boundary", () => {
     // UNAVAILABLE 跨 RPC 边界，而不是 INTERNAL_SERVER_ERROR。
     writeGlobalSkill("alpha", "alpha skill body");
     const client = createClient();
-    const appDataDir = path.join(sandbox, "state", ".skill-creator");
-    fs.mkdirSync(appDataDir, { recursive: true });
-    fs.writeFileSync(path.join(appDataDir, "search-index.json"), "{ not json");
-    blockFileAccess(path.join(appDataDir, "search-index.json"));
+    const searchHome = path.join(sandbox, "state", ".skill-creator", "search");
+    fs.mkdirSync(searchHome, { recursive: true });
+    fs.writeFileSync(path.join(searchHome, "meta.json"), "{ not json");
+    blockFileAccess(path.join(searchHome, "meta.json"));
     try {
       await expect(client.skills.search({ query: "alpha" })).rejects.toMatchObject({
         code: "UNAVAILABLE",
       });
     } finally {
-      restoreFileAccess(path.join(appDataDir, "search-index.json"));
+      restoreFileAccess(path.join(searchHome, "meta.json"));
     }
   });
 });

@@ -148,8 +148,8 @@ describe("CLI search (in-process, no daemon)", () => {
     const second = await runCli(home, stateHome, ["search", "React组件设计", "--json"]);
     expect(second.code).toBe(0);
     expect(second.stdout).toBe(first.stdout);
-    // 索引持久化在 appDir 下。
-    expect(fs.existsSync(path.join(stateHome, ".skill-creator", "search-index.json"))).toBe(true);
+    // 两层信封持久化在 appDir/search/ 下（登记表 + 包索引目录）。
+    expect(fs.existsSync(path.join(stateHome, ".skill-creator", "search", "meta.json"))).toBe(true);
   });
 
   it("merges symlink installations from multiple provider roots and exits 0 with zero results", async () => {

@@ -25,6 +25,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openIndex, SearchError, type SearchBackend } from "../src/index.js";
+import { rmSandboxRetry } from "./helpers/rm-sandbox.js";
 
 const FIELDS = { name: { weight: 5 } };
 
@@ -35,7 +36,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  rmSandboxRetry(sandbox);
 });
 
 function directory(): string {

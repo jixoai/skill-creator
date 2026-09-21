@@ -1,12 +1,14 @@
 /**
- * SkillSearchIndex 持久化与新鲜度测试。
+ * SkillSearchIndex 持久化与新鲜度测试（@jixoai/search 两层信封：包索引目录 +
+ * meta.json 登记表；2026-09-21 Phase 2 迁移自 MiniSearch 单文件信封）。
  *
  * User input [2026-09-17]: "freshen 先做无内容读取的 stat 扫描；stat 键全等直接查询；
  * 增删改走增量；版本不符/损坏重建；IO 故障 hard error 保留原文件；并发 last-writer-wins。"
  *
  * Orthogonal intents:
  *   [1] stat 新鲜度（fresh 零重解析 / 单文件增量 / 保时保长 ino+ctimeMs 检出）。
- *   [2] 错误矩阵（版本不符、损坏 JSON、loadJSON 失败重建；EACCES hard error）。
+ *   [2] 错误矩阵（configDigest 不符、损坏 JSON、登记表条目 schema 违例、引擎被
+ *       静默清空（金丝雀）重建；EACCES hard error）。
  *   [3] 串行并发 last-writer-wins 与读回可用性。
  */
 import {
@@ -26,9 +28,9 @@ import {
 } from "../src/daemon/skill-search/canonicalize.js";
 import {
   createSkillSearchIndex,
-  ENGINE_CONFIG_DIGEST,
-  minisearchRuntimeVersion,
   payloadDigest,
+  resolveSkillSearchBackend,
+  skillSearchConfigDigest,
   SkillSearchIndexError,
   type FreshenSummary,
 } from "../src/daemon/skill-search/index.js";
@@ -90,31 +92,28 @@ function countingReader(counter: { calls: string[] }) {
   };
 }
 
-/** appDataDir → search-index.json 路径（故障注入助手的目标文件）。 */
-function indexFileFor(appDataDir: string): string {
-  return path.join(appDataDir, "search-index.json");
+/** 登记表路径 <home>/.skill-creator/search/meta.json（故障注入助手的目标文件）。 */
+function metaFile(): string {
+  return path.join(home, ".skill-creator", "search", "meta.json");
+}
+
+/** 包索引目录 <home>/.skill-creator/search/index/。 */
+function engineDirectory(): string {
+  return path.join(home, ".skill-creator", "search", "index");
 }
 
 function readEnvelopeFile(): Record<string, unknown> {
-  return JSON.parse(
-    fs.readFileSync(path.join(home, ".skill-creator", "search-index.json"), "utf8"),
-  ) as Record<string, unknown>;
+  return JSON.parse(fs.readFileSync(metaFile(), "utf8")) as Record<string, unknown>;
 }
 
 function writeEnvelopeFile(value: unknown): void {
-  const file = path.join(home, ".skill-creator", "search-index.json");
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, typeof value === "string" ? value : JSON.stringify(value), "utf8");
+  fs.mkdirSync(path.dirname(metaFile()), { recursive: true });
+  fs.writeFileSync(metaFile(), typeof value === "string" ? value : JSON.stringify(value), "utf8");
 }
 
 /** 篡改后重算载荷摘要（生产 payloadDigest 镜像），使测试穿透摘要层验证更深处的校验。 */
 function refreshEnvelopeDigest(envelope: Record<string, unknown>): void {
-  envelope.payloadDigest = payloadDigest(envelope.index, envelope.stats);
-}
-
-function refreshedEnvelope(envelope: Record<string, unknown>): Record<string, unknown> {
-  refreshEnvelopeDigest(envelope);
-  return envelope;
+  envelope.payloadDigest = payloadDigest(envelope.documents);
 }
 
 describe("skill search index freshness", () => {
@@ -124,12 +123,12 @@ describe("skill search index freshness", () => {
     for (const name of SIX_SKILLS) writeSkill(name, skillContent(name, `${name} skill body`));
   }
 
-  it("rebuilds on first run and performs zero reparses when stats are unchanged", () => {
+  it("rebuilds on first run and performs zero reparses when stats are unchanged", async () => {
     writeSixSkills();
     const index = createSkillSearchIndex();
     const counter = { calls: [] };
 
-    const first = index.freshen(scans(), countingReader(counter));
+    const first = await index.freshen(scans(), countingReader(counter));
     expect(first.mode).toBe("rebuilt");
     expect(first.parsed).toBe(6);
     expect(index.documentCount()).toBe(6);
@@ -137,386 +136,294 @@ describe("skill search index freshness", () => {
     // 第二个实例从磁盘加载（模拟下一次 CLI 进程），stat 全等 → 零重解析。
     const nextProcess = createSkillSearchIndex();
     const secondCounter = { calls: [] };
-    const second = nextProcess.freshen(scans(), countingReader(secondCounter));
+    const second = await nextProcess.freshen(scans(), countingReader(secondCounter));
     expect(second.mode).toBe("fresh");
     expect(secondCounter.calls).toEqual([]);
     expect(nextProcess.documentCount()).toBe(6);
-    expect(nextProcess.search("alpha")).toHaveLength(1);
+    expect(await nextProcess.search("alpha")).toHaveLength(1);
   });
 
-  it("reparses only the changed file on an mtime-touching edit", () => {
+  it("reparses only the changed file on an mtime-touching edit", async () => {
     writeSixSkills();
     const index = createSkillSearchIndex();
-    index.freshen(scans(), readSkillSearchDocument);
+    await index.freshen(scans(), readSkillSearchDocument);
 
     // 修改 alpha（写入新内容，mtime/size 变化）；1/6 脏度低于 20% 重建阈值 → 增量。
     writeSkill("alpha", skillContent("alpha", "alpha skill body, edited"));
     const counter = { calls: [] };
-    const summary = index.freshen(scans(), countingReader(counter));
+    const summary = await index.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("incremental");
     expect(counter.calls).toHaveLength(1);
     expect(counter.calls[0]).toContain("alpha");
     expect(index.documentCount()).toBe(6);
-    expect(index.search("edited")).toHaveLength(1);
+    expect(await index.search("edited")).toHaveLength(1);
   });
 
-  it("detects a same-mtime same-size replacement through ino/ctimeMs", () => {
+  it("detects a same-mtime same-size replacement through ino/ctimeMs", async () => {
     writeSixSkills();
     const index = createSkillSearchIndex();
-    index.freshen(scans(), readSkillSearchDocument);
+    await index.freshen(scans(), readSkillSearchDocument);
     const file = path.join(sandbox, "skills", "alpha", "SKILL.md");
     const statBefore = fs.statSync(file);
 
-    // 篡改持久化 stats 的 ino/ctimeMs（模拟保时保长替换后 stat 四元组的 inode 侧差异）。
+    // 篡改登记表的 ino/ctimeMs（模拟保时保长替换后 stat 四元组的 inode 侧差异）。
     const envelope = readEnvelopeFile();
-    const stats = envelope.stats as Record<
+    const documents = envelope.documents as Record<
       string,
       { canonicalPath: string; files: Array<{ ino: number; ctimeMs: number }> }
     >;
-    const alphaKey = Object.keys(stats).find((id) => stats[id].canonicalPath.includes("alpha"));
-    if (!alphaKey || !stats[alphaKey].files[0]) throw new Error("alpha stat missing");
-    stats[alphaKey].files[0].ino += 1;
-    stats[alphaKey].files[0].ctimeMs += 1;
+    const alphaKey = Object.keys(documents).find((id) =>
+      documents[id].canonicalPath.includes("alpha"),
+    );
+    if (!alphaKey || !documents[alphaKey].files[0]) throw new Error("alpha stat missing");
+    documents[alphaKey].files[0].ino += 1;
+    documents[alphaKey].files[0].ctimeMs += 1;
     refreshEnvelopeDigest(envelope);
     writeEnvelopeFile(envelope);
     expect(fs.statSync(file).mtimeMs).toBe(statBefore.mtimeMs);
 
     const nextProcess = createSkillSearchIndex();
     const counter = { calls: [] };
-    const summary = nextProcess.freshen(scans(), countingReader(counter));
+    const summary = await nextProcess.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("incremental");
     expect(counter.calls).toHaveLength(1);
     expect(counter.calls[0]).toContain("alpha");
   });
 
-  it("rebuilds fully when any envelope version or engine digest mismatches", () => {
+  it("rebuilds fully when the config digest mismatches", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
     const index = createSkillSearchIndex();
-    index.freshen(scans(), readSkillSearchDocument);
+    await index.freshen(scans(), readSkillSearchDocument);
 
     const envelope = readEnvelopeFile();
-    (envelope as { tokenizerVersion: string }).tokenizerVersion = "segmenter-bigram-v0";
+    (envelope as { configDigest: string }).configDigest = `${"d".repeat(64)}`;
     writeEnvelopeFile(envelope);
 
     const nextProcess = createSkillSearchIndex();
     const counter = { calls: [] };
-    const summary = nextProcess.freshen(scans(), countingReader(counter));
+    const summary = await nextProcess.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("rebuilt");
     expect(summary.rebuildReason).toBe("incompatible");
     expect(counter.calls).toHaveLength(1);
   });
 
-  it("writes the five-version envelope with the runtime engine version", () => {
+  it("writes the v4 registry envelope with the frozen config digest", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
     const index = createSkillSearchIndex();
-    index.freshen(scans(), readSkillSearchDocument);
+    await index.freshen(scans(), readSkillSearchDocument);
     const envelope = readEnvelopeFile();
-    expect(envelope.schemaVersion).toBe(3);
-    expect(envelope.tokenizerVersion).toBe("segmenter-bigram-v1");
-    expect(envelope.parserVersion).toBe("matter-mdset-v2");
-    expect(envelope.rankingVersion).toBe("rerank-2026-09-18-v2");
-    expect(envelope.engine).toEqual({
-      name: "minisearch",
-      version: minisearchRuntimeVersion(),
-      configDigest: ENGINE_CONFIG_DIGEST,
-    });
-    expect(Object.keys(envelope.stats as object)).toHaveLength(1);
+    expect(envelope.schemaVersion).toBe(4);
+    // createSkillSearchIndex() 缺省摘要源为空串；backend 走当前解析值。
+    expect(envelope.configDigest).toBe(skillSearchConfigDigest("", resolveSkillSearchBackend()));
+    expect(Object.keys(envelope.documents as object)).toHaveLength(1);
+    // 两层信封：包索引目录与登记表同在 <appDir>/search/ 下。
+    expect(fs.existsSync(path.join(engineDirectory(), "envelope.json"))).toBe(true);
   });
 });
 
 describe("skill search index error matrix", () => {
-  it("rebuilds from corrupt JSON and still answers queries", () => {
+  it("rebuilds from corrupt JSON and still answers queries", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
     const index = createSkillSearchIndex();
-    index.freshen(scans(), readSkillSearchDocument);
+    await index.freshen(scans(), readSkillSearchDocument);
     writeEnvelopeFile("{ this is not json");
 
     const nextProcess = createSkillSearchIndex();
     const counter = { calls: [] };
-    const summary = nextProcess.freshen(scans(), countingReader(counter));
+    const summary = await nextProcess.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("rebuilt");
     expect(summary.rebuildReason).toBe("corrupt");
-    expect(nextProcess.search("alpha")).toHaveLength(1);
+    expect(await nextProcess.search("alpha")).toHaveLength(1);
   });
 
-  it("rebuilds when MiniSearch loadJSON fails on an incompatible index payload", () => {
+  it("rebuilds when a registry entry violates the entry schema", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
     const index = createSkillSearchIndex();
-    index.freshen(scans(), readSkillSearchDocument);
+    await index.freshen(scans(), readSkillSearchDocument);
     const envelope = readEnvelopeFile();
-    // 信封 Zod 通过（index: unknown），但序列化版本缺失 → loadJSON 抛错 → 空索引重建。
-    envelope.index = { bogus: true };
+    const documents = envelope.documents as Record<string, { contentHash: string }>;
+    documents[Object.keys(documents)[0]!]!.contentHash = "not-a-sha256";
+    refreshEnvelopeDigest(envelope);
     writeEnvelopeFile(envelope);
 
     const nextProcess = createSkillSearchIndex();
     const counter = { calls: [] };
-    const summary = nextProcess.freshen(scans(), countingReader(counter));
+    const summary = await nextProcess.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("rebuilt");
     expect(summary.rebuildReason).toBe("corrupt");
     expect(counter.calls).toHaveLength(1);
   });
 
-  it("hard-errors on a blocked save and preserves the previous index file", () => {
+  it("hard-errors on a blocked save and preserves the previous registry file", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
     const index = createSkillSearchIndex();
-    index.freshen(scans(), readSkillSearchDocument);
-    const file = path.join(home, ".skill-creator", "search-index.json");
-    const before = fs.readFileSync(file, "utf8");
-    holdFileForBlockedWrite(file);
+    await index.freshen(scans(), readSkillSearchDocument);
+    const before = fs.readFileSync(metaFile(), "utf8");
+    holdFileForBlockedWrite(metaFile());
 
     try {
       writeSkill("beta", skillContent("beta", "second skill"));
       const nextProcess = createSkillSearchIndex();
-      expect(() => nextProcess.freshen(scans(), readSkillSearchDocument)).toThrowError(
+      await expect(nextProcess.freshen(scans(), readSkillSearchDocument)).rejects.toThrowError(
         SkillSearchIndexError,
       );
       // 保留原文件，不降级为空索引。
-      expect(fs.readFileSync(file, "utf8")).toBe(before);
+      expect(fs.readFileSync(metaFile(), "utf8")).toBe(before);
     } finally {
-      releaseHeldFile(file);
+      releaseHeldFile(metaFile());
     }
   });
 });
 
 describe("skill search index concurrency", () => {
-  it("applies last-writer-wins across serial freshen writes and stays readable", () => {
+  it("applies last-writer-wins across serial freshen writes and stays readable", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
     const first = createSkillSearchIndex();
-    const firstSummary: FreshenSummary = first.freshen(scans(), readSkillSearchDocument);
+    const firstSummary: FreshenSummary = await first.freshen(scans(), readSkillSearchDocument);
     expect(firstSummary.mode).toBe("rebuilt");
 
     // 第二个写者（后写胜）：移除 alpha、加入 beta 后落盘。
     fs.rmSync(path.join(sandbox, "skills", "alpha"), { recursive: true });
     writeSkill("beta", skillContent("beta", "second skill"));
     const second = createSkillSearchIndex();
-    const secondSummary = second.freshen(scans(), readSkillSearchDocument);
+    const secondSummary: FreshenSummary = await second.freshen(scans(), readSkillSearchDocument);
     expect(secondSummary.mode).toBe("rebuilt");
 
     // 读者读回仍可用；stale stat 校验在下次 freshen 自愈。
     const reader = createSkillSearchIndex();
-    reader.freshen(scans(), readSkillSearchDocument);
+    await reader.freshen(scans(), readSkillSearchDocument);
     expect(reader.documentCount()).toBe(1);
-    expect(reader.search("beta")).toHaveLength(1);
-    expect(reader.search("alpha")).toEqual([]);
+    expect(await reader.search("beta")).toHaveLength(1);
+    expect(await reader.search("alpha")).toEqual([]);
   });
 });
 
 describe("skill search index load validation (external input boundary)", () => {
-  it("rejects tampered stored projections and rebuilds with real metadata", () => {
+  it("rebuilds when the engine index was silently wiped under an intact registry", async () => {
     writeSkill("target", "---\nname: target\ndescription: real skill\n---\nbody");
     const first = createSkillSearchIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
-    first.freshen(scans, readSkillSearchDocument);
+    await first.freshen(scans, readSkillSearchDocument);
     const id = scans[0]!.id as string;
 
-    const file = path.join(home, ".skill-creator", "search-index.json");
-    const envelope = JSON.parse(fs.readFileSync(file, "utf8")) as {
-      index: {
-        documentIds: Record<string, string>;
-        storedFields: Record<string, { canonicalPath: string; contentHash: string }>;
-      };
+    // 包信封不匹配（tokenizerVersion 篡改）→ openIndex 静默删除重建空索引；登记
+    // 表完好。金丝雀必须检出「登记表有文档而引擎召回不了」并全量重建。
+    const packageEnvelopeFile = path.join(engineDirectory(), "envelope.json");
+    const packageEnvelope = JSON.parse(fs.readFileSync(packageEnvelopeFile, "utf8")) as {
+      tokenizerVersion: string;
     };
-    const shortIdEntry = Object.entries(envelope.index.documentIds).find(
-      ([, docId]) => docId === id,
-    );
-    const shortId = shortIdEntry?.[0]!;
-    envelope.index.storedFields[shortId]!.canonicalPath = "/etc/passwd";
-    envelope.index.storedFields[shortId]!.contentHash = "not-a-sha256";
-    fs.writeFileSync(file, JSON.stringify(envelope));
+    packageEnvelope.tokenizerVersion = "tampered";
+    fs.writeFileSync(packageEnvelopeFile, JSON.stringify(packageEnvelope));
 
     const second = createSkillSearchIndex();
-    const summary = second.freshen(scans, readSkillSearchDocument);
+    const summary = await second.freshen(scans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
     expect(summary.rebuildReason).toBe("corrupt");
-    const hit = second.search("real skill").find((candidate) => candidate.id === id);
+    const hit = (await second.search("real skill")).find((candidate) => candidate.id === id);
     expect(hit?.canonicalPath).not.toBe("/etc/passwd");
     expect(hit?.contentHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("rebuilds instead of crashing when a stats entry was removed from the envelope", () => {
+  it("rebuilds instead of crashing when a registry entry was removed from the envelope", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
     const first = createSkillSearchIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
-    first.freshen(scans, readSkillSearchDocument);
+    await first.freshen(scans, readSkillSearchDocument);
 
-    const file = path.join(home, ".skill-creator", "search-index.json");
-    const envelope = JSON.parse(fs.readFileSync(file, "utf8")) as {
-      stats: Record<string, unknown>;
-    };
-    delete envelope.stats[scans[0]!.id as string];
-    fs.writeFileSync(file, JSON.stringify(envelope));
+    const envelope = readEnvelopeFile() as { documents: Record<string, unknown> };
+    delete envelope.documents[scans[0]!.id as string];
+    writeEnvelopeFile(envelope);
 
     const second = createSkillSearchIndex();
-    const summary = second.freshen(scans, readSkillSearchDocument);
+    const summary = await second.freshen(scans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
-    // 空/被裁剪 stats 经由 dirty-ratio 路径全量重建；关键断言是不崩溃且结果正确。
+    // 被裁剪的登记表经载荷摘要或脏度路径全量重建；关键断言是不崩溃且结果正确。
     expect(["corrupt", "dirty-ratio"]).toContain(summary.rebuildReason);
-    expect(second.search("alpha skill")).toHaveLength(1);
+    expect(await second.search("alpha skill")).toHaveLength(1);
   });
 
-  it("invalidates in-memory state after a save failure and self-heals on the next call", () => {
+  it("invalidates in-memory state after a save failure and self-heals on the next call", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
     const index = createSkillSearchIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
-    index.freshen(scans, readSkillSearchDocument);
+    await index.freshen(scans, readSkillSearchDocument);
 
-    // 引入第二个 skill 后把 appDir 置为只读：save 失败必须抛错并作废内存状态。
+    // 引入第二个 skill 后把登记表置为只读：save 失败必须抛错并作废内存状态。
     writeSkill("beta", "---\nname: beta\ndescription: beta skill\n---\nbody");
     const scansWithBeta = canonicalizeCandidates(scanSkillRoots([root()]));
-    const appDataDir = path.join(home, ".skill-creator");
-    blockFileAccess(indexFileFor(appDataDir));
+    blockFileAccess(metaFile());
     try {
-      expect(() => index.freshen(scansWithBeta, readSkillSearchDocument)).toThrow(
+      await expect(index.freshen(scansWithBeta, readSkillSearchDocument)).rejects.toThrow(
         SkillSearchIndexError,
       );
     } finally {
-      restoreFileAccess(indexFileFor(appDataDir));
+      restoreFileAccess(metaFile());
     }
 
-    // 下一次调用从磁盘重新加载并自愈（磁盘索引缺 beta → 增量补齐）。
-    const summary = index.freshen(scansWithBeta, readSkillSearchDocument);
+    // 下一次调用从磁盘重新加载并自愈（磁盘登记表缺 beta → 增量补齐）。
+    const summary = await index.freshen(scansWithBeta, readSkillSearchDocument);
     expect(["incremental", "rebuilt"]).toContain(summary.mode);
-    expect(index.search("beta").map((candidate) => candidate.name)).toEqual(["beta"]);
+    expect((await index.search("beta")).map((candidate) => candidate.name)).toEqual(["beta"]);
   });
 });
 
 describe("skill search index adversarial envelopes", () => {
-  it("rechecks canonical path before accepting a jointly tampered fresh stat", () => {
+  it("rechecks canonical path before accepting a jointly tampered fresh stat", async () => {
     for (const name of ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]) {
       writeSkill(name, skillContent(name, `${name} skill body`));
     }
     const first = createSkillSearchIndex();
     const allScans = scans();
-    first.freshen(allScans, readSkillSearchDocument);
+    await first.freshen(allScans, readSkillSearchDocument);
     const alphaScan = allScans.find((scan) => scan.canonicalPath.endsWith("alpha"));
     if (!alphaScan) throw new Error("alpha scan missing");
     const alphaId = alphaScan.id as string;
 
     const envelope = readEnvelopeFile();
-    const index = envelope.index as {
-      documentIds: Record<string, string>;
-      storedFields: Record<string, { canonicalPath: string; contentHash: string }>;
-    };
-    const alphaShortId = Object.entries(index.documentIds).find(
-      ([, documentId]) => documentId === alphaId,
-    )?.[0];
-    if (!alphaShortId) throw new Error("alpha short id missing");
-    const stats = envelope.stats as Record<string, { canonicalPath: string; contentHash: string }>;
-    // 两份外部元数据同步篡改为合法格式，旧实现会把这次 freshen 错判为 fresh。
-    stats[alphaId]!.canonicalPath = "/etc/passwd";
-    stats[alphaId]!.contentHash = "b".repeat(64);
-    index.storedFields[alphaShortId]!.canonicalPath = "/etc/passwd";
-    index.storedFields[alphaShortId]!.contentHash = "b".repeat(64);
+    const documents = envelope.documents as Record<
+      string,
+      { canonicalPath: string; contentHash: string }
+    >;
+    // 两份外部元数据同步篡改为合法格式并重算摘要，旧实现会把这次 freshen 错判为 fresh。
+    documents[alphaId]!.canonicalPath = "/etc/passwd";
+    documents[alphaId]!.contentHash = "b".repeat(64);
     refreshEnvelopeDigest(envelope);
     writeEnvelopeFile(envelope);
 
     const second = createSkillSearchIndex();
     const counter = { calls: [] as string[] };
-    const summary = second.freshen(scans(), countingReader(counter));
+    const summary = await second.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("incremental");
     expect(counter.calls).toEqual([alphaScan.canonicalPath]);
     const expected = readSkillSearchDocument(alphaScan);
-    const hit = second.search("alpha skill").find((candidate) => candidate.id === alphaId);
+    const hit = (await second.search("alpha skill")).find((candidate) => candidate.id === alphaId);
     expect(hit?.canonicalPath).toBe(alphaScan.canonicalPath);
     expect(hit?.contentHash).toBe(expected.contentHash);
   });
 
-  it("rejects format-valid tampering that contradicts stats metadata", () => {
-    writeSkill("target", "---\nname: target\ndescription: real skill\n---\nbody");
-    const first = createSkillSearchIndex();
-    const scans = canonicalizeCandidates(scanSkillRoots([root()]));
-    first.freshen(scans, readSkillSearchDocument);
-    const id = scans[0]!.id as string;
-
-    const file = path.join(home, ".skill-creator", "search-index.json");
-    const envelope = JSON.parse(fs.readFileSync(file, "utf8")) as {
-      index: {
-        documentIds: Record<string, string>;
-        storedFields: Record<string, Record<string, unknown>>;
-      };
-    };
-    // 全部通过 schema 的合法格式：64-hex hash + 非空路径，但与 stats 矛盾。
-    const shortId = Object.entries(envelope.index.documentIds).find(
-      ([, docId]) => docId === id,
-    )?.[0]!;
-    envelope.index.storedFields[shortId]!.canonicalPath = "/etc/passwd";
-    envelope.index.storedFields[shortId]!.contentHash = "a".repeat(64);
-    fs.writeFileSync(file, JSON.stringify(refreshedEnvelope(envelope)));
-
-    const second = createSkillSearchIndex();
-    const summary = second.freshen(scans, readSkillSearchDocument);
-    expect(summary.mode).toBe("rebuilt");
-    expect(summary.rebuildReason).toBe("corrupt");
-    const hit = second.search("real skill").find((candidate) => candidate.id === id);
-    expect(hit?.canonicalPath).not.toBe("/etc/passwd");
-    expect(hit?.contentHash).toMatch(/^[a-f0-9]{64}$/);
-  });
-
-  it("purges ghost documents whose stats entries were pruned with the skill deleted", () => {
+  it("purges ghost documents whose registry entries were pruned with the skill deleted", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
     writeSkill("beta", "---\nname: beta\ndescription: beta skill\n---\nbody");
     const first = createSkillSearchIndex();
-    const allScans = canonicalizeCandidates(scanSkillRoots([root()]));
-    first.freshen(allScans, readSkillSearchDocument);
+    const allScans = scans();
+    await first.freshen(allScans, readSkillSearchDocument);
     const betaId = allScans.find(
       (scan) => (scan.id as string).length > 0 && scan.canonicalPath.endsWith("beta"),
     )!.id as string;
 
-    // 磁盘删 beta，同时从信封裁剪其 stats：MiniSearch 里的 active 文档成为幽灵。
+    // 磁盘删 beta，同时从登记表裁剪其条目（摘要不重算）：载荷摘要失配 → 全量重建，
+    // 引擎中的 beta 幽灵文档随重建清除（旧 MiniSearch 活跃 id 镜像校验的等价物）。
     fs.rmSync(path.join(sandbox, "skills", "beta"), { recursive: true, force: true });
-    const file = path.join(home, ".skill-creator", "search-index.json");
-    const envelope = JSON.parse(fs.readFileSync(file, "utf8")) as {
-      stats: Record<string, unknown>;
-    };
-    delete envelope.stats[betaId];
-    fs.writeFileSync(file, JSON.stringify(envelope));
-
-    const second = createSkillSearchIndex();
-    const alphaScans = allScans.filter((scan) => scan.canonicalPath.endsWith("alpha"));
-    const summary = second.freshen(alphaScans, readSkillSearchDocument);
-    expect(summary.mode).toBe("rebuilt");
-    expect(second.search("beta")).toHaveLength(0);
-    expect(second.search("alpha")).toHaveLength(1);
-  });
-
-  it("rejects duplicate active ids and their forged inverted projection", () => {
-    writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nalpha body");
-    writeSkill("beta", "---\nname: beta\ndescription: beta skill\n---\nbeta body");
-    const first = createSkillSearchIndex();
-    const allScans = scans();
-    first.freshen(allScans, readSkillSearchDocument);
-    const alphaScan = allScans.find((scan) => scan.canonicalPath.endsWith("alpha"));
-    const betaScan = allScans.find((scan) => scan.canonicalPath.endsWith("beta"));
-    if (!alphaScan || !betaScan) throw new Error("alpha/beta scan missing");
-    const alphaId = alphaScan.id as string;
-    const betaId = betaScan.id as string;
-
-    const envelope = readEnvelopeFile();
-    const index = envelope.index as {
-      documentIds: Record<string, string>;
-      storedFields: Record<string, Record<string, unknown>>;
-    };
-    const alphaShortId = Object.entries(index.documentIds).find(
-      ([, documentId]) => documentId === alphaId,
-    )?.[0];
-    const betaShortId = Object.entries(index.documentIds).find(
-      ([, documentId]) => documentId === betaId,
-    )?.[0];
-    if (!alphaShortId || !betaShortId) throw new Error("alpha/beta short id missing");
-    // beta 的短 id 复用 alpha，stored projection 也复制 alpha，同时裁剪 beta stats；
-    // 其 beta 倒排词仍留在 MiniSearch payload 中，正是重复值 Set 的绕过向量。
-    index.documentIds[betaShortId] = alphaId;
-    index.storedFields[betaShortId] = index.storedFields[alphaShortId]!;
-    delete (envelope.stats as Record<string, unknown>)[betaId];
+    const envelope = readEnvelopeFile() as { documents: Record<string, unknown> };
+    delete envelope.documents[betaId];
     writeEnvelopeFile(envelope);
 
     const second = createSkillSearchIndex();
-    const summary = second.freshen([alphaScan], readSkillSearchDocument);
+    const alphaScans = allScans.filter((scan) => scan.canonicalPath.endsWith("alpha"));
+    const summary = await second.freshen(alphaScans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
-    expect(summary.rebuildReason).toBe("corrupt");
-    expect(second.documentCount()).toBe(1);
-    expect(second.search("beta")).toEqual([]);
-    expect(second.search("alpha")).toHaveLength(1);
+    expect(await second.search("beta")).toHaveLength(0);
+    expect(await second.search("alpha")).toHaveLength(1);
   });
 
   it("rejects a SKILL.md replaced by an external symlink after the scan snapshot", () => {
@@ -532,57 +439,102 @@ describe("skill search index adversarial envelopes", () => {
     expect(() => readSkillSearchDocument(scan)).toThrow(SkillSearchDocumentReadError);
   });
 
-  it("does not fake freshness after a failed first rebuild persist", () => {
+  it("does not fake freshness after a failed first rebuild persist", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
     const index = createSkillSearchIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
-    const appDataDir = path.join(home, ".skill-creator");
-    fs.mkdirSync(appDataDir, { recursive: true });
-    blockFileAccess(indexFileFor(appDataDir));
+    fs.mkdirSync(path.dirname(metaFile()), { recursive: true });
+    blockFileAccess(metaFile());
     try {
-      expect(() => index.freshen(scans, readSkillSearchDocument)).toThrow(SkillSearchIndexError);
+      await expect(index.freshen(scans, readSkillSearchDocument)).rejects.toThrow(
+        SkillSearchIndexError,
+      );
     } finally {
-      restoreFileAccess(indexFileFor(appDataDir));
+      restoreFileAccess(metaFile());
     }
-    expect(fs.existsSync(path.join(appDataDir, "search-index.json"))).toBe(false);
+    expect(fs.existsSync(metaFile())).toBe(false);
 
     // 恢复后：必须重建并真正落盘，而不是用未持久化的内存状态伪装 fresh。
-    const summary = index.freshen(scans, readSkillSearchDocument);
+    const summary = await index.freshen(scans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
-    expect(fs.existsSync(path.join(appDataDir, "search-index.json"))).toBe(true);
+    expect(fs.existsSync(metaFile())).toBe(true);
+  });
+});
+
+describe("skill search index backend selection", () => {
+  it("resolves the env override with invalid values falling back to sqlite", () => {
+    const previous = process.env.SKILL_CREATOR_SEARCH_BACKEND;
+    try {
+      delete process.env.SKILL_CREATOR_SEARCH_BACKEND;
+      expect(resolveSkillSearchBackend()).toBe("sqlite");
+      process.env.SKILL_CREATOR_SEARCH_BACKEND = "tantivy";
+      expect(resolveSkillSearchBackend()).toBe("tantivy");
+      process.env.SKILL_CREATOR_SEARCH_BACKEND = "sqlite";
+      expect(resolveSkillSearchBackend()).toBe("sqlite");
+      // 非法取值回落默认（外部输入收窄：不因拼错的 env 静默改变行为面）。
+      process.env.SKILL_CREATOR_SEARCH_BACKEND = "sqllite-typo";
+      expect(resolveSkillSearchBackend()).toBe("sqlite");
+    } finally {
+      if (previous === undefined) delete process.env.SKILL_CREATOR_SEARCH_BACKEND;
+      else process.env.SKILL_CREATOR_SEARCH_BACKEND = previous;
+    }
+  });
+
+  it("rebuilds when the backend changes under an intact registry", async () => {
+    writeSkill("alpha", skillContent("alpha", "first skill"));
+    const index = createSkillSearchIndex();
+    await index.freshen(scans(), readSkillSearchDocument);
+
+    // 模拟 env 切换 backend：backend 是 configDigest 成员——以另一 backend 的
+    // 摘要落盘后，当前解析摘要不符 → incompatible 全量重建（索引内容随之重灌）。
+    const envelope = readEnvelopeFile();
+    (envelope as { configDigest: string }).configDigest = skillSearchConfigDigest(
+      "",
+      resolveSkillSearchBackend() === "sqlite" ? "tantivy" : "sqlite",
+    );
+    writeEnvelopeFile(envelope);
+
+    const nextProcess = createSkillSearchIndex();
+    const summary = await nextProcess.freshen(scans(), readSkillSearchDocument);
+    expect(summary.mode).toBe("rebuilt");
+    expect(summary.rebuildReason).toBe("incompatible");
+    expect(await nextProcess.search("alpha")).toHaveLength(1);
   });
 });
 
 describe("skill search index payload digest", () => {
-  it("rejects control-plane tampering that keeps every other field intact", () => {
+  it("rejects control-plane tampering that keeps every other field intact", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
     const first = createSkillSearchIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
-    first.freshen(scans, readSkillSearchDocument);
+    await first.freshen(scans, readSkillSearchDocument);
 
-    // R4 复现向量：仅改 documentCount = -1（合法 JSON、其余不变、不重算摘要）。
-    const envelope = readEnvelopeFile() as { index: { documentCount: number } };
-    envelope.index.documentCount = -1;
+    // 复现向量：仅改一个 stat 四元组字段（合法 JSON、其余不变、不重算摘要）。
+    const envelope = readEnvelopeFile() as {
+      documents: Record<string, { files: Array<{ size: number }> }>;
+    };
+    const entry = Object.values(envelope.documents)[0]!;
+    entry.files[0]!.size += 1;
     writeEnvelopeFile(envelope);
 
     const second = createSkillSearchIndex();
-    const summary = second.freshen(scans, readSkillSearchDocument);
+    const summary = await second.freshen(scans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
     expect(summary.rebuildReason).toBe("corrupt");
-    const hits = second.search("alpha skill");
+    const hits = await second.search("alpha skill");
     expect(hits).toHaveLength(1);
     expect(Number.isFinite(hits[0]!.bm25)).toBe(true);
   });
 });
 
 describe("skill search index incremental atomicity", () => {
-  it("leaves no partial state when a changed document fails identity verification", () => {
+  it("leaves no partial state when a changed document fails identity verification", async () => {
     for (const name of ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]) {
       writeSkill(name, skillContent(name, `${name} skill body`));
     }
     const index = createSkillSearchIndex();
     const firstScans = canonicalizeCandidates(scanSkillRoots([root()]));
-    index.freshen(firstScans, readSkillSearchDocument);
+    await index.freshen(firstScans, readSkillSearchDocument);
     expect(index.documentCount()).toBe(6);
 
     // 低脏度（1/6）变更 + 读取失败：touch alpha 使其进入 changed，reader 对 alpha
@@ -598,12 +550,12 @@ describe("skill search index incremental atomicity", () => {
       return readSkillSearchDocument(scan);
     };
 
-    expect(() =>
+    await expect(
       index.freshen(canonicalizeCandidates(scanSkillRoots([root()])), failingReader),
-    ).toThrow(SkillSearchDocumentReadError);
+    ).rejects.toThrow(SkillSearchDocumentReadError);
 
-    // 原子一致性：失败后成员保持本轮开始前的完整状态（无 discard 残留、无半更新）。
+    // 原子一致性：失败后成员保持本轮开始前的完整状态（无 remove 残留、无半更新）。
     expect(index.documentCount()).toBe(6);
-    expect(index.search("alpha").length).toBeGreaterThanOrEqual(1);
+    expect((await index.search("alpha")).length).toBeGreaterThanOrEqual(1);
   });
 });

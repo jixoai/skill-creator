@@ -5,6 +5,9 @@
  * 修订 [2026-09-18]（search-robustness）：编排升级——排除配置载入（每次维护重读，
  * 摘要进信封）、额外 md 文件集读取（fd 身份校验纪律扩展到文件集）、watcher 事件
  * 驱动（clean 时 search 零扫描、事件后去抖同步刷新）、dispose 生命周期。
+ * 修订 [2026-09-21]（jixoai-search-core Phase 2）：索引层迁移 @jixoai/search（全
+ * async 契约）——maintain/ensureMaintained 转 async、flush 失败态由 service 侧
+ * flushFailed 标记接管（watcher 回调契约语义冻结不动）；编排路径与维护门不变。
  * 正交意图：
  * 1. 默认 root 装配：catalog globalPath（含 env override/XDG/openclaw 约定）+ 持久态 imported roots。
  * 2. 单次调用内完成 freshen+search 的编排；watcher clean 时跳过扫描（纯内存查询）。
@@ -90,26 +93,43 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
   }
 
   // clean 判定的 roots→watchDirs 缓存（复审 P1：clean 查询不做 readdir/realpath
-  // ——纯字符串键比对 + 缓存目录集合；roots 集合变化即失效走完整维护）。
+  // —— 纯字符串键比对 + 缓存目录集合；roots 集合变化即失效走完整维护）。
   let cachedWatchDirs: string[] = [];
   let cachedRootsKey: string | null = null;
+  // 异步 flush 失败标记：watcher 在 onFlush 同步返回后即清 dirty（其回调契约是
+  // 同步的，语义冻结不改），失败态由本标记接管——下一次 search 重走完整路径自愈，
+  // 等价于旧同步 freshen 抛错时 watcher 保持 dirty 的行为。
+  let flushFailed = false;
+  // 维护串行链：freshen 异步化（@jixoai/search 全 async）后，维护按到达次序执行，
+  // 查询等待在途维护落定后再读索引（旧同步原子性的等价物）。
+  let maintainChain: Promise<unknown> = Promise.resolve();
+
+  function runMaintain(): Promise<void> {
+    const run = maintainChain.then(maintain);
+    maintainChain = run.catch(() => undefined);
+    return run;
+  }
 
   /** 完整维护路径：config 载入 → scan → canonicalize → freshen → watcher reconcile。 */
-  function maintain(): void {
+  async function maintain(): Promise<void> {
     const activeConfig = loadSkillSearchConfig();
     config = activeConfig;
     const roots = resolveRoots();
     const candidates = scanSkillRoots(roots);
     const excluded = new Set(activeConfig.excludedDirs);
     const scans = canonicalizeCandidates(candidates, excluded);
-    index.freshen(scans, readSkillSearchDocument);
+    await index.freshen(scans, readSkillSearchDocument);
     cachedWatchDirs = canonicalWatchDirs(roots);
     cachedRootsKey = rootsKeyOf(roots);
     watcher.reconcile(cachedWatchDirs);
   }
 
   const watcher = createSkillSearchWatcher({
-    onFlush: () => maintain(),
+    onFlush: () => {
+      void runMaintain().catch(() => {
+        flushFailed = true;
+      });
+    },
     documentCount: () => index.documentCount(),
   });
 
@@ -118,14 +138,18 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
    * config 是单文件小读取（~200B），每次查询都重读比对——用户编辑
    * search-config.toml 后无需任何文件事件即可触发全量重建（digest 进信封）。
    */
-  function ensureMaintained(): void {
+  async function ensureMaintained(): Promise<void> {
     const roots = resolveRoots();
     const rootsChanged = cachedRootsKey !== rootsKeyOf(roots);
     const configChanged =
       config === null || loadSkillSearchConfig().configDigest !== config.configDigest;
-    if (rootsChanged || configChanged || !watcher.isClean(cachedWatchDirs)) {
-      maintain();
+    if (rootsChanged || configChanged || flushFailed || !watcher.isClean(cachedWatchDirs)) {
+      await runMaintain();
+      flushFailed = false;
     }
+    // 在途维护（如去抖 flush）落定后才查询：读不落在半更新状态；链条自身不
+    // 拒绝，失败态由 flushFailed 在下一次调用接管。
+    await maintainChain;
   }
 
   return {
@@ -136,15 +160,15 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
     ): Promise<SkillSearchResult[]> => {
       const parsedOptions = SkillSearchOptionsSchema.parse(searchOptions ?? {});
       if (query.trim() === "") return [];
-      ensureMaintained();
-      const hits = index.search(query);
+      await ensureMaintained();
+      const hits = await index.search(query);
       return rankResults(hits, query, parsedOptions.limit, (text) => tokenizer.tokenize(text));
     },
     /**
      * 内容重复组投影（与 search 共用维护门：clean + 配置未变时零扫描直读内存）。
      */
     duplicates: async (): Promise<SkillDuplicateGroup[]> => {
-      ensureMaintained();
+      await ensureMaintained();
       // 索引层 id 是字符串键；跨模块边界收窄回 branded SkillId。
       return index.duplicates().map((group) => ({
         contentHash: group.contentHash,

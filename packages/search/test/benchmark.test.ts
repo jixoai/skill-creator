@@ -37,6 +37,7 @@ import {
   BENCHMARK_SYNTHETIC_SKILLS,
 } from "./fixtures/benchmark.js";
 import { BENCHMARK_FIELDS, buildBenchmarkDocuments } from "./fixtures/benchmark-docs.js";
+import { rmSandboxRetry } from "./helpers/rm-sandbox.js";
 
 // ---------- 指标计算（主仓 test/skill-search-benchmark.test.ts evaluate 复刻 + name 折叠） ----------
 interface Metrics {
@@ -99,7 +100,7 @@ beforeEach(() => {
 afterEach(async () => {
   await index?.close();
   index = null;
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  rmSandboxRetry(sandbox);
 });
 
 for (const backend of ["sqlite", "tantivy"] as const satisfies readonly SearchBackend[]) {

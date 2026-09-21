@@ -22,6 +22,7 @@ import { openIndex, type SearchDocument, type SearchIndex } from "../src/index.j
 import { createSkillTokenizer } from "../src/tokenizer.js";
 import { BENCHMARK_LABELED_QUERIES } from "./fixtures/benchmark.js";
 import { BENCHMARK_FIELDS, buildBenchmarkDocuments } from "./fixtures/benchmark-docs.js";
+import { rmSandboxRetry } from "./helpers/rm-sandbox.js";
 
 /** 冻结浮点容差（理想逐位一致；两后端词表装载序在 astral 码点排序上理论可差 1ulp）。 */
 const SCORE_TOLERANCE = 1e-9;
@@ -142,7 +143,7 @@ afterEach(async () => {
   for (const index of openIndexes.splice(0)) {
     await index.close();
   }
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  rmSandboxRetry(sandbox);
 });
 
 describe("tantivy vs sqlite backend parity (frozen benchmark corpus)", () => {

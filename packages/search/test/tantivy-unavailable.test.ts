@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openIndex } from "../src/index.js";
+import { rmSandboxRetry } from "./helpers/rm-sandbox.js";
 
 vi.mock("@oxdev03/node-tantivy-binding", () => {
   throw new Error("Cannot find module '@oxdev03/node-tantivy-binding' (mocked native absence)");
@@ -30,7 +31,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  rmSandboxRetry(sandbox);
 });
 
 describe("tantivy backend unavailability", () => {
