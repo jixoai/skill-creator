@@ -11,6 +11,10 @@
  *   [2] reload 失败（commit 已成功）：SEARCH_IO 但盘面保留已提交内容、镜像
  *       不撤销——后续成功 reload 后进程内分数与 reopen 重放逐字节一致。
  *   [3] remove 路径同构：commit 失败的删除不生效。
+ *   [4] stale reader 门（codex r2 R2-1）：reload 失败后重试同 id upsert/remove，
+ *       mutation 前强制刷新 reader——旧 reader 查不到已提交版本会漏发 delete
+ *       （upsert 同 id 双版本）或跳过删除（remove 旧内容跨 reopen 存活）；
+ *       门内刷新仍失败 → SEARCH_IO 不带病继续。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -35,11 +39,13 @@ afterEach(async () => {
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
-/** 可编程 seam：在 write/commit/reload 的第 N 次调用上一次性注入失败（后续恢复）。 */
+/** 可编程 seam：在 write/commit/reload 的第 N 次调用上一次性注入失败（后续恢复）；
+ * failReloadFrom 从第 N 次起持续失败（覆盖门内强制 reload 也失败的场景）。 */
 function failingSeam(failures: {
   failWriteAt?: number;
   failCommitAt?: number;
   failReloadAt?: number;
+  failReloadFrom?: number;
 }): TantivyMutationSeam & { state: { writes: number; commits: number; reloads: number } } {
   const state = { writes: 0, commits: 0, reloads: 0 };
   return {
@@ -60,7 +66,9 @@ function failingSeam(failures: {
     },
     reload: (operation) => {
       state.reloads += 1;
-      if (failures.failReloadAt === state.reloads) {
+      const persistent =
+        failures.failReloadFrom !== undefined && state.reloads >= failures.failReloadFrom;
+      if (failures.failReloadAt === state.reloads || persistent) {
         throw new Error(`injected reload failure #${state.reloads}`);
       }
       operation();
@@ -171,6 +179,73 @@ describe("tantivy mutation failure states (injected seam)", () => {
     await expect(search.remove(["a"])).rejects.toMatchObject({ code: "SEARCH_IO" });
     expect((await search.search("alpha")).total).toBe(1);
     const reopened = await assertReplayConsistency(search, path.join(sandbox, "idx"));
+    expect((await reopened.search("alpha")).total).toBe(1);
+  });
+
+  it("forces a reader refresh before retrying a same-id upsert after a failed reload", async () => {
+    const seam = failingSeam({ failReloadAt: 2 });
+    const search = await open(seam);
+    await search.upsert([{ id: "a", fields: { name: "alpha beta", body: "" } }]);
+    // b 的 commit 成功、reload（#2）注入失败 → SEARCH_IO，盘面已有 b:gamma。
+    await expect(
+      search.upsert([{ id: "b", fields: { name: "gamma theta", body: "" } }]),
+    ).rejects.toMatchObject({ code: "SEARCH_IO" });
+
+    // codex r2 复现序列：立即重试同一 id 的新内容（词表与旧版本不相交）。
+    // stale 门先强制 reload（#3 成功）→ fetchFieldTokens 在新 reader 上找到
+    // 已提交的 gamma 版本 → delete 先于 add 发出 → 同 id 恰一份。
+    await search.upsert([{ id: "b", fields: { name: "delta epsilon", body: "" } }]);
+    expect((await search.search("gamma")).total).toBe(0);
+    expect((await search.search("theta")).total).toBe(0);
+    expect((await search.search("delta")).total).toBe(1);
+
+    // codex 复现断言：close/reopen 后旧版本（gamma）不得存活（双版本即 bug）。
+    const reopened = await assertReplayConsistency(search, path.join(sandbox, "idx"));
+    expect((await reopened.search("gamma")).total).toBe(0);
+    expect((await reopened.search("delta")).total).toBe(1);
+    expect((await reopened.search("alpha")).total).toBe(1);
+  });
+
+  it("surfaces SEARCH_IO when the forced refresh before a retry also fails", async () => {
+    // failReloadFrom：从第 2 次起持续失败——commit 后 reload（#2）与门内强制
+    // reload（#3）双双失败。
+    const seam = failingSeam({ failReloadFrom: 2 });
+    const search = await open(seam);
+    await search.upsert([{ id: "a", fields: { name: "alpha beta", body: "" } }]);
+    await expect(
+      search.upsert([{ id: "b", fields: { name: "gamma theta", body: "" } }]),
+    ).rejects.toMatchObject({ code: "SEARCH_IO" });
+
+    // 门内刷新失败 → SEARCH_IO，不让带病状态继续累积。
+    await expect(
+      search.upsert([{ id: "b", fields: { name: "delta epsilon", body: "" } }]),
+    ).rejects.toMatchObject({ code: "SEARCH_IO" });
+
+    // 调用方恢复路径：close 重开自盘面重建——已提交的 gamma 版本完好、delta
+    // 未写入（两次尝试都停在 SEARCH_IO）。
+    await search.close();
+    index = null;
+    const reopened = await open(undefined, path.join(sandbox, "idx"));
+    expect((await reopened.search("gamma")).total).toBe(1);
+    expect((await reopened.search("delta")).total).toBe(0);
+  });
+
+  it("forces a reader refresh before a remove that follows a failed reload", async () => {
+    const seam = failingSeam({ failReloadAt: 2 });
+    const search = await open(seam);
+    await search.upsert([{ id: "a", fields: { name: "alpha beta", body: "" } }]);
+    // b 已提交（commit 成功）但 reload 失败 → SEARCH_IO、盘面保留 b:gamma。
+    await expect(
+      search.upsert([{ id: "b", fields: { name: "gamma theta", body: "" } }]),
+    ).rejects.toMatchObject({ code: "SEARCH_IO" });
+
+    // 无门时 remove 在旧 reader 上查不到已提交的 b → existing=null 跳过删除
+    // → gamma 跨 reopen 存活（remove 路径同构残余）。门先强制 reload（#3
+    // 成功）→ b 可见 → delete 生效。
+    await search.remove(["b"]);
+    expect((await search.search("gamma")).total).toBe(0);
+    const reopened = await assertReplayConsistency(search, path.join(sandbox, "idx"));
+    expect((await reopened.search("gamma")).total).toBe(0);
     expect((await reopened.search("alpha")).total).toBe(1);
   });
 });

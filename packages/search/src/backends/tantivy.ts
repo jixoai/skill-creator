@@ -22,7 +22,9 @@
  * 词表分桶与大语料优化与 sqlite 后端同口径留给后续。mutation 失败语义（冻结）：
  * writer.commit 返回前的失败 → 引擎 rollback + 镜像逆序回放；commit 成功后
  * reload 失败 → 盘面已提交，不回滚不撤销（镜像保留 = 已对齐已提交内容），
- * 抛 SEARCH_IO 由调用方 close 重开（镜像自盘面重建，二者不可分裂）。
+ * reader 标记 stale，抛 SEARCH_IO；后续 mutation 前强制 reload 门（codex r2
+ * R2-1：旧 reader 上做同 id 查找会漏 delete → 同 id 双版本），刷新仍失败则
+ * hard error，由调用方 close 重开（镜像自盘面重建，二者不可分裂）。
  */
 import { z } from "zod";
 import {
@@ -78,7 +80,7 @@ const ENGINE_FUZZY_MAX_DISTANCE = 2;
  * tantivy 后端产物判定（重建删除的 allowlist，P1-1；布局为 2026-09-21 bun 探针
  * 实证，见 /tmp/list-tantivy-files.ts 输出）：meta.json / .managed.json /
  * .tantivy-meta.lock / .tantivy-writer.lock / 段文件 <32hex>.<ext>（term/idx/
- * pos/store/fieldnorm/fast/delete）/ 合并临时文件 .tmp*。
+ * pos/store/fieldnorm/fast/delete）/ 合并瞬态临时文件 .tmp + 6 位 [A-Za-z0-9]。
  */
 const TANTIVY_META_NAMES: ReadonlySet<string> = new Set([
   "meta.json",
@@ -87,10 +89,20 @@ const TANTIVY_META_NAMES: ReadonlySet<string> = new Set([
   ".tantivy-writer.lock",
 ]);
 const TANTIVY_SEGMENT_FILE_RE = /^[0-9a-f]{32}\.(term|idx|pos|store|fieldnorm|fast|delete)$/;
+/**
+ * 合并瞬态临时文件的精确模式（codex r2 R2-2）：tantivy 0.25.0 写侧经 tempfile
+ * crate 生成 `.tmp` + 恰好 6 个 [A-Za-z0-9] 随机字符（2026-09-21 三轮并发
+ * watcher 探针 /tmp/tantivy-tmpfile-probe.ts 共捕捉 158 个瞬态名，零偏离）。
+ * 不得放宽为 startsWith(".tmp")——用户文件 `.tmp-user-data` 不是 backend 产物，
+ * 误放行会在重建时被删除；不匹配此模式的 `.tmp*` 一律按未知内容 SEARCH_IO 拒删。
+ */
+const TANTIVY_TMP_FILE_RE = /^\.tmp[A-Za-z0-9]{6}$/;
 
 export function isTantivyArtifactName(name: string): boolean {
   return (
-    TANTIVY_META_NAMES.has(name) || TANTIVY_SEGMENT_FILE_RE.test(name) || name.startsWith(".tmp")
+    TANTIVY_META_NAMES.has(name) ||
+    TANTIVY_SEGMENT_FILE_RE.test(name) ||
+    TANTIVY_TMP_FILE_RE.test(name)
   );
 }
 
@@ -160,6 +172,13 @@ class TantivySearchIndex implements SearchIndex {
   private readonly schema: TantivySchema;
   private readonly index: TantivyIndex;
   private writer: TantivyWriter | null;
+  /**
+   * reader 停留在旧提交之前的视图（codex r2 R2-1）：commit 成功后 reload 失败
+   * 置位。带病继续会让同 id upsert/remove 的 fetchFieldTokens 查不到已提交
+   * 版本（漏发 delete / 重复 retract 镜像）。后续 mutation 经 ensureFreshReader
+   * 强制刷新后才可继续。
+   */
+  private readerStale = false;
   /** 打分统计镜像：docCount 含全空文档（MiniSearch avgFieldLength 口径）。 */
   private docCount = 0;
   private readonly totals = new Map<string, number>();
@@ -330,8 +349,37 @@ class TantivySearchIndex implements SearchIndex {
       progress.committed = true;
     });
     if (progress.committed) {
-      this.runSeamed(this.mutationSeam?.reload, () => this.index.reload());
+      try {
+        this.runSeamed(this.mutationSeam?.reload, () => this.index.reload());
+      } catch (error) {
+        // 盘面已提交持久化（不得回滚、镜像不撤销）；reader 未刷新 → 标记
+        // stale，异常继续上抛（外层 SEARCH_IO），后续 mutation 先经
+        // ensureFreshReader 强制刷新（codex r2 R2-1：旧 reader 上做同 id
+        // 查找会漏 delete → 同 id 双版本残留盘面）。
+        this.readerStale = true;
+        throw error;
+      }
     }
+  }
+
+  /**
+   * stale reader 门（codex r2 R2-1）：任何 mutation（upsert/remove）开始前，
+   * 若上一次 commit 后 reload 失败过，先强制 index.reload()——成功清标志继续；
+   * 失败抛 SEARCH_IO（磁盘/引擎异常本应 hard error，不带着旧视图继续累积
+   * 同 id 双版本）。同 id 查找（fetchFieldTokens）因此不可能落在旧 reader 上。
+   */
+  private ensureFreshReader(): void {
+    if (!this.readerStale) return;
+    try {
+      this.runSeamed(this.mutationSeam?.reload, () => this.index.reload());
+    } catch (error) {
+      throw new SearchError(
+        "SEARCH_IO",
+        "tantivy index reader is stale after a failed reload; forced reload before mutation failed",
+        { cause: error },
+      );
+    }
+    this.readerStale = false;
   }
 
   private rollbackSilently(): void {
@@ -344,6 +392,7 @@ class TantivySearchIndex implements SearchIndex {
 
   async upsert(docs: SearchDocument[]): Promise<void> {
     this.assertOpen();
+    this.ensureFreshReader();
     // 统计逆操作日志：引擎 rollback 后按逆序回放，镜像与盘面同步还原。
     const undo: Array<() => void> = [];
     // 同批同 id 的后续读改走批内最新状态（searcher 看不到未提交 delete）。
@@ -384,6 +433,7 @@ class TantivySearchIndex implements SearchIndex {
 
   async remove(ids: string[]): Promise<void> {
     this.assertOpen();
+    this.ensureFreshReader();
     const undo: Array<() => void> = [];
     const removedInBatch = new Set<string>();
     const progress = { committed: false };

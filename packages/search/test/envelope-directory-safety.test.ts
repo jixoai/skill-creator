@@ -11,6 +11,10 @@
  *       → SEARCH_IO、目录零改动。
  *   [2] mismatch 收紧：合法信封指纹不符时同样受产物审计约束（sentinel 拒删；
  *       纯产物正常重建——与 api.test.ts 的重建用例互补）。
+ *   [3] tantivy 临时文件白名单精度（codex r2 R2-2）：`.tmp*` 不整体放行——
+ *       用户文件 `.tmp-user-data` 按未知内容拒删；仅探针实证的合并瞬态命名
+ *       `.tmp` + 6 位 [A-Za-z0-9]（tantivy 0.25.0 tempfile crate，
+ *       /tmp/tantivy-tmpfile-probe.ts 三轮共 158 个瞬态名零偏离）放行重建。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -140,4 +144,40 @@ describe("envelope three-state read and tightened rebuild", () => {
       });
     });
   }
+
+  describe("(tantivy merge temp-file allowlist precision)", () => {
+    it("refuses to delete a user file named .tmp-user-data and preserves its bytes", async () => {
+      seedInvalidEnvelope("meta.json");
+      fs.writeFileSync(path.join(directory(), ".tmp-user-data"), "user data bytes", "utf8");
+      const before = snapshotListing();
+
+      // `.tmp` 前缀不再是整体白名单：非引擎瞬态命名（带连字符的用户文件）
+      // 按未知内容拒删、字节保留。
+      const error = await openIndex({
+        directory: directory(),
+        fields: FIELDS,
+        backend: "tantivy",
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SearchError);
+      expect(error).toMatchObject({ code: "SEARCH_IO" });
+      expect((error as Error).message).toContain(".tmp-user-data");
+      expect(snapshotListing()).toBe(before);
+    });
+
+    it("rebuilds over a leftover tantivy merge temp file (.tmp + 6 alnum)", async () => {
+      seedInvalidEnvelope("meta.json");
+      // 探针捕捉的真实瞬态命名（崩溃残留的合并临时文件）：必须视为 backend
+      // 产物放行重建，否则一次中断的 merge 会把目录永久变成不可重建。
+      const tempName = ".tmpwuMelD";
+      fs.writeFileSync(path.join(directory(), tempName), "merge residue", "utf8");
+
+      const index = await openIndex({ directory: directory(), fields: FIELDS, backend: "tantivy" });
+      expect((await index.search("webpack")).total).toBe(0);
+      await index.upsert([{ id: "b", fields: { name: "webpack bundler" } }]);
+      expect((await index.search("webpack")).total).toBe(1);
+      await index.close();
+      // 重建是目录级删除重建：残留临时文件必须随之消失。
+      expect(fs.existsSync(path.join(directory(), tempName))).toBe(false);
+    });
+  });
 });
