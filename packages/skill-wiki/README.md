@@ -1,8 +1,7 @@
 <!--
 File intent (2026-09-21). Owner ruling context: repo READMEs are bilingual
-(README.md EN canon + README-zh.md, lockstep). This package is private and
-incubating; the EN canon lands now, README-zh.md joins at publish time
-(same facts, both languages, per the repo-wide ruling).
+(README.md EN canon + README.zh-CN.md, lockstep — same facts, both
+languages, evolving together).
 -->
 
 # skill-wiki
