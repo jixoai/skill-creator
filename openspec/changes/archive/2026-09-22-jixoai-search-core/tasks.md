@@ -52,4 +52,4 @@
 
 - [x] 4.1 门禁全绿（test/typecheck/webui check/build/fmt/pack）+
       冒烟记录归档 docs/
-- [ ] 4.2 codex 复核（herdr 异步回调）+ 处置
+- [x] 4.2 codex 复核（herdr 异步回调）+ 处置
