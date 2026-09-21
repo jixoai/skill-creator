@@ -62,14 +62,17 @@ title: Pin exit codes in gates
 created: 2026-09-21T00:00:00.000Z
 updated: 2026-09-21T00:00:00.000Z
 origin: ws_0123…def # 产生该 pattern 的 scope 足迹
-promotedFrom: "" # 页面升格到 global 时写入
+promotedFrom: "" # 泛化溯源，由 LLM Maintainer 写入（切片③）
 ---
 
 Gate commands must branch on the real exit code, never on piped stdout.
 ```
 
-- `origin` 是最小溯源足迹（对应论文的 provenance-aware 探索）；
-  `promotedFrom` 只在 global scope 上、对从某 workspace 升格出来的页面非空。
+- `origin` 是最小溯源足迹（对应论文的 provenance-aware 探索）。
+  `promotedFrom` 是**预留的**泛化溯源槽位：当宿主的 LLM Maintainer 把
+  workspace 认知蒸馏进 global（新建页面，或经 patch 吸收进既有页面）时，
+  记录这条 global 页由哪个 workspace 的洞见触发。它**永远不是机械搬运**——
+  workspace 页面原地保留，追加通道恒写 `null`。
 - **去重判据**：`contentHash` = 正文先做 CRLF → LF 归一化并去除尾部空白后
   的 SHA-256。文件卫生字节不参与判据，因此追加侧与落盘回读侧永远一致。追加
   已存在同 hash 正文的条目是幂等的：不新建页，返回既有条目并带
@@ -139,7 +142,8 @@ schema，而不会经 workspace 层把 `node:fs` 拉进 bundle。根入口只在
 ## 路线图（宿主侧，不在本包内）
 
 孵化计划的切片③：四 agent 循环（Wiki Maintainer / Skill Proposer 作为内核
-agent role）、会话后 consolidation、workspace → global 升格自动化——全部位于
+agent role）、会话后 consolidation、workspace → global 泛化（LLM 蒸馏更新
+global——新建页面或经 patch 吸收进既有页面，workspace 原文保留）——全部位于
 skill-creator 内核，消费本库。
 
 ## 测试与验证

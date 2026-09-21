@@ -68,15 +68,19 @@ title: Pin exit codes in gates
 created: 2026-09-21T00:00:00.000Z
 updated: 2026-09-21T00:00:00.000Z
 origin: ws_0123…def # scope footprint where it was captured
-promotedFrom: "" # set when a page is promoted to global
+promotedFrom: "" # generalization provenance, written by the LLM maintainer (slice 3)
 ---
 
 Gate commands must branch on the real exit code, never on piped stdout.
 ```
 
 - `origin` is the minimal provenance footprint (the paper's provenance-aware
-  exploration); `promotedFrom` is non-null only on the global scope for
-  pages promoted out of a workspace.
+  exploration). `promotedFrom` is a **reserved** generalization-provenance
+  slot: when the host's LLM maintainer distills workspace knowledge into a
+  global page (creating one, or absorbing it into an existing one via
+  patches), it records which workspace's insights triggered that page. It is
+  never a mechanical move — workspace pages stay where they are, and the
+  append path always writes `null`.
 - **Dedup criterion**: `contentHash` = SHA-256 of the body after
   normalizing CRLF → LF and stripping trailing whitespace. File-hygiene
   bytes never participate, so the append side and the read-back side always
@@ -157,7 +161,9 @@ hierarchy is leaked in either direction:
 
 Slice 3 of the incubation plan: the four-agent loop (Wiki Maintainer /
 Skill Proposer as kernel agent roles), post-session consolidation, and
-workspace → global promotion automation all live in the skill-creator
+workspace → global generalization (LLM distillation that updates global —
+creating pages or absorbing insights via patches — while workspace pages
+stay untouched) all live in the skill-creator
 kernel and consume this library.
 
 ## Test & verify

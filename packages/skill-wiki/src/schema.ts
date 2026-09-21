@@ -26,9 +26,13 @@ export const PatternFrontmatterSchema = z
     created: z.string().min(1),
     /** 最后更新时间（ISO 8601）。 */
     updated: z.string().min(1),
-    /** 产生该 pattern 的作用域（升格溯源的最小足迹；global 侧为 "~"）。 */
+    /** 产生该 pattern 的作用域（溯源足迹；global 侧为 "~"）。 */
     origin: z.string().min(1),
-    /** 从哪个 workspace 升格而来（global 侧非空；本 scope 原生为 null）。 */
+    /**
+     * 泛化溯源（预留）：LLM Maintainer 把 workspace 认知蒸馏进 global 页
+     * （新建或经 patch 吸收）时写入触发源；append 通道恒 null，无机械升格
+     * 操作，workspace 原文永不删除。
+     */
     promotedFrom: z.string().nullable().default(null),
   })
   .strict();

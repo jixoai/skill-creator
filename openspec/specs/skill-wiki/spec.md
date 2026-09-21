@@ -1,6 +1,7 @@
 # skill-wiki Specification
 
 ## Purpose
+
 TBD - created by archiving change skill-wiki-incubation. Update Purpose after archive.
 
 ## Requirements
@@ -14,7 +15,8 @@ TBD - created by archiving change skill-wiki-incubation. Update Purpose after ar
 `wiki/<scope>/`（scope = global `~` 或 `ws_<id>`），MUST NOT 写入用户
 workspace 的技能资产目录。全部从磁盘读入的结构 MUST 经 Zod safeParse
 收窄；不兼容投影为该领域空值并 typed 失败于 mutation。pattern 元数据
-MUST 预留 `origin`/`promotedFrom`（global 升格语义，本轮只落 schema）。
+MUST 预留 `origin`/`promotedFrom`（泛化溯源：由切片③的 LLM Maintainer
+蒸馏写入，非机械升格搬运；本轮只落 schema）。
 
 #### Scenario: 双级作用域解析
 
