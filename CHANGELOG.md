@@ -11,7 +11,7 @@ loads in ~1s instead of ~7s, and native OS pickers for choosing directories.
   `realpath` dedup, CJK-aware frozen tokenizer, MiniSearch BM25 with frozen
   rerank weights, persisted under a versioned envelope with per-file stat
   freshness and event-driven watching) now backs four faces: `skill-creator
-  search` on the CLI, `skills.search` / `skills.duplicates` over RPC, the
+search` on the CLI, `skills.search` / `skills.duplicates` over RPC, the
   `skills_search` / `skills_duplicates` MCP tools, and three GUI entry points
   — the ProviderView filter box (URL-`q` truth), the ⌘K command palette, and
   the composer `$` menu. Exclusion dirs are tunable via a `search-config.toml`
@@ -34,7 +34,7 @@ loads in ~1s instead of ~7s, and native OS pickers for choosing directories.
 ### Fixed
 
 - **Search returned nothing on real libraries** — the ranking pool folded
-  duplicate content *after* the top-40 cut, so 30+ byte-identical copies of
+  duplicate content _after_ the top-40 cut, so 30+ byte-identical copies of
   one skill drowned every other result, and the surviving representative only
   carried its own installation scope, which made provider-filtered views match
   nothing. Folding now happens before the pool (one representative per content
