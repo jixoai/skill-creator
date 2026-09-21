@@ -9,8 +9,11 @@
       docs/search-design.md 补记
 - [x] 1.2 D2 供应链：minimumReleaseAge 白名单登记；macOS arm64/x64、
       Linux、Windows 安装矩阵核验；失败项记录
-- [x] 1.3 任一验证门失败 → 默认 backend 切 sqlite 并在本 change 记录
-      阻塞；两门全过 → tantivy 定为默认
+- [x] 1.3 两门全过 → backend 默认分层定稿（终审 P1-3 同步）：包级默认
+      tantivy（spec 不变）；daemon/CLI 消费方默认 sqlite（tantivy 目录锁
+      单写者 vs 多进程持有者，探针见 docs/search-design.md §16）；
+      SKILL_CREATOR_SEARCH_BACKEND=tantivy|sqlite 覆盖。「任一门失败 →
+      全局切 sqlite」的回落分支未触发
 - [x] 1.4 packages/search 包骨架（@jixoai/search、private、src 直出）+ workspace/tsconfig/vitest 接线
 - [x] 1.5 冻结 tokenizer 下沉（从 src/daemon/skill-search/tokenizer.ts
       迁入包内，TOKENIZER_VERSION 延续；daemon 侧 re-export 过渡）+ 冻结期望表平移

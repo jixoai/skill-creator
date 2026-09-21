@@ -44,9 +44,14 @@ stored }` + `total`。公共面零引擎概念泄漏。
 
 ### B. skill-search 迁移（还债）
 
-- src/daemon/skill-search 改为消费 @jixoai/search（tantivy 后端），
-  MiniSearch 依赖移除；冻结 rerank/ranking v2/持久信封语义不变，
-  对拍基准作迁移门禁；watcher/rootsKey 缓存等宿主编排保留。
+- src/daemon/skill-search 改为消费 @jixoai/search，MiniSearch 依赖移除；
+  冻结 rerank/ranking v2/持久信封语义不变，对拍基准作迁移门禁；
+  watcher/rootsKey 缓存等宿主编排保留。
+- backend 默认分层（终审 P1-3 同步；探针见 docs/search-design.md §16）：
+  **包级**默认 tantivy（`@jixoai/search` 的 spec 不变）；**daemon/CLI 消费方**
+  默认 sqlite——tantivy 目录锁是单写者，而 daemon + `skill-creator search`
+  CLI + stdio MCP 是既定多进程持有者；`SKILL_CREATOR_SEARCH_BACKEND=
+tantivy|sqlite` 显式覆盖。
 
 ### C. skill-wiki 松绑 + CLI 命令面（消费 A）
 

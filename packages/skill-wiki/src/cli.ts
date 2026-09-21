@@ -30,6 +30,8 @@ import {
   findSimilarPatterns,
   openScopeSearchIndex,
   patternSearchDoc,
+  registerScopeCorpusEntries,
+  unregisterScopeCorpusEntries,
   type PatternDocSource,
   type SimilarPattern,
 } from "./similarity.js";
@@ -274,9 +276,11 @@ async function cmdAdd(ctx: CommandContext): Promise<number> {
   if (!ctx.options.has("no-similarity")) {
     try {
       similar = await withScopeIndex(wikiRoot, scope, wiki, async (index) => {
-        // 增量 upsert 该页（幂等）→ 自查询分可归一。
-        await index.upsert([patternSearchDoc({ name: item.name, title: item.title, body })]);
-        return findSimilarPatterns(index, { name: item.name, title: item.title, body });
+        // 增量 upsert 该页（幂等）→ 自查询分可归一；corpus 登记随动。
+        const source = { name: item.name, title: item.title, body };
+        await index.upsert([patternSearchDoc(source)]);
+        registerScopeCorpusEntries(wikiRoot, scope, [source]);
+        return findSimilarPatterns(index, source);
       });
     } catch (error) {
       if (!(error instanceof SearchError)) throw error;
@@ -367,9 +371,13 @@ async function cmdEdit(ctx: CommandContext): Promise<number> {
   try {
     await withScopeIndex(wikiRoot, scope, wiki, async (index) => {
       const read = wiki.readPattern(item.name);
-      await index.upsert([
-        patternSearchDoc({ name: item.name, title: read.frontmatter.title, body: read.body }),
-      ]);
+      const source = {
+        name: item.name,
+        title: read.frontmatter.title,
+        body: read.body,
+      };
+      await index.upsert([patternSearchDoc(source)]);
+      registerScopeCorpusEntries(wikiRoot, scope, [source]);
     });
   } catch (error) {
     if (!(error instanceof SearchError)) throw error;
@@ -396,7 +404,10 @@ async function cmdRemove(ctx: CommandContext): Promise<number> {
   wiki.appendLog(`removed pattern ${name} ("${read.frontmatter.title}")`);
 
   try {
-    await withScopeIndex(wikiRoot, scope, wiki, (index) => index.remove([name]));
+    await withScopeIndex(wikiRoot, scope, wiki, async (index) => {
+      await index.remove([name]);
+      unregisterScopeCorpusEntries(wikiRoot, scope, [name]);
+    });
   } catch (error) {
     if (!(error instanceof SearchError)) throw error;
     ctx.io.stderr(`warning: search index refresh failed: ${errorMessage(error)}\n`);

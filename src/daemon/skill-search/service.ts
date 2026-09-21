@@ -8,6 +8,10 @@
  * 修订 [2026-09-21]（jixoai-search-core Phase 2）：索引层迁移 @jixoai/search（全
  * async 契约）——maintain/ensureMaintained 转 async、flush 失败态由 service 侧
  * flushFailed 标记接管（watcher 回调契约语义冻结不动）；编排路径与维护门不变。
+ * 修订 [2026-09-21]（终审 P2-2 处置）：维护链吞错被废除——最近一次维护的
+ * **真实结果**（lastMaintain，不吞错）暴露给并发 search；与失败的后台 flush
+ * 交错的 search 在同一 promise 上观察到失败后自愈重跑（重跑仍失败 → typed
+ * 上抛），flushFailed 降级为次级记录。
  * 正交意图：
  * 1. 默认 root 装配：catalog globalPath（含 env override/XDG/openclaw 约定）+ 持久态 imported roots。
  * 2. 单次调用内完成 freshen+search 的编排；watcher clean 时跳过扫描（纯内存查询）。
@@ -35,7 +39,7 @@ import { rankResults } from "./ranking.js";
 import { parseSkillDocumentSet } from "./parser.js";
 import { scanSkillRoots, type SkillRoot } from "./scanner.js";
 import { createSkillTokenizer } from "./tokenizer.js";
-import { createSkillSearchWatcher } from "./watcher.js";
+import { createSkillSearchWatcher, type WatchFactory } from "./watcher.js";
 
 /** 只读持久态来源（默认绑定 workspace-registry persistence；测试可替换）。 */
 export interface SkillSearchStateSource {
@@ -66,16 +70,18 @@ export function createSkillSearchService(): SkillSearchService {
 }
 
 /**
- * 测试专用 seam：显式注入 roots（沙箱语料）。仅测试导入，禁止接入 CLI/daemon/
- * RPC 装配——生产 root 解析必须经 createSkillSearchService 的 server-owned 路径。
+ * 测试专用 seam：显式注入 roots（沙箱语料）与可选 watch 工厂（确定性事件
+ * 驱动）。仅测试导入，禁止接入 CLI/daemon/RPC 装配——生产 root 解析必须经
+ * createSkillSearchService 的 server-owned 路径。
  */
 export function createSkillSearchServiceWithRoots(
   resolveRoots: () => SkillRoot[],
+  options: { watch?: WatchFactory } = {},
 ): SkillSearchService {
-  return createSkillSearchEngine(resolveRoots);
+  return createSkillSearchEngine(resolveRoots, options.watch);
 }
 
-function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
+function createSkillSearchEngine(resolveRoots: () => SkillRoot[], watch?: WatchFactory) {
   const tokenizer = createSkillTokenizer();
   // 最近一次维护载入的配置（摘要供索引信封校验/落盘）。
   let config: SkillSearchConfig | null = null;
@@ -96,17 +102,23 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
   // —— 纯字符串键比对 + 缓存目录集合；roots 集合变化即失效走完整维护）。
   let cachedWatchDirs: string[] = [];
   let cachedRootsKey: string | null = null;
-  // 异步 flush 失败标记：watcher 在 onFlush 同步返回后即清 dirty（其回调契约是
-  // 同步的，语义冻结不改），失败态由本标记接管——下一次 search 重走完整路径自愈，
-  // 等价于旧同步 freshen 抛错时 watcher 保持 dirty 的行为。
+  // 异步 flush 失败标记（次级记录：watcher 在 onFlush 同步返回后即清 dirty，
+  // 其回调契约是同步的，语义冻结不改）。失败可见性的主通道是 lastMaintain——
+  // 与后台 flush 交错的 search 在同一 promise 上观察到失败并自愈，不再依赖
+  // 本标记与 rejection 之间的微任务时序。
   let flushFailed = false;
   // 维护串行链：freshen 异步化（@jixoai/search 全 async）后，维护按到达次序执行，
   // 查询等待在途维护落定后再读索引（旧同步原子性的等价物）。
   let maintainChain: Promise<unknown> = Promise.resolve();
+  // 最近一次维护的真实结果（不吞错）：后台 flush reject 与 flushFailed=true
+  // 之间的窗口里，并发 search 等待的是这条 promise——失败被观察到，而不是
+  // 被吞错链放行后静默读旧 reader 或 loaded=false 的空结果。
+  let lastMaintain: Promise<void> = Promise.resolve();
 
   function runMaintain(): Promise<void> {
     const run = maintainChain.then(maintain);
     maintainChain = run.catch(() => undefined);
+    lastMaintain = run;
     return run;
   }
 
@@ -131,6 +143,7 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
       });
     },
     documentCount: () => index.documentCount(),
+    watch,
   });
 
   /**
@@ -146,10 +159,18 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[]) {
     if (rootsChanged || configChanged || flushFailed || !watcher.isClean(cachedWatchDirs)) {
       await runMaintain();
       flushFailed = false;
+      return;
     }
-    // 在途维护（如去抖 flush）落定后才查询：读不落在半更新状态；链条自身不
-    // 拒绝，失败态由 flushFailed 在下一次调用接管。
-    await maintainChain;
+    try {
+      // 在途维护（如去抖 flush）落定后才查询：读不落在半更新状态。等待的是
+      // 真实结果——失败不被吞。
+      await lastMaintain;
+    } catch {
+      // 与失败的后台 flush 交错：把「下一次 search 自愈」内联到本轮——重走
+      // 完整路径；重跑仍失败 → typed 上抛，绝不静默读旧/空结果。
+      await runMaintain();
+      flushFailed = false;
+    }
   }
 
   return {

@@ -7,5 +7,6 @@
 export * from "./schema.js";
 export * from "./patch.js";
 export * from "./workspace.js";
+export * from "./scopes.js";
 export * from "./sampling.js";
 export * from "./gate.js";

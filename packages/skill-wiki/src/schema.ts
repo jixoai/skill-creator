@@ -78,7 +78,9 @@ export type SkillImpactEntry = z.infer<typeof SkillImpactEntrySchema>;
 export type SkillWikiErrorCode =
   | "WIKI_PATCH_FAILED"
   | "WIKI_INVALID_PATTERN"
-  | "WIKI_INVALID_SCOPE";
+  | "WIKI_INVALID_SCOPE"
+  | "WIKI_SCOPE_REGISTRY"
+  | "WIKI_SCOPE_CONFLICT";
 export class SkillWikiError extends Error {
   readonly code: SkillWikiErrorCode;
   constructor(code: SkillWikiErrorCode, message: string, options?: { cause?: unknown }) {

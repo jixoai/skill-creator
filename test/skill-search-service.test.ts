@@ -9,8 +9,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createSkillSearchService } from "../src/daemon/skill-search/service.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createSkillSearchService,
+  createSkillSearchServiceWithRoots,
+} from "../src/daemon/skill-search/service.js";
+import { FLUSH_DEBOUNCE_MS, type WatchFactory } from "../src/daemon/skill-search/watcher.js";
+import { GLOBAL_WORKSPACE_ID, ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 let sandbox = "";
@@ -114,5 +119,54 @@ describe("skill search service default assembly", () => {
           installation.workspaceId === "~" && installation.providerId === "claude-code",
       ),
     ).toBe(true);
+  });
+});
+
+describe("background flush failure vs concurrent search (final review P2-2)", () => {
+  it("a search interleaved with a failing watcher flush heals or throws, never silently resolves stale/empty", async () => {
+    vi.useFakeTimers();
+    const skillRoot = path.join(sandbox, "skills");
+    writeSkill(skillRoot, "base-skill", "base skill body");
+    const eventCallbacks: Array<() => void> = [];
+    const watch: WatchFactory = () => ({
+      close: () => {},
+      onEvent: (callback) => {
+        eventCallbacks.push(callback);
+      },
+      onError: () => {},
+    });
+    const service = createSkillSearchServiceWithRoots(
+      () => [
+        {
+          rootPath: skillRoot,
+          workspaceId: GLOBAL_WORKSPACE_ID,
+          providerId: ProviderIdSchema.parse("claude-code"),
+        },
+      ],
+      { watch },
+    );
+
+    // 首查建索引并 reconcile（fake watch 建立在 canonical 目录上）。
+    const base = await service.search("base skill", { limit: 10 });
+    expect(base.map((result) => result.name)).toContain("base-skill");
+
+    // 破坏 searchHome 写路径 + 语料变更 → 后台 flush 的 maintain 必失败。
+    const searchHome = path.join(sandbox, "state", ".skill-creator", "search");
+    fs.chmodSync(searchHome, 0o500);
+    writeSkill(skillRoot, "extra-skill", "extra skill body");
+    try {
+      expect(eventCallbacks.length).toBeGreaterThan(0);
+      for (const trigger of eventCallbacks) trigger(); // → dirty → 去抖（fake timer）
+      // onFlush 同步返回（watcher 清 dirty）；maintain 排入微任务、尚未落定。
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
+      // 与失败中的后台维护交错：旧实现在吞错链上等待后静默返回空结果；
+      // 修复后必须观察到真实失败并自愈重跑——写路径仍破坏 → typed 拒绝。
+      const search = service.search("extra skill", { limit: 10 });
+      await expect(search).rejects.toMatchObject({ code: "UNAVAILABLE" });
+    } finally {
+      fs.chmodSync(searchHome, 0o700);
+      vi.useRealTimers();
+      service.dispose();
+    }
   });
 });

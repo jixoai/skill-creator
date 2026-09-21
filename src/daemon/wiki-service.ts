@@ -7,8 +7,9 @@
  * 正交意图：
  *   [1] scope 权限闸 + workspaceId → slug 映射：`~` 直通；ws_* 必须是 registry
  *       已注册 Imported（轻量 lookup，不触发 ccski 扫描），未注册 → typed
- *       NOT_FOUND。slug 由 label 确定性派生（不持久化）；同 slug 冲突附 id
- *       digest 前 4 hex 消歧（经轻量 listImported 判定）。
+ *       NOT_FOUND。slug 分配持久化于 <wikiRoot>/scopes.json（终审 P1-1：
+ *       skill-wiki 库层登记表——同 id 复用、forget 不释放，杜绝 forget/
+ *       re-import 后存活 workspace 顶替裸名读写他人目录）。
  *   [2] 委派 skill-wiki 领域库（目录契约/去重/index 重建都在包内）+ 统一根
  *       装配（defaultWikiRoot()，SKILL_WIKI_HOME env 可覆盖）+ 存量迁移三态
  *       （wiki-root-migration，首次打开时执行一次）+ 错误映射
@@ -19,6 +20,7 @@ import path from "node:path";
 import {
   SkillWikiError,
   defaultWikiRoot,
+  openScopeSlugRegistry,
   openWikiWorkspace,
   parseWikiScope,
   patternContentHash,
@@ -57,38 +59,9 @@ export interface WikiServiceOptions {
   legacyDir?: string | null;
 }
 
-/** label 的 slug 裁剪上限（与 skill-wiki pattern 文件名 slugify 同口径）。 */
-const WORKSPACE_SLUG_MAX = 48;
-
-/**
- * label → npm-scope 式 base slug（确定性纯函数）：小写、非法字符→-、压缩、裁剪
- * 到 48、去尾连字符；空结果回退 "ws"（workspace 语义）。输出恒满足
- * SLUG_SCOPE_REGEX。
- */
-export function workspaceLabelSlug(label: string): string {
-  const slug = label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, WORKSPACE_SLUG_MAX)
-    .replace(/-+$/g, "");
-  return slug === "" ? "ws" : slug;
-}
-
-/**
- * workspaceId → wiki scope slug（确定性、不持久化）：base = label 的 slugify；
- * `collides` 由调用方以 registry 顺序快照判定（存在**更早注册**的 workspace
- * 产生相同 base slug——首个保留裸名，避免追加冲突方移动既有 wiki 目录）——
- * 此时附 id digest 前 4 hex 消歧（如 `skill-creator-a1b2`）。
- */
-export function workspaceScopeSlug(label: string, id: WorkspaceId, collides: boolean): string {
-  const base = workspaceLabelSlug(label);
-  return collides ? `${base}-${id.slice(3, 7)}` : base;
-}
-
 /** Create the daemon wiki service bound to one registry. */
 export function createWikiService(
-  workspaces: Pick<WorkspaceRegistry, "lookup" | "listImported">,
+  workspaces: Pick<WorkspaceRegistry, "lookup">,
   options: WikiServiceOptions = {},
 ): WikiService {
   const injectedRoot = options.rootDir !== undefined;
@@ -102,6 +75,8 @@ export function createWikiService(
         ? null
         : path.join(appDir(), "wiki");
   let migrationDone = false;
+  // slug 分配登记表（终审 P1-1）：与 registry 顺序解耦的持久身份。
+  const scopeSlugs = openScopeSlugRegistry(rootDir);
 
   /** 首次打开时执行一次存量迁移（幂等；typed CONFLICT 上抛）。 */
   const runMigrationOnce = (): void => {
@@ -110,7 +85,11 @@ export function createWikiService(
     migrationDone = true;
   };
 
-  /** ws_* → slug（RPC 契约仍是 WorkspaceId；wiki 侧车目录名是人类可读 slug）。 */
+  /**
+   * ws_* → slug（RPC 契约仍是 WorkspaceId；wiki 侧车目录名是人类可读 slug）。
+   * 分配走 scopes.json 登记表：登记表命中复用；登记表读/写失败与分配冲突
+   * 映射为 typed DomainError（不伪装成功、不清目录）。
+   */
   const resolveScope = (scope: WorkspaceId): WikiScope => {
     if (scope === "~") return "~";
     // scope 已由 RPC 契约的 WorkspaceIdSchema 收窄过形状；这里再闸注册态。
@@ -118,17 +97,32 @@ export function createWikiService(
     if (self === null) {
       throw new DomainError("NOT_FOUND", `Workspace not found: ${scope}`);
     }
-    // 冲突消解按 registry 顺序：首个产出该 base slug 的 workspace 保留裸名
-    // （后出现的冲突方才附 digest——保证追加冲突方不移动既有 wiki 目录）。
-    const base = workspaceLabelSlug(self.label);
-    const imported = workspaces.listImported();
-    const selfIndex = imported.findIndex((entry) => entry.id === scope);
-    const collides =
-      selfIndex >= 0 &&
-      imported.some(
-        (other, index) => index < selfIndex && workspaceLabelSlug(other.label) === base,
-      );
-    return parseWikiScope(workspaceScopeSlug(self.label, scope, collides));
+    try {
+      const slug = scopeSlugs.assign({
+        key: scope,
+        label: self.label,
+        // id digest 前 4 hex 消歧（如 `skill-creator-a1b2`）。
+        disambiguator: scope.slice(3, 7),
+      });
+      return parseWikiScope(slug);
+    } catch (error) {
+      if (error instanceof SkillWikiError) {
+        if (error.code === "WIKI_SCOPE_CONFLICT") {
+          throw new DomainError(
+            "CONFLICT",
+            `Wiki scope slug collision for workspace ${scope}: ${error.message}`,
+          );
+        }
+        if (error.code === "WIKI_SCOPE_REGISTRY") {
+          throw new DomainError(
+            "UNAVAILABLE",
+            `Wiki scope registry is unavailable; inspect ${path.join(rootDir, "scopes.json")} ` +
+              `manually: ${error.message}`,
+          );
+        }
+      }
+      throw error;
+    }
   };
 
   const openScope = (scope: WorkspaceId) => {

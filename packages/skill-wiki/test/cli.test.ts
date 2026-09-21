@@ -5,7 +5,8 @@
  *   [1] runCli 纯函数面（注入内存 IO + SKILL_WIKI_HOME 隔离根）：命令语义、
  *       exit code 全映射、--json 形状。
  *   [2] 查重闭环：add 相似警告触发与 --no-similarity、find 召回、edit/remove
- *       后索引随动。
+ *       后索引随动；外部（编辑器/库 API）patterns/ 漂移经 corpus 登记实时
+ *       反映（终审 P1-2：新增/编辑/删除后 find 命中当前真相）。
  *   [3] child_process 冒烟（tsx 直跑 bin）：进程适配层与退出码透传。
  */
 import { spawn } from "node:child_process";
@@ -223,6 +224,52 @@ describe("similarity pipeline", () => {
     expect(removed.code).toBe(0);
     const after = await run(["find", "pipefail everywhere"]);
     expect(after.stdout).not.toContain("pin-exit-codes-in-gates");
+  });
+});
+
+describe("external pattern drift (corpus registry, final review P1-2)", () => {
+  it("find reflects externally added patterns immediately", async () => {
+    await run(["add", "--title", "Internal page"], "internal body\n");
+    // 外部（编辑器 / 库 API）直接写 patterns/——不得静默漏检。
+    const wiki = openWikiWorkspace(path.join(root, "~"));
+    wiki.appendPattern({ title: "External page", body: "zephyr unique phrase marker\n" });
+
+    const found = await run(["find", "zephyr unique phrase", "--json"]);
+    expect(found.code).toBe(0);
+    const payload = JSON.parse(found.stdout) as { results: { name: string }[]; total: number };
+    expect(payload.total).toBe(1);
+    expect(payload.results[0]?.name).toBe("external-page");
+  });
+
+  it("find reflects externally edited content (full rebuild path on 100% drift)", async () => {
+    const wiki = openWikiWorkspace(path.join(root, "~"));
+    wiki.appendPattern({ title: "Drift page", body: "alpha bravo charlie\n" });
+    await run(["find", "alpha bravo"]); // 打开一次索引（corpus 登记当前状态）
+    wiki.editPattern("drift-page", [
+      { op: "replace", target: "alpha bravo charlie", content: "delta echo franklin" },
+    ]);
+
+    const found = await run(["find", "delta echo", "--json"]);
+    const payload = JSON.parse(found.stdout) as { results: { name: string }[]; total: number };
+    expect(payload.results[0]?.name).toBe("drift-page");
+    // 旧措辞不再召回。
+    const stale = await run(["find", "alpha bravo", "--json"]);
+    expect((JSON.parse(stale.stdout) as { total: number }).total).toBe(0);
+  });
+
+  it("find forgets externally removed patterns (incremental sync)", async () => {
+    const wiki = openWikiWorkspace(path.join(root, "~"));
+    wiki.appendPattern({ title: "Keep page", body: "keeper body\n" });
+    wiki.appendPattern({ title: "Doomed external", body: "orangutan unique marker\n" });
+    await run(["find", "orangutan unique"]); // 索引 + corpus 登记两页
+    wiki.removePattern("doomed-external");
+
+    const found = await run(["find", "orangutan unique", "--json"]);
+    const payload = JSON.parse(found.stdout) as { results: { name: string }[]; total: number };
+    expect(payload.total).toBe(0);
+    // 幸存页仍可召回。
+    const kept = await run(["find", "keeper body", "--json"]);
+    expect((JSON.parse(kept.stdout) as { total: number }).total).toBe(1);
   });
 });
 
