@@ -13,11 +13,16 @@
  *   [3] 生命周期：native binding 动态 import（加载失败/平台缺失 → typed
  *       SEARCH_BACKEND_UNAVAILABLE，消息含原因；失败不缓存可重试）；close =
  *       waitMergingThreads 释放目录锁（同进程重开可再取 writer）；同步 binding
- *       API 以 async 方法包装，接口形状不暴露同步性。
+ *       API 以 async 方法包装，接口形状不暴露同步性；writer/index 操作经
+ *       可注入 seam（TantivyMutationSeam）覆盖 partial batch / commit 失败 /
+ *       reload 失败三态（P2-4）。
  * 妥协声明：引擎分数弃用（tantivy 原生 BM25 无 d 底分/乘数面，D1 路线 B typo 差
  * 1 hit 的根因），召回命中只取 docAddress；打分统计镜像常驻内存（docCount/
  * totalTokens/per-field df，open 时全量重建 + mutation 增量维护 + 失败日志回滚），
- * 词表分桶与大语料优化与 sqlite 后端同口径留给后续。
+ * 词表分桶与大语料优化与 sqlite 后端同口径留给后续。mutation 失败语义（冻结）：
+ * writer.commit 返回前的失败 → 引擎 rollback + 镜像逆序回放；commit 成功后
+ * reload 失败 → 盘面已提交，不回滚不撤销（镜像保留 = 已对齐已提交内容），
+ * 抛 SEARCH_IO 由调用方 close 重开（镜像自盘面重建，二者不可分裂）。
  */
 import { z } from "zod";
 import {
@@ -69,8 +74,42 @@ const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=H
 /** 引擎 fuzzyTermQuery 的距离上限（D1 实测：传 3 报 Levenshtein distance not allowed）。 */
 const ENGINE_FUZZY_MAX_DISTANCE = 2;
 
+/**
+ * tantivy 后端产物判定（重建删除的 allowlist，P1-1；布局为 2026-09-21 bun 探针
+ * 实证，见 /tmp/list-tantivy-files.ts 输出）：meta.json / .managed.json /
+ * .tantivy-meta.lock / .tantivy-writer.lock / 段文件 <32hex>.<ext>（term/idx/
+ * pos/store/fieldnorm/fast/delete）/ 合并临时文件 .tmp*。
+ */
+const TANTIVY_META_NAMES: ReadonlySet<string> = new Set([
+  "meta.json",
+  ".managed.json",
+  ".tantivy-meta.lock",
+  ".tantivy-writer.lock",
+]);
+const TANTIVY_SEGMENT_FILE_RE = /^[0-9a-f]{32}\.(term|idx|pos|store|fieldnorm|fast|delete)$/;
+
+export function isTantivyArtifactName(name: string): boolean {
+  return (
+    TANTIVY_META_NAMES.has(name) || TANTIVY_SEGMENT_FILE_RE.test(name) || name.startsWith(".tmp")
+  );
+}
+
 /** stored 落盘 JSON 的读取收窄：不兼容（含 null/缺失）投影为无 stored。 */
 const StoredSchema = z.record(z.string(), z.unknown());
+
+/**
+ * 可测性 seam（P2-4）：mutation 路径上 writer/index 操作的可注入包装。
+ * 默认（缺省）直通；测试注入失败以覆盖 partial batch（write 抛出）、
+ * commit 失败、commit 成功后 reload 失败三态。生产路径零行为差异。
+ */
+export interface TantivyMutationSeam {
+  /** 包装 writer.addDocument / writer.deleteDocumentsByTerm。 */
+  write?: (operation: () => void) => void;
+  /** 包装 writer.commit。 */
+  commit?: (operation: () => void) => void;
+  /** 包装 index.reload。 */
+  reload?: (operation: () => void) => void;
+}
 
 /** binding 加载缓存；失败置空可重试（如补装平台子包后同进程恢复）。 */
 let bindingPromise: Promise<TantivyModule> | null = null;
@@ -99,9 +138,16 @@ export async function openTantivyIndex(params: {
   directory: string;
   fields: Record<string, SearchFieldSpec>;
   scoring: ScoringOptions;
+  mutationSeam?: TantivyMutationSeam;
 }): Promise<SearchIndex> {
   const binding = await loadTantivyBinding();
-  return new TantivySearchIndex(binding, params.directory, params.fields, params.scoring);
+  return new TantivySearchIndex(
+    binding,
+    params.directory,
+    params.fields,
+    params.scoring,
+    params.mutationSeam,
+  );
 }
 
 class TantivySearchIndex implements SearchIndex {
@@ -109,6 +155,7 @@ class TantivySearchIndex implements SearchIndex {
   private readonly fieldNames: string[];
   private readonly weights: Record<string, number>;
   private readonly scoring: ScoringOptions;
+  private readonly mutationSeam: TantivyMutationSeam | undefined;
   private readonly tokenizer = createSkillTokenizer();
   private readonly schema: TantivySchema;
   private readonly index: TantivyIndex;
@@ -124,6 +171,7 @@ class TantivySearchIndex implements SearchIndex {
     directory: string,
     fields: Record<string, SearchFieldSpec>,
     scoring: ScoringOptions,
+    mutationSeam?: TantivyMutationSeam,
   ) {
     this.binding = binding;
     this.fieldNames = Object.keys(fields);
@@ -131,6 +179,7 @@ class TantivySearchIndex implements SearchIndex {
       this.fieldNames.map((field) => [field, fields[field].weight]),
     );
     this.scoring = scoring;
+    this.mutationSeam = mutationSeam;
     let index: TantivyIndex | null = null;
     let writer: TantivyWriter | null = null;
     try {
@@ -260,10 +309,29 @@ class TantivySearchIndex implements SearchIndex {
     return document;
   }
 
-  /** 提交并刷新 reader 视图（commit 阻塞发布；显式 reload 保证确定性）。 */
-  private commit(): void {
-    this.requireWriter().commit();
-    this.index.reload();
+  /** seam 直通包装（缺省零开销；测试注入失败点）。 */
+  private runSeamed(
+    seam: ((operation: () => void) => void) | undefined,
+    operation: () => void,
+  ): void {
+    if (seam) seam(operation);
+    else operation();
+  }
+
+  /**
+   * 提交并刷新 reader 视图（commit 阻塞发布；显式 reload 保证确定性）。
+   * progress.committed 在 writer.commit 返回瞬间经闭包置位——reload 失败会
+   * 从本方法抛出，但置位对外层 catch 存活：commit 返回即「已发布且持久化」
+   * （binding 契约），此后不得回滚盘面或撤销镜像。
+   */
+  private commit(progress: { committed: boolean }): void {
+    this.runSeamed(this.mutationSeam?.commit, () => {
+      this.requireWriter().commit();
+      progress.committed = true;
+    });
+    if (progress.committed) {
+      this.runSeamed(this.mutationSeam?.reload, () => this.index.reload());
+    }
   }
 
   private rollbackSilently(): void {
@@ -280,26 +348,36 @@ class TantivySearchIndex implements SearchIndex {
     const undo: Array<() => void> = [];
     // 同批同 id 的后续读改走批内最新状态（searcher 看不到未提交 delete）。
     const overlay = new Map<string, Map<string, string[]>>();
+    const progress = { committed: false };
     try {
       for (const doc of docs) {
         const previous = overlay.has(doc.id) ? overlay.get(doc.id) : this.fetchFieldTokens(doc.id);
         if (previous) {
           this.retractDocStats(previous);
           undo.push(() => this.applyDocStats(previous));
-          this.requireWriter().deleteDocumentsByTerm(ID_FIELD, doc.id);
+          this.runSeamed(this.mutationSeam?.write, () => {
+            this.requireWriter().deleteDocumentsByTerm(ID_FIELD, doc.id);
+          });
         }
         const perField = new Map(
           this.fieldNames.map((field) => [field, this.tokenizeField(doc.fields[field])]),
         );
         this.applyDocStats(perField);
         undo.push(() => this.retractDocStats(perField));
-        this.requireWriter().addDocument(this.newDocument(doc, perField));
+        this.runSeamed(this.mutationSeam?.write, () => {
+          this.requireWriter().addDocument(this.newDocument(doc, perField));
+        });
         overlay.set(doc.id, perField);
       }
-      this.commit();
+      this.commit(progress);
     } catch (error) {
-      this.rollbackSilently();
-      for (const inverse of undo.reverse()) inverse();
+      // commit 未完成：引擎 rollback + 镜像逆序回放（盘面与镜像同步还原）。
+      // commit 已完成（reload 失败）：盘面已持久化，不回滚不撤销——镜像保留
+      // 即已对齐已提交内容，SEARCH_IO 由调用方 close 重开自盘面重建。
+      if (!progress.committed) {
+        this.rollbackSilently();
+        for (const inverse of undo.reverse()) inverse();
+      }
       throw new SearchError("SEARCH_IO", "tantivy index mutation failed", { cause: error });
     }
   }
@@ -308,6 +386,7 @@ class TantivySearchIndex implements SearchIndex {
     this.assertOpen();
     const undo: Array<() => void> = [];
     const removedInBatch = new Set<string>();
+    const progress = { committed: false };
     try {
       for (const id of ids) {
         if (removedInBatch.has(id)) continue;
@@ -316,12 +395,16 @@ class TantivySearchIndex implements SearchIndex {
         if (!existing) continue;
         this.retractDocStats(existing);
         undo.push(() => this.applyDocStats(existing));
-        this.requireWriter().deleteDocumentsByTerm(ID_FIELD, id);
+        this.runSeamed(this.mutationSeam?.write, () => {
+          this.requireWriter().deleteDocumentsByTerm(ID_FIELD, id);
+        });
       }
-      this.commit();
+      this.commit(progress);
     } catch (error) {
-      this.rollbackSilently();
-      for (const inverse of undo.reverse()) inverse();
+      if (!progress.committed) {
+        this.rollbackSilently();
+        for (const inverse of undo.reverse()) inverse();
+      }
       throw new SearchError("SEARCH_IO", "tantivy index mutation failed", { cause: error });
     }
   }

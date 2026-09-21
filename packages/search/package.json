@@ -2,7 +2,7 @@
   "name": "@jixoai/search",
   "version": "0.0.1",
   "private": true,
-  "description": "General-purpose inverted-recall + frozen JS BM25 scoring search kernel (sqlite FTS5 now, tantivy next) — incubating inside skill-creator; pure domain library, no daemon/UI dependencies.",
+  "description": "General-purpose inverted-recall + frozen JS BM25 scoring search kernel (tantivy default, sqlite FTS5 fallback) — incubating private inside skill-creator; native tantivy binding is host-runtime-owned (root dependencies), NOT bundled here; pure domain library, no daemon/UI dependencies.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

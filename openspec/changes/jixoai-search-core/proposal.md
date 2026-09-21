@@ -21,7 +21,8 @@ Owner 三轮裁决（2026-09-21）收敛出一个一致方向：
 ### A. 新包 `@jixoai/search`（packages/search，孵化 private）
 
 - **通用文档/查询 API**（全 async）：`openIndex({ directory, fields+weight,
-backend })` → `upsert / remove / search({query,limit,offset}) / close`；
+backend })` → `upsert / remove / search(query, {limit, offset}) / close`
+  （search 为 MiniSearch 惯例的位置参数 query + 可选 options）；
   文档 = `{ id, fields, stored? }`（stored 回传不打分）；命中 = `{ id, score,
 stored }` + `total`。公共面零引擎概念泄漏。
 - **冻结分词内置**：NFKC + Intl.Segmenter(zh) + bigram 滑窗 + Latin 标识符

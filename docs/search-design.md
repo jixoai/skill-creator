@@ -521,6 +521,28 @@ token OR 乘数行为 score(doc) = 命中数 × Σ 单 token 贡献）。sqlite(
 纯引擎路线的差距根因：binding 不暴露 BM25 参数，d=0.5 底分与乘数分布无法
 从引擎侧对齐，且降地板等于基准回退，违反迁移门禁。
 
+**Phase 1 冻结规则补订（2026-09-21，codex 复核处置）**：
+
+- **长词 fuzzy 距离 canonical（P1-2）**：min(6, round(len×0.2)) 给出的距离
+  3-6 是 MiniSearch 7.2 的实测真实行为（对照实验 /tmp/jixoai-fuzzy-canonical.mjs
+  留存：len16 距离 3、len15 距离 3、len20 距离 4、len30 距离 6 均命中；距离
+  6>3（len16）与 7>6（len30）不命中；**且不按长度差钳 2**——len16→len13
+  删除与 len16→len19 插入的距离 3 变体均命中）。D1 冒烟脚本 levenshtein 助手
+  的 |m−n|>2 早退（固定返回 99）是其自身简化，非 MiniSearch 行为；包实现
+  （早退阈值 = maxDistance）以实测为准，冻结不回退，scoringDigest 不变。
+- **CJK 跳过 fuzzy（P2-3，已有实现行为的文档化）**：query token 含 Han/
+  Hiragana/Katakana/Hangul 任一 script 时跳过 fuzzy 变体展开（exact/prefix
+  不受影响）。中文经 Segmenter 词典词 + 滑窗 bigram 召回，逐码点编辑距离对
+  CJK 的语义贡献低而误召回高；此规则属冻结口径的一部分，非已知偏差。
+- **包级信封错误三态与重建收紧（P1-1）**：`@jixoai/search` 信封读取区分
+  missing（ENOENT → 正常新建）/ invalid（文件存在但 JSON/Zod 失败 → 重建）/
+  其余 fs 异常（EACCES/EIO/… → typed SEARCH_IO hard error，目录零改动）；
+  重建删除前审计目录内容——仅信封产物（envelope.json/.tmp）+ 信封声明
+  backend 的已知产物（sqlite：index.sqlite3[-journal/-wal/-shm]；tantivy：
+  meta.json/.managed.json/两个 lock/段文件/合并临时文件）+ OS 元数据噪音
+  （.DS_Store/Thumbs.db）可删，未知内容 SEARCH_IO 拒删且消息列名。这是
+  §10 错误矩阵「IO 故障保留原文件、不降级为空值」在包层的落地。
+
 观测（89 合成文档）：建索引 ~510ms；磁盘索引 89 KiB；查询 ~1ms；进程
 RSS +37MiB（native 库常驻 + mmap，对比 MiniSearch 10k 文档 103MB 纯堆，
 文档数增长时差距继续拉大）。

@@ -5,8 +5,9 @@
 ### Requirement: 通用索引/搜索 API（零引擎泄漏）
 
 `@jixoai/search` 的公共面 SHALL 只包含领域语义：`openIndex({ directory,
-fields, backend })`、`upsert(docs)`（同 id 覆盖的幂等写入）、`remove(id)`、
-`search({ query, limit, offset })` 返回 `{ hits: [{ id, score, stored }],
+fields, backend })`、`upsert(docs)`（同 id 覆盖的幂等写入）、`remove(ids)`、
+`search(query, { limit, offset })`（MiniSearch 惯例：位置参数 query 字符串 +
+可选 options）返回 `{ hits: [{ id, score, stored }],
 total }`、`close()`。全部方法 SHALL 为 async。引擎特定类型（tantivy
 schema/query/builder、SQLite 语句）MUST NOT 出现在公共导出、参数或返回
 类型中。
@@ -26,7 +27,7 @@ schema/query/builder、SQLite 语句）MUST NOT 出现在公共导出、参数�
 
 #### Scenario: 分页与总数
 
-- **WHEN** `search({ query, limit, offset })` 的结果超过单页
+- **WHEN** `search(query, { limit, offset })` 的结果超过单页
 - **THEN** 返回的 `total` 反映去重后的命中总数，翻页由 `offset` 递进，
   排序稳定可重放
 
@@ -64,13 +65,27 @@ token。`TOKENIZER_VERSION` SHALL 随包版本化，口径变化 MUST 递增。
 ### Requirement: 索引信封版本化与自动重建
 
 索引目录 SHALL 携带信封（backend 标识 + tokenizerVersion + 字段 schema
-指纹）。`openIndex` 发现信封不匹配时 MUST 丢弃旧索引并以空索引重建，
-MUST NOT 抛基础设施错误或读取不兼容结构。
+指纹）。`openIndex` 发现信封不匹配（缺失/损坏/指纹不符）且目录内容全部
+属于索引已知产物时 MUST 丢弃旧索引并以空索引重建，MUST NOT 读取不兼容
+结构。信封读取遇到 IO 故障（EACCES/EIO/…）或目录含未知非索引内容时
+MUST 以 typed `SEARCH_IO` hard error 拒绝并保留原文件，MUST NOT 降级为
+空索引重建（对齐 docs/search-design.md §10 错误矩阵）。
 
 #### Scenario: tokenizer 升级后旧索引自动重建
 
 - **WHEN** `TOKENIZER_VERSION` 递增后打开既有索引目录
 - **THEN** `openIndex` 成功返回空索引（调用方重新灌数据），无异常
+
+#### Scenario: 目录混入未知内容时拒绝重建
+
+- **WHEN** 信封不匹配的目录中存在非索引产物文件（如用户数据）
+- **THEN** `openIndex` 抛 typed `SEARCH_IO` 且消息列出未知文件，目录字节
+  原样保留
+
+#### Scenario: 信封读取 IO 故障不伪装成重建
+
+- **WHEN** 信封读取因权限或磁盘 IO 异常失败
+- **THEN** `openIndex` 抛 typed `SEARCH_IO`，目录零改动
 
 ### Requirement: 前置验证门（D1 冒烟 + D2 供应链）
 

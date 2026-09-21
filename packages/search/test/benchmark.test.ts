@@ -12,9 +12,14 @@
  *   [2] 重开逐位重放：同目录 close 后重开，45 query 的分页结果 JSON 逐字节一致
  *       （持久化 + 打分统计镜像重建的确定性契约）。
  *
- * 与主仓基准的口径差异（有意声明）：包 API 不做 contentHash 折叠与 rerank（属消费方
- * ranking v2 职责）；评测在测试侧按 name 折叠（content 重复 ⟹ name 相同，为产品
- * contentHash 折叠的上界近似），排序即冻结 score desc → id asc。
+ * 与主仓基准的口径差异（有意声明，P2-2 强化）：本测试是包级资格地板，不是产品
+ * 口径——包 API 不做 contentHash 折叠与 rerank（属消费方 ranking v2 职责）；
+ * 评测在测试侧按 name 折叠，仅是产品侧 contentHash 折叠的**上界近似**（content
+ * 重复 ⟹ name 相同的假设在合成语料上成立，真实语料不保证），排序即冻结
+ * score desc → id asc。因此本文件实测指标（如 MRR 0.985）与 §15 D1 oracle 的
+ * 0.959 属不同评测口径，不得互相引用为回归证据；Phase 2 迁移放行以消费方
+ * （skill-search）真实 contentHash + rerank 门禁为准，届时重跑并以此为包级
+ * 地板的上位替代。
  */
 import fs from "node:fs";
 import os from "node:os";

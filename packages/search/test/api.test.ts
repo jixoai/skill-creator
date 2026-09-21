@@ -20,6 +20,19 @@ import { openIndex, SearchError, type SearchBackend, type SearchIndex } from "..
 
 const FIELDS = { name: { weight: 10 }, body: { weight: 1 } };
 
+// 长 token fuzzy 冻结期望（P1-2；变体真实码点编辑距离经独立 DP 校准：
+// len16 同长度距离 3 / len13 删除距离 3（|Δlen|=3）/ len16 距离 6 > 上限 3；
+// len30 距离 6 = 上限 / 距离 7 > 上限。canonical 证据 /tmp/jixoai-fuzzy-canonical.mjs：
+// MiniSearch 7.2 长词真实接受距离 3-6 且不按长度差钳 2——D1 冒烟 |m−n|>2 早退
+// 是其自身简化）。
+const LONG_WORD_16 = "abcdefghijklmnop";
+const LONG_WORD_16_DIST_3_SAME_LENGTH = "abcxefghiqklmnwp";
+const LONG_WORD_16_DIST_3_DELETION = "abcefghiklmnp";
+const LONG_WORD_16_DIST_6 = "abxdeqghwjkzmjok";
+const LONG_WORD_30 = "abcdefghijklmnopqrstuvwxyzabcd";
+const LONG_WORD_30_DIST_6 = "abcqefghwjklmxopqrztuvwjyzabkd";
+const LONG_WORD_30_DIST_7 = "abqdefwhijxlmnzpqrjtuvkxyzvbcd";
+
 let sandbox = "";
 let index: SearchIndex | null = null;
 
@@ -177,6 +190,41 @@ for (const backend of ["sqlite", "tantivy"] as const satisfies readonly SearchBa
       expect(prefix.hits[0]?.id).toBe("reactive");
     });
 
+    it("recalls long tokens at frozen fuzzy distances 3-6 (MiniSearch canonical)", async () => {
+      const search = await openTestIndex(backend);
+      await search.upsert([
+        { id: "w16", fields: { name: LONG_WORD_16, body: "" } },
+        { id: "w30", fields: { name: LONG_WORD_30, body: "" } },
+      ]);
+      // len16 上限 = min(6, round(16×0.2)) = 3：距离 3 命中（同长度替换与
+      // |Δlen|=3 删除两种形态——后者正是冒烟 |m−n|>2 早退会错误拒绝的形态）。
+      expect(
+        (await search.search(LONG_WORD_16_DIST_3_SAME_LENGTH)).hits.map((hit) => hit.id),
+      ).toEqual(["w16"]);
+      expect((await search.search(LONG_WORD_16_DIST_3_DELETION)).hits.map((hit) => hit.id)).toEqual(
+        ["w16"],
+      );
+      // 距离 6 > 3：不命中。
+      expect((await search.search(LONG_WORD_16_DIST_6)).total).toBe(0);
+      // len30 上限 = min(6, round(30×0.2)) = 6：距离 6 命中、距离 7 不命中。
+      expect((await search.search(LONG_WORD_30_DIST_6)).hits.map((hit) => hit.id)).toEqual(["w30"]);
+      expect((await search.search(LONG_WORD_30_DIST_7)).total).toBe(0);
+    });
+
+    it("retrieves long CJK words exactly without fuzzy drift", async () => {
+      const search = await openTestIndex(backend);
+      await search.upsert([
+        { id: "idiom", fields: { name: "实事求是", body: "" } },
+        { id: "other", fields: { name: "软件工程", body: "" } },
+      ]);
+      // CJK 词精确命中（Segmenter 词典词为单 token）。
+      expect((await search.search("实事求是")).hits.map((hit) => hit.id)).toEqual(["idiom"]);
+      // CJK 跳过 fuzzy（P2-3 冻结规则）：同字集错排查询（是事/事求/求实 与文档
+      // token 实事求是 无 exact/prefix 关系）零召回——若 CJK fuzzy 未跳过，
+      // 1-2 码点编辑距离的 bigram 变体将命中。拉丁同距 typo 对照见上一下用例。
+      expect((await search.search("是事求实")).total).toBe(0);
+    });
+
     it("retrieves mixed Chinese/English corpora (bigram, camelCase, npm scope)", async () => {
       const search = await openTestIndex(backend);
       await search.upsert([
@@ -206,6 +254,31 @@ for (const backend of ["sqlite", "tantivy"] as const satisfies readonly SearchBa
       await expect(
         search.upsert([{ id: "a", fields: { unknown: "x" } } as never]),
       ).rejects.toMatchObject({ code: "SEARCH_INVALID_ARGUMENT" });
+      // 容器收窄（P1-3）：null/非数组的 upsert/remove/search 入参 typed 拒绝，
+      // 不得裸 TypeError。
+      await expect(search.upsert(null as never)).rejects.toBeInstanceOf(SearchError);
+      await expect(search.upsert(undefined as never)).rejects.toMatchObject({
+        code: "SEARCH_INVALID_ARGUMENT",
+      });
+      await expect(search.upsert("not-an-array" as never)).rejects.toMatchObject({
+        code: "SEARCH_INVALID_ARGUMENT",
+      });
+      await expect(search.remove(null as never)).rejects.toBeInstanceOf(SearchError);
+      await expect(search.remove(42 as never)).rejects.toMatchObject({
+        code: "SEARCH_INVALID_ARGUMENT",
+      });
+      await expect(search.search(null as never)).rejects.toBeInstanceOf(SearchError);
+      await expect(search.search(7 as never)).rejects.toMatchObject({
+        code: "SEARCH_INVALID_ARGUMENT",
+      });
+      // 混合批次：一条合法一条非法 → 整批拒绝、零写入。
+      await expect(
+        search.upsert([
+          { id: "would-exist", fields: { name: "zero write proof" } },
+          { id: "", fields: { name: "invalid empty id" } },
+        ]),
+      ).rejects.toMatchObject({ code: "SEARCH_INVALID_ARGUMENT" });
+      expect((await search.search("zero write proof")).total).toBe(0);
       await expect(search.search("x", { limit: 101 })).rejects.toMatchObject({
         code: "SEARCH_INVALID_ARGUMENT",
       });

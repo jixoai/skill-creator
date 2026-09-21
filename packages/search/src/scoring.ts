@@ -8,8 +8,11 @@
  *   [2] 变体展开：exact ∪ prefix 前缀扩展 ∪ fuzzy 编辑距离扩展（CJK 词跳过 fuzzy），
  *       供打分与后端召回共用，保证两后端候选口径一致。
  *   [3] 打分配置指纹：scoringDigest 进索引信封，任何打分口径变化强制全量重建。
- * 妥协声明：levenshtein 早退阈值取 maxDistance（冒烟脚本硬编码 2，是其 maxFuzzy=6
- * 语义在长词上的已知收敛化——此处按冻结语义 min(6, round(len×0.2)) 忠实实现）。
+ * 妥协声明：长词 fuzzy 距离以 MiniSearch 实测为 canonical（2026-09-21 对照实验
+ * /tmp/jixoai-fuzzy-canonical.mjs：MiniSearch 7.2 对 len≥15 的 query 词真实接受
+ * 编辑距离 3-6，且不按长度差钳 2——len16→len13 删除距离 3 命中）；D1 冒烟脚本
+ * 的 |m−n|>2 早退是其自身简化，非 MiniSearch 行为。levenshtein 早退阈值取
+ * maxDistance = min(6, round(len×fuzzy))，与实测一致。
  */
 import { createHash } from "node:crypto";
 
@@ -165,7 +168,9 @@ export function expandQueryToken(
 }
 
 /**
- * 冻结口径打分（/tmp/tantivy-smoke/benchmark-run.mjs jsRescore 原样移植）：
+ * 冻结口径打分（/tmp/tantivy-smoke/benchmark-run.mjs jsRescore 移植；长词
+ * fuzzy 早退细节以 MiniSearch 实测 canonical 实验 /tmp/jixoai-fuzzy-canonical.mjs
+ * 修正——冒烟 |m−n|>2 早退为其自身简化，实测 MiniSearch 不按长度差钳 2）：
  * 对召回候选按 query token × field × 变体词累加贡献，再乘以命中 token 数。
  * 返回 docId → score（score > 0 即命中；total 口径 = 返回条数）。
  */

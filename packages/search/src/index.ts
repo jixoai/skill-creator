@@ -1,21 +1,24 @@
 /**
  * 用户原始需求 [2026-09-21]：「通用 API 提供索引/搜索能力……检索是 jixoai 通用能力
  * （skill 检索与 wiki 查重只是前两个消费方），包名 @jixoai/search。」
- * （jixoai-search-core proposal §A。）
+ * （jixoai-search-core proposal §A；2026-09-21 codex P1-1/P1-3 处置。）
  * 正交意图：
  *   [1] 公共面出口：契约类型 + typed 错误 + openIndex（含 zod 参数收窄）。
- *   [2] 信封编排：目录存在且信封匹配 → 复用；缺失/不兼容/不匹配 → 删除重建空索引。
+ *   [2] 信封编排：目录存在且信封匹配 → 复用；缺失/invalid/不匹配 → 目录内容
+ *       审计（仅信封 + backend 已知产物）通过才删除重建空索引，未知内容
+ *       SEARCH_IO 拒删；信封读取的 IO 异常在 envelope 层 hard error（三态）。
  *   [3] 后端分派：tantivy 默认（native binding 动态 import，缺失/平台不支持
  *       typed SEARCH_BACKEND_UNAVAILABLE）；sqlite 回落（Node 24 内置 FTS5）。
- * 妥协声明：目录由索引独占拥有（信封不匹配整目录删除重建；backend 名进信封，
- * 切换 backend = 信封不匹配 = 重建）；字段名限于 [A-Za-z0-9_]{1,64}
- * （sqlite 列名安全性），消费者用语义化短名声明字段。
+ * 妥协声明：目录由索引独占拥有（重建仅删除 backend 已知产物 + 信封 + OS 元数据
+ * 噪音；backend 名进信封，切换 backend = 信封不匹配 = 重建）；字段名限于
+ * [A-Za-z0-9_]{1,64}（sqlite 列名安全性），消费者用语义化短名声明字段。
  */
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { SearchError, type OpenIndexOptions, type SearchIndex } from "./api.js";
+import { SearchError, type OpenIndexOptions, type SearchBackend, type SearchIndex } from "./api.js";
 import {
+  ENVELOPE_FILE_NAME,
   ENVELOPE_SCHEMA_VERSION,
   computeFieldsDigest,
   envelopeMatches,
@@ -24,8 +27,12 @@ import {
 } from "./envelope.js";
 import { scoringOptionsDigest, type ScoringOptions } from "./scoring.js";
 import { TOKENIZER_VERSION } from "./tokenizer.js";
-import { openSqliteIndex } from "./backends/sqlite.js";
-import { assertTantivyBackendAvailable, openTantivyIndex } from "./backends/tantivy.js";
+import { isSqliteArtifactName, openSqliteIndex } from "./backends/sqlite.js";
+import {
+  assertTantivyBackendAvailable,
+  isTantivyArtifactName,
+  openTantivyIndex,
+} from "./backends/tantivy.js";
 
 export * from "./api.js";
 export { TOKENIZER_VERSION, createSkillTokenizer, type SkillTokenizer } from "./tokenizer.js";
@@ -124,7 +131,46 @@ function parseQueryOptions(options: unknown): z.infer<typeof QueryOptionsSchema>
   return parsed.data;
 }
 
-/** 打开（必要时创建）索引；信封不匹配自动删除重建空索引。 */
+/** 信封与原子写自身的产物（重建 allowlist 的公共部分）。 */
+const ENVELOPE_ARTIFACT_NAMES: ReadonlySet<string> = new Set([
+  ENVELOPE_FILE_NAME,
+  `${ENVELOPE_FILE_NAME}.tmp`,
+]);
+/** 与索引无关但可安全随重建丢弃的 OS 元数据（macOS Finder / Windows 缩略图缓存）。 */
+const IGNORABLE_OS_METADATA_NAMES: ReadonlySet<string> = new Set([".DS_Store", "Thumbs.db"]);
+
+const BACKEND_ARTIFACT_TESTS: Record<SearchBackend, (name: string) => boolean> = {
+  sqlite: isSqliteArtifactName,
+  tantivy: isTantivyArtifactName,
+};
+
+/**
+ * 重建前目录内容审计（P1-1 数据安全）：每个条目必须是信封产物或给定 backend
+ * 集的已知产物；发现未知内容 → SEARCH_IO（消息列出未知文件），不删任何东西。
+ * 信封读取层的 EACCES/EIO 已先行 hard error，此处拦截的是「目录里混有非索引
+ * 文件」的误删（如 sentinel/用户数据）。
+ */
+function assertDirectoryOwnedByIndex(directory: string, backends: readonly SearchBackend[]): void {
+  const unknown = fs
+    .readdirSync(directory, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        !ENVELOPE_ARTIFACT_NAMES.has(entry.name) &&
+        !IGNORABLE_OS_METADATA_NAMES.has(entry.name) &&
+        !backends.some((backend) => BACKEND_ARTIFACT_TESTS[backend](entry.name)),
+    )
+    .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name));
+  if (unknown.length > 0) {
+    throw new SearchError(
+      "SEARCH_IO",
+      `index directory ${directory} contains unknown non-index content ` +
+        `(${unknown.join(", ")}); refusing to rebuild — remove it manually or ` +
+        `open the index in a dedicated empty directory`,
+    );
+  }
+}
+
+/** 打开（必要时创建）索引；信封缺失/invalid/不匹配 → 目录审计通过后删除重建。 */
 export async function openIndex(options: OpenIndexOptions): Promise<SearchIndex> {
   const parsed = parseOpenOptions(options);
   const scoring: ScoringOptions = { fuzzy: parsed.fuzzy, prefix: parsed.prefix };
@@ -157,7 +203,13 @@ export async function openIndex(options: OpenIndexOptions): Promise<SearchIndex>
       ) {
         fresh = false;
       } else {
-        // 信封不匹配（含缺失/损坏）：删除重建空索引，不抛错。
+        // 信封缺失/invalid/不匹配：目录内容审计（合法信封按其声明 backend 定产物
+        // 归属；缺失/invalid 按两后端并集）通过才删除重建，未知内容 SEARCH_IO 拒删。
+        const owners: readonly SearchBackend[] =
+          envelope.status === "ok" && envelope.envelope
+            ? [envelope.envelope.backend]
+            : ["sqlite", "tantivy"];
+        assertDirectoryOwnedByIndex(parsed.directory, owners);
         fs.rmSync(parsed.directory, { recursive: true, force: true });
         fs.mkdirSync(parsed.directory, { recursive: true });
       }
@@ -197,11 +249,18 @@ export async function openIndex(options: OpenIndexOptions): Promise<SearchIndex>
   return wrapIndex(index, parsed.fields);
 }
 
-/** 校验装饰：mutation/查询参数在分派后端前统一 typed 拒绝。 */
+/** 校验装饰：mutation/查询参数在分派后端前统一 typed 拒绝（含容器收窄，P1-3）。 */
 function wrapIndex(index: SearchIndex, fields: Record<string, { weight: number }>): SearchIndex {
   const fieldNames = new Set(Object.keys(fields));
   return {
-    upsert: async (docs) => index.upsert(parseDocuments(docs, fieldNames)),
+    upsert: async (docs) => {
+      // 容器先收窄：null/undefined/非数组 → typed 拒绝（不得裸 TypeError）。
+      const container = z.array(z.unknown()).safeParse(docs);
+      if (!container.success) {
+        throw new SearchError("SEARCH_INVALID_ARGUMENT", "upsert requires an array of documents");
+      }
+      await index.upsert(parseDocuments(container.data, fieldNames));
+    },
     remove: async (ids) => {
       const parsed = z.array(z.string().min(1)).safeParse(ids);
       if (!parsed.success) {

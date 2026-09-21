@@ -48,6 +48,22 @@ const StoredSchema = z.record(z.string(), z.unknown());
 /** 索引目录内 sqlite 文件名。 */
 const DATABASE_FILE_NAME = "index.sqlite3";
 
+/**
+ * sqlite 后端产物判定（重建删除的 allowlist，P1-1）：主库文件 + 崩溃残留的
+ * rollback journal（journal_mode=DELETE）；-wal/-shm 为防御性纳管（当前配置
+ * 不产生，但旧目录残留不应阻塞重建）。
+ */
+const SQLITE_ARTIFACT_NAMES: ReadonlySet<string> = new Set([
+  DATABASE_FILE_NAME,
+  `${DATABASE_FILE_NAME}-journal`,
+  `${DATABASE_FILE_NAME}-wal`,
+  `${DATABASE_FILE_NAME}-shm`,
+]);
+
+export function isSqliteArtifactName(name: string): boolean {
+  return SQLITE_ARTIFACT_NAMES.has(name);
+}
+
 export function openSqliteIndex(params: {
   directory: string;
   fields: Record<string, SearchFieldSpec>;
