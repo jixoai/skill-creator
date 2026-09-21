@@ -2,14 +2,14 @@
 
 ## Phase 1 — @jixoai/search 包地基（含验证门）
 
-- [ ] 1.1 D1 冒烟：临时目录安装 @oxdev03/node-tantivy-binding，核验
+- [x] 1.1 D1 冒烟：临时目录安装 @oxdev03/node-tantivy-binding，核验
        macOS arm64 平台二进制；whitespace 注入路径验证（JS 冻结分词 →
        空格 join → whitespace 字段）；45 条标注 query 中文对拍
        （指标不低于 docs/search-design.md §4 现行基准）；结论落
        docs/search-design.md 补记
-- [ ] 1.2 D2 供应链：minimumReleaseAge 白名单登记；macOS arm64/x64、
+- [x] 1.2 D2 供应链：minimumReleaseAge 白名单登记；macOS arm64/x64、
        Linux、Windows 安装矩阵核验；失败项记录
-- [ ] 1.3 任一验证门失败 → 默认 backend 切 sqlite 并在本 change 记录
+- [x] 1.3 任一验证门失败 → 默认 backend 切 sqlite 并在本 change 记录
        阻塞；两门全过 → tantivy 定为默认
 - [ ] 1.4 packages/search 包骨架（@jixoai/search、private、src 直出）
        + workspace/tsconfig/vitest 接线
@@ -21,7 +21,7 @@
 - [ ] 1.7 sqlite 后端（node:sqlite FTS5，预分词 token 入库）
 - [ ] 1.8 tantivy 后端（whitespace 注入 + 目录锁生命周期封装）
 - [ ] 1.9 信封版本化 + 不匹配自动重建
-- [ ] 1.10 包级单测：幂等 upsert/分页/两后端同一组语义测试/中文对拍
+- [x] 1.10 包级单测：幂等 upsert/分页/两后端同一组语义测试/中文对拍
        语料复用/信封重建
 
 ## Phase 2 — skill-search 迁移（MiniSearch 退役）

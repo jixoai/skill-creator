@@ -493,3 +493,56 @@ LexicalSearch（本 change）→ rpc skills.search（daemon 域过程，GUI Queu
 daemon rpc-router 加 `skills.search` 过程 + webui ProviderView 的 `q`
 参数改走后端搜索，即可让 composer `$` 引用、Workspaces 过滤等全部消费
 同一索引——本 change 的接口按此消费方设计，不在本 change 实施。
+
+## 15. Tantivy 落地验证与架构定型（2026-09-21，jixoai-search-core D1/D2）
+
+Owner 裁决提前触发 §3.1 的 Tantivy 评估（内存红线取代 >10k 文档触发条件）。
+两个前置验证门结论：
+
+### D1 冒烟（PASS；/tmp/tantivy-smoke/，脚本与 benchmark-result.json 留存）
+
+「JS 冻结分词 → 空格 join → tantivy `whitespace` tokenizer 字段」注入路径可用。
+两条架构路线的 45 条标注 query 对拍（语料复刻等价性已证：主仓真管线跑复刻
+语料与 vitest oracle 逐位一致）：
+
+| 路线                                | R@5   | MRR   | typo R@5 | 判定                |
+| ----------------------------------- | ----- | ----- | -------- | ------------------- |
+| 冻结地板                            | 0.95  | 0.95  | 1.00     | —                   |
+| oracle（MiniSearch 现役）           | 0.993 | 0.959 | 1.00     | 基准                |
+| tantivy 召回 + JS 冻结打分 + rerank | 0.993 | 0.959 | 1.00     | **逐位复原，采用**  |
+| tantivy 原生 BM25 + rerank          | 0.978 | 0.963 | 0.93     | typo 差 1 hit，弃用 |
+
+**定型（tasks 1.3）**：`@jixoai/search` 默认后端 = tantivy，架构 =「后端只做
+倒排召回与持久化，BM25 变体打分在 JS 共享层」——打分常量冻结自 MiniSearch
+实测算术（k1=1.2 / b=0.7 / **底分 d=0.5**；fuzzy/prefix 折扣 0.45/0.375，
+prefix 前缀扩展按 L/(L+0.3d) 衰减；fuzzy 距离 = min(6, round(len×0.2))；多
+token OR 乘数行为 score(doc) = 命中数 × Σ 单 token 贡献）。sqlite(FTS5)
+回落后端共享同一 JS 打分层（两后端仅召回实现不同，语义测试逐位一致）。
+纯引擎路线的差距根因：binding 不暴露 BM25 参数，d=0.5 底分与乘数分布无法
+从引擎侧对齐，且降地板等于基准回退，违反迁移门禁。
+
+观测（89 合成文档）：建索引 ~510ms；磁盘索引 89 KiB；查询 ~1ms；进程
+RSS +37MiB（native 库常驻 + mmap，对比 MiniSearch 10k 文档 103MB 纯堆，
+文档数增长时差距继续拉大）。
+
+### D2 供应链（PASS 有条件；/tmp/tantivy-d2/）
+
+0.3.3（2026-08-23 发布，年龄 29 天）：13/13 平台子包 registry 存在、os/cpu
+一致；四主力平台 tarball 实测下载，sha512 与 integrity 重算一致，.node 二
+进制 file 识别正确；发布链含 SLSA provenance + 签名。风险登记：solo 维护
+（bus factor 1）、周下载 108——由 sqlite 回落策略对冲。
+
+**白名单决策：暂不登记** `minimumReleaseAgeExclude`。事实：主仓未配置
+`minimumReleaseAge`（门禁关闭，grep 全仓 + `pnpm config get` 均空；D2 纠正
+了「19 条」的误记——现有 exclude 174 条）；且 0.3.3 于 2026-09-22T13:43Z
+满 30 天，早于任何可能的门禁启用时点。触发条件：未来开启门禁（≤30 天档）
+且升级到发布不足 30 天的新版本时，按 opentray 段样式登记主包 + 13 平台
+子包（草案 14 条见 /tmp/tantivy-d2/report.md §5）。
+
+### binding 实现注意事项（自 D1 实测，喂给包实现）
+
+static 方法宿主是 `TokenizerStatic`（非 .d.ts 字面）；`fuzzyTermQuery`
+distance 上限 2；`regexQuery` 拒绝可空算子（不能当 prefix 用）；
+`termSetQuery` 常数分无 BM25 权重（前缀扩展须逐 term `termQuery`）；
+`Index` 要求目录已存在；`garbageCollectFiles` 是 no-op（增量删除的膨胀
+风险由信封重建兜底）。
