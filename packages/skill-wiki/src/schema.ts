@@ -80,7 +80,8 @@ export type SkillWikiErrorCode =
   | "WIKI_INVALID_PATTERN"
   | "WIKI_INVALID_SCOPE"
   | "WIKI_SCOPE_REGISTRY"
-  | "WIKI_SCOPE_CONFLICT";
+  | "WIKI_SCOPE_CONFLICT"
+  | "WIKI_IO";
 export class SkillWikiError extends Error {
   readonly code: SkillWikiErrorCode;
   constructor(code: SkillWikiErrorCode, message: string, options?: { cause?: unknown }) {

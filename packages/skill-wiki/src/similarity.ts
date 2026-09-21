@@ -19,7 +19,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { openIndex, type SearchDocument, type SearchIndex } from "@jixoai/search";
-import { patternContentHash, type WikiScope } from "./workspace.js";
+import { createHash } from "node:crypto";
+import { SkillWikiError } from "./schema.js";
+import type { WikiScope } from "./workspace.js";
+
+/**
+ * corpus 指纹 = 完整搜索投影（title+body）的版本化 digest——搜索投影包含 title
+ * （patternSearchDoc），指纹必须覆盖同一投影，否则标题-only 外部编辑漏检
+ * （codex r6 P1-2 边界）。
+ */
+const PROJECTION_DIGEST_VERSION = 1;
+function patternProjectionHash(title: string, body: string): string {
+  return createHash("sha256")
+    .update(`${PROJECTION_DIGEST_VERSION}\n${title}\n${body}`)
+    .digest("hex");
+}
 
 /**
  * @jixoai/search 的信封文件名（包内 ENVELOPE_FILE_NAME 常量未从公共面导出）。
@@ -92,13 +106,20 @@ function readEnvelopeFingerprint(directory: string): string | null {
   }
 }
 
-/** 读取 corpus 登记（缺失/不兼容 = null：派生物语义，缺失即全量重建）。 */
+/**
+ * 读取 corpus 登记。ENOENT 或内容不兼容 = null（派生物语义，缺失即重建）；
+ * 其余 IO 异常（权限/磁盘）typed 上抛——IO 故障不得折叠成「重建」去删派生目录
+ * （codex r6 低优先级注意项）。
+ */
 function readCorpus(file: string): Map<string, string> | null {
   let raw: string;
   try {
     raw = fs.readFileSync(file, "utf8");
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new SkillWikiError("WIKI_IO", `failed to read similarity corpus: ${file}`, {
+      cause: error,
+    });
   }
   let json: unknown;
   try {
@@ -141,7 +162,9 @@ export async function openScopeSearchIndex(
   const directory = scopeSearchIndexDirectory(wikiRoot, scope);
   const corpusFile = scopeCorpusRegistryFile(wikiRoot, scope);
   const patterns = loadPatterns();
-  const desired = new Map(patterns.map((source) => [source.name, patternContentHash(source.body)]));
+  const desired = new Map(
+    patterns.map((source) => [source.name, patternProjectionHash(source.title, source.body)]),
+  );
 
   const corpus = readCorpus(corpusFile);
   if (corpus === null) {
@@ -194,7 +217,9 @@ export function registerScopeCorpusEntries(
 ): void {
   const file = scopeCorpusRegistryFile(wikiRoot, scope);
   const corpus = readCorpus(file) ?? new Map<string, string>();
-  for (const source of sources) corpus.set(source.name, patternContentHash(source.body));
+  for (const source of sources) {
+    corpus.set(source.name, patternProjectionHash(source.title, source.body));
+  }
   writeCorpus(file, corpus);
 }
 

@@ -271,6 +271,21 @@ describe("external pattern drift (corpus registry, final review P1-2)", () => {
     const kept = await run(["find", "keeper body", "--json"]);
     expect((JSON.parse(kept.stdout) as { total: number }).total).toBe(1);
   });
+
+  it("find reflects externally title-only edits (projection fingerprint, r6 P1-2)", async () => {
+    const wiki = openWikiWorkspace(path.join(root, "~"));
+    wiki.appendPattern({ title: "Old title", body: "stable body\n" });
+    await run(["find", "stable body"]); // 打开一次索引（corpus 登记投影指纹）
+    // 模拟外部编辑器：直接改 frontmatter 标题、body 不动——指纹必须覆盖 title 才能检出漂移。
+    const pageFile = path.join(root, "~", "patterns", "old-title.md");
+    const raw = fs.readFileSync(pageFile, "utf8");
+    fs.writeFileSync(pageFile, raw.replace("title: Old title", "title: Zzuniqueqwerty"), "utf8");
+
+    const found = await run(["find", "Zzuniqueqwerty", "--json"]);
+    const payload = JSON.parse(found.stdout) as { results: { name: string }[]; total: number };
+    expect(payload.total).toBe(1);
+    expect(payload.results[0]?.name).toBe("old-title");
+  });
 });
 
 describe("edit atomicity and remove footprint", () => {
