@@ -47,7 +47,11 @@ export default defineConfig({
           name: "node",
           plugins: [resolveTypeScriptSources()],
           environment: "node",
-          include: ["test/**/*.test.ts", "webui/config/**/*.test.ts"],
+          include: [
+            "test/**/*.test.ts",
+            "webui/config/**/*.test.ts",
+            "packages/skill-wiki/test/**/*.test.ts",
+          ],
           exclude: ["webui/src/**"],
           globals: false,
           fileParallelism: false,
@@ -76,6 +80,14 @@ export default defineConfig({
               replacement: path.join(
                 projectRoot,
                 "webui/src/lib/__tests__/stubs/app-navigation-stub.ts",
+              ),
+            },
+            // $app/state 同理（组件级测试 mount 的视图 import page）。
+            {
+              find: "$app/state",
+              replacement: path.join(
+                projectRoot,
+                "webui/src/lib/__tests__/stubs/app-state-stub.ts",
               ),
             },
             // @lucide/svelte 图标是 node_modules 的 .svelte——root vitest 管线

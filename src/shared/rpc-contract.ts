@@ -136,6 +136,14 @@ import {
   WorkspaceIdSchema,
   WorkspaceSchema,
 } from "./contracts/workspaces.js";
+import {
+  WikiAppendInputSchema,
+  WikiAppendResultSchema,
+  WikiListInputSchema,
+  WikiReadInputSchema,
+  WikiReadResultSchema,
+} from "./contracts/wiki.js";
+import { PatternListItemSchema } from "skill-wiki/schema";
 
 const WorkspaceProviderReadInputSchema = z.object({
   ...WorkspaceProviderTargetSchema.shape,
@@ -287,6 +295,19 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       /** Remove one user-persisted source; built-in ids are rejected. */
       remove: oc.input(RemoveUserSourceInputSchema).output(z.object({ removed: z.literal(true) })),
     },
+  },
+  wiki: {
+    /**
+     * skill-wiki 知识库面（双级 scope：Global `~` + per-Imported ws_*）：
+     * direct mutation（碎片追加不经 proposal 审批链——spec 裁决 2026-09-21）。
+     */
+    list: oc
+      .input(WikiListInputSchema)
+      .output(z.object({ patterns: z.array(PatternListItemSchema) })),
+    /** 读单 pattern 全文（frontmatter + body）。 */
+    read: oc.input(WikiReadInputSchema).output(WikiReadResultSchema),
+    /** 追加碎片认知（contentHash 幂等去重；deduplicated=true 表示未新建页）。 */
+    append: oc.input(WikiAppendInputSchema).output(WikiAppendResultSchema),
   },
   daemon: {
     /** Read the live daemon and tray status. */

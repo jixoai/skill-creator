@@ -24,6 +24,18 @@ export const workspacesApp = defineApp({
         component: () => import("./WorkspacesHome.svelte"),
       }),
     }),
+    // wiki tab：双级 scope 的碎片认知知识库（skill-wiki）。必须排在 provider
+    // activity 之前——`:wsId/:providerId` 会结构性吞掉 `wiki/<scope>` 并触发
+    // params parse-error 的渲染前重定向；静态段 wiki 先匹配才能落进 wiki 视图。
+    defineActivity({
+      pattern: "/workspaces",
+      root: defineRoute({
+        id: "workspaces.wiki",
+        pattern: "wiki/:wsId",
+        params: z.object({ wsId: WorkspaceIdSchema }),
+        component: () => import("./WikiView.svelte"),
+      }),
+    }),
     // 实例 tab：某个 Workspace.Provider 的技能列表 + 详情
     defineActivity({
       pattern: "/workspaces",

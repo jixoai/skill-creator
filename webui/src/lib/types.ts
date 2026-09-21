@@ -49,3 +49,6 @@ export type {
   WorkspaceProvider,
   WorkspaceProviderTarget,
 } from "$shared/contracts/workspaces.js";
+/** skill-wiki 知识库（双级 scope 碎片认知）使用的共享类型。 */
+export type { WikiAppendResult, WikiReadResult } from "$shared/contracts/wiki.js";
+export type { PatternListItem } from "skill-wiki/schema";

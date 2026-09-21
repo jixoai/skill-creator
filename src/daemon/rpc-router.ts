@@ -126,6 +126,14 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         ),
       },
     },
+    wiki: {
+      // skill-wiki 双级知识库面：direct mutation（spec 裁决，不经 proposal 链）。
+      list: rpc.wiki.list.handler(({ input }) => domain.wiki.list(input.scope)),
+      read: rpc.wiki.read.handler(({ input }) => domain.wiki.read(input.scope, input.name)),
+      append: rpc.wiki.append.handler(({ input }) =>
+        domain.wiki.append(input.scope, { title: input.title, body: input.body }),
+      ),
+    },
     daemon: {
       status: rpc.daemon.status.handler(() => status()),
     },

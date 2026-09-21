@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { appDir } from "../shared/paths.js";
 
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
+import { createWikiService, type WikiService } from "./wiki-service.js";
 import { createSkillSearchService, type SkillSearchService } from "./skill-search/service.js";
 import { platformOpenFile, type SearchConfigOpener } from "./search-config-opener.js";
 import { createDialogService, type DialogService } from "./dialog-service.js";
@@ -82,6 +83,8 @@ export interface DaemonDomain {
   searchConfigOpener: SearchConfigOpener;
   /** 原生目录选择器（tray 挂载后 attach；ext-dialog 集成）。 */
   dialog: DialogService;
+  /** 双级 wiki 知识库（skill-wiki 领域库委派；direct mutation 面）。 */
+  wiki: WikiService;
   /** ACP 子进程池 + stdio↔WS 帧桥 + 安全门。 */
   acpBridge: AcpBridgeService;
   /** 只读技能分析 + proposal 草稿审批服务。 */
@@ -169,6 +172,8 @@ export function createDaemonDomain(
   const skillIntelligence = createSkillIntelligenceService(skills, creator);
   const searchConfigOpener = options.searchConfigOpener ?? platformOpenFile;
   const dialog = options.dialog ?? createDialogService();
+  // wiki 侧车根默认 appDir()（构造期求值，daemon 生命周期内 home 不变）。
+  const wiki = createWikiService(workspaces);
   const domain: DaemonDomain = {
     workspaces,
     skills,
@@ -180,6 +185,7 @@ export function createDaemonDomain(
     skillSearch: createSkillSearchService(),
     searchConfigOpener,
     dialog,
+    wiki,
     acpBridge: createAcpBridgeService(workspaces),
     skillIntelligence,
     steward: createStewardService(workspaces, skills, skillIntelligence, {

@@ -34,9 +34,17 @@ export default defineConfig({
     }),
     tailwindcss(),
     sveltekit({
-      // 让 webui 能 import repo root 的 browser-safe shared 契约。
+      // 让 webui 能 import repo root 的 browser-safe shared 契约；skill-wiki
+      // 只开放 ./schema 子路径（纯 zod）——根入口含 node:fs 的 workspace 层，
+      // 浏览器包不得解析到它。子路径键必须排在根键之前（前缀替换语义）。
       alias: {
         $shared: fileURLToPath(new URL("../src/shared/", import.meta.url)),
+        "skill-wiki/schema": fileURLToPath(
+          new URL("../packages/skill-wiki/src/schema.ts", import.meta.url),
+        ),
+        "skill-wiki": fileURLToPath(
+          new URL("../packages/skill-wiki/src/index.ts", import.meta.url),
+        ),
       },
       adapter: adapter({
         pages: "build",

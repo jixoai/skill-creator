@@ -28,6 +28,8 @@ const WS = "ws_0123456789abcdef01234567";
 describe("workspaces activity route matching", () => {
   const cases = [
     { path: "/workspaces", id: "workspaces.home" },
+    { path: "/workspaces/wiki/%7E", id: "workspaces.wiki" },
+    { path: `/workspaces/wiki/${WS}`, id: "workspaces.wiki" },
     { path: `/workspaces/${WS}/openclaw`, id: "workspaces.provider" },
     { path: `/workspaces/intelligence/${WS}/openclaw`, id: "workspaces.intelligence" },
   ];

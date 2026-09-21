@@ -60,6 +60,11 @@ export interface WorkspaceRegistry {
   activate: (id: WorkspaceId) => WorkspaceId;
   resolve: (target: WorkspaceProviderTarget, includeDisabled?: boolean) => WorkspaceProviderScope;
   resolveWritable: (target: WorkspaceProviderTarget) => WorkspaceProviderScope;
+  /**
+   * 轻量 Imported 查询（不触发 ccski 扫描）：wiki 等 scope 校验方只需要
+   * 「id 是否注册」，不应付出全量投影代价。Global `~` 一律 null。
+   */
+  lookup: (id: WorkspaceId) => { id: ImportedWorkspaceId; label: string } | null;
 }
 
 /** Test seam for replacing ccski's dynamic skill scan（单遍产出计数与去重键）。 */
@@ -167,6 +172,12 @@ export function createWorkspaceRegistry(options: WorkspaceRegistryOptions = {}):
         );
       }
       return this.resolve(target, true);
+    },
+
+    lookup(id) {
+      if (id === GLOBAL_WORKSPACE_ID) return null;
+      const entry = state.workspaces.find((workspace) => workspace.id === id);
+      return entry ? { id: entry.id, label: entry.label } : null;
     },
   };
 }

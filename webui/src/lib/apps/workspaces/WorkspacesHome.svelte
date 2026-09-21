@@ -39,7 +39,13 @@
   import IconAlert from "@lucide/svelte/icons/triangle-alert";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconBoxes from "@lucide/svelte/icons/boxes";
+  import IconWiki from "@lucide/svelte/icons/book-open";
   import type { ImportedWorkspace, Workspace, WorkspaceProvider } from "$lib/types";
+
+  /** wiki 视图路径（Global id "~" 在 URL path 段编码为 %7E）。 */
+  function wikiPath(wsId: string): string {
+    return `/workspaces/wiki/${wsId === "~" ? "%7E" : wsId}`;
+  }
 
   const globalWorkspaces = $derived(workspaceState.workspaces.filter((ws) => ws.kind === "global"));
   const importedWorkspaces = $derived(
@@ -306,6 +312,16 @@
                   agent location{ws.providers.length === 1 ? "" : "s"}
                 </p>
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-9 w-9 shrink-0"
+                title="Open the global wiki"
+                aria-label="Open the global wiki"
+                onclick={() => void goto(wikiPath(ws.id))}
+              >
+                <IconWiki class="h-4 w-4" />
+              </Button>
             </div>
             <ul class="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
               {#each ws.providers as provider (provider.id)}
@@ -378,6 +394,17 @@
                       </Badge>
                     </button>
                     {#if removable}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-11 w-11 shrink-0 text-muted-foreground hover:text-foreground"
+                        title={`Open the wiki for ${ws.label}`}
+                        aria-label={`Open the wiki for ${ws.label}`}
+                        disabled={!ws.available}
+                        onclick={() => ws.available && void goto(wikiPath(ws.id))}
+                      >
+                        <IconWiki class="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
