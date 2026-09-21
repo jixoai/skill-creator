@@ -104,7 +104,9 @@ Queue Face         = agent.queue.*：内核 ReactLoopInbox 的读写面——lis
 Skill Search Index = 第一代本地技能索引：Canonical Skill（realpath 去重）+
                       文件集正文（SKILL.md 身份源 + 额外 *.md；排除目录 =
                       内置 ∪ search-config.toml 追加，dot 规则只作用于目录）+
-                      contentHash 文件集字节分组 + MiniSearch BM25+ 字段加权 +
+                      contentHash 文件集字节分组 + @jixoai/search（org 级通用包：后端召回
+                      （sqlite FTS5 默认/tantivy 单进程）+ JS 冻结 BM25 打分，逐位
+                      复原 MiniSearch 口径）字段加权 +
                       冻结 rerank；持久信封 v3（六版本 + payloadDigest +
                       searchConfigDigest + 逐文件 stat 四元组）。watcher 事件
                       驱动新鲜度（clean 查询零 readdir/realpath；≤20k 同步
@@ -190,7 +192,7 @@ Tray WebUI        |    |                          |          ^
 Browser (web mode)-+                  |          |
                  |                    +-- Workspace Registry
                  |                    +-- skills (ccski) + skillsUpdate (lock hash)
-                 |                    +-- skill-search (canonicalize + BM25 index + ranking)
+                 |                    +-- skill-search (canonicalize + @jixoai/search + ranking)
                  |                    +-- creator / repository (Git)
                  |                    +-- sourceRegistry (sources.json)
                  |                    +-- capability (capability-core + manager registry)
@@ -498,14 +500,16 @@ src/
 |   |-- domain.ts ------------- [2] domain module composition / dependency wiring
 |   |-- rpc-router.ts ---------- [5] skill+update / workspace+creator / repository+sources / agent+card+proposals / status+acp / error boundary
 |   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
+|   |-- wiki-service.ts ------- [3] 双级 wiki（skill-wiki 委派 + WorkspaceId→slug 映射 + scope 闸）
+|   |-- wiki-root-migration.ts  [2] legacy 侧车一次性 mv+symlink 三态迁移（冲突 CONFLICT）
 |   |-- skill-search/
-|   |   |-- tokenizer.ts -------- [3] 冻结规则分词器（Segmenter+滑窗 bigram+Latin 切分；版本化+探针降级）
+|   |   |-- tokenizer.ts -------- [3] 冻结规则分词器（已下沉 @jixoai/search；此处 re-export 过渡；版本化+探针降级）
 |   |   |-- scanner.ts ---------- [2] provider roots 扫描（symlink 入口层跟进 / 递归≤2 / broken 跳过）
 |   |   |-- canonicalize.ts ----- [3] realpath 去重 + installations 作用域 + 双文件规则 + 文件集 stat 快照（路径序）
 |   |   |-- content-files.ts ---- [2] 额外 md 收集（dot 目录/排除目录/深度/数量 cap；descent lstat 复核）
 |   |   |-- parser.ts ----------- [2] 文件集 → SearchDocument（身份源 frontmatter + 额外正文 + fence 状态机 + 截断）
 |   |   |-- config.ts ----------- [2] search-config.toml 生命周期（boot 模板/解析收窄/摘要）
-|   |   |-- index.ts ------------ [4] MiniSearch 封装 + v3 信封（六版本+双 digest+文件集 stat）+ 增量 + duplicates 投影
+|   |   |-- index.ts ------------ [4] @jixoai/search 消费 + 两层信封（包层 index/ + meta v4 登记表）+ 增量 + duplicates 投影 + 金丝雀重建
 |   |   |-- watcher.ts ---------- [2] 事件驱动新鲜度（WatchFactory seam/去抖 flush/≥20k lazy）
 |   |   |-- ranking.ts ---------- [2] 冻结 rerank + 池前 content-dup 折叠（组代表进 top-40 + primary installations 全组合并，v2 2026-09-18）+ 稳定 tie-break
 |   |   `-- service.ts ---------- [3] server-owned 编排（boot 预写 config/维护门/rootsKey 缓存/测试 seam）
