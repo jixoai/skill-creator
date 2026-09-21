@@ -17,7 +17,9 @@ provenance → governance → evolution).
 source (`src/` direct export, no build step). It incubates inside the
 skill-creator monorepo the same way ccsi did — once the design stabilizes
 into a standard it will be published to npm as `skill-wiki`. Zero daemon or
-WebUI dependencies; the only runtime dep is `zod`.
+WebUI dependencies; the library core depends on `zod` only, and the CLI's
+similarity pipeline additionally consumes `@jixoai/search` (kept out of the
+root entry so daemon bundles never pull it in).
 
 ## Where it sits in the WikiSkill architecture
 
@@ -37,25 +39,36 @@ consume this library, never the other way around.
 
 ## Storage contract
 
-One wiki per **scope**, stored in an app-owned sidecar tree (never inside
-the user's skill assets):
+One wiki per **scope**, stored under a unified root (never inside the user's
+skill assets). The root resolves as `SKILL_WIKI_HOME` env override, else
+`~/.skill-wiki/` (`defaultWikiRoot()`) — host daemon and CLI share the same
+root; the skill-creator host bridges its legacy path with a one-time
+migration (`mv ~/.skill-creator/wiki ~/.skill-wiki` + symlink back):
 
 ```
-<root>/wiki/<scope>/
-├── patterns/          # source of truth: one canonical pattern per file
-│   └── <name>.md
-├── index.md           # derived projection, always rebuilt from patterns/
-├── logs.md            # human-readable append-only event log
-└── skill-impact.md    # machine-appended JSONL audit: proposal → decision
+<root>/                      # ~/.skill-wiki/ unless SKILL_WIKI_HOME is set
+├── ~/                       # global scope
+├── <slug>/                  # per-workspace scope (e.g. skill-creator/)
+│   ├── patterns/            # source of truth: one canonical pattern per file
+│   │   └── <name>.md
+│   ├── index.md             # derived projection, always rebuilt from patterns/
+│   ├── logs.md              # human-readable append-only event log
+│   └── skill-impact.md      # machine-appended JSONL audit: proposal → decision
+└── search-index/<scope>/    # dedup/similarity index (@jixoai/search, sqlite)
 ```
 
 - **Scopes** are dual-level: global `"~"` (generalized knowledge detached
-  from any workspace) and per-imported-workspace `"ws_<24-hex>"`. Scope ids
-  are validated by `parseWikiScope`; the host gates `ws_*` against its
-  workspace registry before opening a wiki.
+  from any workspace) and per-workspace npm-scope slugs matching
+  `^[a-z0-9](-?[a-z0-9])*$` (e.g. `skill-creator`, `my-app`; the shape is
+  exported as `SLUG_SCOPE_REGEX`). The former `ws_<24-hex>` digest shape is
+  **no longer accepted** (breaking change inside the private window); the
+  skill-creator host maps its registry's workspace ids to slugs derived
+  from the workspace label (first registrant keeps the bare slug; a later
+  colliding label gets a `-<4-hex>` digest suffix).
 - **`patterns/` is the single truth.** `index.md` exists for standard
-  compatibility only — `rebuildIndex()` regenerates it from the directory,
-  so there is never a second truth to reconcile.
+  compatibility only — the CLI refreshes it after every read command, so
+  no maintenance command exists (`rebuildIndex()` also regenerates it from
+  the directory). There is never a second truth to reconcile.
 - **`logs.md` is unstructured by design** (human-auditable narrative);
   **`skill-impact.md` is structured by design** (one `SkillImpactEntry`
   JSON object per line, the harness's programmatic audit trail).
@@ -133,16 +146,51 @@ The `./schema` subpath exists so browser bundles (WebUI, shared RPC
 contracts) consume types and schemas without pulling `node:fs` through the
 workspace tier. Import from the root entry only in Node contexts.
 
+## CLI (private bin)
+
+The package ships a `skill-wiki` bin (`bin/skill-wiki.ts`, run locally via
+`pnpm exec tsx bin/skill-wiki.ts` — src-direct, no build step while
+private). The implementation lives in `src/cli.ts` and exports a pure
+`runCli(argv, io)` face for tests; it is deliberately **not** re-exported
+from the root entry (see incubation note above).
+
+```
+list    [--scope ~|slug] [--sort name|updated] [--offset 0] [--limit 100] [--json]
+show    <name> [--scope] [--json]
+add     --title <t> [--scope] [--no-similarity] [--json]   # body from stdin
+find    <query> [--scope] [--json]
+edit    <name> -f <edits.json> [--scope] [--json]          # WikiEdit[] JSON file
+remove  <name> [--scope] [--json]                          # + logs.md footprint
+log     [--scope] [--limit 20] [--json]
+impact  [--scope] [--filter accept|reject] [--json]
+```
+
+- **Exit codes**: `0` success (including hash-deduplicated adds, which print
+  `Already captured as "…"`); `2` usage; `3` `WIKI_INVALID_SCOPE`; `4`
+  `WIKI_INVALID_PATTERN`; `5` `WIKI_PATCH_FAILED`.
+- **Similarity on write**: after every `add` (unless `--no-similarity`) the
+  page's title+body is searched against the scope's
+  `search-index/<scope>/` index (fields `title` weight 3 / `body` weight 1,
+  sqlite backend for multi-process safety) and near-relatives are printed as
+  `similar: <name> (0.83), …` — the score is relative to the page's
+  self-match and the threshold is the frozen versioned constant
+  `SIMILARITY_THRESHOLD = 0.35`. Similarity is a warning, never an error
+  (search failures degrade to a stderr warning with exit 0). `find` queries
+  the same index read-only (populating it once when missing/stale-rebuilt).
+- **Derived artifacts self-heal**: every read command refreshes `index.md`
+  after output; `add`/`edit`/`remove` keep the search index in step. The
+  command surface has no `reindex`.
+
 ## Error model
 
 One library-level error class with discriminable codes — no host error
 hierarchy is leaked in either direction:
 
-| Code                   | Meaning                                              |
-| ---------------------- | ---------------------------------------------------- |
-| `WIKI_PATCH_FAILED`    | a patch anchor did not resolve (batch aborted)       |
-| `WIKI_INVALID_PATTERN` | invalid pattern name / title / frontmatter / entry   |
-| `WIKI_INVALID_SCOPE`   | scope id is neither `~` nor a canonical `ws_<24hex>` |
+| Code                   | Meaning                                            |
+| ---------------------- | -------------------------------------------------- |
+| `WIKI_PATCH_FAILED`    | a patch anchor did not resolve (batch aborted)     |
+| `WIKI_INVALID_PATTERN` | invalid pattern name / title / frontmatter / entry |
+| `WIKI_INVALID_SCOPE`   | scope id is neither `~` nor an npm-scope slug      |
 
 ## Design rulings (2026-09-21, owner decisions)
 

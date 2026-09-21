@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "description": "Persistent agent-experience wiki (WikiSkill, arXiv:2608.27454) — incubating inside skill-creator; pure domain library, no daemon/UI dependencies.",
+  "bin": {
+    "skill-wiki": "./bin/skill-wiki.ts"
+  },
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -14,6 +17,7 @@
     "test": "pnpm --dir ../.. exec vitest run packages/skill-wiki"
   },
   "dependencies": {
+    "@jixoai/search": "workspace:*",
     "zod": "^4.4.3"
   }
 }

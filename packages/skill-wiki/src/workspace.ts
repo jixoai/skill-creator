@@ -2,9 +2,12 @@
  * 用户原始需求 [2026-09-21]：「workspace 很重要，但我们仍然需要有一个 global 的
  * 概念，global 能承载 workspace 泛化出来的 skill」——双级作用域（global `~` +
  * per-workspace 侧车目录）。
+ * 用户原始需求 [2026-09-21]（jixoai-search-core 3.1/3.2）：「scope 用人类可读的
+ * npm-scope 式 slug，ws_ digest 形状退役；存储根统一 ~/.skill-wiki/，宿主与
+ * CLI 同根」。
  * 正交意图：
  *   [1] WikiWorkspace：wiki/ 目录契约（patterns 为真相源；index 为派生投影；
- *       logs 追加式；skill-impact 程序化追加）。
+ *       logs 追加式；skill-impact 程序化追加）+ scope slug 形状 + 统一根解析。
  *   [2] 碎片认知追加通道（P1 升格）：contentHash 去重幂等 + index 同步重建。
  *   [3] 磁盘边界：畸形 pattern 读取丢弃、mutation typed 拒绝；全部写入走
  *       同目录临时文件 + rename 原子替换。
@@ -13,6 +16,7 @@
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   PatternFrontmatterSchema,
@@ -24,20 +28,37 @@ import {
   type PatternListItem,
   type SkillImpactEntry,
 } from "./schema.js";
+import { applyEdits, type WikiEdit } from "./patch.js";
 
-/** wiki 作用域：global `~` 或 Imported WorkspaceId（`ws_` 前缀）。 */
+/**
+ * scope slug 形状（npm-scope 式，破坏性收紧 2026-09-21）：小写字母数字单词以
+ * 单连字符串联（1-3+ 个单词，例：`skill-creator`、`my-app`）；`ws_<24hex>`
+ * digest 形状不再被接受（private 窗口期破坏性变更）。
+ */
+export const SLUG_SCOPE_REGEX = /^[a-z0-9](-?[a-z0-9])*$/;
+
+/** wiki 作用域：global `~` 或 npm-scope 式 slug。 */
 export type WikiScope = "~" | (string & { readonly __wikiScope: unique symbol });
 
 /** 校验并收窄 scope（外部输入边界）。 */
 export function parseWikiScope(value: string): WikiScope {
   if (value === "~") return "~";
-  if (/^ws_[a-f0-9]{24}$/.test(value)) return value as WikiScope;
+  if (SLUG_SCOPE_REGEX.test(value)) return value as WikiScope;
   throw new SkillWikiError("WIKI_INVALID_SCOPE", `Invalid wiki scope: ${value}`);
 }
 
-/** 双级侧车目录：<appDir>/wiki/<scope>/（不写入用户技能资产目录）。 */
-export function wikiScopeDirectory(appDir: string, scope: WikiScope): string {
-  return path.join(appDir, "wiki", scope === "~" ? "~" : scope);
+/**
+ * 统一存储根：`SKILL_WIKI_HOME` env > `~/.skill-wiki/`（os.homedir）。宿主与
+ * CLI 同根（spec「宿主与 CLI 同根」scenario）；测试隔离经 env 注入。
+ */
+export function defaultWikiRoot(): string {
+  const override = process.env.SKILL_WIKI_HOME;
+  return override && override.length > 0 ? override : path.join(os.homedir(), ".skill-wiki");
+}
+
+/** scope 目录：<wikiRoot>/<scope>/（wikiRoot 由调用方解析，通常是 defaultWikiRoot()）。 */
+export function wikiScopeDirectory(wikiRoot: string, scope: WikiScope): string {
+  return path.join(wikiRoot, scope === "~" ? "~" : scope);
 }
 
 /**
@@ -99,6 +120,8 @@ export interface WikiWorkspace {
   listPatterns(): PatternListItem[];
   /** 单 pattern 全文（name 收窄；缺失/畸形 typed 失败）。 */
   readPattern(name: string): { frontmatter: PatternFrontmatter; body: string };
+  /** 单 pattern 原文落盘字节（frontmatter + body；缺失/非法 name typed 失败）。 */
+  readPatternRaw(name: string): string;
   /**
    * 碎片认知追加（P1 通道）：同 scope 内正文 contentHash 相同 → 幂等返回
    * 既有条目；否则新建 pattern 页（name 冲突时追加 `-2` 序号）并重建 index.md。
@@ -107,8 +130,18 @@ export interface WikiWorkspace {
     item: PatternListItem;
     deduplicated: boolean;
   };
+  /**
+   * 结构化编辑（patch 词汇表锚定 body；frontmatter 由库管理，`updated` 自动
+   * bump）：任一锚点未命中 → WIKI_PATCH_FAILED 且零写入（applyEdits 纯函数 +
+   * 写侧原子 rename 双保险）。
+   */
+  editPattern(name: string, edits: readonly WikiEdit[]): { item: PatternListItem };
+  /** 删除 pattern 页并重建 index（未知/非法 name typed 失败）。 */
+  removePattern(name: string): void;
   /** 追加人类可读日志行（logs.md，append-only）。 */
   appendLog(line: string): void;
+  /** logs.md 全部非空行（追加序；文件缺失 = 空）。 */
+  readLogLines(): string[];
   /** 程序化追加 skill-impact 条目（文件尾 JSON 行；解析失败 typed 失败）。 */
   appendImpact(entry: SkillImpactEntry): void;
   /** 读取全部 skill-impact 条目（畸形行丢弃）。 */
@@ -143,6 +176,15 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
     return fs.readFileSync(file, "utf8");
   };
 
+  /** name 收窄（外部输入边界：目录段安全）。 */
+  const narrowName = (name: string): string => {
+    const parsed = PatternNameSchema.safeParse(name);
+    if (!parsed.success) {
+      throw new SkillWikiError("WIKI_INVALID_PATTERN", `Invalid pattern name: ${name}`);
+    }
+    return parsed.data;
+  };
+
   return {
     listPatterns() {
       const items: PatternListItem[] = [];
@@ -165,19 +207,20 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
     },
 
     readPattern(name) {
-      const parsed = PatternNameSchema.safeParse(name);
-      if (!parsed.success) {
-        throw new SkillWikiError("WIKI_INVALID_PATTERN", `Invalid pattern name: ${name}`);
-      }
-      const raw = readRaw(parsed.data);
+      const narrowed = narrowName(name);
+      const raw = readRaw(narrowed);
       const frontmatter = parseFrontmatter(raw);
       if (!frontmatter) {
         throw new SkillWikiError(
           "WIKI_INVALID_PATTERN",
-          `Pattern frontmatter is incompatible: ${parsed.data}`,
+          `Pattern frontmatter is incompatible: ${narrowed}`,
         );
       }
       return { frontmatter, body: raw.replace(/^---\n[\s\S]*?\n---\n?/, "") };
+    },
+
+    readPatternRaw(name) {
+      return readRaw(narrowName(name));
     },
 
     appendPattern(input) {
@@ -226,9 +269,58 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
       };
     },
 
+    editPattern(name, edits) {
+      const narrowed = narrowName(name);
+      const raw = readRaw(narrowed);
+      const frontmatter = parseFrontmatter(raw);
+      if (!frontmatter) {
+        throw new SkillWikiError(
+          "WIKI_INVALID_PATTERN",
+          `Pattern frontmatter is incompatible: ${narrowed}`,
+        );
+      }
+      const body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
+      // 纯函数先行：任一锚点未命中在写入前失败（WIKI_PATCH_FAILED，零改动）。
+      const nextBody = applyEdits(body, edits);
+      const updated: PatternFrontmatter = {
+        ...frontmatter,
+        updated: new Date().toISOString(),
+      };
+      atomicWriteUtf8(path.join(patternsDir, `${narrowed}.md`), formatPattern(updated, nextBody));
+      this.rebuildIndex();
+      return {
+        item: {
+          name: narrowed,
+          title: updated.title,
+          origin: updated.origin,
+          promotedFrom: updated.promotedFrom,
+          updated: updated.updated,
+          contentHash: patternContentHash(nextBody),
+        },
+      };
+    },
+
+    removePattern(name) {
+      const narrowed = narrowName(name);
+      const file = path.join(patternsDir, `${narrowed}.md`);
+      if (!fs.existsSync(file)) {
+        throw new SkillWikiError("WIKI_INVALID_PATTERN", `Pattern not found: ${narrowed}`);
+      }
+      fs.unlinkSync(file);
+      this.rebuildIndex();
+    },
+
     appendLog(line) {
       ensureDirectories();
       fs.appendFileSync(logsFile, `- ${new Date().toISOString()} ${line}\n`, "utf8");
+    },
+
+    readLogLines() {
+      if (!fs.existsSync(logsFile)) return [];
+      return fs
+        .readFileSync(logsFile, "utf8")
+        .split("\n")
+        .filter((line) => line.trim() !== "");
     },
 
     appendImpact(entry) {

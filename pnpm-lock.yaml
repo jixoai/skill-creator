@@ -281,6 +281,9 @@ importers:
 
   packages/skill-wiki:
     dependencies:
+      '@jixoai/search':
+        specifier: workspace:*
+        version: link:../search
       zod:
         specifier: ^4.4.3
         version: 4.5.4

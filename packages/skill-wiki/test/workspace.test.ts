@@ -9,7 +9,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  SLUG_SCOPE_REGEX,
   SkillWikiError,
+  defaultWikiRoot,
   openWikiWorkspace,
   parseWikiScope,
   patternContentHash,
@@ -27,13 +29,29 @@ afterEach(() => {
 });
 
 describe("scope", () => {
-  it("accepts global `~` and canonical ws_<24-hex> ids", () => {
+  it("accepts global `~` and npm-scope slugs", () => {
     expect(parseWikiScope("~")).toBe("~");
-    expect(parseWikiScope("ws_" + "a".repeat(24))).toBe("ws_" + "a".repeat(24));
+    expect(parseWikiScope("skill-creator")).toBe("skill-creator");
+    expect(parseWikiScope("my-app")).toBe("my-app");
+    expect(parseWikiScope("a")).toBe("a");
+    expect(parseWikiScope("app2")).toBe("app2");
   });
 
-  it("rejects other shapes with WIKI_INVALID_SCOPE", () => {
-    for (const bad of ["", "home", "ws_abc", "ws_" + "a".repeat(23), "../escape"]) {
+  it("rejects digest shapes and other malformed scopes with WIKI_INVALID_SCOPE", () => {
+    for (const bad of [
+      "",
+      // 单词串本身是合法 slug（如 "home"）——只拒绝非 slug 形状。
+      "Skill Creator",
+      // ws_ digest 形状在 slug 窗口期退役（破坏性变更，jixoai-search-core 3.1）。
+      "ws_abc",
+      "ws_" + "a".repeat(24),
+      "Skill-Creator",
+      "my--app",
+      "-my-app",
+      "my-app-",
+      "my_app",
+      "../escape",
+    ]) {
       try {
         parseWikiScope(bad);
         expect.unreachable(`must reject: ${bad}`);
@@ -44,11 +62,27 @@ describe("scope", () => {
     }
   });
 
-  it("maps scopes into the appDir sidecar tree", () => {
-    expect(wikiScopeDirectory("/app", "~")).toBe(path.join("/app", "wiki", "~"));
-    expect(wikiScopeDirectory("/app", "ws_" + "0".repeat(24))).toBe(
-      path.join("/app", "wiki", "ws_" + "0".repeat(24)),
-    );
+  it("exports the slug shape regex for hosts and tests", () => {
+    expect(SLUG_SCOPE_REGEX.test("skill-creator")).toBe(true);
+    expect(SLUG_SCOPE_REGEX.test("ws_" + "0".repeat(24))).toBe(false);
+  });
+
+  it("maps scopes directly under the wiki root", () => {
+    expect(wikiScopeDirectory("/root", "~")).toBe(path.join("/root", "~"));
+    expect(wikiScopeDirectory("/root", "skill-creator")).toBe(path.join("/root", "skill-creator"));
+  });
+
+  it("resolves the default root from SKILL_WIKI_HOME env, falling back to ~/.skill-wiki", () => {
+    const previous = process.env.SKILL_WIKI_HOME;
+    try {
+      process.env.SKILL_WIKI_HOME = "/tmp/wiki-home-override";
+      expect(defaultWikiRoot()).toBe("/tmp/wiki-home-override");
+      delete process.env.SKILL_WIKI_HOME;
+      expect(defaultWikiRoot()).toBe(path.join(os.homedir(), ".skill-wiki"));
+    } finally {
+      if (previous === undefined) delete process.env.SKILL_WIKI_HOME;
+      else process.env.SKILL_WIKI_HOME = previous;
+    }
   });
 });
 
@@ -193,6 +227,85 @@ describe("WikiWorkspace patterns", () => {
     expect(index).toContain("one — One");
     expect(index).toContain("two — Two");
     expect(index).not.toContain("stale");
+  });
+});
+
+describe("WikiWorkspace edit, remove, and raw read", () => {
+  it("editPattern applies anchored edits to the body, bumps updated, and keeps frontmatter", () => {
+    const dir = makeTempDir();
+    const wiki = openWikiWorkspace(dir);
+    const first = wiki.appendPattern({
+      title: "Gate exits",
+      body: "Branch on exit code, never on piped stdout.",
+    });
+    const edited = wiki.editPattern("gate-exits", [
+      { op: "replace", target: "piped stdout", content: "tail output" },
+      { op: "append", content: "\nAlways use pipefail." },
+    ]);
+    expect(edited.item.name).toBe("gate-exits");
+    expect(edited.item.contentHash).not.toBe(first.item.contentHash);
+
+    const read = wiki.readPattern("gate-exits");
+    expect(read.body).toContain("never on tail output.");
+    expect(read.body).toContain("Always use pipefail.");
+    expect(read.frontmatter.title).toBe("Gate exits");
+    expect(read.frontmatter.updated >= first.item.updated).toBe(true);
+
+    const index = fs.readFileSync(path.join(dir, "index.md"), "utf8");
+    expect(index).toContain("gate-exits — Gate exits");
+  });
+
+  it("editPattern fails atomically when any anchor misses (zero changes)", () => {
+    const dir = makeTempDir();
+    const wiki = openWikiWorkspace(dir);
+    wiki.appendPattern({ title: "Stable", body: "keep this line\nand this one\n" });
+    const before = fs.readFileSync(path.join(dir, "patterns", "stable.md"), "utf8");
+    try {
+      wiki.editPattern("stable", [
+        { op: "replace", target: "keep this line", content: "changed" },
+        { op: "replace", target: "NO_SUCH_ANCHOR", content: "boom" },
+      ]);
+      expect.unreachable("must throw");
+    } catch (error) {
+      expect((error as SkillWikiError).code).toBe("WIKI_PATCH_FAILED");
+    }
+    const after = fs.readFileSync(path.join(dir, "patterns", "stable.md"), "utf8");
+    expect(after).toBe(before);
+  });
+
+  it("removePattern deletes the page and rebuilds the index; unknown names typed-fail", () => {
+    const dir = makeTempDir();
+    const wiki = openWikiWorkspace(dir);
+    wiki.appendPattern({ title: "Doomed", body: "bye" });
+    wiki.removePattern("doomed");
+    expect(wiki.listPatterns()).toEqual([]);
+    expect(fs.existsSync(path.join(dir, "patterns", "doomed.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(dir, "index.md"), "utf8")).not.toContain("doomed");
+    try {
+      wiki.removePattern("doomed");
+      expect.unreachable("must throw");
+    } catch (error) {
+      expect((error as SkillWikiError).code).toBe("WIKI_INVALID_PATTERN");
+    }
+  });
+
+  it("readPatternRaw returns the on-disk bytes", () => {
+    const dir = makeTempDir();
+    const wiki = openWikiWorkspace(dir);
+    wiki.appendPattern({ title: "Raw", body: "line\n" });
+    const raw = wiki.readPatternRaw("raw");
+    expect(raw.startsWith("---\n")).toBe(true);
+    expect(raw).toContain("title: Raw");
+    expect(raw).toContain("line");
+  });
+
+  it("readLogLines returns appended lines in order and tolerates a missing file", () => {
+    const wiki = openWikiWorkspace(makeTempDir());
+    expect(wiki.readLogLines()).toEqual([]);
+    wiki.appendLog("first event");
+    wiki.appendLog("second event");
+    expect(wiki.readLogLines()).toHaveLength(2);
+    expect(wiki.readLogLines()[1]).toMatch(/second event$/);
   });
 });
 

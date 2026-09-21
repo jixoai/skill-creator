@@ -30,18 +30,28 @@ afterEach(() => {
   while (tempDirs.length > 0) fs.rmSync(tempDirs.pop() as string, { recursive: true, force: true });
 });
 
-/** stub lookup：只有 REGISTERED_WS 视为已注册（不触发真实 registry 持久化）。 */
-function stubRegistry(): Pick<WorkspaceRegistry, "lookup"> {
+/** stub registry：只有 REGISTERED_WS 视为已注册（不触发真实 registry 持久化）。 */
+function stubRegistry(): Pick<WorkspaceRegistry, "lookup" | "listImported"> {
   return {
     lookup: (id) => (id === REGISTERED_WS ? { id: REGISTERED_WS, label: "registered" } : null),
+    listImported: () => [{ id: REGISTERED_WS, label: "registered" }],
   };
 }
 
-function wikiClient() {
+function wikiClient(): {
+  client: ReturnType<typeof makeClient>;
+  rootDir: string;
+} {
+  const rootDir = makeTempDir();
+  const client = makeClient(rootDir);
+  return { client, rootDir };
+}
+
+function makeClient(rootDir: string) {
   const domain = createDaemonDomain(undefined, {});
   const withWiki: DaemonDomain = {
     ...domain,
-    wiki: createWikiService(stubRegistry(), { rootDir: makeTempDir() }),
+    wiki: createWikiService(stubRegistry(), { rootDir, legacyDir: null }),
   } as DaemonDomain;
   return createRouterClient(
     createRpcRouter({
@@ -60,12 +70,12 @@ function wikiClient() {
 
 describe("wiki RPC surface", () => {
   it("lists an empty global scope", async () => {
-    const client = wikiClient();
+    const { client } = wikiClient();
     await expect(client.wiki.list({ scope: "~" })).resolves.toEqual({ patterns: [] });
   });
 
   it("appends a fragment to global, reads it back, and dedups identical bodies", async () => {
-    const client = wikiClient();
+    const { client } = wikiClient();
     const appended = await client.wiki.append({
       scope: "~",
       title: "Pin exit codes",
@@ -92,42 +102,47 @@ describe("wiki RPC surface", () => {
     expect(read.promotedFrom).toBeNull();
   });
 
-  it("scopes a registered ws_* workspace with origin footprint", async () => {
-    const client = wikiClient();
+  it("scopes a registered ws_* workspace by label slug with origin footprint", async () => {
+    const { client, rootDir } = wikiClient();
     const appended = await client.wiki.append({
       scope: REGISTERED_WS,
       title: "Workspace-local insight",
       body: "only in this workspace",
     });
     expect(appended.item.origin).toBe(REGISTERED_WS);
+    // RPC 侧仍是 WorkspaceId；wiki 侧车目录名是 label 的 slug（jixoai-search-core 3.1）。
+    expect(
+      fs.existsSync(path.join(rootDir, "registered", "patterns", "workspace-local-insight.md")),
+    ).toBe(true);
+    expect(fs.readdirSync(rootDir)).toContain("registered");
     // global scope 不受 ws 追加影响（双级隔离）。
     const globalList = await client.wiki.list({ scope: "~" });
     expect(globalList.patterns).toEqual([]);
   });
 
   it("rejects an unregistered ws_* scope with typed NOT_FOUND", async () => {
-    const client = wikiClient();
+    const { client } = wikiClient();
     const failure = client.wiki.list({ scope: UNKNOWN_WS });
     await expect(failure).rejects.toBeInstanceOf(ORPCError);
     await expect(failure).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("rejects a whitespace-only title as INVALID_OPERATION (trim rule in skill-wiki)", async () => {
-    const client = wikiClient();
+    const { client } = wikiClient();
     const failure = client.wiki.append({ scope: "~", title: "   ", body: "b" });
     await expect(failure).rejects.toBeInstanceOf(ORPCError);
     await expect(failure).rejects.toMatchObject({ code: "INVALID_OPERATION" });
   });
 
   it("rejects reading an unknown pattern with typed NOT_FOUND", async () => {
-    const client = wikiClient();
+    const { client } = wikiClient();
     const failure = client.wiki.read({ scope: "~", name: "does-not-exist" });
     await expect(failure).rejects.toBeInstanceOf(ORPCError);
     await expect(failure).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("enforces contract bounds on inputs at the oRPC schema boundary", async () => {
-    const client = wikiClient();
+    const { client } = wikiClient();
     await expect(client.wiki.append({ scope: "~", title: "", body: "b" })).rejects.toBeInstanceOf(
       ORPCError,
     );

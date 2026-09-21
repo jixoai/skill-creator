@@ -32,21 +32,21 @@
 
 ## Phase 3 — skill-wiki 松绑 + CLI
 
-- [ ] 3.1 parseWikiScope 放宽为 npm-scope 式 slug（破坏性，含测试更新）+ 宿主 workspaceId → slug 映射层（wiki-service 适配）
-- [ ] 3.2 root 统一 ~/.skill-wiki/ + SKILL_WIKI_HOME env + 宿主 symlink
+- [x] 3.1 parseWikiScope 放宽为 npm-scope 式 slug（破坏性，含测试更新）+ 宿主 workspaceId → slug 映射层（wiki-service 适配）
+- [x] 3.2 root 统一 ~/.skill-wiki/ + SKILL_WIKI_HOME env + 宿主 symlink
       衔接 + 存量目录一次性迁移
-- [ ] 3.3 CLI 骨架：命令路由 / --json / exit code 映射 / root 解析链
-- [ ] 3.4 list（分页/排序/--json 元数据）、show、log、impact
-- [ ] 3.5 add（stdin 正文 + hash 幂等 + 写入后自动相似警告 +
+- [x] 3.3 CLI 骨架：命令路由 / --json / exit code 映射 / root 解析链
+- [x] 3.4 list（分页/排序/--json 元数据）、show、log、impact
+- [x] 3.5 add（stdin 正文 + hash 幂等 + 写入后自动相似警告 +
       --no-similarity）+ find（写入前主动查）
-- [ ] 3.6 edit（-f edits.json patch 批量）+ remove（删页 + log 足迹）
-- [ ] 3.7 index.md 派生物移交 search 侧维护（读命令自动刷新；命令面
+- [x] 3.6 edit（-f edits.json patch 批量）+ remove（删页 + log 足迹）
+- [x] 3.7 index.md 派生物移交 search 侧维护（读命令自动刷新；命令面
       无 reindex）
-- [ ] 3.8 CLI 级测试（幂等/警告/原子失败/exit code/分页）+ wiki-service
+- [x] 3.8 CLI 级测试（幂等/警告/原子失败/exit code/分页）+ wiki-service
       RPC 回归
 
 ## Phase 4 — 门禁与复核
 
-- [ ] 4.1 门禁全绿（test/typecheck/webui check/build/fmt/pack）+
+- [x] 4.1 门禁全绿（test/typecheck/webui check/build/fmt/pack）+
       冒烟记录归档 docs/
 - [ ] 4.2 codex 复核（herdr 异步回调）+ 处置
