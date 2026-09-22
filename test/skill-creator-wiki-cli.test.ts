@@ -232,6 +232,57 @@ describe("CLI wiki subcommand (in-process, no daemon)", () => {
     expect(human.stdout).toContain("(missing)");
   }, 60_000);
 
+  it("scopes does not create patterns/ under a partially initialized wiki root (codex r1 P1)", async () => {
+    const sandbox = await createSandbox();
+    const partial = sandbox.registerWorkspace("Partial");
+    // 只建 wiki 根目录、不建 patterns/（手工或半途状态的等价物）。
+    fs.mkdirSync(path.join(partial.path, ".agents", "skill-wiki"), { recursive: true });
+
+    const json = await sandbox.run(["scopes", "--json"]);
+    expect(json.code).toBe(0);
+    const payload = JSON.parse(json.stdout) as { scopes: ScopeJsonRow[] };
+    const row = payload.scopes.find((entry) => entry.id === partial.id);
+    expect(row).toEqual({
+      id: partial.id,
+      label: "Partial",
+      workspacePath: partial.path,
+      exists: true,
+      patternCount: 0,
+    });
+    expect(fs.existsSync(path.join(partial.path, ".agents", "skill-wiki", "patterns"))).toBe(false);
+  }, 60_000);
+
+  it("treats a Windows-shaped relative path (backslash) as a path, not a label (codex r1 P2)", async () => {
+    const sandbox = await createSandbox();
+    // POSIX 上 `sub\dir` 是含反斜杠的单段文件名——路径直传语义下解析为该字面
+    // 目录；绝不能落入 label 匹配（exit 2 "no workspace matches"）。
+    const result = await sandbox.run(
+      ["add", "--title", "Win path", "--workspace", "sub\\dir"],
+      "w\n",
+    );
+    expect(result.code).toBe(0);
+    // POSIX 字面目录；Windows 上 path.sep 会将其拆为 sub/dir——两种平台都
+    // 落在 cwd 之下，断言以平台分隔符拼接的等价路径存在。
+    const resolved = path.resolve(sandbox.project, "sub\\dir", ".agents", "skill-wiki");
+    expect(fs.existsSync(path.join(resolved, "patterns"))).toBe(true);
+  }, 60_000);
+
+  it("surfaces registry read failures as hard errors, not empty-registry label misses (codex r1 P2)", async () => {
+    if (process.platform === "win32") return; // chmod 对 Windows ACL 无效
+    const sandbox = await createSandbox();
+    sandbox.registerWorkspace("Frontend");
+    const registry = path.join(sandbox.stateHome, ".skill-creator", "workspaces.json");
+    fs.chmodSync(registry, 0o000);
+    try {
+      const result = await sandbox.run(["list", "--workspace", "Frontend"]);
+      expect(result.code).not.toBe(2); // 用法错误（零匹配）是被禁止的投影
+      expect(result.stderr).toContain("cannot read workspace registry");
+      expect(result.stderr).not.toContain("no workspace matches");
+    } finally {
+      fs.chmodSync(registry, 0o600);
+    }
+  }, 60_000);
+
   it("defaults --workspace to ./ (the cwd's .agents/skill-wiki, no registry)", async () => {
     const sandbox = await createSandbox();
     const added = await sandbox.run(["add", "--title", "Project local"], "project body\n");

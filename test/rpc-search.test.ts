@@ -70,11 +70,10 @@ afterEach(async () => {
     else process.env[name] = previous;
     delete previousEnv[name];
   }
-  // 域内 skillSearch 持有 sqlite 引擎句柄：dispose 的 close 是 fire-and-forget
-  // 微任务——等一个宏任务排干再删沙箱（Windows EPERM 防线）。
-  for (const domain of createdDomains) domain.skillSearch.dispose();
+  // 域内 skillSearch 持有 sqlite 引擎句柄：dispose 是 async 完成屏障（引擎
+  // close 经 enqueue 串行落定）——await 后再删沙箱（Windows EPERM 防线）。
+  for (const domain of createdDomains) await domain.skillSearch.dispose();
   createdDomains.length = 0;
-  await new Promise((resolve) => setTimeout(resolve, 0));
   fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 

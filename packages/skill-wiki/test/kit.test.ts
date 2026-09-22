@@ -203,3 +203,18 @@ describe("host slot: resolveScope", () => {
     expect(failed.stderr).toContain("host app: unsupported workspace reference: anything");
   });
 });
+
+describe("frozen error text (codex r1 P2)", () => {
+  it("keeps the legacy body-overflow message byte for byte", async () => {
+    const huge = "x".repeat(200_001);
+    const result = await runKit(
+      { run: (argv, io) => runCli(argv, io) },
+      ["add", "--title", "t"],
+      huge,
+    );
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("body exceeds 200000 chars (got 200001)");
+    // 冒号变体（got: N）是被禁止的回归形状。
+    expect(result.stderr).not.toContain("got:");
+  });
+});

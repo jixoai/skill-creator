@@ -64,20 +64,18 @@ afterEach(async () => {
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousHome;
-  // 引擎句柄先释放再删沙箱：dispose 的 close 是 fire-and-forget 微任务——
-  // 等一个宏任务排干（Windows EPERM 防线）。
-  for (const service of trackedServices) service.dispose();
+  // 引擎句柄先释放再删沙箱：dispose 是 async 完成屏障（引擎 close 落定）。
+  for (const service of trackedServices) await service.dispose();
   trackedServices.length = 0;
-  await new Promise((resolve) => setTimeout(resolve, 0));
   fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 /** 创建即登记：afterEach 统一 dispose（watcher + sqlite 引擎句柄）。 */
-function trackService<T extends { dispose: () => void }>(service: T): T {
+function trackService<T extends { dispose: () => void | Promise<void> }>(service: T): T {
   trackedServices.push(service);
   return service;
 }
-const trackedServices: Array<{ dispose: () => void }> = [];
+const trackedServices: Array<{ dispose: () => void | Promise<void> }> = [];
 
 /** 真实形态语料落盘：119 个 manifest 快照 + 11 个合成 skill（含 keywords/triggers）。 */
 function materializeCorpus(): SkillRoot {

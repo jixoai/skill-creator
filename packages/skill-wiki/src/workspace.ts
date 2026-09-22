@@ -163,6 +163,38 @@ export interface WikiWorkspace {
   rebuildIndex(): void;
 }
 
+/**
+ * 只读 pattern 计数（codex r1 P1）：与 listPatterns 同语义（仅统计 frontmatter
+ * 可解析的 *.md，畸形页丢弃），但绝不创建任何目录——openWikiWorkspace 的
+ * patterns/ 惰性 mkdir 不适用于读面（wiki.scopes / CLI scopes 索引）。目录
+ * 未初始化（ENOENT/ENOTDIR）计 0；其它读取故障（EACCES/EIO）typed 上抛，
+ * 不伪装成空。单页读取失败按集合语义丢弃该页。
+ */
+export function countWikiPatterns(wikiDirectory: string): number {
+  const patternsDir = path.join(wikiDirectory, "patterns");
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(patternsDir);
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code === "ENOENT" || code === "ENOTDIR") return 0;
+    throw new SkillWikiError(
+      "WIKI_IO",
+      `Cannot read the wiki patterns directory ${patternsDir}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  let count = 0;
+  for (const entry of entries.filter((name) => name.endsWith(".md")).sort()) {
+    try {
+      const raw = fs.readFileSync(path.join(patternsDir, entry), "utf8");
+      if (parseFrontmatter(raw)) count += 1;
+    } catch {
+      // 单页读取失败：按集合语义丢弃（计数的成员级降级，不影响其余页）。
+    }
+  }
+  return count;
+}
+
 export function openWikiWorkspace(directory: string): WikiWorkspace {
   const patternsDir = path.join(directory, "patterns");
   const indexFile = path.join(directory, "index.md");
@@ -180,7 +212,6 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
       .filter((name) => name.endsWith(".md"))
       .sort();
   };
-
   const readRaw = (name: string): string => {
     const file = path.join(patternsDir, `${name}.md`);
     if (!fs.existsSync(file)) {

@@ -16,6 +16,7 @@ import {
   openWikiWorkspace,
   patternContentHash,
   resolveWikiDirectory,
+  countWikiPatterns,
   workspaceWikiDirectory,
 } from "../src/index.js";
 
@@ -383,3 +384,49 @@ describe("WikiWorkspace logs and impact", () => {
     }
   });
 });
+
+describe("countWikiPatterns (read-only projection, codex r1 P1)", () => {
+  it("counts valid pattern pages without creating any directory", () => {
+    const workspace = makeTempDir();
+    const wikiDir = workspaceWikiDirectory(workspace);
+    fs.mkdirSync(wikiDir, { recursive: true });
+    // 部分初始化：root 存在、patterns/ 缺失 → 计数 0 且绝不 mkdir。
+    expect(countWikiPatterns(wikiDir)).toBe(0);
+    expect(fs.existsSync(path.join(wikiDir, "patterns"))).toBe(false);
+    expect(countWikiPatterns(path.join(workspace, "not-initialized"))).toBe(0);
+    expect(fs.existsSync(path.join(workspace, "not-initialized"))).toBe(false);
+  });
+
+  it("matches listPatterns semantics (malformed pages dropped)", () => {
+    const workspace = makeTempDir();
+    const wiki = openWikiWorkspace(workspaceWikiDirectory(workspace));
+    wiki.appendPattern({ title: "One", body: "first" });
+    wiki.appendPattern({ title: "Two", body: "second" });
+    // 畸形页：无 frontmatter——listPatterns 丢弃，计数同语义丢弃。
+    fs.writeFileSync(path.join(wikiDirOf(workspace), "patterns", "broken.md"), "no frontmatter\n");
+    const listed = openWikiWorkspace(wikiDirOf(workspace)).listPatterns();
+    expect(listed).toHaveLength(2);
+    expect(countWikiPatterns(wikiDirOf(workspace))).toBe(2);
+  });
+
+  it("maps unreadable patterns directory to typed WIKI_IO, not zero", () => {
+    if (process.platform === "win32") return; // chmod 对 Windows ACL 无效
+    const workspace = makeTempDir();
+    const wikiDir = workspaceWikiDirectory(workspace);
+    fs.mkdirSync(path.join(wikiDir, "patterns"), { recursive: true });
+    fs.chmodSync(path.join(wikiDir, "patterns"), 0o000);
+    try {
+      countWikiPatterns(wikiDir);
+      expect.unreachable("unreadable patterns dir must throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SkillWikiError);
+      expect((error as SkillWikiError).code).toBe("WIKI_IO");
+    } finally {
+      fs.chmodSync(path.join(wikiDir, "patterns"), 0o700);
+    }
+  });
+});
+
+function wikiDirOf(workspace: string): string {
+  return workspaceWikiDirectory(workspace);
+}

@@ -47,8 +47,26 @@
       8 项（.git/.cargo/.cache/.npm/.pnpm-store/.bun/.rustup/.local）；
       search-config.toml 模板另将 7 个 dot 名显式写出（可注释、只能追加
       排除、内置不可移除）。无需代码变更。
-- [ ] 4.2 Windows 实机轮（ssh gaubeehonor）：装包 + 包测试 + CLI 直跑 +
+- [x] 4.2 Windows 实机轮（ssh gaubeehonor）：装包 + 包测试 + CLI 直跑 +
       索引/查重冒烟；结论记录 docs
-- [ ] 4.3 门禁全绿（test/typecheck/webui check/build/fmt/pack）+ dev
+      → 收据（2026-09-22，docs/search-design.md §17）：包 165/165（tantivy
+      win32 binding ✓）；skill-search index+service 22/22；rpc-search+
+      robustness+benchmark 15/15；CLI 冒烟（绝对路径/~ /find/exit 3）全绿。
+      修复三类：SkillSearchIndex.close() 面 + dispose 关引擎；多实例测试进程
+      边界显式 close；chmod 注入换跨平台 meta.json 目录注入。全量套件其余
+      63 失败为非辖区既有 Windows 债（清单见 §17）。
+- [x] 4.3 门禁全绿（test/typecheck/webui check/build/fmt/pack）+ dev
       走查（wiki 面板桌面+窄屏，探针 + vision 判读）
+      → 收据（2026-09-22）：全量 1344 绿（3 文件满载超时 flake 隔离复跑
+      28/28）；typecheck/webui check(0/0)/build/fmt/diff/pack 全绿 + 依赖
+      卫生（workspace:* 仅 devDeps）。dev 走查（Vite+daemon+内置浏览器）：
+      第四面板导航/scope 索引/详情/数据流实测；vision 判读桌面 pass×2，
+      窄屏阻塞项（语义标题宽度 0）当场修复回归（h1 87px 实测）。走查另
+      抓到 WikiScopeView 误用 $app/state page.params（ws_* 静默兜底
+      Global）——已改 shell useParams + 回归钉。
 - [ ] 4.4 codex 复核（remix 闭环）+ 处置 + 归档
+      → r1（2026-09-22）：7.8/10 NEEDS-WORK——P1×1（scopes 对部分初始化
+      目录惰性 mkdir）+ P2×5；全部处置：SDK countWikiPatterns 只读计数
+      （daemon/CLI 共用）、registry 读取 ENOENT-only + EACCES hard error、
+      Windows 反斜杠路径形状直传、dispose 转 async 完成屏障、超限错误
+      文本逐位恢复、本文件 4.2/4.3 收口。待 r2 复验。

@@ -228,6 +228,19 @@ describe("wiki.scopes RPC surface", () => {
     expect(fs.existsSync(path.join(globalHome, "patterns"))).toBe(false);
   });
 
+  it("does not create patterns/ under a partially initialized wiki root (codex r1 P1)", async () => {
+    // 独立复现向量：wiki 根目录已存在（例如手工建过或只写过 index.md）、
+    // patterns/ 缺失——openWikiWorkspace().listPatterns() 会补建目录，
+    // scopes 必须保持零写。
+    fs.mkdirSync(path.join(workspaceDir, ".agents", "skill-wiki"), { recursive: true });
+    const { client } = wikiClient();
+    const { scopes } = await client.wiki.scopes({});
+    const registered = scopes.find((scope) => scope.id === REGISTERED_WS);
+    expect(registered?.exists).toBe(true);
+    expect(registered?.patternCount).toBe(0);
+    expect(fs.existsSync(path.join(workspaceDir, ".agents", "skill-wiki", "patterns"))).toBe(false);
+  });
+
   it("reflects appended fragments in counts after GUI writes (same physical directory)", async () => {
     const { client } = wikiClient();
     await client.wiki.append({ scope: REGISTERED_WS, title: "Count me", body: "body 1" });

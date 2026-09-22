@@ -309,7 +309,8 @@ async function cmdAdd(ctx: WikiCliContext): Promise<number> {
   const title = requireOption(ctx.options, "title");
   const body = await ctx.io.readStdin();
   if (body.length > MAX_BODY_CHARS) {
-    throw new WikiUsageError(`body exceeds ${MAX_BODY_CHARS} chars (got: ${body.length})`);
+    // 旧 bin 逐位一致（codex r1 P2）：错误正文是冻结面，不得改写标点。
+    throw new WikiUsageError(`body exceeds ${MAX_BODY_CHARS} chars (got ${body.length})`);
   }
   const { wiki, wikiDirectory } = await ctx.openWiki();
   const json = ctx.options.has("json");

@@ -56,10 +56,9 @@ afterEach(async () => {
   else process.env.USERPROFILE = previousUserProfile;
   if (previousAppHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousAppHome;
-  // dispose 内 engine close 是 fire-and-forget 的 async：等微任务落定再删沙箱。
-  for (const service of openServices) service.dispose();
+  // dispose 已是 async（引擎 close 落定屏障）：await 后句柄确定已释放。
+  for (const service of openServices) await service.dispose();
   openServices.length = 0;
-  await new Promise((resolve) => setTimeout(resolve, 0));
   fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 

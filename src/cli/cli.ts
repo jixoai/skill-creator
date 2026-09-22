@@ -540,18 +540,20 @@ interface WikiScopeRow {
 
 /**
  * 进程内只读读取 workspaces.json（appDir 受 SKILL_CREATOR_HOME 尊重）：
- * 文件缺失 / JSON 或 schema 不兼容 → 空注册面（label 解析退化为零匹配）；
- * 读取 IO 故障 → 上抛（非用法错误，不伪装成空 registry）。
+ * 文件缺失（仅 ENOENT）/ JSON 或 schema 不兼容 → 空注册面（label 解析退化
+ * 为零匹配）；其它读取 IO 故障（EACCES/EIO 等）→ 上抛（非用法错误，不
+ * 伪装成空 registry——codex r1 P2：existsSync 会吞权限/IO 故障，禁用）。
  */
 function loadWikiRegistryEntries(
   stateSchema: typeof WorkspaceRegistryStateSchema,
 ): WikiRegistryEntry[] {
   const file = path.join(appDir(), "workspaces.json");
-  if (!fs.existsSync(file)) return [];
   let source: string;
   try {
     source = fs.readFileSync(file, "utf8");
   } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code === "ENOENT") return [];
     throw new Error(
       `cannot read workspace registry ${file}: ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -590,9 +592,9 @@ async function runWiki(): Promise<number> {
     import("../daemon/workspace-registry/state.js"),
   ]);
   const {
+    countWikiPatterns: countWikiPatternsIn,
     createWikiCli,
     globalWikiDirectory,
-    openWikiWorkspace,
     resolveWikiDirectory,
     workspaceWikiDirectory,
     WikiUsageError,
@@ -601,19 +603,27 @@ async function runWiki(): Promise<number> {
   const rest = argv.slice(argv.indexOf("wiki") + 1);
   const stateSchema = registryState.WorkspaceRegistryStateSchema;
 
-  /** wiki 目录 → 存在性 + pattern 计数（目录不存在 = exists:false 计数 0，不创建）。 */
-  const countWikiPatterns = (wikiDirectory: string): { exists: boolean; patternCount: number } => {
-    if (!fs.existsSync(wikiDirectory)) return { exists: false, patternCount: 0 };
-    return { exists: true, patternCount: openWikiWorkspace(wikiDirectory).listPatterns().length };
-  };
+  /** wiki 目录 → 存在性 + pattern 计数（只读：不创建 patterns/，codex r1 P1）。 */
+  const countWikiPatterns = (wikiDirectory: string): { exists: boolean; patternCount: number } => ({
+    exists: fs.existsSync(wikiDirectory),
+    patternCount: countWikiPatternsIn(wikiDirectory),
+  });
 
   /** resolveScope（registry 只读解析）：`~`/路径直传默认解析；裸 token = label 前缀或 ws_* id。 */
   const resolveScope = async ({ requested }: { requested?: string }): Promise<string> => {
     const trimmed = (requested ?? "./").trim();
     // 非法形状（空/纯空白/NUL）交默认解析收窄为 typed WIKI_INVALID_SCOPE（exit 3）。
     if (trimmed.length === 0 || trimmed.includes("\0")) return resolveWikiDirectory(trimmed);
-    // 路径形状直传：`~`（global）、绝对路径、./ ../ . 前缀或含路径分隔符。
-    if (trimmed === "~" || path.isAbsolute(trimmed) || trimmed.includes("/")) {
+    // 路径形状直传：`~`（global）、绝对路径、./ ../ . .. 前缀、或含任一平台
+    // 分隔符（codex r1 P2：Windows 的 `.\foo`/`foo\bar` 曾落入 label 匹配）。
+    if (
+      trimmed === "~" ||
+      trimmed === "." ||
+      trimmed === ".." ||
+      path.isAbsolute(trimmed) ||
+      trimmed.includes("/") ||
+      trimmed.includes("\\")
+    ) {
       return resolveWikiDirectory(trimmed);
     }
     const entries = loadWikiRegistryEntries(stateSchema);

@@ -199,10 +199,12 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[], watch?: WatchF
         })),
       }));
     },
-    /** watcher + 引擎句柄回收（daemon stop coordinator 接线；幂等）。 */
-    dispose: (): void => {
+    /** watcher + 引擎句柄回收（daemon stop coordinator 接线；幂等）。await 保证
+     *  引擎 close（enqueue 串行链）真实落定——Windows 上早退的 teardown 会与
+     *  索引目录删除发生 EPERM 竞态（codex r1 P2）。 */
+    dispose: async (): Promise<void> => {
       watcher.dispose();
-      void index.close();
+      await index.close();
     },
   };
 }
