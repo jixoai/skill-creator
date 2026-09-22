@@ -185,6 +185,10 @@ export function countWikiPatterns(wikiDirectory: string): number {
   }
   let count = 0;
   for (const entry of entries.filter((name) => name.endsWith(".md")).sort()) {
+    // 成员判定与 listPatterns 全等（codex r2 P2）：文件名去掉 .md 后须过
+    // PatternNameSchema，frontmatter 须可解析——「frontmatter 合法但文件名
+    // 非法」的页面两处同弃，计数与列表永不漂移。
+    if (!PatternNameSchema.safeParse(entry.replace(/\.md$/, "")).success) continue;
     try {
       const raw = fs.readFileSync(path.join(patternsDir, entry), "utf8");
       if (parseFrontmatter(raw)) count += 1;

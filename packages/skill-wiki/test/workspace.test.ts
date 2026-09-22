@@ -404,6 +404,10 @@ describe("countWikiPatterns (read-only projection, codex r1 P1)", () => {
     wiki.appendPattern({ title: "Two", body: "second" });
     // 畸形页：无 frontmatter——listPatterns 丢弃，计数同语义丢弃。
     fs.writeFileSync(path.join(wikiDirOf(workspace), "patterns", "broken.md"), "no frontmatter\n");
+    // 非法文件名页（codex r2 P2 复现向量）：frontmatter 合法但文件名不过
+    // PatternNameSchema——listPatterns 丢弃，计数必须同弃（计数/列表不漂移）。
+    const legal = fs.readFileSync(path.join(wikiDirOf(workspace), "patterns", "one.md"), "utf8");
+    fs.writeFileSync(path.join(wikiDirOf(workspace), "patterns", "Bad_Name.md"), legal);
     const listed = openWikiWorkspace(wikiDirOf(workspace)).listPatterns();
     expect(listed).toHaveLength(2);
     expect(countWikiPatterns(wikiDirOf(workspace))).toBe(2);

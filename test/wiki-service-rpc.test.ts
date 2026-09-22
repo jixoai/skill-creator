@@ -245,6 +245,11 @@ describe("wiki.scopes RPC surface", () => {
     const { client } = wikiClient();
     await client.wiki.append({ scope: REGISTERED_WS, title: "Count me", body: "body 1" });
     await client.wiki.append({ scope: REGISTERED_WS, title: "Count me too", body: "body 2" });
+    // 非法文件名页（codex r2 P2）：frontmatter 合法但文件名不过 schema——
+    // 计数与可列 pattern 永不漂移（两处同弃）。
+    const wikiDir = path.join(workspaceDir, ".agents", "skill-wiki");
+    const legal = fs.readFileSync(path.join(wikiDir, "patterns", "count-me.md"), "utf8");
+    fs.writeFileSync(path.join(wikiDir, "patterns", "Bad_Name.md"), legal);
 
     const { scopes } = await client.wiki.scopes({});
     const registered = scopes.find((scope) => scope.id === REGISTERED_WS);
