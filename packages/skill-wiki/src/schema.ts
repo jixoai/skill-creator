@@ -26,7 +26,7 @@ export const PatternFrontmatterSchema = z
     created: z.string().min(1),
     /** 最后更新时间（ISO 8601）。 */
     updated: z.string().min(1),
-    /** 产生该 pattern 的作用域（溯源足迹；global 侧为 "~"）。 */
+    /** 溯源足迹（目录映射标准 2026-09-22）：global 写入 "~"，workspace 写入 workspace 目录绝对路径。 */
     origin: z.string().min(1),
     /**
      * 泛化溯源（预留）：LLM Maintainer 把 workspace 认知蒸馏进 global 页
@@ -79,8 +79,6 @@ export type SkillWikiErrorCode =
   | "WIKI_PATCH_FAILED"
   | "WIKI_INVALID_PATTERN"
   | "WIKI_INVALID_SCOPE"
-  | "WIKI_SCOPE_REGISTRY"
-  | "WIKI_SCOPE_CONFLICT"
   | "WIKI_IO";
 export class SkillWikiError extends Error {
   readonly code: SkillWikiErrorCode;

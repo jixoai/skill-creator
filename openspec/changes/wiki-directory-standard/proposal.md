@@ -17,11 +17,12 @@ skill-creator GUI 新增第四个一级面板 **Wiki**（与 Workspaces 面板�
 home=scope 索引，detail=patterns 列表）。
 
 配套（同一裁决批次）：
+
 - skill-wiki SDK 提供原子 cli-kit（命令单元 + createWikiCli 组装器），
   skill-creator `wiki` 子命令为首个消费者；
 - Windows 实机验证（ssh gaubeehonor）补跨平台欠账；
 - skill-search 内置排除目录名单与 Owner 名单（node_modules/.git/build/
-  dist/target/.cargo/.cache/.npm/__pycache__/tmp/logs/.pnpm-store/.bun/
+  dist/target/.cargo/.cache/.npm/**pycache**/tmp/logs/.pnpm-store/.bun/
   .rustup/.local）核对补齐。
 
 ## What Changes

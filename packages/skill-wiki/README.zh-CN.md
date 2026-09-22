@@ -34,35 +34,45 @@ Proposer……）由宿主内核在后续切片中编排——它们消费本库
 
 ## 存储契约
 
-每个 **scope** 一个 wiki，存放在统一根下（绝不进入用户的技能资产）。根解析
-顺序：`SKILL_WIKI_HOME` env 覆盖 > `~/.skill-wiki/`（`defaultWikiRoot()`）——
-宿主 daemon 与 CLI 同根；skill-creator 宿主以一次性迁移衔接旧路径（mv
-`~/.skill-creator/wiki` → `~/.skill-wiki` 后原位建 symlink）：
+**目录映射标准（Owner 裁决 2026-09-22）。** wiki 是目录自身的属性——像
+`.git/` 一样的目录约定，不存在由中央登记表分配的名字空间：
+
+- 任意 workspace 目录 `<dir>` 的 wiki 位于 `<dir>/.agents/skill-wiki/`
+  （`workspaceWikiDirectory(dir)`）；项目级使用**完全无需 registry**——在
+  任意目录执行 CLI，该目录的 `.agents/skill-wiki/` 按需创建；
+- global 是 `~` 特例，由 `globalWikiDirectory()` 解析：`SKILL_WIKI_HOME`
+  env 覆盖 > `~/.agents/skill-wiki/`；
+- registry workspace（skill-creator）的 wiki 与 workspace 目录**同居**——
+  registry 把 workspace id 解析为目录，绝不解析为 wiki 名字；
+- **没有中央根，也没有 slug 登记表**：slug 形状校验与 `scopes.json` 分配
+  退役——scope 由路径客观决定，名字空间分配问题不存在。
 
 ```
-<root>/                      # ~/.skill-wiki/（SKILL_WIKI_HOME 可覆盖）
-├── ~/                       # 全局 scope
-├── <slug>/                  # 按 workspace 的 scope（例：skill-creator/）
-│   ├── patterns/            # 唯一真相源：一个 canonical pattern 一个文件
-│   │   └── <name>.md
-│   ├── index.md             # 派生投影，总是从 patterns/ 重建
-│   ├── logs.md              # 人类可读的追加式事件日志
-│   └── skill-impact.md      # 机器追加的 JSONL 审计：提案 → 决策
-└── search-index/<scope>/    # 查重/相似索引（@jixoai/search，sqlite）
+<workspace 目录>/                     # 任意项目目录（无需 registry）
+└── .agents/skill-wiki/
+    ├── patterns/            # 唯一真相源：一个 canonical pattern 一个文件
+    │   └── <name>.md
+    ├── index.md             # 派生投影，总是从 patterns/ 重建
+    ├── logs.md              # 人类可读的追加式事件日志
+    ├── skill-impact.md      # 机器追加的 JSONL 审计：提案 → 决策
+    └── search-index/        # 查重/相似索引（@jixoai/search，sqlite）
+
+~/.agents/skill-wiki/               # global（"~" 特例；SKILL_WIKI_HOME 可覆盖）
 ```
 
-- **scope 双级**：全局 `"~"`（脱离任何 workspace 的泛化知识）与按 workspace
-  的 npm-scope 式 slug `^[a-z0-9](-?[a-z0-9])*$`（例：`skill-creator`、
-  `my-app`；形状以 `SLUG_SCOPE_REGEX` 导出）。`ws_<24-hex>` digest 形状
-  **不再被接受**（private 窗口期内的破坏性变更）；skill-creator 宿主把
-  registry 的 workspace id 映射为 label 派生的 slug（首个注册者保留裸名，
-  后出现的同 label 冲突方附 `-<4-hex>` digest 后缀）。
+- **宿主与 CLI 同根**：skill-creator daemon 经 registry 写
+  `<dir>/.agents/skill-wiki`，CLI 以 `--workspace <dir>` 读回——同一物理
+  目录，零衔接层。
+- **`origin` 足迹约定**：页面记录产生位置——global 写入记 `"~"`，workspace
+  写入记 workspace 目录绝对路径（人类可读 + 可机器解析）。
 - **`patterns/` 是唯一真相。** `index.md` 仅为标准兼容而存在——CLI 在每个
   读命令后自动刷新它，因此不存在任何维护命令（`rebuildIndex()` 同样从目录
   重建）。永远不存在需要调和的第二真相。
 - **`logs.md` 刻意非结构化**（面向人类的叙事审计）；
   **`skill-impact.md` 刻意结构化**（每行一个 `SkillImpactEntry` JSON 对象，
   是 harness 程序化追加的审计足迹）。
+- 旧布局存量（`~/.skill-wiki/` 中央根、`~/.skill-creator/wiki` 侧车）由
+  `scripts/migrate-wiki-roots.sh.ts` 一次性迁入——见 `docs/wiki-design.md`。
 
 ## Pattern 页解剖
 
@@ -71,18 +81,19 @@ Proposer……）由宿主内核在后续切片中编排——它们消费本库
 title: Pin exit codes in gates
 created: 2026-09-21T00:00:00.000Z
 updated: 2026-09-21T00:00:00.000Z
-origin: ws_0123…def # 产生该 pattern 的 scope 足迹
+origin: /Users/me/Dev/project # 产生该 pattern 的 workspace 足迹（global 记 "~"）
 promotedFrom: "" # 泛化溯源，由 LLM Maintainer 写入（切片③）
 ---
 
 Gate commands must branch on the real exit code, never on piped stdout.
 ```
 
-- `origin` 是最小溯源足迹（对应论文的 provenance-aware 探索）。
-  `promotedFrom` 是**预留的**泛化溯源槽位：当宿主的 LLM Maintainer 把
-  workspace 认知蒸馏进 global（新建页面，或经 patch 吸收进既有页面）时，
-  记录这条 global 页由哪个 workspace 的洞见触发。它**永远不是机械搬运**——
-  workspace 页面原地保留，追加通道恒写 `null`。
+- `origin` 是最小溯源足迹（对应论文的 provenance-aware 探索）：global 写入
+  记 `"~"`，workspace 写入记 workspace 目录绝对路径。`promotedFrom` 是
+  **预留的**泛化溯源槽位：当宿主的 LLM Maintainer 把 workspace 认知蒸馏进
+  global（新建页面，或经 patch 吸收进既有页面）时，记录这条 global 页由
+  哪个 workspace 的洞见触发。它**永远不是机械搬运**——workspace 页面原地
+  保留，追加通道恒写 `null`。
 - **去重判据**：`contentHash` = 正文先做 CRLF → LF 归一化并去除尾部空白后
   的 SHA-256。文件卫生字节不参与判据，因此追加侧与落盘回读侧永远一致。追加
   已存在同 hash 正文的条目是幂等的：不新建页，返回既有条目并带
@@ -136,21 +147,24 @@ schema，而不会经 workspace 层把 `node:fs` 拉进 bundle。根入口只在
 再导出（见上文孵化说明）。
 
 ```
-list    [--scope ~|slug] [--sort name|updated] [--offset 0] [--limit 100] [--json]
-show    <name> [--scope] [--json]
-add     --title <t> [--scope] [--no-similarity] [--json]   # 正文来自 stdin
-find    <query> [--scope] [--json]
-edit    <name> -f <edits.json> [--scope] [--json]          # WikiEdit[] JSON 文件
-remove  <name> [--scope] [--json]                          # + logs.md 足迹行
-log     [--scope] [--limit 20] [--json]
-impact  [--scope] [--filter accept|reject] [--json]
+list    [--workspace <path|~|./>] [--sort name|updated] [--offset 0] [--limit 100] [--json]
+show    <name> [--workspace] [--json]
+add     --title <t> [--workspace] [--no-similarity] [--json]   # 正文来自 stdin
+find    <query> [--workspace] [--json]
+edit    <name> -f <edits.json> [--workspace] [--json]          # WikiEdit[] JSON 文件
+remove  <name> [--workspace] [--json]                          # + logs.md 足迹行
+log     [--workspace] [--limit 20] [--json]
+impact  [--workspace] [--filter accept|reject] [--json]
 ```
 
+- **`--workspace <path|~|./>`**（缺省 `./`）：项目级使用是一等公民默认——
+  当前目录的 `.agents/skill-wiki/`，不依赖任何 registry；`~` 寻址 global，
+  任意相对/绝对路径寻址该目录的 wiki。
 - **退出码**：`0` 成功（含 hash 去重的 add——输出 `Already captured as "…"`）；
   `2` 用法错误；`3` `WIKI_INVALID_SCOPE`；`4` `WIKI_INVALID_PATTERN`；
   `5` `WIKI_PATCH_FAILED`。
 - **写入相似警告**：每次 `add`（除非 `--no-similarity`）写入后以该页
-  title+body 对 scope 的 `search-index/<scope>/` 索引（字段 `title` 权重 3 /
+  title+body 对该 wiki 的 `search-index/` 索引（字段 `title` 权重 3 /
   `body` 权重 1，sqlite 后端保证多进程安全）执行相似检索，近亲以
   `similar: <name> (0.83), …` 输出——分数相对该页自查询分归一，阈值是冻结的
   版本化常量 `SIMILARITY_THRESHOLD = 0.35`。相似是警告不是错误（检索失败降级
@@ -166,10 +180,15 @@ impact  [--scope] [--filter accept|reject] [--json]
 | ---------------------- | ------------------------------------------- |
 | `WIKI_PATCH_FAILED`    | patch 锚点未解析成功（整批中止）            |
 | `WIKI_INVALID_PATTERN` | 非法 pattern 名 / 标题 / frontmatter / 条目 |
-| `WIKI_INVALID_SCOPE`   | scope id 既非 `~` 也非 npm-scope 式 slug    |
+| `WIKI_INVALID_SCOPE`   | workspace 引用为空或无法解析                |
 
-## 设计裁决（2026-09-21，Owner 决定）
+## 设计裁决（Owner 决定）
 
+- **目录映射标准（2026-09-22）。** wiki 位于 `<dir>/.agents/skill-wiki/`——
+  目录自身的属性，如同 `.git/`。global 是 `~` 特例（`SKILL_WIKI_HOME`，默认
+  `~/.agents/skill-wiki`）。中央根、slug 名字空间与 `scopes.json` 登记表
+  退役：scope 由路径客观决定，碰撞/冒名问题族结构性消失。CLI `--workspace`
+  缺省 `./`（项目级一等公民；global 显式 `~`）。
 - **不引入每 pattern 一份 `PURPOSE.md`。** 消费语义在 frontmatter；演化语义
   在 `skill-impact.md`。第三个文件只会重复两者。
 - **`index.md` 是派生物，不是权威。** 读取路径从 `patterns/` 重建；该文件

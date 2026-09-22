@@ -172,7 +172,7 @@ export function createDaemonDomain(
   const skillIntelligence = createSkillIntelligenceService(skills, creator);
   const searchConfigOpener = options.searchConfigOpener ?? platformOpenFile;
   const dialog = options.dialog ?? createDialogService();
-  // wiki 侧车根默认 appDir()（构造期求值，daemon 生命周期内 home 不变）。
+  // wiki 随 workspace 目录同居（目录映射标准 2026-09-22）；global 由库解析。
   const wiki = createWikiService(workspaces);
   const domain: DaemonDomain = {
     workspaces,

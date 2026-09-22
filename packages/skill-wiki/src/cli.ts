@@ -2,6 +2,9 @@
  * 用户原始需求 [2026-09-21]（jixoai-search-core Phase 3）：「skill-wiki CLI——
  * list/show/add/find/edit/remove/log/impact；add 默认写入后自动相似警告；
  * 读命令结束后自动刷新 index.md，命令面无 reindex」。
+ * 修订 [2026-09-22]（目录映射标准 Owner 裁决）：寻址从 `--scope ~|slug` 改为
+ * `--workspace <path|~|./>`，缺省 `./`（项目级一等公民：当前目录的
+ * .agents/skill-wiki/，无需 registry；global 显式 `~`）。
  * 正交意图：
  *   [1] 命令路由与 argv 解析（零依赖手写——包依赖纪律，zod 唯一运行时依赖
  *       之外的 @jixoai/search 仅供查重管线）；用法错误 exit 2。
@@ -18,20 +21,13 @@ import { z } from "zod";
 import { SearchError, type SearchIndex } from "@jixoai/search";
 import { SkillWikiError } from "./schema.js";
 import type { WikiEdit } from "./patch.js";
-import {
-  defaultWikiRoot,
-  openWikiWorkspace,
-  parseWikiScope,
-  wikiScopeDirectory,
-  type WikiScope,
-  type WikiWorkspace,
-} from "./workspace.js";
+import { openWikiWorkspace, resolveWikiDirectory, type WikiWorkspace } from "./workspace.js";
 import {
   findSimilarPatterns,
-  openScopeSearchIndex,
+  openWikiSearchIndex,
   patternSearchDoc,
-  registerScopeCorpusEntries,
-  unregisterScopeCorpusEntries,
+  registerWikiCorpusEntries,
+  unregisterWikiCorpusEntries,
   type PatternDocSource,
   type SimilarPattern,
 } from "./similarity.js";
@@ -73,7 +69,7 @@ interface ParsedCommandLine {
 }
 
 /** 接受值的形式参名（规范化后，不含 -- 前缀）。 */
-const VALUE_OPTIONS = new Set(["scope", "sort", "offset", "limit", "title", "file", "filter"]);
+const VALUE_OPTIONS = new Set(["workspace", "sort", "offset", "limit", "title", "file", "filter"]);
 /** 布尔形式参名。 */
 const BOOLEAN_OPTIONS = new Set(["json", "no-similarity", "help"]);
 /** 短参别名 → 规范名。 */
@@ -150,15 +146,17 @@ function parseUnsignedInt(
   return value;
 }
 
-/** 打开 scope（parseWikiScope typed 失败 → exit 3 由外层映射）。 */
-function openScope(scopeValue: string | undefined): {
+/**
+ * 打开 workspace 引用指向的 wiki（resolveWikiDirectory typed 失败 → exit 3 由
+ * 外层映射）。缺省 `./`——项目级一等公民，当前目录的 .agents/skill-wiki/，
+ * 不依赖任何 registry 状态；global 显式 `~`。
+ */
+function openWiki(workspaceValue: string | undefined): {
   wiki: WikiWorkspace;
-  scope: WikiScope;
-  wikiRoot: string;
+  wikiDirectory: string;
 } {
-  const wikiRoot = defaultWikiRoot();
-  const scope = parseWikiScope(scopeValue ?? "~");
-  return { wiki: openWikiWorkspace(wikiScopeDirectory(wikiRoot, scope)), scope, wikiRoot };
+  const wikiDirectory = resolveWikiDirectory(workspaceValue ?? "./");
+  return { wiki: openWikiWorkspace(wikiDirectory), wikiDirectory };
 }
 
 /** 读命令结束后的派生物刷新（失败仅警告——index.md 不是真相源）。 */
@@ -183,13 +181,12 @@ function loadPatternDocSources(wiki: WikiWorkspace): PatternDocSource[] {
  * 查重索引维护会话：打开（必要时全量重灌）→ 执行 → 必 close。
  * SearchError 由调用方决定降级（add/edit/remove 警告；find 上抛）。
  */
-async function withScopeIndex<T>(
-  wikiRoot: string,
-  scope: WikiScope,
+async function withWikiIndex<T>(
+  wikiDirectory: string,
   wiki: WikiWorkspace,
   action: (index: SearchIndex) => Promise<T>,
 ): Promise<T> {
-  const index = await openScopeSearchIndex(wikiRoot, scope, () => loadPatternDocSources(wiki));
+  const index = await openWikiSearchIndex(wikiDirectory, () => loadPatternDocSources(wiki));
   try {
     return await action(index);
   } finally {
@@ -217,7 +214,7 @@ function storedTitle(hit: { id: string; stored?: Record<string, unknown> }): str
 /* ------------------------------- commands ------------------------------- */
 
 function cmdList(ctx: CommandContext): number {
-  const { wiki } = openScope(optionString(ctx.options, "scope"));
+  const { wiki } = openWiki(optionString(ctx.options, "workspace"));
   const sort = optionString(ctx.options, "sort") ?? "name";
   if (sort !== "name" && sort !== "updated") {
     throw new UsageError(`option --sort must be name or updated (got: ${sort})`);
@@ -245,7 +242,7 @@ function cmdList(ctx: CommandContext): number {
 function cmdShow(ctx: CommandContext): number {
   const name = ctx.positionals[0];
   if (name === undefined) throw new UsageError("show requires a <name> argument");
-  const { wiki } = openScope(optionString(ctx.options, "scope"));
+  const { wiki } = openWiki(optionString(ctx.options, "workspace"));
   const json = ctx.options.has("json");
   if (json) {
     const read = wiki.readPattern(name);
@@ -268,18 +265,18 @@ async function cmdAdd(ctx: CommandContext): Promise<number> {
   if (body.length > MAX_BODY_CHARS) {
     throw new UsageError(`body exceeds ${MAX_BODY_CHARS} chars (got ${body.length})`);
   }
-  const { wiki, scope, wikiRoot } = openScope(optionString(ctx.options, "scope"));
+  const { wiki, wikiDirectory } = openWiki(optionString(ctx.options, "workspace"));
   const json = ctx.options.has("json");
   const { item, deduplicated } = wiki.appendPattern({ title, body });
 
   let similar: SimilarPattern[] = [];
   if (!ctx.options.has("no-similarity")) {
     try {
-      similar = await withScopeIndex(wikiRoot, scope, wiki, async (index) => {
+      similar = await withWikiIndex(wikiDirectory, wiki, async (index) => {
         // 增量 upsert 该页（幂等）→ 自查询分可归一；corpus 登记随动。
         const source = { name: item.name, title: item.title, body };
         await index.upsert([patternSearchDoc(source)]);
-        registerScopeCorpusEntries(wikiRoot, scope, [source]);
+        registerWikiCorpusEntries(wikiDirectory, [source]);
         return findSimilarPatterns(index, source);
       });
     } catch (error) {
@@ -315,9 +312,9 @@ const FIND_HIT_LIMIT = 10;
 async function cmdFind(ctx: CommandContext): Promise<number> {
   const query = ctx.positionals.join(" ").trim();
   if (query.length === 0) throw new UsageError("find requires a <query> argument");
-  const { wiki, scope, wikiRoot } = openScope(optionString(ctx.options, "scope"));
+  const { wiki, wikiDirectory } = openWiki(optionString(ctx.options, "workspace"));
   const json = ctx.options.has("json");
-  const result = await withScopeIndex(wikiRoot, scope, wiki, (index) =>
+  const result = await withWikiIndex(wikiDirectory, wiki, (index) =>
     index.search(query, { limit: FIND_HIT_LIMIT }),
   );
   refreshDerivedIndex(wiki, ctx.io);
@@ -342,7 +339,7 @@ async function cmdEdit(ctx: CommandContext): Promise<number> {
   const name = ctx.positionals[0];
   if (name === undefined) throw new UsageError("edit requires a <name> argument");
   const file = requireOption(ctx.options, "file");
-  const { wiki, scope, wikiRoot } = openScope(optionString(ctx.options, "scope"));
+  const { wiki, wikiDirectory } = openWiki(optionString(ctx.options, "workspace"));
 
   let raw: string;
   try {
@@ -369,7 +366,7 @@ async function cmdEdit(ctx: CommandContext): Promise<number> {
   const { item } = wiki.editPattern(name, edits);
 
   try {
-    await withScopeIndex(wikiRoot, scope, wiki, async (index) => {
+    await withWikiIndex(wikiDirectory, wiki, async (index) => {
       const read = wiki.readPattern(item.name);
       const source = {
         name: item.name,
@@ -377,7 +374,7 @@ async function cmdEdit(ctx: CommandContext): Promise<number> {
         body: read.body,
       };
       await index.upsert([patternSearchDoc(source)]);
-      registerScopeCorpusEntries(wikiRoot, scope, [source]);
+      registerWikiCorpusEntries(wikiDirectory, [source]);
     });
   } catch (error) {
     if (!(error instanceof SearchError)) throw error;
@@ -397,16 +394,16 @@ async function cmdEdit(ctx: CommandContext): Promise<number> {
 async function cmdRemove(ctx: CommandContext): Promise<number> {
   const name = ctx.positionals[0];
   if (name === undefined) throw new UsageError("remove requires a <name> argument");
-  const { wiki, scope, wikiRoot } = openScope(optionString(ctx.options, "scope"));
+  const { wiki, wikiDirectory } = openWiki(optionString(ctx.options, "workspace"));
   const read = wiki.readPattern(name);
   wiki.removePattern(name);
   // 删除后页面上无痕，logs.md 是唯一足迹。
   wiki.appendLog(`removed pattern ${name} ("${read.frontmatter.title}")`);
 
   try {
-    await withScopeIndex(wikiRoot, scope, wiki, async (index) => {
+    await withWikiIndex(wikiDirectory, wiki, async (index) => {
       await index.remove([name]);
-      unregisterScopeCorpusEntries(wikiRoot, scope, [name]);
+      unregisterWikiCorpusEntries(wikiDirectory, [name]);
     });
   } catch (error) {
     if (!(error instanceof SearchError)) throw error;
@@ -422,7 +419,7 @@ async function cmdRemove(ctx: CommandContext): Promise<number> {
 }
 
 function cmdLog(ctx: CommandContext): number {
-  const { wiki } = openScope(optionString(ctx.options, "scope"));
+  const { wiki } = openWiki(optionString(ctx.options, "workspace"));
   const limit = parseUnsignedInt(ctx.options, "limit", 20, 10_000);
   const lines = wiki.readLogLines().slice(-limit);
   refreshDerivedIndex(wiki, ctx.io);
@@ -435,7 +432,7 @@ function cmdLog(ctx: CommandContext): number {
 }
 
 function cmdImpact(ctx: CommandContext): number {
-  const { wiki } = openScope(optionString(ctx.options, "scope"));
+  const { wiki } = openWiki(optionString(ctx.options, "workspace"));
   const filter = optionString(ctx.options, "filter");
   if (filter !== undefined && filter !== "accept" && filter !== "reject") {
     throw new UsageError(`option --filter must be accept or reject (got: ${filter})`);
@@ -462,18 +459,20 @@ function cmdImpact(ctx: CommandContext): number {
 const USAGE = `usage: skill-wiki <command> [options]
 
 commands:
-  list    [--scope ~|slug] [--sort name|updated] [--offset 0] [--limit 100] [--json]
-  show    <name> [--scope] [--json]
-  add     --title <t> [--scope] [--no-similarity] [--json]   (body from stdin)
-  find    <query> [--scope] [--json]
-  edit    <name> -f <edits.json> [--scope] [--json]
-  remove  <name> [--scope] [--json]
-  log     [--scope] [--limit 20] [--json]
-  impact  [--scope] [--filter accept|reject] [--json]
+  list    [--workspace <path|~|./>] [--sort name|updated] [--offset 0] [--limit 100] [--json]
+  show    <name> [--workspace] [--json]
+  add     --title <t> [--workspace] [--no-similarity] [--json]   (body from stdin)
+  find    <query> [--workspace] [--json]
+  edit    <name> -f <edits.json> [--workspace] [--json]
+  remove  <name> [--workspace] [--json]
+  log     [--workspace] [--limit 20] [--json]
+  impact  [--workspace] [--filter accept|reject] [--json]
 
 options:
-  --scope <s>   wiki scope: global "~" (default) or npm-scope slug
-  --json        machine-readable output
+  --workspace <w>   wiki workspace: "~" (global), "./" (default; the current
+                    directory's .agents/skill-wiki/), or any relative/absolute
+                    directory path (its .agents/skill-wiki/ — no registry needed)
+  --json            machine-readable output
 
 exit codes: 0 ok (incl. deduplicated) | 2 usage | 3 WIKI_INVALID_SCOPE
             4 WIKI_INVALID_PATTERN | 5 WIKI_PATCH_FAILED`;

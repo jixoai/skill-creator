@@ -1,6 +1,9 @@
 /**
  * 用户原始需求 [2026-09-21]（jixoai-search-core 3.3-3.8）：「CLI 命令面随包私有…
  * add 幂等/相似警告、edit 原子失败、exit code 映射、分页元数据、派生物自愈」。
+ * 修订 [2026-09-22]（目录映射标准）：寻址 `--workspace <path|~|./>`，缺省 `./`；
+ * 测试默认面 = `--workspace ~`（SKILL_WIKI_HOME 隔离根），缺省 `./` 行为在
+ * "default workspace" describe 显式验证。
  * 正交意图：
  *   [1] runCli 纯函数面（注入内存 IO + SKILL_WIKI_HOME 隔离根）：命令语义、
  *       exit code 全映射、--json 形状。
@@ -42,7 +45,16 @@ interface RunResult {
   stderr: string;
 }
 
+/**
+ * 测试默认面：global wiki（SKILL_WIKI_HOME = root）。run 统一注入
+ * `--workspace ~`；缺省 `./` 的项目级行为由 "default workspace" describe 用
+ * runCli + process.chdir 显式覆盖。
+ */
 async function run(args: string[], stdin = ""): Promise<RunResult> {
+  return runRaw(["--workspace", "~", ...args], stdin);
+}
+
+async function runRaw(args: string[], stdin = ""): Promise<RunResult> {
   const out: string[] = [];
   const err: string[] = [];
   const code = await runCli(args, {
@@ -231,7 +243,7 @@ describe("external pattern drift (corpus registry, final review P1-2)", () => {
   it("find reflects externally added patterns immediately", async () => {
     await run(["add", "--title", "Internal page"], "internal body\n");
     // 外部（编辑器 / 库 API）直接写 patterns/——不得静默漏检。
-    const wiki = openWikiWorkspace(path.join(root, "~"));
+    const wiki = openWikiWorkspace(root);
     wiki.appendPattern({ title: "External page", body: "zephyr unique phrase marker\n" });
 
     const found = await run(["find", "zephyr unique phrase", "--json"]);
@@ -242,7 +254,7 @@ describe("external pattern drift (corpus registry, final review P1-2)", () => {
   });
 
   it("find reflects externally edited content (full rebuild path on 100% drift)", async () => {
-    const wiki = openWikiWorkspace(path.join(root, "~"));
+    const wiki = openWikiWorkspace(root);
     wiki.appendPattern({ title: "Drift page", body: "alpha bravo charlie\n" });
     await run(["find", "alpha bravo"]); // 打开一次索引（corpus 登记当前状态）
     wiki.editPattern("drift-page", [
@@ -258,7 +270,7 @@ describe("external pattern drift (corpus registry, final review P1-2)", () => {
   });
 
   it("find forgets externally removed patterns (incremental sync)", async () => {
-    const wiki = openWikiWorkspace(path.join(root, "~"));
+    const wiki = openWikiWorkspace(root);
     wiki.appendPattern({ title: "Keep page", body: "keeper body\n" });
     wiki.appendPattern({ title: "Doomed external", body: "orangutan unique marker\n" });
     await run(["find", "orangutan unique"]); // 索引 + corpus 登记两页
@@ -273,11 +285,11 @@ describe("external pattern drift (corpus registry, final review P1-2)", () => {
   });
 
   it("find reflects externally title-only edits (projection fingerprint, r6 P1-2)", async () => {
-    const wiki = openWikiWorkspace(path.join(root, "~"));
+    const wiki = openWikiWorkspace(root);
     wiki.appendPattern({ title: "Old title", body: "stable body\n" });
     await run(["find", "stable body"]); // 打开一次索引（corpus 登记投影指纹）
     // 模拟外部编辑器：直接改 frontmatter 标题、body 不动——指纹必须覆盖 title 才能检出漂移。
-    const pageFile = path.join(root, "~", "patterns", "old-title.md");
+    const pageFile = path.join(root, "patterns", "old-title.md");
     const raw = fs.readFileSync(pageFile, "utf8");
     fs.writeFileSync(pageFile, raw.replace("title: Old title", "title: Zzuniqueqwerty"), "utf8");
 
@@ -291,7 +303,7 @@ describe("external pattern drift (corpus registry, final review P1-2)", () => {
 describe("edit atomicity and remove footprint", () => {
   it("fails the whole batch with exit 5 and zero page changes when an anchor misses", async () => {
     await run(["add", "--title", "Stable page"], "keep this line\nand this one\n");
-    const pageFile = path.join(root, "~", "patterns", "stable-page.md");
+    const pageFile = path.join(root, "patterns", "stable-page.md");
     const before = fs.readFileSync(pageFile, "utf8");
     const editsFile = path.join(root, "edits.json");
     fs.writeFileSync(
@@ -325,7 +337,7 @@ describe("edit atomicity and remove footprint", () => {
     expect(removed.code).toBe(0);
     expect(removed.stdout).toContain("Removed doomed-insight");
 
-    const logs = fs.readFileSync(path.join(root, "~", "logs.md"), "utf8");
+    const logs = fs.readFileSync(path.join(root, "logs.md"), "utf8");
     expect(logs).toContain("removed pattern doomed-insight");
     expect(logs).toContain("Doomed insight");
 
@@ -337,10 +349,10 @@ describe("edit atomicity and remove footprint", () => {
 describe("derived artifact self-healing", () => {
   it("read commands refresh index.md after external pattern edits (no reindex command)", async () => {
     await run(["add", "--title", "Healing"], "original body\n");
-    const scopeDir = path.join(root, "~");
+    const wikiDir = root;
     // 外部编辑器直接改 patterns/ + 弄脏 index.md。
     fs.writeFileSync(
-      path.join(scopeDir, "patterns", "hand-written.md"),
+      path.join(wikiDir, "patterns", "hand-written.md"),
       [
         "---",
         "title: Hand Written",
@@ -354,11 +366,11 @@ describe("derived artifact self-healing", () => {
       ].join("\n"),
       "utf8",
     );
-    fs.writeFileSync(path.join(scopeDir, "index.md"), "stale index\n", "utf8");
+    fs.writeFileSync(path.join(wikiDir, "index.md"), "stale index\n", "utf8");
 
     const listed = await run(["list"]);
     expect(listed.stdout).toContain("hand-written — Hand Written");
-    const index = fs.readFileSync(path.join(scopeDir, "index.md"), "utf8");
+    const index = fs.readFileSync(path.join(wikiDir, "index.md"), "utf8");
     expect(index).toContain("hand-written — Hand Written");
     expect(index).not.toContain("stale index");
     // 命令面无 reindex：unknown command 佐证。
@@ -370,7 +382,7 @@ describe("derived artifact self-healing", () => {
 
 describe("log and impact", () => {
   it("log tails the last N lines", async () => {
-    const wiki = openWikiWorkspace(path.join(root, "~"));
+    const wiki = openWikiWorkspace(root);
     for (let index = 1; index <= 5; index += 1) wiki.appendLog(`event ${index}`);
     const tailed = await run(["log", "--limit", "2"]);
     expect(tailed.code).toBe(0);
@@ -381,7 +393,7 @@ describe("log and impact", () => {
   });
 
   it("impact filters by decision and emits --json", async () => {
-    const wiki = openWikiWorkspace(path.join(root, "~"));
+    const wiki = openWikiWorkspace(root);
     const entry = (decision: "accept" | "reject", skill: string) => ({
       date: `2026-09-21T00:0${skill.length}:00.000Z`,
       proposal: { action: "create", skill, summary: `summary for ${skill}` },
@@ -405,9 +417,12 @@ describe("log and impact", () => {
 });
 
 describe("exit code mapping", () => {
-  it("maps usage / scope / pattern failures to 2 / 3 / 4", async () => {
-    expect((await run(["list", "--scope", "Bad_Scope"])).code).toBe(3);
-    expect((await run(["list", "--scope", "ws_" + "a".repeat(24)])).code).toBe(3);
+  it("maps usage / workspace / pattern failures to 2 / 3 / 4", async () => {
+    // --scope 已随 slug 寻址退役：未知选项 = 用法错误 2。
+    expect((await run(["list", "--scope", "anything"])).code).toBe(2);
+    // 非法 workspace 输入（空串/纯空白）= typed WIKI_INVALID_SCOPE → 3。
+    expect((await run(["list", "--workspace", ""])).code).toBe(3);
+    expect((await runRaw(["list", "--workspace", " "])).code).toBe(3);
     expect((await run(["frobnicate"])).code).toBe(2);
     expect((await run(["add"])).code).toBe(2);
     expect((await run(["add", "--title"])).code).toBe(2);
@@ -418,9 +433,56 @@ describe("exit code mapping", () => {
     expect((await run(["--help"])).code).toBe(0);
   });
 
-  it("stderr carries the typed code for scope failures", async () => {
-    const scope = await run(["list", "--scope", "Bad_Scope"]);
-    expect(scope.stderr).toContain("WIKI_INVALID_SCOPE");
+  it("stderr carries the typed code for workspace failures", async () => {
+    const workspace = await run(["list", "--workspace", ""]);
+    expect(workspace.stderr).toContain("WIKI_INVALID_SCOPE");
+  });
+});
+
+describe("default workspace (./, directory mapping standard)", () => {
+  it("addresses the current directory's .agents/skill-wiki without any registry", async () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "skill-wiki-cwd-"));
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(project);
+      // 缺省 ./：不传任何 workspace 参数。
+      const added = await runRaw(["add", "--title", "Project local"], "project body\n");
+      expect(added.code).toBe(0);
+      const wikiDir = path.join(project, ".agents", "skill-wiki");
+      expect(fs.existsSync(path.join(wikiDir, "patterns", "project-local.md"))).toBe(true);
+
+      const listed = await runRaw(["list", "--json"]);
+      expect((JSON.parse(listed.stdout) as { total: number }).total).toBe(1);
+
+      // 显式 ./ 与缺省同址；相对路径经 cwd 解析。
+      const explicit = await runRaw(["list", "--workspace", "./"]);
+      expect(explicit.stdout).toContain("project-local");
+      const relative = await runRaw(["list", "--workspace", "."]);
+      expect(relative.stdout).toContain("project-local");
+      // global 与项目级互不重叠（global 由 SKILL_WIKI_HOME 隔离为 root）。
+      const global = await runRaw(["list", "--workspace", "~", "--json"]);
+      expect((JSON.parse(global.stdout) as { total: number }).total).toBe(0);
+    } finally {
+      process.chdir(previousCwd);
+      fs.rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  it("addresses an arbitrary workspace directory by path (--workspace <dir>)", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "skill-wiki-ws-"));
+    try {
+      const added = await run(["add", "--title", "Arbitrary dir", "--workspace", workspace], "w\n");
+      expect(added.code).toBe(0);
+      expect(
+        fs.existsSync(
+          path.join(workspace, ".agents", "skill-wiki", "patterns", "arbitrary-dir.md"),
+        ),
+      ).toBe(true);
+      // SKILL_WIKI_HOME（root/global）不受影响。
+      expect(fs.existsSync(path.join(root, "patterns"))).toBe(false);
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
   });
 });
 
@@ -430,11 +492,15 @@ describe("child-process smoke (tsx)", () => {
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("usage: skill-wiki");
 
-    const added = await spawnCli(["add", "--title", "Smoke test"], "smoke body\n");
+    // 显式 ~：child cwd 是仓库根，缺省 ./ 会误写仓库目录。
+    const added = await spawnCli(
+      ["add", "--workspace", "~", "--title", "Smoke test"],
+      "smoke body\n",
+    );
     expect(added.code).toBe(0);
     expect(added.stdout).toContain("Captured");
 
-    const listed = await spawnCli(["list", "--json"]);
+    const listed = await spawnCli(["list", "--workspace", "~", "--json"]);
     expect(listed.code).toBe(0);
     const payload = JSON.parse(listed.stdout) as { total: number };
     expect(payload.total).toBe(1);

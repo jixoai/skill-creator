@@ -1,13 +1,14 @@
 /**
  * 用户原始需求 [2026-09-21]：「workspace 很重要，但我们仍然需要有一个 global 的
- * 概念，global 能承载 workspace 泛化出来的 skill」——双级作用域（global `~` +
- * per-workspace 侧车目录）。
- * 用户原始需求 [2026-09-21]（jixoai-search-core 3.1/3.2）：「scope 用人类可读的
- * npm-scope 式 slug，ws_ digest 形状退役；存储根统一 ~/.skill-wiki/，宿主与
- * CLI 同根」。
+ * 概念，global 能承载 workspace 泛化出来的 skill」。
+ * 用户原始需求 [2026-09-22]（wiki-directory-standard Owner 裁决）：「wiki 从中央根
+ * 按名字分目录改为目录自身的属性——wiki 目录 = <dir>/.agents/skill-wiki/；
+ * global 是 `~` 特例（SKILL_WIKI_HOME 覆盖，默认 ~/.agents/skill-wiki）；
+ * slug 登记表与中央根退役，scope 由路径客观决定」。
  * 正交意图：
  *   [1] WikiWorkspace：wiki/ 目录契约（patterns 为真相源；index 为派生投影；
- *       logs 追加式；skill-impact 程序化追加）+ scope slug 形状 + 统一根解析。
+ *       logs 追加式；skill-impact 程序化追加）+ 目录映射标准
+ *       （workspaceWikiDirectory / globalWikiDirectory / resolveWikiDirectory）。
  *   [2] 碎片认知追加通道（P1 升格）：contentHash 去重幂等 + index 同步重建。
  *   [3] 磁盘边界：畸形 pattern 读取丢弃、mutation typed 拒绝；全部写入走
  *       同目录临时文件 + rename 原子替换。
@@ -31,34 +32,44 @@ import {
 import { applyEdits, type WikiEdit } from "./patch.js";
 
 /**
- * scope slug 形状（npm-scope 式，破坏性收紧 2026-09-21）：小写字母数字单词以
- * 单连字符串联（1-3+ 个单词，例：`skill-creator`、`my-app`）；`ws_<24hex>`
- * digest 形状不再被接受（private 窗口期破坏性变更）。
+ * 目录映射标准（2026-09-22 Owner 裁决）：wiki 目录是目录自身的属性（`.git/` 式
+ * 约定），不存在中央根与名字空间分配——
+ * - workspace 目录 `<dir>` → `<dir>/.agents/skill-wiki/`；
+ * - global（`~` 特例）→ `SKILL_WIKI_HOME` env > `~/.agents/skill-wiki/`；
+ * - registry workspace 的 wiki 与 workspace 目录同居。
  */
-export const SLUG_SCOPE_REGEX = /^[a-z0-9](-?[a-z0-9])*$/;
 
-/** wiki 作用域：global `~` 或 npm-scope 式 slug。 */
-export type WikiScope = "~" | (string & { readonly __wikiScope: unique symbol });
+/** wiki 目录在 workspace 目录内的相对位置（`.git/` 式目录属性约定）。 */
+export const WIKI_DIRECTORY_SEGMENTS = [".agents", "skill-wiki"] as const;
 
-/** 校验并收窄 scope（外部输入边界）。 */
-export function parseWikiScope(value: string): WikiScope {
-  if (value === "~") return "~";
-  if (SLUG_SCOPE_REGEX.test(value)) return value as WikiScope;
-  throw new SkillWikiError("WIKI_INVALID_SCOPE", `Invalid wiki scope: ${value}`);
+/** workspace 目录 → wiki 目录（`<dir>/.agents/skill-wiki`）。 */
+export function workspaceWikiDirectory(dir: string): string {
+  return path.join(dir, ...WIKI_DIRECTORY_SEGMENTS);
+}
+
+/** global wiki 目录：`SKILL_WIKI_HOME` env > `~/.agents/skill-wiki`（os.homedir）。 */
+export function globalWikiDirectory(): string {
+  const override = process.env.SKILL_WIKI_HOME;
+  return override && override.length > 0
+    ? override
+    : path.join(os.homedir(), ".agents", "skill-wiki");
 }
 
 /**
- * 统一存储根：`SKILL_WIKI_HOME` env > `~/.skill-wiki/`（os.homedir）。宿主与
- * CLI 同根（spec「宿主与 CLI 同根」scenario）；测试隔离经 env 注入。
+ * workspace 引用（`"~"` 或目录路径）→ wiki 目录。外部输入边界：空串/纯空白/
+ * 含 NUL 的非法形状 → typed `WIKI_INVALID_SCOPE`（slug 规则已随登记表退役，
+ * 但非法 workspace 输入仍被拒绝）；相对路径按当前工作目录解析为绝对路径。
  */
-export function defaultWikiRoot(): string {
-  const override = process.env.SKILL_WIKI_HOME;
-  return override && override.length > 0 ? override : path.join(os.homedir(), ".skill-wiki");
-}
-
-/** scope 目录：<wikiRoot>/<scope>/（wikiRoot 由调用方解析，通常是 defaultWikiRoot()）。 */
-export function wikiScopeDirectory(wikiRoot: string, scope: WikiScope): string {
-  return path.join(wikiRoot, scope === "~" ? "~" : scope);
+export function resolveWikiDirectory(workspace: string): string {
+  const trimmed = workspace.trim();
+  if (trimmed.length === 0 || trimmed.includes("\0")) {
+    throw new SkillWikiError(
+      "WIKI_INVALID_SCOPE",
+      `Invalid wiki workspace: ${JSON.stringify(workspace)}`,
+    );
+  }
+  if (trimmed === "~") return globalWikiDirectory();
+  return workspaceWikiDirectory(path.resolve(trimmed));
 }
 
 /**
@@ -114,7 +125,7 @@ function atomicWriteUtf8(file: string, content: string): void {
   fs.renameSync(temp, file);
 }
 
-/** 一个 scope 的 wiki workspace（stateless 门面；目录惰性创建）。 */
+/** 一个 wiki 目录的 workspace（stateless 门面；目录惰性创建）。 */
 export interface WikiWorkspace {
   /** 列表投影（patterns 目录为真相源；畸形条目静默丢弃）。 */
   listPatterns(): PatternListItem[];
@@ -123,8 +134,10 @@ export interface WikiWorkspace {
   /** 单 pattern 原文落盘字节（frontmatter + body；缺失/非法 name typed 失败）。 */
   readPatternRaw(name: string): string;
   /**
-   * 碎片认知追加（P1 通道）：同 scope 内正文 contentHash 相同 → 幂等返回
+   * 碎片认知追加（P1 通道）：同 wiki 内正文 contentHash 相同 → 幂等返回
    * 既有条目；否则新建 pattern 页（name 冲突时追加 `-2` 序号）并重建 index.md。
+   * origin 足迹约定（显示足迹 + 可机器解析）：global 写入传 `"~"`，workspace
+   * 写入传 workspace 目录绝对路径。
    */
   appendPattern(input: { title: string; body: string; origin?: string }): {
     item: PatternListItem;

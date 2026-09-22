@@ -7,11 +7,14 @@
  * 每次打开重算当前 patterns 与登记比对：一致复用；漂移增量同步；登记缺失或
  * 全量漂移 >50% → 全量重灌。仅比对 envelope.json 字节的旧探测保留（包信封
  * 重建后 corpus 也重建）。
+ * 修订 [2026-09-22]（目录映射标准 Owner 裁决）：索引目录随 wiki 目录走——
+ * `<wiki目录>/search-index/`（wiki 目录 = `<dir>/.agents/skill-wiki` 或 global
+ * 特例）；不再有中央根下的 per-scope 子目录。
  * 正交意图：
- *   [1] scope 查重索引生命周期：<wikiRoot>/search-index/<scope>/，@jixoai/search
+ *   [1] wiki 查重索引生命周期：<wiki目录>/search-index/，@jixoai/search
  *       sqlite backend（多进程安全默认，与 daemon 选择一致；tantivy 目录锁是
- *       单写者）。corpus 登记放在索引目录**旁**（<scope>.corpus.json）——包的
- *       openIndex 重建审计只接受信封与 backend 已知产物，外来文件会拒绝重建。
+ *       单写者）。corpus 登记放在索引目录**旁**（search-index.corpus.json）——
+ *       包的 openIndex 重建审计只接受信封与 backend 已知产物，外来文件会拒绝重建。
  *   [2] 相似判定：相对分 = 候选命中分 / 自查询分（该页 title+body 作为 query 时
  *       自身的命中分 = 该 query 的可达上界），阈值冻结为版本化常量。
  */
@@ -21,7 +24,6 @@ import { z } from "zod";
 import { openIndex, type SearchDocument, type SearchIndex } from "@jixoai/search";
 import { createHash } from "node:crypto";
 import { SkillWikiError } from "./schema.js";
-import type { WikiScope } from "./workspace.js";
 
 /**
  * corpus 指纹 = 完整搜索投影（title+body）的版本化 digest——搜索投影包含 title
@@ -71,14 +73,14 @@ export const SIMILARITY_THRESHOLD = 0.35;
 /** 相似警告输出的近亲条数上限。 */
 export const SIMILARITY_LIMIT = 3;
 
-/** scope 的查重索引目录：<wikiRoot>/search-index/<scope>/。 */
-export function scopeSearchIndexDirectory(wikiRoot: string, scope: WikiScope): string {
-  return path.join(wikiRoot, "search-index", scope === "~" ? "~" : scope);
+/** wiki 的查重索引目录：<wiki目录>/search-index/（随 wiki 目录走，无中央根）。 */
+export function wikiSearchIndexDirectory(wikiDirectory: string): string {
+  return path.join(wikiDirectory, "search-index");
 }
 
-/** scope 的 corpus 登记文件（索引目录旁的兄弟文件；索引目录内容审计不接受外来文件）。 */
-export function scopeCorpusRegistryFile(wikiRoot: string, scope: WikiScope): string {
-  return `${scopeSearchIndexDirectory(wikiRoot, scope)}.corpus.json`;
+/** wiki 的 corpus 登记文件（索引目录旁的兄弟文件；索引目录内容审计不接受外来文件）。 */
+export function wikiCorpusRegistryFile(wikiDirectory: string): string {
+  return `${wikiSearchIndexDirectory(wikiDirectory)}.corpus.json`;
 }
 
 /** 索引文档源：一个 pattern 页的可检索投影。 */
@@ -146,7 +148,7 @@ function writeCorpus(file: string, files: Map<string, string>): void {
 }
 
 /**
- * 打开（必要时同步）某 scope 的查重索引。patterns/ 是唯一真相：每次打开都
+ * 打开（必要时同步）某 wiki 目录的查重索引。patterns/ 是唯一真相：每次打开都
  * 重算当前 patterns 的 name→contentHash，与 corpus 登记比对——
  * - 登记缺失 → 索引内容不可证明，整目录重建（派生物，安全删除）+ 全量重灌；
  * - openIndex 信封重建（目录缺失/口径漂移）→ 引擎已清空，全量重灌 + 登记重建；
@@ -154,13 +156,12 @@ function writeCorpus(file: string, files: Map<string, string>): void {
  * - 漂移 → 增量同步（缺失/变更 upsert、多余 remove）；漂移 >50% → 全量重灌。
  * 外部（编辑器/库 API）对 patterns/ 的增删改由此即时反映，不再静默漏检。
  */
-export async function openScopeSearchIndex(
-  wikiRoot: string,
-  scope: WikiScope,
+export async function openWikiSearchIndex(
+  wikiDirectory: string,
   loadPatterns: () => PatternDocSource[],
 ): Promise<SearchIndex> {
-  const directory = scopeSearchIndexDirectory(wikiRoot, scope);
-  const corpusFile = scopeCorpusRegistryFile(wikiRoot, scope);
+  const directory = wikiSearchIndexDirectory(wikiDirectory);
+  const corpusFile = wikiCorpusRegistryFile(wikiDirectory);
   const patterns = loadPatterns();
   const desired = new Map(
     patterns.map((source) => [source.name, patternProjectionHash(source.title, source.body)]),
@@ -210,12 +211,11 @@ export async function openScopeSearchIndex(
 }
 
 /** 调用方增量 upsert 后同步 corpus 登记（幂等：同 hash 重写）。 */
-export function registerScopeCorpusEntries(
-  wikiRoot: string,
-  scope: WikiScope,
+export function registerWikiCorpusEntries(
+  wikiDirectory: string,
   sources: readonly PatternDocSource[],
 ): void {
-  const file = scopeCorpusRegistryFile(wikiRoot, scope);
+  const file = wikiCorpusRegistryFile(wikiDirectory);
   const corpus = readCorpus(file) ?? new Map<string, string>();
   for (const source of sources) {
     corpus.set(source.name, patternProjectionHash(source.title, source.body));
@@ -224,12 +224,8 @@ export function registerScopeCorpusEntries(
 }
 
 /** 调用方增量 remove 后同步 corpus 登记（登记缺失 = 下次打开全量重建，无需维护）。 */
-export function unregisterScopeCorpusEntries(
-  wikiRoot: string,
-  scope: WikiScope,
-  names: readonly string[],
-): void {
-  const file = scopeCorpusRegistryFile(wikiRoot, scope);
+export function unregisterWikiCorpusEntries(wikiDirectory: string, names: readonly string[]): void {
+  const file = wikiCorpusRegistryFile(wikiDirectory);
   const corpus = readCorpus(file);
   if (corpus === null) return;
   let mutated = false;

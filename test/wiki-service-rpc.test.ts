@@ -1,17 +1,21 @@
 /**
- * wiki.* RPC 面测试（skill-wiki-incubation 切片②，2026-09-21）。
+ * wiki.* RPC 面测试（skill-wiki-incubation 切片②，2026-09-21；目录映射标准重写
+ * 2026-09-22）。
  *
  * User input [2026-09-21]: "P1 本质上是在收集一些碎片的认知……是 skill-wiki 输入的一部分"
+ * User ruling [2026-09-22]: "registry workspace 的 wiki 与 workspace 目录同居
+ * （<dir>/.agents/skill-wiki）；global 走 SKILL_WIKI_HOME > ~/.agents/skill-wiki。"
  * Orthogonal intents:
- *   [1] 双级 scope 权限闸经真实 router 投影（global 直通 / 注册 ws_* 放行 /
- *       未注册 ws_* typed NOT_FOUND）。
- *   [2] 追加幂等（deduplicated）与 read round-trip 走完 oRPC 契约边界。
+ *   [1] 双级 scope 解析经真实 router 投影（global → globalWikiDirectory / 注册
+ *       ws_* → <workspace>/.agents/skill-wiki / 未注册 ws_* typed NOT_FOUND）。
+ *   [2] 追加幂等（deduplicated）、origin 足迹（"~" 或 workspace 目录绝对路径）与
+ *       read round-trip 走完 oRPC 契约边界。
  */
 import { ORPCError, createRouterClient } from "@orpc/server";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
 import { createWikiService } from "../src/daemon/wiki-service.js";
@@ -26,32 +30,44 @@ function makeTempDir(): string {
   tempDirs.push(dir);
   return dir;
 }
+
+const previousWikiHome = process.env.SKILL_WIKI_HOME;
+let workspaceDir = "";
+let globalHome = "";
+
+beforeEach(() => {
+  workspaceDir = makeTempDir();
+  globalHome = makeTempDir();
+  // global 解析按请求读 env（wiki-service 语义）；测试隔离注入。
+  process.env.SKILL_WIKI_HOME = globalHome;
+});
 afterEach(() => {
+  if (previousWikiHome === undefined) delete process.env.SKILL_WIKI_HOME;
+  else process.env.SKILL_WIKI_HOME = previousWikiHome;
   while (tempDirs.length > 0) fs.rmSync(tempDirs.pop() as string, { recursive: true, force: true });
 });
 
 /** stub registry：只有 REGISTERED_WS 视为已注册（不触发真实 registry 持久化）。 */
 function stubRegistry(): Pick<WorkspaceRegistry, "lookup" | "listImported"> {
   return {
-    lookup: (id) => (id === REGISTERED_WS ? { id: REGISTERED_WS, label: "registered" } : null),
-    listImported: () => [{ id: REGISTERED_WS, label: "registered" }],
+    lookup: (id) =>
+      id === REGISTERED_WS ? { id: REGISTERED_WS, label: "registered", path: workspaceDir } : null,
+    listImported: () => [{ id: REGISTERED_WS, label: "registered", path: workspaceDir }],
   };
 }
 
 function wikiClient(): {
   client: ReturnType<typeof makeClient>;
-  rootDir: string;
 } {
-  const rootDir = makeTempDir();
-  const client = makeClient(rootDir);
-  return { client, rootDir };
+  const client = makeClient();
+  return { client };
 }
 
-function makeClient(rootDir: string) {
+function makeClient() {
   const domain = createDaemonDomain(undefined, {});
   const withWiki: DaemonDomain = {
     ...domain,
-    wiki: createWikiService(stubRegistry(), { rootDir, legacyDir: null }),
+    wiki: createWikiService(stubRegistry()),
   } as DaemonDomain;
   return createRouterClient(
     createRpcRouter({
@@ -84,6 +100,8 @@ describe("wiki RPC surface", () => {
     expect(appended.deduplicated).toBe(false);
     expect(appended.item.name).toBe("pin-exit-codes");
     expect(appended.item.origin).toBe("~");
+    // global 落在 SKILL_WIKI_HOME 覆盖的新址（globalWikiDirectory）。
+    expect(fs.existsSync(path.join(globalHome, "patterns", "pin-exit-codes.md"))).toBe(true);
 
     const again = await client.wiki.append({
       scope: "~",
@@ -102,22 +120,24 @@ describe("wiki RPC surface", () => {
     expect(read.promotedFrom).toBeNull();
   });
 
-  it("scopes a registered ws_* workspace by label slug with origin footprint", async () => {
-    const { client, rootDir } = wikiClient();
+  it("co-locates a registered ws_* wiki with the workspace directory (origin footprint)", async () => {
+    const { client } = wikiClient();
     const appended = await client.wiki.append({
       scope: REGISTERED_WS,
       title: "Workspace-local insight",
       body: "only in this workspace",
     });
-    expect(appended.item.origin).toBe(REGISTERED_WS);
-    // RPC 侧仍是 WorkspaceId；wiki 侧车目录名是 label 的 slug（jixoai-search-core 3.1）。
-    expect(
-      fs.existsSync(path.join(rootDir, "registered", "patterns", "workspace-local-insight.md")),
-    ).toBe(true);
-    expect(fs.readdirSync(rootDir)).toContain("registered");
-    // global scope 不受 ws 追加影响（双级隔离）。
+    // origin 足迹 = workspace 目录绝对路径（目录映射标准 2026-09-22）。
+    expect(appended.item.origin).toBe(workspaceDir);
+    // RPC 侧仍是 WorkspaceId；wiki 与 workspace 目录同居。
+    const wikiDir = path.join(workspaceDir, ".agents", "skill-wiki");
+    expect(fs.existsSync(path.join(wikiDir, "patterns", "workspace-local-insight.md"))).toBe(true);
+    // global 不受 ws 追加影响（双级互不重叠——list 仅惰性建了空结构）。
     const globalList = await client.wiki.list({ scope: "~" });
     expect(globalList.patterns).toEqual([]);
+    expect(fs.existsSync(path.join(globalHome, "patterns", "workspace-local-insight.md"))).toBe(
+      false,
+    );
   });
 
   it("rejects an unregistered ws_* scope with typed NOT_FOUND", async () => {

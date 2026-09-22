@@ -1,7 +1,9 @@
 /**
  * 用户原始需求 [2026-09-21]：「global 能承载 workspace 泛化出来的 skill」+
  * 「P1 本质上是在收集一些碎片的认知……是 skill-wiki 输入的一部分」。
- * 正交意图：[1] 钉死双级 scope 目录契约与碎片追加的去重幂等；
+ * 修订 [2026-09-22]（目录映射标准 Owner 裁决）：scope 寻址 = workspace 目录
+ * 路径；global 是 `~` 特例；slug 形状与中央登记表退役。
+ * 正交意图：[1] 钉死目录映射标准与碎片追加的去重幂等；
  * [2] 钉死磁盘输入边界（畸形 pattern/impact 行丢弃、typed 失败、原子写）。
  */
 import fs from "node:fs";
@@ -9,13 +11,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  SLUG_SCOPE_REGEX,
   SkillWikiError,
-  defaultWikiRoot,
+  globalWikiDirectory,
   openWikiWorkspace,
-  parseWikiScope,
   patternContentHash,
-  wikiScopeDirectory,
+  resolveWikiDirectory,
+  workspaceWikiDirectory,
 } from "../src/index.js";
 
 const tempDirs: string[] = [];
@@ -28,33 +29,68 @@ afterEach(() => {
   while (tempDirs.length > 0) fs.rmSync(tempDirs.pop() as string, { recursive: true, force: true });
 });
 
-describe("scope", () => {
-  it("accepts global `~` and npm-scope slugs", () => {
-    expect(parseWikiScope("~")).toBe("~");
-    expect(parseWikiScope("skill-creator")).toBe("skill-creator");
-    expect(parseWikiScope("my-app")).toBe("my-app");
-    expect(parseWikiScope("a")).toBe("a");
-    expect(parseWikiScope("app2")).toBe("app2");
+describe("directory mapping standard (2026-09-22)", () => {
+  it("maps a workspace directory to its co-located .agents/skill-wiki", () => {
+    expect(workspaceWikiDirectory("/tmp/proj")).toBe(
+      path.join("/tmp/proj", ".agents", "skill-wiki"),
+    );
   });
 
-  it("rejects digest shapes and other malformed scopes with WIKI_INVALID_SCOPE", () => {
-    for (const bad of [
-      "",
-      // 单词串本身是合法 slug（如 "home"）——只拒绝非 slug 形状。
-      "Skill Creator",
-      // ws_ digest 形状在 slug 窗口期退役（破坏性变更，jixoai-search-core 3.1）。
-      "ws_abc",
-      "ws_" + "a".repeat(24),
-      "Skill-Creator",
-      "my--app",
-      "-my-app",
-      "my-app-",
-      "my_app",
-      "../escape",
-    ]) {
+  it("resolves global '~' and workspace paths to non-overlapping wiki directories", () => {
+    const previous = process.env.SKILL_WIKI_HOME;
+    try {
+      const home = makeTempDir();
+      process.env.SKILL_WIKI_HOME = home;
+      const workspace = makeTempDir();
+      const global = resolveWikiDirectory("~");
+      const local = resolveWikiDirectory(workspace);
+      expect(global).toBe(home);
+      expect(local).toBe(path.join(workspace, ".agents", "skill-wiki"));
+      expect(global).not.toBe(local);
+    } finally {
+      if (previous === undefined) delete process.env.SKILL_WIKI_HOME;
+      else process.env.SKILL_WIKI_HOME = previous;
+    }
+  });
+
+  it("resolves relative workspace references against the current directory", () => {
+    const workspace = makeTempDir();
+    // chdir 后 process.cwd() 是物理路径（macOS /var → /private/var），
+    // 期望值必须同样取 realpath 口径。
+    const physical = fs.realpathSync(workspace);
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(workspace);
+      expect(resolveWikiDirectory("./")).toBe(workspaceWikiDirectory(physical));
+      expect(resolveWikiDirectory(".")).toBe(workspaceWikiDirectory(physical));
+      expect(resolveWikiDirectory("sub/dir")).toBe(
+        workspaceWikiDirectory(path.join(physical, "sub/dir")),
+      );
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it("defaults global to ~/.agents/skill-wiki, overridable via SKILL_WIKI_HOME", () => {
+    const previous = process.env.SKILL_WIKI_HOME;
+    try {
+      delete process.env.SKILL_WIKI_HOME;
+      expect(globalWikiDirectory()).toBe(path.join(os.homedir(), ".agents", "skill-wiki"));
+      expect(resolveWikiDirectory("~")).toBe(path.join(os.homedir(), ".agents", "skill-wiki"));
+      process.env.SKILL_WIKI_HOME = "/tmp/wiki-home-override";
+      expect(globalWikiDirectory()).toBe("/tmp/wiki-home-override");
+      expect(resolveWikiDirectory("~")).toBe("/tmp/wiki-home-override");
+    } finally {
+      if (previous === undefined) delete process.env.SKILL_WIKI_HOME;
+      else process.env.SKILL_WIKI_HOME = previous;
+    }
+  });
+
+  it("rejects empty or unparseable workspace input with WIKI_INVALID_SCOPE", () => {
+    for (const bad of ["", "   ", "a\0b"]) {
       try {
-        parseWikiScope(bad);
-        expect.unreachable(`must reject: ${bad}`);
+        resolveWikiDirectory(bad);
+        expect.unreachable(`must reject: ${JSON.stringify(bad)}`);
       } catch (error) {
         expect(error).toBeInstanceOf(SkillWikiError);
         expect((error as SkillWikiError).code).toBe("WIKI_INVALID_SCOPE");
@@ -62,27 +98,14 @@ describe("scope", () => {
     }
   });
 
-  it("exports the slug shape regex for hosts and tests", () => {
-    expect(SLUG_SCOPE_REGEX.test("skill-creator")).toBe(true);
-    expect(SLUG_SCOPE_REGEX.test("ws_" + "0".repeat(24))).toBe(false);
-  });
-
-  it("maps scopes directly under the wiki root", () => {
-    expect(wikiScopeDirectory("/root", "~")).toBe(path.join("/root", "~"));
-    expect(wikiScopeDirectory("/root", "skill-creator")).toBe(path.join("/root", "skill-creator"));
-  });
-
-  it("resolves the default root from SKILL_WIKI_HOME env, falling back to ~/.skill-wiki", () => {
-    const previous = process.env.SKILL_WIKI_HOME;
-    try {
-      process.env.SKILL_WIKI_HOME = "/tmp/wiki-home-override";
-      expect(defaultWikiRoot()).toBe("/tmp/wiki-home-override");
-      delete process.env.SKILL_WIKI_HOME;
-      expect(defaultWikiRoot()).toBe(path.join(os.homedir(), ".skill-wiki"));
-    } finally {
-      if (previous === undefined) delete process.env.SKILL_WIKI_HOME;
-      else process.env.SKILL_WIKI_HOME = previous;
-    }
+  it("host and CLI converge on the same physical wiki for one workspace directory", () => {
+    // spec「宿主与 CLI 同根」scenario：同一 workspace 目录 → 同一 wiki 目录。
+    const workspace = makeTempDir();
+    const wiki = openWikiWorkspace(resolveWikiDirectory(workspace));
+    wiki.appendPattern({ title: "Shared insight", body: "one physical directory" });
+    expect(
+      fs.existsSync(path.join(workspace, ".agents", "skill-wiki", "patterns", "shared-insight.md")),
+    ).toBe(true);
   });
 });
 
@@ -141,14 +164,16 @@ describe("WikiWorkspace patterns", () => {
 
   it("round-trips a pattern through readPattern", () => {
     const wiki = openWikiWorkspace(makeTempDir());
+    const workspacePath = makeTempDir();
     wiki.appendPattern({
       title: "Round trip",
       body: "content here",
-      origin: "ws_" + "b".repeat(24),
+      origin: workspacePath,
     });
     const read = wiki.readPattern("round-trip");
     expect(read.frontmatter.title).toBe("Round trip");
-    expect(read.frontmatter.origin).toBe("ws_" + "b".repeat(24));
+    // origin 足迹约定：workspace 写入 = workspace 目录绝对路径。
+    expect(read.frontmatter.origin).toBe(workspacePath);
     expect(read.frontmatter.promotedFrom).toBeNull();
     expect(read.body.replace(/\n$/, "")).toBe("content here");
   });

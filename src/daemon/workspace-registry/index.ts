@@ -61,15 +61,16 @@ export interface WorkspaceRegistry {
   resolve: (target: WorkspaceProviderTarget, includeDisabled?: boolean) => WorkspaceProviderScope;
   resolveWritable: (target: WorkspaceProviderTarget) => WorkspaceProviderScope;
   /**
-   * 轻量 Imported 查询（不触发 ccski 扫描）：wiki 等 scope 校验方只需要
-   * 「id 是否注册」，不应付出全量投影代价。Global `~` 一律 null。
+   * 轻量 Imported 查询（不触发 ccski 扫描）：wiki 等目录解析方只需要
+   * 「id 是否注册 + workspace 目录」，不应付出全量投影代价。Global `~` 一律 null。
+   * path 是 import 时 canonicalize 的持久身份（目录映射标准：wiki 同居于此）。
    */
-  lookup: (id: WorkspaceId) => { id: ImportedWorkspaceId; label: string } | null;
+  lookup: (id: WorkspaceId) => { id: ImportedWorkspaceId; label: string; path: string } | null;
   /**
-   * 轻量 Imported 枚举（不触发 ccski 扫描；与 lookup 同源同口径）：wiki scope
-   * slug 消歧等只需要 {id,label} 全集的调用方使用，不应付出全量投影代价。
+   * 轻量 Imported 枚举（不触发 ccski 扫描；与 lookup 同源同口径）：只需要
+   * {id,label,path} 全集的调用方使用，不应付出全量投影代价。
    */
-  listImported: () => { id: ImportedWorkspaceId; label: string }[];
+  listImported: () => { id: ImportedWorkspaceId; label: string; path: string }[];
 }
 
 /** Test seam for replacing ccski's dynamic skill scan（单遍产出计数与去重键）。 */
@@ -182,11 +183,15 @@ export function createWorkspaceRegistry(options: WorkspaceRegistryOptions = {}):
     lookup(id) {
       if (id === GLOBAL_WORKSPACE_ID) return null;
       const entry = state.workspaces.find((workspace) => workspace.id === id);
-      return entry ? { id: entry.id, label: entry.label } : null;
+      return entry ? { id: entry.id, label: entry.label, path: entry.path } : null;
     },
 
     listImported() {
-      return state.workspaces.map((workspace) => ({ id: workspace.id, label: workspace.label }));
+      return state.workspaces.map((workspace) => ({
+        id: workspace.id,
+        label: workspace.label,
+        path: workspace.path,
+      }));
     },
   };
 }

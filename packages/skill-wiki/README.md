@@ -39,32 +39,43 @@ consume this library, never the other way around.
 
 ## Storage contract
 
-One wiki per **scope**, stored under a unified root (never inside the user's
-skill assets). The root resolves as `SKILL_WIKI_HOME` env override, else
-`~/.skill-wiki/` (`defaultWikiRoot()`) — host daemon and CLI share the same
-root; the skill-creator host bridges its legacy path with a one-time
-migration (`mv ~/.skill-creator/wiki ~/.skill-wiki` + symlink back):
+**Directory mapping standard (owner ruling 2026-09-22).** A wiki is a
+property of its directory — a `.git/`-style convention, not a namespace
+handed out by any central registry:
+
+- any workspace directory `<dir>` keeps its wiki at
+  `<dir>/.agents/skill-wiki/` (`workspaceWikiDirectory(dir)`); project-level
+  use needs **no registry at all** — run the CLI in any directory and its
+  `.agents/skill-wiki/` is created on demand;
+- global is the `~` special case, resolved by `globalWikiDirectory()`:
+  `SKILL_WIKI_HOME` env override, else `~/.agents/skill-wiki/`;
+- registry workspaces (skill-creator) keep their wiki **co-located** with the
+  workspace directory — the registry resolves a workspace id to its directory,
+  never to a wiki name;
+- there is **no central root and no slug table**: scope shape validation and
+  `scopes.json` assignments are retired because the scope is objectively
+  decided by the path.
 
 ```
-<root>/                      # ~/.skill-wiki/ unless SKILL_WIKI_HOME is set
-├── ~/                       # global scope
-├── <slug>/                  # per-workspace scope (e.g. skill-creator/)
-│   ├── patterns/            # source of truth: one canonical pattern per file
-│   │   └── <name>.md
-│   ├── index.md             # derived projection, always rebuilt from patterns/
-│   ├── logs.md              # human-readable append-only event log
-│   └── skill-impact.md      # machine-appended JSONL audit: proposal → decision
-└── search-index/<scope>/    # dedup/similarity index (@jixoai/search, sqlite)
+<workspace dir>/                     # any project directory (no registry needed)
+└── .agents/skill-wiki/
+    ├── patterns/            # source of truth: one canonical pattern per file
+    │   └── <name>.md
+    ├── index.md             # derived projection, always rebuilt from patterns/
+    ├── logs.md              # human-readable append-only event log
+    ├── skill-impact.md      # machine-appended JSONL audit: proposal → decision
+    └── search-index/        # dedup/similarity index (@jixoai/search, sqlite)
+
+~/.agents/skill-wiki/               # global (the "~" special case;
+                                    #   SKILL_WIKI_HOME overrides)
 ```
 
-- **Scopes** are dual-level: global `"~"` (generalized knowledge detached
-  from any workspace) and per-workspace npm-scope slugs matching
-  `^[a-z0-9](-?[a-z0-9])*$` (e.g. `skill-creator`, `my-app`; the shape is
-  exported as `SLUG_SCOPE_REGEX`). The former `ws_<24-hex>` digest shape is
-  **no longer accepted** (breaking change inside the private window); the
-  skill-creator host maps its registry's workspace ids to slugs derived
-  from the workspace label (first registrant keeps the bare slug; a later
-  colliding label gets a `-<4-hex>` digest suffix).
+- **Host and CLI converge** on the same physical directory: the skill-creator
+  daemon writes `<dir>/.agents/skill-wiki` through its registry, the CLI
+  reads it back with `--workspace <dir>` — one truth, zero bridging.
+- **`origin` footprint convention**: pages record where they were captured —
+  `"~"` for global writes, the workspace directory's absolute path for
+  workspace writes (human-readable and machine-parseable).
 - **`patterns/` is the single truth.** `index.md` exists for standard
   compatibility only — the CLI refreshes it after every read command, so
   no maintenance command exists (`rebuildIndex()` also regenerates it from
@@ -72,6 +83,9 @@ migration (`mv ~/.skill-creator/wiki ~/.skill-wiki` + symlink back):
 - **`logs.md` is unstructured by design** (human-auditable narrative);
   **`skill-impact.md` is structured by design** (one `SkillImpactEntry`
   JSON object per line, the harness's programmatic audit trail).
+- Legacy layouts (`~/.skill-wiki/` central root, `~/.skill-creator/wiki`
+  sidecar) are migrated once by `scripts/migrate-wiki-roots.sh.ts` — see
+  `docs/wiki-design.md`.
 
 ## Pattern page anatomy
 
@@ -80,7 +94,7 @@ migration (`mv ~/.skill-creator/wiki ~/.skill-wiki` + symlink back):
 title: Pin exit codes in gates
 created: 2026-09-21T00:00:00.000Z
 updated: 2026-09-21T00:00:00.000Z
-origin: ws_0123…def # scope footprint where it was captured
+origin: /Users/me/Dev/project # workspace footprint where it was captured ("~" for global)
 promotedFrom: "" # generalization provenance, written by the LLM maintainer (slice 3)
 ---
 
@@ -88,12 +102,13 @@ Gate commands must branch on the real exit code, never on piped stdout.
 ```
 
 - `origin` is the minimal provenance footprint (the paper's provenance-aware
-  exploration). `promotedFrom` is a **reserved** generalization-provenance
-  slot: when the host's LLM maintainer distills workspace knowledge into a
-  global page (creating one, or absorbing it into an existing one via
-  patches), it records which workspace's insights triggered that page. It is
-  never a mechanical move — workspace pages stay where they are, and the
-  append path always writes `null`.
+  exploration): `"~"` for global writes, the workspace directory's absolute
+  path for workspace writes. `promotedFrom` is a **reserved**
+  generalization-provenance slot: when the host's LLM maintainer distills
+  workspace knowledge into a global page (creating one, or absorbing it into
+  an existing one via patches), it records which workspace's insights
+  triggered that page. It is never a mechanical move — workspace pages stay
+  where they are, and the append path always writes `null`.
 - **Dedup criterion**: `contentHash` = SHA-256 of the body after
   normalizing CRLF → LF and stripping trailing whitespace. File-hygiene
   bytes never participate, so the append side and the read-back side always
@@ -155,22 +170,26 @@ private). The implementation lives in `src/cli.ts` and exports a pure
 from the root entry (see incubation note above).
 
 ```
-list    [--scope ~|slug] [--sort name|updated] [--offset 0] [--limit 100] [--json]
-show    <name> [--scope] [--json]
-add     --title <t> [--scope] [--no-similarity] [--json]   # body from stdin
-find    <query> [--scope] [--json]
-edit    <name> -f <edits.json> [--scope] [--json]          # WikiEdit[] JSON file
-remove  <name> [--scope] [--json]                          # + logs.md footprint
-log     [--scope] [--limit 20] [--json]
-impact  [--scope] [--filter accept|reject] [--json]
+list    [--workspace <path|~|./>] [--sort name|updated] [--offset 0] [--limit 100] [--json]
+show    <name> [--workspace] [--json]
+add     --title <t> [--workspace] [--no-similarity] [--json]   # body from stdin
+find    <query> [--workspace] [--json]
+edit    <name> -f <edits.json> [--workspace] [--json]          # WikiEdit[] JSON file
+remove  <name> [--workspace] [--json]                          # + logs.md footprint
+log     [--workspace] [--limit 20] [--json]
+impact  [--workspace] [--filter accept|reject] [--json]
 ```
 
+- **`--workspace <path|~|./>`** (default `./`): project-level use is the
+  first-class default — the current directory's `.agents/skill-wiki/` is
+  used with no registry involvement; `~` addresses global, and any
+  relative/absolute directory path addresses that directory's wiki.
 - **Exit codes**: `0` success (including hash-deduplicated adds, which print
   `Already captured as "…"`); `2` usage; `3` `WIKI_INVALID_SCOPE`; `4`
   `WIKI_INVALID_PATTERN`; `5` `WIKI_PATCH_FAILED`.
 - **Similarity on write**: after every `add` (unless `--no-similarity`) the
-  page's title+body is searched against the scope's
-  `search-index/<scope>/` index (fields `title` weight 3 / `body` weight 1,
+  page's title+body is searched against the wiki's
+  `search-index/` index (fields `title` weight 3 / `body` weight 1,
   sqlite backend for multi-process safety) and near-relatives are printed as
   `similar: <name> (0.83), …` — the score is relative to the page's
   self-match and the threshold is the frozen versioned constant
@@ -190,10 +209,18 @@ hierarchy is leaked in either direction:
 | ---------------------- | -------------------------------------------------- |
 | `WIKI_PATCH_FAILED`    | a patch anchor did not resolve (batch aborted)     |
 | `WIKI_INVALID_PATTERN` | invalid pattern name / title / frontmatter / entry |
-| `WIKI_INVALID_SCOPE`   | scope id is neither `~` nor an npm-scope slug      |
+| `WIKI_INVALID_SCOPE`   | workspace reference is empty or unparseable        |
 
-## Design rulings (2026-09-21, owner decisions)
+## Design rulings (owner decisions)
 
+- **Directory mapping standard (2026-09-22).** A wiki lives at
+  `<dir>/.agents/skill-wiki/` — a property of the directory, like `.git/`.
+  Global is the `~` special case (`SKILL_WIKI_HOME`, default
+  `~/.agents/skill-wiki`). The central root, slug namespace, and
+  `scopes.json` assignment table are retired: the scope is objectively
+  decided by the path, so the collision/impersonation problem family
+  disappears structurally. CLI `--workspace` defaults to `./`
+  (project-level first-class; global is explicit `~`).
 - **No `PURPOSE.md` per pattern.** Consumption semantics live in the
   frontmatter; evolution semantics live in `skill-impact.md`. A third
   per-page file would duplicate both.
