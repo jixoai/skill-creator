@@ -199,9 +199,10 @@ function createSkillSearchEngine(resolveRoots: () => SkillRoot[], watch?: WatchF
         })),
       }));
     },
-    /** watcher 回收（daemon stop coordinator 接线；幂等）。 */
+    /** watcher + 引擎句柄回收（daemon stop coordinator 接线；幂等）。 */
     dispose: (): void => {
       watcher.dispose();
+      void index.close();
     },
   };
 }

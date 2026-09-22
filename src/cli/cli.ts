@@ -4,12 +4,17 @@
  * 用户原始需求 [2026-07-22]：「同意，但是改成 `skill-creator openinbrowser`。」
  * 用户原始需求 [2026-09-17]：「`skill-creator search <query...>` 进程内完成（不要求 daemon），
  * 支持 --json 与 --limit；空 query 或 flag 解析失败 exit 1。」
+ * 修订 [2026-09-22]（wiki-directory-standard 2.3 spec）：`skill-creator wiki <子命令>`
+ * 经 skill-wiki cli-kit 组装——--workspace 支持 registry label/ws_id 只读解析与
+ * 路径直传；含 scopes 扩展命令；进程内执行（无 daemon 依赖）。
  * 正交意图：
  * 1. 解析并路由公开 CLI 命令。
  * 2. 通过带版本、运行时校验的 IPC 协议调用 daemon。
  * 3. 安全启动、替换或恢复 tray 已失联的分离运行 daemon。
  * 4. 向终端投影 daemon 与 tray 状态，并只由显式命令打开系统浏览器。
- * 5. search 命令的 query/flag 解析与结果投影（进程内最小装配，不 import kernel/MCP/domain）。
+ * 5. 进程内子命令装配（不 import kernel/MCP/domain，动态 import 延迟加载）：
+ *    search 的 query/flag 解析与结果投影；wiki 的 createWikiCli 宿主插槽注入
+ *    （registry 只读 scope 解析 + scopes 全局视角命令）与退出码透传。
  *
  * Routing:
  *   skill-creator start   -> spawn daemon + open tray window
@@ -18,6 +23,7 @@
  *   skill-creator status  -> query daemon status
  *   skill-creator stop    -> graceful daemon shutdown
  *   skill-creator search  -> in-process BM25 skill search (no daemon)
+ *   skill-creator wiki    -> in-process skill-wiki kit subcommands (no daemon)
  *   skill-creator help    -> print command help
  *   skill-creator version -> print version
  *
@@ -28,11 +34,14 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { CliIo, WikiCliCommand } from "skill-wiki";
 import type { IpcCommand } from "../shared/frame.js";
 import { DaemonStatusSchema, type DaemonStatus } from "../shared/contracts/daemon.js";
+import type { WorkspaceRegistryStateSchema } from "../daemon/workspace-registry/state.js";
 import { resolveDevHome } from "../shared/dev-runtime.js";
+import { safeParseJson } from "../shared/external-input.js";
 import { openUrlInBrowser as launchBrowser } from "../shared/browser-launch.js";
-import { daemonLogPath, ensureAppDirs, socketPath } from "../shared/paths.js";
+import { appDir, daemonLogPath, ensureAppDirs, socketPath } from "../shared/paths.js";
 import { socketAcceptsConnections } from "../shared/socket-liveness.js";
 import { parseWebModeFlag, SKILL_CREATOR_WEB_ENV, type WebModeFlag } from "../shared/web-mode.js";
 import { DaemonConnectionError, DaemonResponseError, requestDaemon } from "./ipc-client.js";
@@ -513,6 +522,167 @@ interface CommandDefinition {
   run: () => number | Promise<number>;
 }
 
+/** wiki 子命令的 registry 投影行（label 解析与 scopes 共用；进程内只读）。 */
+interface WikiRegistryEntry {
+  id: string;
+  label: string;
+  path: string;
+}
+
+/** wiki 子命令的 scope 行（scopes 输出形状）。 */
+interface WikiScopeRow {
+  id: string;
+  label: string;
+  workspacePath: string;
+  exists: boolean;
+  patternCount: number;
+}
+
+/**
+ * 进程内只读读取 workspaces.json（appDir 受 SKILL_CREATOR_HOME 尊重）：
+ * 文件缺失 / JSON 或 schema 不兼容 → 空注册面（label 解析退化为零匹配）；
+ * 读取 IO 故障 → 上抛（非用法错误，不伪装成空 registry）。
+ */
+function loadWikiRegistryEntries(
+  stateSchema: typeof WorkspaceRegistryStateSchema,
+): WikiRegistryEntry[] {
+  const file = path.join(appDir(), "workspaces.json");
+  if (!fs.existsSync(file)) return [];
+  let source: string;
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    throw new Error(
+      `cannot read workspace registry ${file}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const parsed = safeParseJson(source, stateSchema);
+  return parsed ? parsed.workspaces : [];
+}
+
+/** skill-creator wiki 的进程 IO 适配（kit 纯函数面 ↔ process.*）。 */
+function processWikiIo(): CliIo {
+  return {
+    readStdin: async (): Promise<string> => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) {
+        chunks.push(chunk as Buffer);
+      }
+      return Buffer.concat(chunks).toString("utf8");
+    },
+    stdout: (text: string): void => {
+      process.stdout.write(text);
+    },
+    stderr: (text: string): void => {
+      process.stderr.write(text);
+    },
+  };
+}
+
+/**
+ * `skill-creator wiki <子命令>`（wiki-directory-standard 2.3）：argv 中 wiki 之后
+ * 的部分交给 createWikiCli 组装实例。退出码透传 wiki 域（2/3/4/5）；scope 解析
+ * 失败（label 歧义/零匹配）统一用法错误 exit 2。进程内执行，无 daemon 依赖。
+ */
+async function runWiki(): Promise<number> {
+  const [wikiKit, registryState] = await Promise.all([
+    import("skill-wiki"),
+    import("../daemon/workspace-registry/state.js"),
+  ]);
+  const {
+    createWikiCli,
+    globalWikiDirectory,
+    openWikiWorkspace,
+    resolveWikiDirectory,
+    workspaceWikiDirectory,
+    WikiUsageError,
+  } = wikiKit;
+  const argv = hideBin(process.argv);
+  const rest = argv.slice(argv.indexOf("wiki") + 1);
+  const stateSchema = registryState.WorkspaceRegistryStateSchema;
+
+  /** wiki 目录 → 存在性 + pattern 计数（目录不存在 = exists:false 计数 0，不创建）。 */
+  const countWikiPatterns = (wikiDirectory: string): { exists: boolean; patternCount: number } => {
+    if (!fs.existsSync(wikiDirectory)) return { exists: false, patternCount: 0 };
+    return { exists: true, patternCount: openWikiWorkspace(wikiDirectory).listPatterns().length };
+  };
+
+  /** resolveScope（registry 只读解析）：`~`/路径直传默认解析；裸 token = label 前缀或 ws_* id。 */
+  const resolveScope = async ({ requested }: { requested?: string }): Promise<string> => {
+    const trimmed = (requested ?? "./").trim();
+    // 非法形状（空/纯空白/NUL）交默认解析收窄为 typed WIKI_INVALID_SCOPE（exit 3）。
+    if (trimmed.length === 0 || trimmed.includes("\0")) return resolveWikiDirectory(trimmed);
+    // 路径形状直传：`~`（global）、绝对路径、./ ../ . 前缀或含路径分隔符。
+    if (trimmed === "~" || path.isAbsolute(trimmed) || trimmed.includes("/")) {
+      return resolveWikiDirectory(trimmed);
+    }
+    const entries = loadWikiRegistryEntries(stateSchema);
+    const idMatches = entries.filter((entry) => entry.id === trimmed);
+    const matches =
+      idMatches.length > 0
+        ? idMatches
+        : entries.filter((entry) => entry.label.toLowerCase().startsWith(trimmed.toLowerCase()));
+    if (matches.length === 1) return workspaceWikiDirectory(matches[0].path);
+    if (matches.length > 1) {
+      throw new WikiUsageError(
+        `ambiguous workspace "${trimmed}": matches ${matches
+          .map((entry) => `"${entry.label}" (${entry.id})`)
+          .join(", ")}`,
+      );
+    }
+    const known = entries.map((entry) => entry.id).join(", ");
+    throw new WikiUsageError(
+      `no workspace matches "${trimmed}" (${known ? `registered: ${known}` : "registry is empty"}; ` +
+        'use a path, "~" for global, or "./" for the current directory)',
+    );
+  };
+
+  /** scopes：global + registry 全部 workspace 的 pattern 计数与 label（全局视角）。 */
+  const scopes: WikiCliCommand = {
+    usage: "[--json]",
+    minPositionals: 0,
+    maxPositionals: 0,
+    run: (ctx) => {
+      const rows: WikiScopeRow[] = [
+        {
+          id: "~",
+          label: "global",
+          workspacePath: "~",
+          ...countWikiPatterns(globalWikiDirectory()),
+        },
+        ...loadWikiRegistryEntries(stateSchema).map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          workspacePath: entry.path,
+          ...countWikiPatterns(workspaceWikiDirectory(entry.path)),
+        })),
+      ];
+      if (ctx.options.has("json")) {
+        ctx.io.stdout(`${JSON.stringify({ scopes: rows }, null, 2)}\n`);
+      } else {
+        ctx.io.stdout(
+          `${"scope".padEnd(28)}${"label".padEnd(18)}${"patterns".padStart(8)}  workspace\n`,
+        );
+        for (const row of rows) {
+          const missing = row.exists ? "" : "  (missing)";
+          ctx.io.stdout(
+            `${row.id.padEnd(28)}${row.label.padEnd(18)}${String(row.patternCount).padStart(8)}  ` +
+              `${row.workspacePath}${missing}\n`,
+          );
+        }
+      }
+      return 0;
+    },
+  };
+
+  const cli = createWikiCli({
+    commandPrefix: "skill-creator wiki",
+    resolveScope,
+    extraCommands: { scopes },
+  });
+  return cli.run(rest, processWikiIo());
+}
+
 const COMMANDS = {
   start: { description: "Boot the daemon and open the tray window", run: runStart },
   open: { description: "Show/focus the tray window of a running daemon", run: runOpen },
@@ -525,6 +695,11 @@ const COMMANDS = {
   search: {
     description: "Search local skills (BM25 + skill tokenizer)",
     run: () => runSearch(),
+  },
+  wiki: {
+    description:
+      "Persistent agent-experience wiki (list/show/add/find/edit/remove/log/impact/scopes)",
+    run: () => runWiki(),
   },
   mcp: {
     description: "Run the skill-creator MCP server over stdio (readonly face)",

@@ -35,7 +35,20 @@ beforeEach(() => {
   setHomeOverride(path.join(sandbox, "state"));
 });
 
-afterEach(() => {
+/** 创建即登记：afterEach 统一 dispose（watcher + 引擎句柄；Windows 删除 EPERM 防线）。 */
+function makeDefaultService() {
+  const service = createSkillSearchService();
+  openServices.push(service);
+  return service;
+}
+function makeSeamService(...args: Parameters<typeof createSkillSearchServiceWithRoots>) {
+  const service = createSkillSearchServiceWithRoots(...args);
+  openServices.push(service);
+  return service;
+}
+const openServices: Array<ReturnType<typeof createSkillSearchServiceWithRoots>> = [];
+
+afterEach(async () => {
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
@@ -43,7 +56,11 @@ afterEach(() => {
   else process.env.USERPROFILE = previousUserProfile;
   if (previousAppHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousAppHome;
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  // dispose 内 engine close 是 fire-and-forget 的 async：等微任务落定再删沙箱。
+  for (const service of openServices) service.dispose();
+  openServices.length = 0;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function writeSkill(root: string, name: string, description: string): string {
@@ -88,7 +105,7 @@ describe("skill search service default assembly", () => {
       "imported workspace skill",
     );
 
-    const service = createSkillSearchService();
+    const service = makeDefaultService();
     const results = await service.search("global skill", { limit: 10 });
     const names = new Set(results.map((result) => result.name));
     expect(names.has("global-claude")).toBe(true);
@@ -135,7 +152,7 @@ describe("background flush failure vs concurrent search (final review P2-2)", ()
       },
       onError: () => {},
     });
-    const service = createSkillSearchServiceWithRoots(
+    const service = makeSeamService(
       () => [
         {
           rootPath: skillRoot,
@@ -150,9 +167,13 @@ describe("background flush failure vs concurrent search (final review P2-2)", ()
     const base = await service.search("base skill", { limit: 10 });
     expect(base.map((result) => result.name)).toContain("base-skill");
 
-    // 破坏 searchHome 写路径 + 语料变更 → 后台 flush 的 maintain 必失败。
-    const searchHome = path.join(sandbox, "state", ".skill-creator", "search");
-    fs.chmodSync(searchHome, 0o500);
+    // 破坏 meta 落盘路径 + 语料变更 → 后台 flush 的 maintain 必失败。
+    // chmod 对 Windows 目录 ACL 无效（mode 位不映射，注入静默失效）；改用
+    // 跨平台机制：meta.json 换成同名目录，原子 rename 落盘必失败
+    // （POSIX EISDIR / Windows EPERM），失败语义同为 typed 拒绝。
+    const metaFile = path.join(sandbox, "state", ".skill-creator", "search", "meta.json");
+    fs.rmSync(metaFile, { force: true });
+    fs.mkdirSync(metaFile);
     writeSkill(skillRoot, "extra-skill", "extra skill body");
     try {
       expect(eventCallbacks.length).toBeGreaterThan(0);
@@ -164,7 +185,7 @@ describe("background flush failure vs concurrent search (final review P2-2)", ()
       const search = service.search("extra skill", { limit: 10 });
       await expect(search).rejects.toMatchObject({ code: "UNAVAILABLE" });
     } finally {
-      fs.chmodSync(searchHome, 0o700);
+      fs.rmSync(metaFile, { recursive: true, force: true });
       vi.useRealTimers();
       service.dispose();
     }

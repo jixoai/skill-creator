@@ -219,7 +219,14 @@ export async function openIndex(options: OpenIndexOptions): Promise<SearchIndex>
             ? [envelope.envelope.backend]
             : ["sqlite", "tantivy"];
         assertDirectoryOwnedByIndex(parsed.directory, owners);
-        fs.rmSync(parsed.directory, { recursive: true, force: true });
+        // maxRetries 吸收 Windows 上 AV/索引器对已存在文件的瞬时锁（EPERM
+        // 线性退避重试）；审计语义不变——未知内容仍在任何删除尝试前拒绝。
+        fs.rmSync(parsed.directory, {
+          recursive: true,
+          force: true,
+          maxRetries: 10,
+          retryDelay: 100,
+        });
         fs.mkdirSync(parsed.directory, { recursive: true });
       }
     } else {

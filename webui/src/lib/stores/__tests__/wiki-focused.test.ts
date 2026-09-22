@@ -1,11 +1,13 @@
 /**
- * wiki store 单测（skill-wiki-incubation 切片② WebUI，2026-09-21）。
+ * wiki store 单测（skill-wiki-incubation 切片② WebUI，2026-09-21；
+ * wiki-directory-standard task 3.5：scope 索引面扩展，2026-09-22）。
  * 用户原始需求 [2026-09-21]：「P1 本质上是在收集一些碎片的认知……是 skill-wiki
  * 输入的一部分」。
  * 正交意图：
- *   [1] latest-request-wins + connection owner generation 的提交纪律。
+ *   [1] latest-request-wins + connection owner generation 的提交纪律（列表面）。
  *   [2] 追加闭环：成功就地插入、幂等去重不重复插、stale 成功/rejection 投影 null。
  *   [3] 空 scope 列表 + 未连接 typed error + RPC 失败置 error 保留已提交数据。
+ *   [4] scope 索引面（loadWikiScopes）同代次纪律的独立请求门（三态可区分）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,11 +29,15 @@ vi.mock("../connection.svelte", () => ({
 import {
   appendWikiFragment,
   loadWiki,
+  loadWikiScopes,
   readWikiPattern,
   resetWiki,
+  resetWikiScopes,
+  wikiScopesState,
   wikiState,
 } from "../wiki.svelte";
 import type { PatternListItem } from "skill-wiki/schema";
+import type { WikiScope } from "$shared/contracts/wiki.js";
 import { WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
 
 function makeItem(name: string, title = name): PatternListItem {
@@ -49,14 +55,16 @@ function mockWiki() {
   const list = vi.fn();
   const append = vi.fn();
   const read = vi.fn();
-  rpcClient = { wiki: { list, append, read } };
-  return { list, append, read };
+  const scopes = vi.fn();
+  rpcClient = { wiki: { list, append, read, scopes } };
+  return { list, append, read, scopes };
 }
 
 beforeEach(() => {
   connectionGeneration = 0;
   rpcClient = null;
   resetWiki();
+  resetWikiScopes();
 });
 
 describe("loadWiki", () => {
@@ -249,5 +257,83 @@ describe("readWikiPattern", () => {
 
     await expect(readWikiPattern("~", "pin-exit-codes")).resolves.toEqual(full);
     expect(read).toHaveBeenCalledWith({ scope: "~", name: "pin-exit-codes" });
+  });
+});
+
+function makeScope(id: "~" | string, label: string, patternCount: number, exists: boolean) {
+  return { id: id === "~" ? "~" : WorkspaceIdSchema.parse(id), label, patternCount, exists };
+}
+
+describe("loadWikiScopes", () => {
+  it("commits the scope index and clears loading (loaded)", async () => {
+    const { scopes } = mockWiki();
+    const index: WikiScope[] = [
+      makeScope("~", "Global", 2, true),
+      makeScope("ws_" + "7".repeat(24), "registered", 0, false),
+    ];
+    scopes.mockResolvedValue({ scopes: index });
+
+    await expect(loadWikiScopes()).resolves.toBe("loaded");
+
+    expect(scopes).toHaveBeenCalledWith({});
+    expect(wikiScopesState.scopes).toEqual(index);
+    expect(wikiScopesState.loading).toBe(false);
+    expect(wikiScopesState.error).toBeNull();
+  });
+
+  it("drops a superseded response after a newer load (superseded)", async () => {
+    const { scopes } = mockWiki();
+    let resolveFirst: (value: { scopes: WikiScope[] }) => void = () => {};
+    const first = new Promise<{ scopes: WikiScope[] }>((resolve) => {
+      resolveFirst = resolve;
+    });
+    scopes
+      .mockImplementationOnce(() => first)
+      .mockResolvedValueOnce({
+        scopes: [makeScope("~", "Global", 0, false)],
+      });
+
+    const slow = void loadWikiScopes();
+    await loadWikiScopes();
+    resolveFirst({ scopes: [makeScope("~", "Stale", 9, true)] });
+    await slow;
+
+    expect(wikiScopesState.scopes.map((scope) => scope.label)).toEqual(["Global"]);
+  });
+
+  it("drops responses whose connection owner generation went stale (reconnect)", async () => {
+    const { scopes } = mockWiki();
+    let resolveScopes: (value: { scopes: WikiScope[] }) => void = () => {};
+    scopes.mockReturnValue(
+      new Promise((resolve) => {
+        resolveScopes = resolve;
+      }),
+    );
+
+    const pending = loadWikiScopes();
+    connectionGeneration += 1;
+    resolveScopes({ scopes: [makeScope("~", "Stale", 9, true)] });
+    await expect(pending).resolves.toBe("superseded");
+
+    expect(wikiScopesState.scopes).toEqual([]);
+    expect(wikiScopesState.loading).toBe(false);
+  });
+
+  it("records the error and keeps previously committed scopes when the RPC fails (failed)", async () => {
+    const { scopes } = mockWiki();
+    wikiScopesState.scopes = [makeScope("~", "Global", 1, true)];
+
+    scopes.mockRejectedValue(new Error("scopes io failed"));
+    await expect(loadWikiScopes()).resolves.toBe("failed");
+
+    expect(wikiScopesState.error).toBe("scopes io failed");
+    expect(wikiScopesState.scopes).toEqual([makeScope("~", "Global", 1, true)]);
+    expect(wikiScopesState.loading).toBe(false);
+  });
+
+  it("fails with a diagnosable error when the daemon is not connected", async () => {
+    await expect(loadWikiScopes()).resolves.toBe("failed");
+    expect(wikiScopesState.error).toBe("The Skill Creator daemon is not connected.");
+    expect(wikiScopesState.loading).toBe(false);
   });
 });

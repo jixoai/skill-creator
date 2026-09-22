@@ -1,18 +1,22 @@
 /**
  * 原始需求 [2026-09-21]：「global 能承载 workspace 泛化出来的 skill……P1 本质上
  * 是在收集一些碎片的认知……是 skill-wiki 输入的一部分」。
+ * 原始需求 [2026-09-22]（wiki-directory-standard）：「GUI 新增第四个一级 Wiki
+ * 面板：home = scope 索引，detail = patterns 列表」。
  * 正交意图：
  * 1. 双级 scope 的 wiki 列表投影（latest-request-wins + connection owner 代次）。
  * 2. 碎片追加 mutation（当前 scope 就地插入；幂等去重结果对调用方可见）。
+ * 3. scope 索引投影（Wiki 面板 home；同代次纪律的独立请求门）。
  */
 import type { PatternListItem } from "skill-wiki/schema";
-import type { WikiAppendResult, WikiReadResult } from "$shared/contracts/wiki.js";
+import type { WikiAppendResult, WikiReadResult, WikiScope } from "$shared/contracts/wiki.js";
 import type { WorkspaceId } from "../types";
 import { getConnectionGeneration, getRpc, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 
 const wikiRequests = createRequestGenerationGate(getConnectionGeneration);
 const wikiMutationRequests = createRequestGenerationGate(getConnectionGeneration);
+const wikiScopesRequests = createRequestGenerationGate(getConnectionGeneration);
 
 /** 一次 wiki 列表加载对调用方可见的终态。 */
 export type WikiLoadOutcome = "loaded" | "superseded" | "failed";
@@ -88,6 +92,38 @@ export async function readWikiPattern(scope: WorkspaceId, name: string): Promise
   return requireRpc().wiki.read({ scope, name });
 }
 
+/** Wiki 面板 home 的 scope 索引状态（global 恒列 + registry workspace）。 */
+export const wikiScopesState = $state<{
+  scopes: WikiScope[];
+  loading: boolean;
+  error: string | null;
+}>({ scopes: [], loading: false, error: null });
+
+/** 加载 scope 索引（新请求作废旧响应的提交资格；与列表门独立）。 */
+export async function loadWikiScopes(): Promise<WikiLoadOutcome> {
+  const request = wikiScopesRequests.issue();
+  const rpc = getRpc();
+  if (!rpc) {
+    if (request.isLatest()) wikiScopesState.loading = false;
+    wikiScopesState.error = "The Skill Creator daemon is not connected.";
+    return "failed";
+  }
+  wikiScopesState.loading = true;
+  wikiScopesState.error = null;
+  try {
+    const { scopes } = await rpc.wiki.scopes({});
+    if (!request.isCurrent()) return "superseded";
+    wikiScopesState.scopes = scopes;
+    return "loaded";
+  } catch (error) {
+    if (!request.isCurrent()) return "superseded";
+    wikiScopesState.error = error instanceof Error ? error.message : String(error);
+    return "failed";
+  } finally {
+    if (request.isLatest()) wikiScopesState.loading = false;
+  }
+}
+
 /** 复位（路由离开与测试隔离用）。 */
 export function resetWiki(): void {
   wikiRequests.invalidate();
@@ -96,4 +132,12 @@ export function resetWiki(): void {
   wikiState.patterns = [];
   wikiState.loading = false;
   wikiState.error = null;
+}
+
+/** 复位 scope 索引（路由离开与测试隔离用）。 */
+export function resetWikiScopes(): void {
+  wikiScopesRequests.invalidate();
+  wikiScopesState.scopes = [];
+  wikiScopesState.loading = false;
+  wikiScopesState.error = null;
 }

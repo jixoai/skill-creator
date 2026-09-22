@@ -142,6 +142,7 @@ import {
   WikiListInputSchema,
   WikiReadInputSchema,
   WikiReadResultSchema,
+  WikiScopesResultSchema,
 } from "./contracts/wiki.js";
 import { PatternListItemSchema } from "skill-wiki/schema";
 
@@ -301,6 +302,8 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
      * skill-wiki 知识库面（双级 scope：Global `~` + per-Imported ws_*）：
      * direct mutation（碎片追加不经 proposal 审批链——spec 裁决 2026-09-21）。
      */
+    /** scope 索引（GUI Wiki 面板 home）：global 恒列 + 全部 registry workspace。 */
+    scopes: oc.input(z.object({})).output(WikiScopesResultSchema),
     list: oc
       .input(WikiListInputSchema)
       .output(z.object({ patterns: z.array(PatternListItemSchema) })),

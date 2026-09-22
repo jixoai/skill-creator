@@ -13,7 +13,12 @@
  *       （SkillWikiError → DomainError）。origin 足迹：global 记 "~"，workspace
  *       记 registry 持久化的 workspace 目录绝对路径（与库约定一致，可机器解析）。
  *   [3] direct mutation 面（spec 裁决：wiki 追加不走 proposal 审批链）。
+ *   [4] scope 索引（wiki.scopes，GUI Wiki 面板 home）：global 恒列 + 全部
+ *       registry imported；patternCount 只统计已初始化目录（读面零写副作用——
+ *       openWikiWorkspace.listPatterns 会惰性 mkdir patterns，未初始化 scope
+ *       不得经 scopes() 被动建目录）。
  */
+import fs from "node:fs";
 import {
   SkillWikiError,
   globalWikiDirectory,
@@ -25,7 +30,7 @@ import {
 import type { WorkspaceId } from "../shared/contracts/workspaces.js";
 import { DomainError } from "./domain-error.js";
 import type { WorkspaceRegistry } from "./workspace-registry/index.js";
-import type { WikiReadResult } from "../shared/contracts/wiki.js";
+import type { WikiReadResult, WikiScope } from "../shared/contracts/wiki.js";
 
 /** daemon wiki 服务面（wiki.* RPC 的领域实现）。 */
 export interface WikiService {
@@ -38,6 +43,8 @@ export interface WikiService {
     scope: WorkspaceId,
     input: { title: string; body: string },
   ) => { item: PatternListItem; deduplicated: boolean };
+  /** scope 索引：global 恒列 + 全部 registry imported（label/计数/是否已初始化）。 */
+  scopes: () => { scopes: WikiScope[] };
 }
 
 /**
@@ -50,7 +57,9 @@ interface ResolvedWikiScope {
 }
 
 /** Create the daemon wiki service bound to one registry. */
-export function createWikiService(workspaces: Pick<WorkspaceRegistry, "lookup">): WikiService {
+export function createWikiService(
+  workspaces: Pick<WorkspaceRegistry, "lookup" | "listImported">,
+): WikiService {
   const resolveScope = (scope: WorkspaceId): ResolvedWikiScope => {
     if (scope === "~") {
       // 按请求解析（SKILL_WIKI_HOME 可被测试注入；生产 env 在 daemon 生命周期内不变）。
@@ -69,7 +78,28 @@ export function createWikiService(workspaces: Pick<WorkspaceRegistry, "lookup">)
 
   const openScope = (scope: WorkspaceId) => openWikiWorkspace(resolveScope(scope).wikiDirectory);
 
+  // 已初始化目录才计数（listPatterns 惰性 mkdir；未初始化 scope 保持零写副作用）。
+  const scopeProjection = (id: WorkspaceId, label: string, wikiDirectory: string): WikiScope => ({
+    id,
+    label,
+    exists: fs.existsSync(wikiDirectory),
+    patternCount: fs.existsSync(wikiDirectory)
+      ? openWikiWorkspace(wikiDirectory).listPatterns().length
+      : 0,
+  });
+
   return {
+    scopes() {
+      // global 恒列（首位）；registry imported 按注册序跟随（label 来自持久化身份）。
+      const scopes: WikiScope[] = [scopeProjection("~", "Global", globalWikiDirectory())];
+      for (const imported of workspaces.listImported()) {
+        scopes.push(
+          scopeProjection(imported.id, imported.label, workspaceWikiDirectory(imported.path)),
+        );
+      }
+      return { scopes };
+    },
+
     list(scope) {
       return { patterns: openScope(scope).listPatterns() };
     },

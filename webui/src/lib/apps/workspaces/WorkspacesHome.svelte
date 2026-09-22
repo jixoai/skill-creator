@@ -42,9 +42,9 @@
   import IconWiki from "@lucide/svelte/icons/book-open";
   import type { ImportedWorkspace, Workspace, WorkspaceProvider } from "$lib/types";
 
-  /** wiki 视图路径（Global id "~" 在 URL path 段编码为 %7E）。 */
+  /** wiki 面板 detail 路径（Global id "~" 在 URL path 段编码为 %7E）。 */
   function wikiPath(wsId: string): string {
-    return `/workspaces/wiki/${wsId === "~" ? "%7E" : wsId}`;
+    return `/wiki/${wsId === "~" ? "%7E" : wsId}`;
   }
 
   const globalWorkspaces = $derived(workspaceState.workspaces.filter((ws) => ws.kind === "global"));

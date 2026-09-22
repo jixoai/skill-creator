@@ -649,3 +649,42 @@ WebUI 契约零改动（service.search/duplicates 本就是 async）。「upsert
   检索全链路（含 ranking）仍在 ~14ms/query 量级（benchmark 45 query 645ms），
   产品体验无感。内存面显著改善（sqlite heapΔ 1k 仅 2MB vs MiniSearch 10MB；
   tantivy 常驻 native mmap）。
+
+## 17. Windows 实机验证（2026-09-22，wiki-directory-standard P4.2）
+
+主机 `gaubeehonor`（Windows、Node v26.3.1、git 2.53）：工作树经 `git archive | ssh tar`
+直传（GitHub 私有凭证不涉），`npx pnpm@12.3.4` 安装（宿主 Volta/独立 pnpm shim 均损坏）。
+
+结论：
+
+- **包测试 165/165**（packages/search + packages/skill-wiki）：tantivy win32-x64-msvc
+  binding 正常工作，两后端行为与 macOS 一致。
+- **CLI 冒烟**：skill-wiki CLI 绝对路径 workspace / `~`（SKILL_WIKI_HOME）/ find BM25
+  / `WIKI_INVALID_SCOPE` exit 3 全部符合预期。
+- **发现并修复（三类）**：
+  1. `PersistentSkillSearchIndex` 缺公开 close 面——daemon 停机与测试都无法释放
+     sqlite 引擎句柄，Windows 上任何后续目录删除 EPERM（macOS 对打开句柄的
+     unlink 宽容掩盖了这一点）。探针实证：`node:sqlite` close 本身是确定性
+     释放（含未 finalize 的 prepared statement 引用与 WAL）。修复：接口加
+     `close()`（enqueue 串行）+ `service.dispose()` 同关引擎。
+  2. 双实例 rebuild 的进程边界：后继实例 rebuild rm 目录时，同进程内仍存活的
+     前身实例持有 sqlite 句柄 → EPERM（`maxRetries` 重试无效——持久句柄非
+     AV 瞬时锁）。真实进程模型里「下一次 CLI 进程」意味着前身已退出；8 个
+     多实例用例改为创建后继前显式 `await 前身.close()`。
+  3. `fs.chmodSync(dir, 0o500)` 失败注入在 Windows 无效（mode 位不映射 ACL，
+     注入静默失效、断言假红）——service 时序用例改用「meta.json 换同名目录」
+     的跨平台注入（原子 rename 落盘 POSIX EISDIR / Windows EPERM）。
+- **防御性加固**：产品 rebuild、包信封重建与测试沙箱的 `rmSync` 统一
+  `maxRetries: 10, retryDelay: 100`（Node 对 EPERM/EBUSY/ENOTEMPTY 线性退避
+  重试，吸收 Defender/搜索索引器对刚写入文件的瞬时锁）。
+- **验证后状态**：skill-search index+service 焦点 22/22（修复前 20 失败），
+  其余 skill-search/wiki 焦点文件首轮即全绿。
+- **全量套件（补充证据）**：1233 过 / 74 失败 / 6 跳过。其中 search 辖区
+  11 个失败（rpc-search 2 / search-robustness 6 / benchmark 3）均为同族
+  「domain/service 持引擎句柄未 dispose」——已修复（域/服务创建登记 +
+  afterEach dispose + rm 重试），Windows 复验全绿。其余 63 个失败为
+  **既有 Windows 债，非本 change 引入**，待后续独立 change 处理：
+  skill-steward-runtime 39、r8-independent-probes 8、webui
+  composer-submission 8 / agent-busy-enter 3 / model-settings-b1 1、
+  skill-creator-mcp 2、repository-service 2、dsh-settings 2、dsh-kernel 1、
+  cli-lifecycle 1。

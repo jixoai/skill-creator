@@ -166,6 +166,8 @@ export interface SkillSearchIndex {
   /** 无查询的内容重复组投影（contentHash 分组 >1；冻结排序，见 duplicatesOf）。 */
   duplicates: () => IndexDuplicateGroup[];
   documentCount: () => number;
+  /** 显式释放引擎句柄（daemon 停机/测试沙箱清理；幂等；之后按未加载语义读空）。 */
+  close: () => Promise<void>;
 }
 
 /** 索引层重复组成员（name 取登记表投影）。 */
@@ -331,6 +333,20 @@ class PersistentSkillSearchIndex implements SkillSearchIndex {
     return this.registry.size;
   }
 
+  /**
+   * 显式关闭（Windows 实机轮 2026-09-22：句柄不释放会让后续目录删除 EPERM
+   * ——macOS 对打开句柄宽容，测试从不失败）。enqueue 与在途操作串行。
+   */
+  close(): Promise<void> {
+    return this.enqueue(() => this.closeLocked());
+  }
+
+  private async closeLocked(): Promise<void> {
+    await this.closeEngineQuietly();
+    this.loaded = false;
+    this.registry = new Map();
+  }
+
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const run = this.opChain.then(operation);
     this.opChain = run.catch(() => undefined);
@@ -418,9 +434,15 @@ class PersistentSkillSearchIndex implements SkillSearchIndex {
     try {
       await this.closeEngineQuietly();
       // 全量重建是 skill-search 对自有 home 子目录的主动行为：直接整目录删除
-      //（包信封的安全删除语义不适用于此处——目标是清空而非复用）。
-      fs.rmSync(searchIndexDirectory(), { recursive: true, force: true });
-      fs.rmSync(searchMetaFile(), { force: true });
+      //（包信封的安全删除语义不适用于此处——目标是清空而非复用）。maxRetries
+      // 吸收 Windows Defender/索引器对刚写入文件的瞬时锁（EPERM 线性退避重试）。
+      fs.rmSync(searchIndexDirectory(), {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 100,
+      });
+      fs.rmSync(searchMetaFile(), { force: true, maxRetries: 10, retryDelay: 100 });
       engine = await this.openEngine();
       if (documents.length > 0) {
         await engine.upsert(documents.map(({ document }) => toSearchDocument(document)));

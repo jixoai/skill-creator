@@ -54,11 +54,21 @@ beforeEach(() => {
   setHomeOverride(home);
 });
 
-afterEach(() => {
+/** 创建即登记：afterEach 统一关闭引擎句柄（Windows 上未释放句柄让删除 EPERM）。 */
+function makeIndex() {
+  const index = createSkillSearchIndex();
+  openIndexes.push(index);
+  return index;
+}
+const openIndexes: Array<ReturnType<typeof createSkillSearchIndex>> = [];
+
+afterEach(async () => {
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousHome;
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  await Promise.all(openIndexes.map((index) => index.close().catch(() => undefined)));
+  openIndexes.length = 0;
+  fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 /** 每次调用基于当前 sandbox 解析 root（sandbox 在 beforeEach 中轮换）。 */
@@ -125,7 +135,7 @@ describe("skill search index freshness", () => {
 
   it("rebuilds on first run and performs zero reparses when stats are unchanged", async () => {
     writeSixSkills();
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     const counter = { calls: [] };
 
     const first = await index.freshen(scans(), countingReader(counter));
@@ -134,7 +144,7 @@ describe("skill search index freshness", () => {
     expect(index.documentCount()).toBe(6);
 
     // 第二个实例从磁盘加载（模拟下一次 CLI 进程），stat 全等 → 零重解析。
-    const nextProcess = createSkillSearchIndex();
+    const nextProcess = makeIndex();
     const secondCounter = { calls: [] };
     const second = await nextProcess.freshen(scans(), countingReader(secondCounter));
     expect(second.mode).toBe("fresh");
@@ -145,7 +155,7 @@ describe("skill search index freshness", () => {
 
   it("reparses only the changed file on an mtime-touching edit", async () => {
     writeSixSkills();
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     await index.freshen(scans(), readSkillSearchDocument);
 
     // 修改 alpha（写入新内容，mtime/size 变化）；1/6 脏度低于 20% 重建阈值 → 增量。
@@ -161,7 +171,7 @@ describe("skill search index freshness", () => {
 
   it("detects a same-mtime same-size replacement through ino/ctimeMs", async () => {
     writeSixSkills();
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     await index.freshen(scans(), readSkillSearchDocument);
     const file = path.join(sandbox, "skills", "alpha", "SKILL.md");
     const statBefore = fs.statSync(file);
@@ -182,7 +192,7 @@ describe("skill search index freshness", () => {
     writeEnvelopeFile(envelope);
     expect(fs.statSync(file).mtimeMs).toBe(statBefore.mtimeMs);
 
-    const nextProcess = createSkillSearchIndex();
+    const nextProcess = makeIndex();
     const counter = { calls: [] };
     const summary = await nextProcess.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("incremental");
@@ -192,14 +202,17 @@ describe("skill search index freshness", () => {
 
   it("rebuilds fully when the config digest mismatches", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     await index.freshen(scans(), readSkillSearchDocument);
 
     const envelope = readEnvelopeFile();
     (envelope as { configDigest: string }).configDigest = `${"d".repeat(64)}`;
     writeEnvelopeFile(envelope);
 
-    const nextProcess = createSkillSearchIndex();
+    // 前一进程退出（句柄释放）后才存在后继进程：Windows 上打开的 sqlite
+    // 句柄会阻塞 rebuild 的目录删除（macOS 的 unlink 宽容掩盖了进程边界）。
+    await index.close();
+    const nextProcess = makeIndex();
     const counter = { calls: [] };
     const summary = await nextProcess.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("rebuilt");
@@ -209,7 +222,7 @@ describe("skill search index freshness", () => {
 
   it("writes the v4 registry envelope with the frozen config digest", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     await index.freshen(scans(), readSkillSearchDocument);
     const envelope = readEnvelopeFile();
     expect(envelope.schemaVersion).toBe(4);
@@ -224,11 +237,13 @@ describe("skill search index freshness", () => {
 describe("skill search index error matrix", () => {
   it("rebuilds from corrupt JSON and still answers queries", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     await index.freshen(scans(), readSkillSearchDocument);
     writeEnvelopeFile("{ this is not json");
 
-    const nextProcess = createSkillSearchIndex();
+    // 进程边界：前身退出后再起后继（见 config digest 用例注）。
+    await index.close();
+    const nextProcess = makeIndex();
     const counter = { calls: [] };
     const summary = await nextProcess.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("rebuilt");
@@ -238,7 +253,7 @@ describe("skill search index error matrix", () => {
 
   it("rebuilds when a registry entry violates the entry schema", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     await index.freshen(scans(), readSkillSearchDocument);
     const envelope = readEnvelopeFile();
     const documents = envelope.documents as Record<string, { contentHash: string }>;
@@ -246,7 +261,9 @@ describe("skill search index error matrix", () => {
     refreshEnvelopeDigest(envelope);
     writeEnvelopeFile(envelope);
 
-    const nextProcess = createSkillSearchIndex();
+    // 进程边界：前身退出后再起后继（见 config digest 用例注）。
+    await index.close();
+    const nextProcess = makeIndex();
     const counter = { calls: [] };
     const summary = await nextProcess.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("rebuilt");
@@ -256,14 +273,14 @@ describe("skill search index error matrix", () => {
 
   it("hard-errors on a blocked save and preserves the previous registry file", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     await index.freshen(scans(), readSkillSearchDocument);
     const before = fs.readFileSync(metaFile(), "utf8");
     holdFileForBlockedWrite(metaFile());
 
     try {
       writeSkill("beta", skillContent("beta", "second skill"));
-      const nextProcess = createSkillSearchIndex();
+      const nextProcess = makeIndex();
       await expect(nextProcess.freshen(scans(), readSkillSearchDocument)).rejects.toThrowError(
         SkillSearchIndexError,
       );
@@ -278,19 +295,22 @@ describe("skill search index error matrix", () => {
 describe("skill search index concurrency", () => {
   it("applies last-writer-wins across serial freshen writes and stays readable", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
-    const first = createSkillSearchIndex();
+    const first = makeIndex();
     const firstSummary: FreshenSummary = await first.freshen(scans(), readSkillSearchDocument);
     expect(firstSummary.mode).toBe("rebuilt");
 
-    // 第二个写者（后写胜）：移除 alpha、加入 beta 后落盘。
+    // 第二个写者（后写胜）：移除 alpha、加入 beta 后落盘。写者交替按进程
+    // 边界串行（前身先退出；见 config digest 用例注）。
     fs.rmSync(path.join(sandbox, "skills", "alpha"), { recursive: true });
     writeSkill("beta", skillContent("beta", "second skill"));
-    const second = createSkillSearchIndex();
+    await first.close();
+    const second = makeIndex();
     const secondSummary: FreshenSummary = await second.freshen(scans(), readSkillSearchDocument);
     expect(secondSummary.mode).toBe("rebuilt");
 
     // 读者读回仍可用；stale stat 校验在下次 freshen 自愈。
-    const reader = createSkillSearchIndex();
+    await second.close();
+    const reader = makeIndex();
     await reader.freshen(scans(), readSkillSearchDocument);
     expect(reader.documentCount()).toBe(1);
     expect(await reader.search("beta")).toHaveLength(1);
@@ -301,7 +321,7 @@ describe("skill search index concurrency", () => {
 describe("skill search index load validation (external input boundary)", () => {
   it("rebuilds when the engine index was silently wiped under an intact registry", async () => {
     writeSkill("target", "---\nname: target\ndescription: real skill\n---\nbody");
-    const first = createSkillSearchIndex();
+    const first = makeIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
     await first.freshen(scans, readSkillSearchDocument);
     const id = scans[0]!.id as string;
@@ -315,7 +335,9 @@ describe("skill search index load validation (external input boundary)", () => {
     packageEnvelope.tokenizerVersion = "tampered";
     fs.writeFileSync(packageEnvelopeFile, JSON.stringify(packageEnvelope));
 
-    const second = createSkillSearchIndex();
+    // 进程边界：前身退出后再起后继（见 config digest 用例注）。
+    await first.close();
+    const second = makeIndex();
     const summary = await second.freshen(scans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
     expect(summary.rebuildReason).toBe("corrupt");
@@ -326,7 +348,7 @@ describe("skill search index load validation (external input boundary)", () => {
 
   it("rebuilds instead of crashing when a registry entry was removed from the envelope", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
-    const first = createSkillSearchIndex();
+    const first = makeIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
     await first.freshen(scans, readSkillSearchDocument);
 
@@ -334,7 +356,9 @@ describe("skill search index load validation (external input boundary)", () => {
     delete envelope.documents[scans[0]!.id as string];
     writeEnvelopeFile(envelope);
 
-    const second = createSkillSearchIndex();
+    // 进程边界：前身退出后再起后继（见 config digest 用例注）。
+    await first.close();
+    const second = makeIndex();
     const summary = await second.freshen(scans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
     // 被裁剪的登记表经载荷摘要或脏度路径全量重建；关键断言是不崩溃且结果正确。
@@ -344,7 +368,7 @@ describe("skill search index load validation (external input boundary)", () => {
 
   it("invalidates in-memory state after a save failure and self-heals on the next call", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
     await index.freshen(scans, readSkillSearchDocument);
 
@@ -372,7 +396,7 @@ describe("skill search index adversarial envelopes", () => {
     for (const name of ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]) {
       writeSkill(name, skillContent(name, `${name} skill body`));
     }
-    const first = createSkillSearchIndex();
+    const first = makeIndex();
     const allScans = scans();
     await first.freshen(allScans, readSkillSearchDocument);
     const alphaScan = allScans.find((scan) => scan.canonicalPath.endsWith("alpha"));
@@ -390,7 +414,7 @@ describe("skill search index adversarial envelopes", () => {
     refreshEnvelopeDigest(envelope);
     writeEnvelopeFile(envelope);
 
-    const second = createSkillSearchIndex();
+    const second = makeIndex();
     const counter = { calls: [] as string[] };
     const summary = await second.freshen(scans(), countingReader(counter));
     expect(summary.mode).toBe("incremental");
@@ -404,7 +428,7 @@ describe("skill search index adversarial envelopes", () => {
   it("purges ghost documents whose registry entries were pruned with the skill deleted", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
     writeSkill("beta", "---\nname: beta\ndescription: beta skill\n---\nbody");
-    const first = createSkillSearchIndex();
+    const first = makeIndex();
     const allScans = scans();
     await first.freshen(allScans, readSkillSearchDocument);
     const betaId = allScans.find(
@@ -418,7 +442,9 @@ describe("skill search index adversarial envelopes", () => {
     delete envelope.documents[betaId];
     writeEnvelopeFile(envelope);
 
-    const second = createSkillSearchIndex();
+    // 进程边界：前身退出后再起后继（见 config digest 用例注）。
+    await first.close();
+    const second = makeIndex();
     const alphaScans = allScans.filter((scan) => scan.canonicalPath.endsWith("alpha"));
     const summary = await second.freshen(alphaScans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
@@ -441,7 +467,7 @@ describe("skill search index adversarial envelopes", () => {
 
   it("does not fake freshness after a failed first rebuild persist", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
     fs.mkdirSync(path.dirname(metaFile()), { recursive: true });
     blockFileAccess(metaFile());
@@ -482,7 +508,7 @@ describe("skill search index backend selection", () => {
 
   it("rebuilds when the backend changes under an intact registry", async () => {
     writeSkill("alpha", skillContent("alpha", "first skill"));
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     await index.freshen(scans(), readSkillSearchDocument);
 
     // 模拟 env 切换 backend：backend 是 configDigest 成员——以另一 backend 的
@@ -494,7 +520,9 @@ describe("skill search index backend selection", () => {
     );
     writeEnvelopeFile(envelope);
 
-    const nextProcess = createSkillSearchIndex();
+    // 进程边界：前身退出后再起后继（见 config digest 用例注）。
+    await index.close();
+    const nextProcess = makeIndex();
     const summary = await nextProcess.freshen(scans(), readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
     expect(summary.rebuildReason).toBe("incompatible");
@@ -505,7 +533,7 @@ describe("skill search index backend selection", () => {
 describe("skill search index payload digest", () => {
   it("rejects control-plane tampering that keeps every other field intact", async () => {
     writeSkill("alpha", "---\nname: alpha\ndescription: alpha skill\n---\nbody");
-    const first = createSkillSearchIndex();
+    const first = makeIndex();
     const scans = canonicalizeCandidates(scanSkillRoots([root()]));
     await first.freshen(scans, readSkillSearchDocument);
 
@@ -517,7 +545,9 @@ describe("skill search index payload digest", () => {
     entry.files[0]!.size += 1;
     writeEnvelopeFile(envelope);
 
-    const second = createSkillSearchIndex();
+    // 进程边界：前身退出后再起后继（见 config digest 用例注）。
+    await first.close();
+    const second = makeIndex();
     const summary = await second.freshen(scans, readSkillSearchDocument);
     expect(summary.mode).toBe("rebuilt");
     expect(summary.rebuildReason).toBe("corrupt");
@@ -532,7 +562,7 @@ describe("skill search index incremental atomicity", () => {
     for (const name of ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]) {
       writeSkill(name, skillContent(name, `${name} skill body`));
     }
-    const index = createSkillSearchIndex();
+    const index = makeIndex();
     const firstScans = canonicalizeCandidates(scanSkillRoots([root()]));
     await index.freshen(firstScans, readSkillSearchDocument);
     expect(index.documentCount()).toBe(6);

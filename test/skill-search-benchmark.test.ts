@@ -60,12 +60,24 @@ beforeEach(() => {
   setHomeOverride(path.join(sandbox, "state"));
 });
 
-afterEach(() => {
+afterEach(async () => {
   setHomeOverride(null);
   if (previousHome === undefined) delete process.env.SKILL_CREATOR_HOME;
   else process.env.SKILL_CREATOR_HOME = previousHome;
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  // 引擎句柄先释放再删沙箱：dispose 的 close 是 fire-and-forget 微任务——
+  // 等一个宏任务排干（Windows EPERM 防线）。
+  for (const service of trackedServices) service.dispose();
+  trackedServices.length = 0;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
+
+/** 创建即登记：afterEach 统一 dispose（watcher + sqlite 引擎句柄）。 */
+function trackService<T extends { dispose: () => void }>(service: T): T {
+  trackedServices.push(service);
+  return service;
+}
+const trackedServices: Array<{ dispose: () => void }> = [];
 
 /** 真实形态语料落盘：119 个 manifest 快照 + 11 个合成 skill（含 keywords/triggers）。 */
 function materializeCorpus(): SkillRoot {
@@ -162,7 +174,7 @@ describe("skill search quality benchmark (frozen ranking pipeline)", () => {
     expect(syntheticSkills).toHaveLength(11);
     expect(labeledQueries).toHaveLength(45);
 
-    const service = createSkillSearchServiceWithRoots(() => [root]);
+    const service = trackService(createSkillSearchServiceWithRoots(() => [root]));
     const results = new Map<string, Array<{ name: string }>>();
     for (const { q } of labeledQueries) {
       results.set(
@@ -187,13 +199,13 @@ describe("skill search quality benchmark (frozen ranking pipeline)", () => {
 
   it("replays byte-identical output across a fresh (stat-stable) second run", async () => {
     const root = materializeCorpus();
-    const service = createSkillSearchServiceWithRoots(() => [root]);
+    const service = trackService(createSkillSearchServiceWithRoots(() => [root]));
     const firstRun: string[] = [];
     for (const { q } of labeledQueries) {
       firstRun.push(JSON.stringify(await service.search(q, { limit: 10 })));
     }
     // 新进程视角：重新装配 service（freshen 走 stat 全等路径），输出必须逐字节相等。
-    const secondService = createSkillSearchServiceWithRoots(() => [root]);
+    const secondService = trackService(createSkillSearchServiceWithRoots(() => [root]));
     for (const [index, { q }] of labeledQueries.entries()) {
       expect(JSON.stringify(await secondService.search(q, { limit: 10 }))).toBe(firstRun[index]);
     }
@@ -212,14 +224,16 @@ describe("skill search quality benchmark (frozen ranking pipeline)", () => {
     const aliasRoot = path.join(sandbox, "roots", "codex", "skills");
     fs.mkdirSync(aliasRoot, { recursive: true });
     fs.cpSync(source, path.join(aliasRoot, path.basename(source)), { recursive: true });
-    const service = createSkillSearchServiceWithRoots(() => [
-      root,
-      {
-        rootPath: aliasRoot,
-        workspaceId: GLOBAL_WORKSPACE_ID,
-        providerId: ProviderIdSchema.parse("codex"),
-      },
-    ]);
+    const service = trackService(
+      createSkillSearchServiceWithRoots(() => [
+        root,
+        {
+          rootPath: aliasRoot,
+          workspaceId: GLOBAL_WORKSPACE_ID,
+          providerId: ProviderIdSchema.parse("codex"),
+        },
+      ]),
+    );
     const name = corpus[0]?.name || corpus[0]?.directoryName || "acp";
     const results = await service.search(name, { limit: 10 });
     const primary = results.find((result) => result.name === name);

@@ -56,7 +56,7 @@ beforeEach(() => {
   setHomeOverride(isolatedState);
 });
 
-afterEach(() => {
+afterEach(async () => {
   setHomeOverride(null);
   for (const name of [
     "HOME",
@@ -70,14 +70,24 @@ afterEach(() => {
     else process.env[name] = previous;
     delete previousEnv[name];
   }
-  fs.rmSync(sandbox, { recursive: true, force: true });
+  // 域内 skillSearch 持有 sqlite 引擎句柄：dispose 的 close 是 fire-and-forget
+  // 微任务——等一个宏任务排干再删沙箱（Windows EPERM 防线）。
+  for (const domain of createdDomains) domain.skillSearch.dispose();
+  createdDomains.length = 0;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-function createClient(
-  domain: DaemonDomain = createDaemonDomain(undefined, {
-    skillsCliProbe: deterministicSkillsCliProbe(),
-  }),
-) {
+/** 创建即登记：afterEach 统一释放 skillSearch 引擎句柄（Windows 删除 EPERM 防线）。 */
+const createdDomains: DaemonDomain[] = [];
+
+function createClient(explicitDomain?: DaemonDomain) {
+  const domain =
+    explicitDomain ??
+    createDaemonDomain(undefined, {
+      skillsCliProbe: deterministicSkillsCliProbe(),
+    });
+  createdDomains.push(domain);
   return createRouterClient(
     createRpcRouter({
       status: () => ({

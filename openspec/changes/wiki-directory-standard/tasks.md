@@ -17,30 +17,36 @@
 
 ## Phase 2 — cli-kit + skill-creator wiki 子命令
 
-- [ ] 2.1 cli.ts 拆层：命令单元（纯函数 + IO 注入）+ createWikiCli(host)
+- [x] 2.1 cli.ts 拆层：命令单元（纯函数 + IO 注入）+ createWikiCli(host)
       （resolveScope/commandPrefix/extraCommands 三插槽）；默认实例 =
       bin 行为逐位一致（现有测试零改动通过）
-- [ ] 2.2 --workspace <path|~|./> 默认 ./（kit 默认实现；bin usage 更新）
-- [ ] 2.3 skill-creator CLI wiki 子命令：createWikiCli + registry 只读
+- [x] 2.2 --workspace <path|~|./> 默认 ./（kit 默认实现；bin usage 更新）
+- [x] 2.3 skill-creator CLI wiki 子命令：createWikiCli + registry 只读
       解析（label 前缀/ws_id/路径）+ scopes 扩展命令；exit code 透传
-- [ ] 2.4 测试：kit 插槽单测、skill-creator wiki 子命令端到端（进程内
+- [x] 2.4 测试：kit 插槽单测、skill-creator wiki 子命令端到端（进程内
       tsx 真跑，沙箱 HOME/registry）
 
 ## Phase 3 — GUI Wiki 面板
 
-- [ ] 3.1 wiki.scopes RPC（contracts + rpc-contract + daemon 投影 +
+- [x] 3.1 wiki.scopes RPC（contracts + rpc-contract + daemon 投影 +
       RPC 测试）
-- [ ] 3.2 webui wiki App manifest + 路由（/wiki home + /wiki/:wsId）+
+- [x] 3.2 webui wiki App manifest + 路由（/wiki home + /wiki/:wsId）+
       一级导航
-- [ ] 3.3 WikiHome（scope 索引卡 + 空态）与 WikiScopeView（patterns
+- [x] 3.3 WikiHome（scope 索引卡 + 空态）与 WikiScopeView（patterns
       列表/过滤/追加/相似警告/展开——现有 WikiView 平移演进）+ wiki
       store 扩展（scopes）
-- [ ] 3.4 旧 /workspaces/wiki 路由删除 + WorkspacesHome 入口改指 /wiki + store 清理；webui 测试更新 + route-match 回归
-- [ ] 3.5 组件测试（scopes 列表/追加闭环/detail 导航）+ webui check
+- [x] 3.4 旧 /workspaces/wiki 路由删除 + WorkspacesHome 入口改指 /wiki + store 清理；webui 测试更新 + route-match 回归
+- [x] 3.5 组件测试（scopes 列表/追加闭环/detail 导航）+ webui check
 
 ## Phase 4 — 边界补账 + 收口
 
-- [ ] 4.1 排除目录内置名单与 Owner 名单 diff 补齐（内置集 + 测试）
+- [x] 4.1 排除目录内置名单与 Owner 名单 diff 补齐（内置集 + 测试）
+      → 核对结论（2026-09-22）：零缺口。Owner 15 项 = 内置
+      BUILTIN_EXCLUDED_DIRS 7 项（node_modules/build/dist/target/
+      **pycache**/tmp/logs，content-files.ts）+ dot 目录无条件全跳规则
+      8 项（.git/.cargo/.cache/.npm/.pnpm-store/.bun/.rustup/.local）；
+      search-config.toml 模板另将 7 个 dot 名显式写出（可注释、只能追加
+      排除、内置不可移除）。无需代码变更。
 - [ ] 4.2 Windows 实机轮（ssh gaubeehonor）：装包 + 包测试 + CLI 直跑 +
       索引/查重冒烟；结论记录 docs
 - [ ] 4.3 门禁全绿（test/typecheck/webui check/build/fmt/pack）+ dev

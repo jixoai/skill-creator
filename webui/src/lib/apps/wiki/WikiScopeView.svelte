@@ -1,14 +1,17 @@
 <!--
   用户原始需求 [2026-09-21]：「P1 本质上是在收集一些碎片的认知，这和 skill-wiki
   是有一些重叠的，是 skill-wiki 输入的一部分」——wiki 通道是碎片认知的收集面。
+  用户原始需求 [2026-09-22]（wiki-directory-standard）：旧 Workspaces 内 wiki 视图
+  平移至第四个一级 Wiki 面板的 detail（/wiki/:wsId）。
   正交意图：
   1. 双级 scope 的 pattern 列表（前端过滤 + 惰性展开正文）。
   2. 碎片追加表单（幂等提交：deduplicated 有独立反馈；失败 toast 可区分）。
-  3. 加载 / 空 / 错误三态可区分；窄屏单列。
+  3. 进入 detail 聚焦语义标题（窄屏单屏列表/详情切换法则；返回恢复由 WikiHome 承担）。
+  4. 加载 / 空 / 错误三态可区分；断线保留草稿（store 列表门不重置表单态）。
 -->
 <script lang="ts">
-  import { page } from "$app/state";
   import { goto } from "$app/navigation";
+  import { useParams } from "$lib/shell";
   import {
     appendWikiFragment,
     loadWiki,
@@ -33,8 +36,10 @@
   import { WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
 
   // 渲染前身份收窄：路由 params zod 已过滤非法值；此处 parse 只做 branded 类型
-  // 收窄（page.params 原始投影是 string）。
-  const { wsId } = $derived(page.params as { wsId?: string });
+  // 收窄（shell 的 useParams 注入——$app/state 的 page.params 属 SvelteKit catch-all
+  // 承载层，永远不含 shell 路由参数，ws_* 会被静默兜底成 Global，走查实证）。
+  const getParams = useParams<{ wsId: string }>();
+  const wsId = $derived.by(() => getParams?.()?.wsId);
   const scope = $derived(WorkspaceIdSchema.parse(wsId ?? "~"));
   const scopeLabel = $derived.by(() => {
     const match = workspaceState.workspaces.find((workspace) => workspace.id === scope);
@@ -49,6 +54,7 @@
   let expanded = $state<
     Record<string, { loading: boolean; error: string | null; read: WikiReadResult | null }>
   >({});
+  let headingEl = $state<HTMLHeadingElement | null>(null);
 
   const filtered = $derived.by(() => {
     const q = filterQuery.trim().toLowerCase();
@@ -66,6 +72,11 @@
   // 离开视图时复位（下次进入不携带旧 scope 的投影）。
   $effect(() => {
     return () => resetWiki();
+  });
+
+  // 进入 detail 聚焦语义标题（挂载时一次；刷新/追加不重复夺焦）。
+  $effect(() => {
+    headingEl?.focus();
   });
 
   async function refresh(): Promise<void> {
@@ -133,21 +144,29 @@
           variant="ghost"
           size="icon"
           class="h-8 w-8 shrink-0"
-          title="Back to workspaces"
-          aria-label="Back to workspaces"
-          onclick={() => void goto("/workspaces")}
+          title="Back to wiki scopes"
+          aria-label="Back to wiki scopes"
+          onclick={() => void goto("/wiki")}
         >
           <IconArrowLeft class="h-4 w-4" />
         </Button>
-        <h1 class="truncate text-lg font-semibold">Wiki</h1>
-        {#if scope === "~"}
-          <Badge variant="secondary" class="text-xs">~ global</Badge>
-        {:else}
-          <Badge variant="secondary" class="text-xs">workspace</Badge>
-        {/if}
+        <h1
+          tabindex="-1"
+          bind:this={headingEl}
+          class="min-w-0 flex-1 truncate text-lg font-semibold outline-none"
+        >
+          {scopeLabel} wiki
+        </h1>
       </div>
-      <p class="mt-0.5 text-xs text-muted-foreground">
-        Persistent notes for {scopeLabel} — fragments collected here feed skill evolution.
+      <p class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+        {#if scope === "~"}
+          <Badge variant="secondary" class="shrink-0">~ global</Badge>
+        {:else}
+          <Badge variant="secondary" class="shrink-0">workspace</Badge>
+        {/if}
+        <span class="min-w-0">
+          Persistent notes for {scopeLabel} — fragments collected here feed skill evolution.
+        </span>
       </p>
     </div>
     <div class="flex shrink-0 items-center gap-1.5">
