@@ -64,9 +64,16 @@
       窄屏阻塞项（语义标题宽度 0）当场修复回归（h1 87px 实测）。走查另
       抓到 WikiScopeView 误用 $app/state page.params（ws_* 静默兜底
       Global）——已改 shell useParams + 回归钉。
-- [ ] 4.4 codex 复核（remix 闭环）+ 处置 + 归档
+- [x] 4.4 codex 复核（remix 闭环）+ 处置 + 归档
       → r1（2026-09-22）：7.8/10 NEEDS-WORK——P1×1（scopes 对部分初始化
       目录惰性 mkdir）+ P2×5；全部处置：SDK countWikiPatterns 只读计数
       （daemon/CLI 共用）、registry 读取 ENOENT-only + EACCES hard error、
       Windows 反斜杠路径形状直传、dispose 转 async 完成屏障、超限错误
-      文本逐位恢复、本文件 4.2/4.3 收口。待 r2 复验。
+      文本逐位恢复、本文件 4.2/4.3 收口（commit e450737；本地全量
+      1353/1353 + Windows 完整树 120/120）。
+      → r2（2026-09-22）：9.0/10——六项处置全 PASS；新 P2×1
+      （countWikiPatterns 未校验文件名 schema，与 listPatterns 成员判定
+      漂移）。处置于 f53a69b：计数先 PatternNameSchema 再 frontmatter
+      （两处同弃）+ SDK/RPC 双层复现钉（Bad_Name.md 向量，旧代码必红）。
+      → r3（2026-09-22）：**9.5/10 ARCHIVE-READY**（/tmp/wiki-dir-review-r3.md
+      ——阻塞问题无，复现钉有效性独立确认，39/39 定向绿）。
