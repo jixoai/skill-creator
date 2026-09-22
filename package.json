@@ -53,6 +53,7 @@
     "dev:daemon": "bun src/daemon/main.ts",
     "skill-creator": "bun scripts/run-skill-creator.sh.ts",
     "typecheck": "tsc --noEmit",
+    "wiki": "tsx packages/skill-wiki/bin/skill-wiki.ts",
     "test": "vp test run",
     "test:watch": "vp test",
     "check": "pnpm test && pnpm typecheck && pnpm --dir webui check && pnpm exec vp fmt --check",
