@@ -132,6 +132,7 @@ describe("wiki RPC surface", () => {
     expect(read.title).toBe("Pin exit codes");
     expect(read.body).toContain("Branch on exit code");
     expect(read.promotedFrom).toBeNull();
+    expect(read.scope).toBe("~");
   });
 
   it("co-locates a registered ws_* wiki with the workspace directory (origin footprint)", async () => {

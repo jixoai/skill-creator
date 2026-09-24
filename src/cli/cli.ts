@@ -70,6 +70,11 @@ function resolveDaemonEntry(): string {
  *
  * `webFlag` 仅在用户显式传 `--web`/`--no-web` 时注入 `SKILL_CREATOR_WEB` env；
  * undefined 时 daemon 侧按平台默认（Linux=true）自行裁决。
+ * 源码态 runtime（Windows 测试债 2026-09-25）：Windows 版 Bun（1.3.14）尚无
+ * `node:sqlite` 内建（daemon 搜索索引后端依赖，Node 24 内置）——bun 直跑
+ * main.ts 即刻死于 "No such built-in module"，daemon.log 都来不及写。win32 的
+ * .ts entry 改经 Node + tsx loader（与开发 CLI 同一加载方式，tsx 自仓内
+ * node_modules 解析）启动；POSIX 开发流维持 Bun 直跑不变。
  */
 function spawnDaemon(webFlag: WebModeFlag = undefined): void {
   const entry = resolveDaemonEntry();
@@ -77,9 +82,10 @@ function spawnDaemon(webFlag: WebModeFlag = undefined): void {
   const baseEnv = { ...process.env };
   const env =
     webFlag === undefined ? baseEnv : { ...baseEnv, [SKILL_CREATOR_WEB_ENV]: webFlag ? "1" : "0" };
-  const child = isTs
-    ? spawn("bun", [entry], { detached: true, stdio: "ignore", env })
-    : spawn(process.execPath, [entry], { detached: true, stdio: "ignore", env });
+  const nodeTsx = isTs && process.platform === "win32";
+  const command = isTs && !nodeTsx ? "bun" : process.execPath;
+  const args = nodeTsx ? ["--import", "tsx", entry] : [entry];
+  const child = spawn(command, args, { detached: true, stdio: "ignore", env });
   child.unref();
 }
 
@@ -780,9 +786,10 @@ async function runMcpStdio(): Promise<void> {
   const domain = createDaemonDomain();
   console.error("skill-creator mcp: stdio server ready (readonly face)");
   await serveStdio(() =>
+    // stdio 无 UI 宿主：不注入卡片注册表（wiki_read 等附卡能力降级纯文本，
+    // 不发 client 无法解析的 ui:// 悬挂引用——codex r1 P2-1）。
     createSkillCreatorMcpServer({
       capabilities: domain.managerCapabilities,
-      cards: domain.uiCards,
       face: "stdio",
     }),
   );

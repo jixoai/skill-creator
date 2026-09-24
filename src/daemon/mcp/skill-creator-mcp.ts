@@ -30,8 +30,9 @@ export type McpFace = "in-process" | "stdio";
 export interface SkillCreatorMcpDeps {
   capabilities: CapabilityRegistry;
   face: McpFace;
-  /** ui:// 卡片注册表（daemon 级；ok 结果按能力面附卡）。 */
-  cards: UiCardRegistry;
+  /** ui:// 卡片注册表（daemon 级；缺省 = 无卡宿主——stdio 等纯文本 client
+   *  不注入，withCard 降级纯文本，绝不发悬挂 ui:// 引用（codex r1 P2-1）。 */
+  cards?: UiCardRegistry;
   /** mutation proposal 存储（形态 A；stdio 形态忽略——mutation 不注册）。 */
   proposals?: McpProposalStore;
 }
@@ -69,7 +70,7 @@ function toToolResult(result: unknown): {
 function withCard(
   capabilityName: string,
   result: unknown,
-  cards: UiCardRegistry,
+  cards: UiCardRegistry | undefined,
 ): {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
@@ -144,7 +145,9 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
           proposeName,
           {
             description: `Propose: ${descriptor.description} A human approves it in the Skill Creator UI before execution.`,
-            inputSchema: z.object(shape),
+            // strictObject 保留共享契约的 unknown 键拒绝（codex r1 P2-2：
+            // z.object(shape) 会静默 strip，输入透传不再 faithful）。
+            inputSchema: z.strictObject(shape),
           },
           async (args) => proposeResult(deps.proposals!.create(descriptor.name, args)),
         );
@@ -169,7 +172,7 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
     if (shape) {
       server.registerTool(
         toolName,
-        { description: descriptor.description, inputSchema: z.object(shape) },
+        { description: descriptor.description, inputSchema: z.strictObject(shape) },
         async (args) =>
           withCard(
             descriptor.name,

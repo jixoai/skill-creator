@@ -35,6 +35,9 @@ export const WikiAppendInputSchema = z
 /** wiki.read 输出：列表条目字段 + 正文。 */
 export const WikiReadResultSchema = PatternListItemSchema.extend({
   body: z.string(),
+  /** 请求作用域（wiki-mcp-surface codex r1 P2-4：origin 是 workspace 绝对
+   * 路径足迹，scope 才是调用方请求的 WikiId——卡片/消费者显示用）。 */
+  scope: WorkspaceIdSchema,
 }).strict();
 /** 单 pattern 全文投影。 */
 export type WikiReadResult = z.infer<typeof WikiReadResultSchema>;

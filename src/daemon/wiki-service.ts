@@ -109,6 +109,7 @@ export function createWikiService(
       try {
         const read = wiki.readPattern(name);
         return {
+          scope,
           name: name as WikiReadResult["name"],
           title: read.frontmatter.title,
           origin: read.frontmatter.origin,

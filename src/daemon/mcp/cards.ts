@@ -223,6 +223,7 @@ export function uiCardForCapability(capabilityName: string, result: unknown): Ui
         title?: string;
         updated?: string;
         origin?: string;
+        scope?: string;
         body?: string;
       };
       if (typeof pattern.name !== "string") return null;
@@ -232,8 +233,8 @@ export function uiCardForCapability(capabilityName: string, result: unknown): Ui
         title: `Wiki — ${pattern.title ?? pattern.name}`,
         fields: [
           { label: "Pattern", value: pattern.name },
+          { label: "Scope", value: pattern.scope ?? pattern.origin ?? "-" },
           { label: "Updated", value: pattern.updated ?? "-" },
-          { label: "Origin", value: pattern.origin ?? "-" },
           { label: "Body", value: bodyPreview || "-" },
         ],
         nav: { label: "Open the Wiki panel", path: "/wiki" },

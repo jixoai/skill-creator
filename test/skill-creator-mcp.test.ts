@@ -370,9 +370,17 @@ describe("wiki capability face (wiki-mcp-surface)", () => {
         (list.value as { patterns: Array<{ name: string }> }).patterns.map((item) => item.name),
       ).toEqual(["mcp-round-trip"]);
 
-      const read = await callJson(client, "wiki_read", { scope: "~", name: "mcp-round-trip" });
+      const readRaw = await client.callTool({
+        name: "wiki_read",
+        arguments: { scope: "~", name: "mcp-round-trip" },
+      });
+      // stdio 无 UI 宿主：绝不发悬挂 ui:// 引用（codex r1 P2-1）。
+      expect(readRaw._meta).toBeUndefined();
+      const readText = (readRaw.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+      expect(readText).not.toContain("uiCard");
+      const read = JSON.parse(readText) as { kind: string; value?: { body?: string } };
       expect(read.kind).toBe("ok");
-      expect((read.value as { body: string }).body.trim()).toBe("read via tools/call");
+      expect(read.value?.body?.trim()).toBe("read via tools/call");
     } finally {
       await client.close();
       await server.close();
@@ -404,16 +412,61 @@ describe("wiki capability face (wiki-mcp-surface)", () => {
       expect(proposed.kind).toBe("proposed");
       const proposalId = (proposed as unknown as { proposalId: string }).proposalId;
 
-      // 提案未决：磁盘零写。
-      expect((await domain.wiki.list("~")).patterns).toHaveLength(0);
+      // 提案未决：磁盘零写——文件系统快照（勿用 wiki.list：它会惰性 mkdir
+      // patterns/，自己制造「写入」，codex r1 P2-3）。
+      const wikiHome = process.env.SKILL_WIKI_HOME as string;
+      expect(fs.existsSync(wikiHome)).toBe(false);
 
       const decision = await domain.mcpProposals.approve(proposalId);
       expect(decision.view.status).toBe("executed");
+      expect(fs.existsSync(path.join(wikiHome, "patterns", "proposed-insight.md"))).toBe(true);
       const patterns = (await domain.wiki.list("~")).patterns;
       expect(patterns.map((item) => item.name)).toEqual(["proposed-insight"]);
     } finally {
       await client.close();
       await server.close();
     }
+  });
+});
+
+describe("wiki capability contract fidelity (codex r1 P2-2 + 补强)", () => {
+  const previousWikiHome = process.env.SKILL_WIKI_HOME;
+
+  afterEach(() => {
+    if (previousWikiHome === undefined) delete process.env.SKILL_WIKI_HOME;
+    else process.env.SKILL_WIKI_HOME = previousWikiHome;
+  });
+
+  it("rejects unknown input keys instead of silently stripping them", async () => {
+    process.env.SKILL_WIKI_HOME = path.join(sandbox, "wiki-strict-home");
+    const server = createSkillCreatorMcpServer({
+      capabilities: domain.managerCapabilities,
+      face: "in-process",
+      proposals: domain.mcpProposals,
+    });
+    const client = new Client({ name: "smoke", version: "0.0.1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+    try {
+      const result = await client.callTool({
+        name: "wiki_append_propose",
+        arguments: { scope: "~", title: "Extra", body: "b", extra: "kept?" },
+      });
+      expect(result.isError).toBe(true);
+      // 未知键被拒绝：不得产生任何 proposal。
+      expect(domain.mcpProposals.list().some((view) => view.status === "pending")).toBe(false);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("rejects wiki.append on the agent principal (authority red line)", async () => {
+    const result = await domain.managerCapabilities.call(
+      "wiki.append",
+      { scope: "~", title: "Nope", body: "b" },
+      "agent",
+    );
+    expect(result.kind).toBe("denied");
   });
 });

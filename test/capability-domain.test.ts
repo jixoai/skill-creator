@@ -132,6 +132,11 @@ const DOMAIN_AUTHORITY: Record<string, string> = {
   "repository.sources.list": "readonly",
   "repository.sources.add": "approved-mutation",
   "repository.sources.remove": "approved-mutation",
+  // wiki-mcp-surface（2026-09-25）：append 落盘 → approved-mutation，余 readonly。
+  "wiki.scopes": "readonly",
+  "wiki.list": "readonly",
+  "wiki.read": "readonly",
+  "wiki.append": "approved-mutation",
 };
 
 describe("manager domain capability registration (tasks 1.2)", () => {
@@ -171,6 +176,11 @@ describe("manager domain capability registration (tasks 1.2)", () => {
       "repository.sources.list",
       "repository.sources.add",
       "repository.sources.remove",
+      // wiki 能力面（wiki-mcp-surface）随 registry 全集断言。
+      "wiki.scopes",
+      "wiki.list",
+      "wiki.read",
+      "wiki.append",
     ];
     expect([...registry.names()].sort()).toEqual([...mapProcedures].sort());
   });
