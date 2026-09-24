@@ -1798,7 +1798,8 @@ describe("move durability and path races (Codex R5 P1-1/P1-2)", () => {
     // 真实内容迁往独立 store；shared 变成挂载点，攻击者在两个 symlink 目标间高频
     // 切换（换体源 = outside，真实源 = realStore）。攻击者绝不写穿 shared 路径。
     const realStore = path.join(sandbox, "realstore");
-    fs.mkdirSync(realStore, { recursive: true });
+    // 不预创建 realStore：Windows rename 无法覆盖已存在目录（POSIX 可替换空目录）
+    // ——直接把 shared 改名成 realStore，两平台语义一致（目标不存在 = 纯改名）。
     fs.renameSync(sharedDir, realStore);
     fs.symlinkSync(realStore, sharedDir);
     const outsideDir = path.join(sandbox, "outside");
@@ -2241,15 +2242,12 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     // 缺失 → NOT_FOUND。
     await expect(readJournal(path.join(journalDir, "none.jsonl"))).rejects.toThrow(/not found/i);
 
-    // 不可读 → UNAVAILABLE。
+    // 不可读 → UNAVAILABLE。Windows 的 chmod 只映射 readonly 位（读不受阻），
+    // 注入统一换成「同名目录占位」：win 上 open 目录 EACCES 走 unreadable，
+    // POSIX 上 open 成功但 isFile 复验拒绝——两侧都是 typed 终态。
     const unreadable = path.join(journalDir, "unreadable.jsonl");
-    fs.copyFileSync(base.journalPath, unreadable);
-    fs.chmodSync(unreadable, 0o000);
-    try {
-      await expect(readJournal(unreadable)).rejects.toThrow(/unreadable/i);
-    } finally {
-      fs.chmodSync(unreadable, 0o644);
-    }
+    fs.mkdirSync(unreadable);
+    await expect(readJournal(unreadable)).rejects.toThrow(/unreadable|not a regular file/i);
 
     // 坏 JSON 行 → 拒绝（不静默跳过）。
     const corrupt = path.join(journalDir, "corrupt.jsonl");
@@ -2486,8 +2484,12 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     const last = entries[entries.length - 1]!;
     expect(last.step).toBe("commit");
     expect(last.detail.kind).toBe("commit");
-    const mode = fs.statSync(ctx.journalPath).mode & 0o777;
-    expect(mode).toBe(0o600);
+    // POSIX 权限位断言只在有该语义的平台执行：Windows 无 mode bits（libuv 对
+    // 可写文件恒报 0o666），journal 的 0600 由 open(..., 0o600) 在创建时声明。
+    if (process.platform !== "win32") {
+      const mode = fs.statSync(ctx.journalPath).mode & 0o777;
+      expect(mode).toBe(0o600);
+    }
   });
 
   it("R9 P1-1: a reused journal path (crash residue) fails closed, never appends", async () => {

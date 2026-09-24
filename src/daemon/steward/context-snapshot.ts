@@ -46,7 +46,10 @@ async function walkRegularFiles(directory: string): Promise<string[]> {
     if (entry.name === ".SKILL.md" || entry.name.startsWith(".tmp-")) continue;
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      found.push(...(await walkRegularFiles(absolute)).map((rel) => path.join(entry.name, rel)));
+      // relPath 契约冻结为 `/` 分隔（isSafeRelativePath 拒绝反斜杠）——Windows
+      // 的 path.join 产出 `\` 会被自己的契约拒绝（39 个 steward 失败同源于此），
+      // 组装边界显式用 `/`。
+      found.push(...(await walkRegularFiles(absolute)).map((rel) => `${entry.name}/${rel}`));
       continue;
     }
     if (entry.isFile()) {

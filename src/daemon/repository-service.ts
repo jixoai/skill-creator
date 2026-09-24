@@ -230,8 +230,22 @@ function findSkillFiles(root: string): string[] {
   return results.sort();
 }
 
+/**
+ * 契约相对路径归一化（Windows 测试债 2026-09-25）：path.relative 在 win32 产出
+ * `\` 分隔，会泄进 RemoteSkill.relativePath 与 rsk_ 摘要；契约字段统一 `/`
+ * （与 steward relPath 同一裁决），消费端 path.resolve 双分隔符兼容。digest 也
+ * 取归一化形式——同一仓库内容在所有平台得到相同 opaque ID。
+ */
+export function toContractRelativePath(relative: string): string {
+  // 双分隔符归一（不依赖宿主平台）：win32 的 path.relative 产出 `\`，POSIX 恒
+  // `/`；显式 Windows 形状输入在任意平台都归一为契约 `/` 形式。
+  return relative.split(/[\\/]/).join("/");
+}
+
 function inspectSkill(repositoryRoot: string, file: string): RemoteSkill {
-  const relativePath = path.relative(repositoryRoot, path.dirname(file)) || ".";
+  const relativePath = toContractRelativePath(
+    path.relative(repositoryRoot, path.dirname(file)) || ".",
+  );
   const issues: string[] = [];
   let name = path.basename(path.dirname(file));
   let description = "";

@@ -323,7 +323,11 @@ describe("Codex R8 independent probes (regression-ized)", () => {
     const journalPath = path.join(root, "op.jsonl");
     fsSync.symlinkSync(outside, journalPath);
     const { readJournal } = await import("../src/daemon/steward/journal-schema.js");
-    await expect(readJournal(journalPath)).rejects.toThrow(/unreadable|ELOOP|regular file/i);
+    // Windows 的 O_NOFOLLOW 语义是打开 reparse point 本身（不抛 ELOOP）——拒绝形态
+    // 落在「读取侧身份漂移」typed 终态；不变量是「symlink leaf 不成为事实源」。
+    await expect(readJournal(journalPath)).rejects.toThrow(
+      /unreadable|ELOOP|regular file|identity drifted/i,
+    );
   });
 
   it("[R9-5] a symlinked restore root is rejected before reading any existing leaf", async () => {
@@ -472,13 +476,13 @@ describe("Codex R8 independent probes (regression-ized)", () => {
     const { readJournal } = await import("../src/daemon/steward/journal-schema.js");
     await expect(readJournal(journalPath)).resolves.toHaveLength(1);
     // 换体后：进程内锚失配 → 拒绝（替换目录不能成为事实源）。
+    // Windows：向刚被 rename 顶替的目录内 copyfile 会被 AV/索引器短暂拒绝
+    // （EPERM）——先在原位组装替换目录再整目录换体，两平台同序。
     const replacement = path.join(root, "replacement");
-    fsSync.mkdirSync(path.join(replacement, "op.jsonl").replace(/\/op\.jsonl$/, ""), {
-      recursive: true,
-    });
+    fsSync.mkdirSync(replacement, { recursive: true });
+    fsSync.copyFileSync(journalPath, path.join(replacement, "op.jsonl"));
     fsSync.renameSync(journalDir, path.join(root, "original-journal"));
     fsSync.renameSync(replacement, journalDir);
-    fsSync.copyFileSync(path.join(root, "original-journal", "op.jsonl"), journalPath);
     await expect(readJournal(journalPath)).rejects.toThrow(
       /replaced during this daemon lifetime|not a real directory|not canonical/i,
     );
@@ -583,21 +587,26 @@ describe("Codex R8 independent probes (regression-ized)", () => {
 });
 
 describe("darwin system symlink roots (4.2 /tmp sandbox finding)", () => {
-  it("accepts /tmp-based roots whose realpath is /private/tmp (IPC-short-path sandboxes)", async () => {
-    const { assertCanonicalDirectory } = await import("../src/daemon/steward/dir-identity.js");
-    const dir = fsSync.mkdtempSync("/tmp/steward-canonical-");
-    try {
-      const identity = await assertCanonicalDirectory(dir);
-      expect(identity.ino).toBeGreaterThan(0);
-      // 归一事实源仍是 realpath 的 inode：/private/tmp 视角读取同一身份。
-      const viaPrivate = await assertCanonicalDirectory(
-        fsSync.realpathSync(dir).replace(/^\/private/, ""),
-      );
-      expect(viaPrivate.ino).toBe(identity.ino);
-    } finally {
-      fsSync.rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  // `/tmp` → `/private/tmp` 归一是 darwin 系统事实；Windows 上 `\tmp` 无该语义
+  // （realpath 带 卷号 前缀，天然不等），本例只在 darwin 上有意义。
+  it.runIf(process.platform === "darwin")(
+    "accepts /tmp-based roots whose realpath is /private/tmp (IPC-short-path sandboxes)",
+    async () => {
+      const { assertCanonicalDirectory } = await import("../src/daemon/steward/dir-identity.js");
+      const dir = fsSync.mkdtempSync("/tmp/steward-canonical-");
+      try {
+        const identity = await assertCanonicalDirectory(dir);
+        expect(identity.ino).toBeGreaterThan(0);
+        // 归一事实源仍是 realpath 的 inode：/private/tmp 视角读取同一身份。
+        const viaPrivate = await assertCanonicalDirectory(
+          fsSync.realpathSync(dir).replace(/^\/private/, ""),
+        );
+        expect(viaPrivate.ino).toBe(identity.ino);
+      } finally {
+        fsSync.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("still rejects a root whose realpath is an unrelated location", async () => {
     const { assertCanonicalDirectory } = await import("../src/daemon/steward/dir-identity.js");
@@ -612,6 +621,44 @@ describe("darwin system symlink roots (4.2 /tmp sandbox finding)", () => {
     } finally {
       fsSync.rmSync(aliased, { recursive: true, force: true });
       fsSync.rmSync(real, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("windows directory-fsync platform ceiling (syncDir root cause, 2026-09-25)", () => {
+  // Windows 测试债主根因回归钉：libuv 的 O_DIRECTORY 句柄只读，FlushFileBuffers
+  // 要求写句柄 → win32 目录 fsync 恒 EPERM。该错误必须归一化为平台上限吸收
+  // （否则 move 备份/隔离的 durability barrier 在 Windows 全线击穿，事务集体
+  // 落 recovery-required）；任何其它平台/错误码保持 fail-closed。
+  it("absorbs EPERM fsync on win32 only; every other platform/error stays fail-closed", async () => {
+    const { isDirSyncPlatformCeiling, syncDir } =
+      await import("../src/daemon/steward/fs-authority.js");
+    const errnoError = (code: string, message: string) =>
+      Object.assign(new Error(message), { code });
+    const eperm = errnoError("EPERM", "EPERM: operation not permitted, fsync");
+    const eio = errnoError("EIO", "EIO: i/o error, fsync");
+    const originalPlatform = process.platform;
+    const setPlatform = (value: string) => {
+      Object.defineProperty(process, "platform", { value, configurable: true });
+    };
+    try {
+      setPlatform("win32");
+      expect(isDirSyncPlatformCeiling(eperm)).toBe(true);
+      expect(isDirSyncPlatformCeiling(eio)).toBe(false);
+      expect(isDirSyncPlatformCeiling(new Error("no errno"))).toBe(false);
+      setPlatform("darwin");
+      expect(isDirSyncPlatformCeiling(eperm)).toBe(false);
+      setPlatform("linux");
+      expect(isDirSyncPlatformCeiling(eperm)).toBe(false);
+    } finally {
+      setPlatform(originalPlatform);
+    }
+    // 本平台真实目录上 syncDir 必须仍然成功（非平台上限路径不吞错误）。
+    const dir = fsSync.mkdtempSync(path.join(os.tmpdir(), "steward-syncdir-ceiling-"));
+    try {
+      await expect(syncDir(dir)).resolves.toBeUndefined();
+    } finally {
+      fsSync.rmSync(dir, { recursive: true, force: true });
     }
   });
 });

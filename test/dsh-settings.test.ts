@@ -186,7 +186,11 @@ describe("DshSettingsService", () => {
     await service.setCredential({ provider: "deepseek", apiKey: "sk-secret-2" });
     const file = path.join(sandbox, "state", "steward-store", "dsh-credentials.json");
     const stat = fs.statSync(file);
-    expect(stat.mode & 0o777).toBe(0o600);
+    // POSIX 权限位断言只在有该语义的平台执行（Windows 无 mode bits，可写文件
+    // 恒报 0o666；0600 由写入侧 open(..., 0o600) 声明）。
+    if (process.platform !== "win32") {
+      expect(stat.mode & 0o777).toBe(0o600);
+    }
     const view = await service.getView();
     // R16 用户裁决：key 客观回显（password 掩码展示）。
     expect(JSON.stringify(view)).toContain("sk-secret-2");
@@ -224,16 +228,13 @@ describe("DshSettingsService", () => {
   it("surfaces filesystem read failures as typed UNAVAILABLE", async () => {
     const dir = path.join(sandbox, "state", "steward-store");
     fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, "dsh-settings.json");
-    fs.writeFileSync(file, "{}", "utf8");
-    fs.chmodSync(file, 0o000);
-    try {
-      await expect(createDshSettingsService().getView()).rejects.toMatchObject({
-        code: "UNAVAILABLE",
-      });
-    } finally {
-      fs.chmodSync(file, 0o600);
-    }
+    // Windows chmod 不产生读拒绝（只映射 readonly 位）——注入换成「同名目录
+    // 占位」：win 上 open 目录 EACCES、POSIX 上 read 报 EISDIR，两侧都落入
+    // 服务层 readFile 的 typed UNAVAILABLE。
+    fs.mkdirSync(path.join(dir, "dsh-settings.json"));
+    await expect(createDshSettingsService().getView()).rejects.toMatchObject({
+      code: "UNAVAILABLE",
+    });
   });
 });
 

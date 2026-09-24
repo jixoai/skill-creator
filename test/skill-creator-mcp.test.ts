@@ -75,6 +75,9 @@ afterEach(async () => {
   web = null;
   await domain.repository.dispose();
   await domain.steward.dispose();
+  // 搜索 watcher 的 recursive fs.watch 句柄不释放，Windows 上沙箱 rmSync 恒
+  // EPERM（windows-test-debt 实证；daemon stop coordinator 本有此步）。
+  await domain.skillSearch.dispose();
   setHomeOverride(null);
   for (const name of [
     "HOME",

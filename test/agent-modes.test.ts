@@ -53,21 +53,32 @@ describe("agent mode catalog consistency", () => {
 });
 
 describe("productToolDenyList native tool policy", () => {
-  const globalNames = ["ask_user_question", "bash", "read_file", "list_directory", "web_search"];
+  // 两个平台原生 shell 名并列（官方矩阵：同一时刻全局表至多一个存在）——
+  // 不变量是「开放模式放行平台原生 shell」，不是某个具体名字。
+  const globalNames = [
+    "ask_user_question",
+    "bash",
+    "pwsh",
+    "read_file",
+    "list_directory",
+    "web_search",
+  ];
 
-  it("focused modes deny the native bash tool", () => {
+  it("focused modes deny both native shell tool names", () => {
     for (const mode of ["create", "manage", "explore"] as const) {
       const deny = productToolDenyList(globalNames, mode);
       expect(deny).toContain("bash");
+      expect(deny).toContain("pwsh");
       expect(deny).not.toContain("ask_user_question");
       expect(deny).toContain("read_file");
       expect(deny).toContain("web_search");
     }
   });
 
-  it("open (free) mode allows bash and still denies other native tools", () => {
+  it("open (free) mode allows both native shell names and still denies other native tools", () => {
     const deny = productToolDenyList(globalNames, "free");
     expect(deny).not.toContain("bash");
+    expect(deny).not.toContain("pwsh");
     expect(deny).not.toContain("ask_user_question");
     expect(deny).toContain("read_file");
     expect(deny).toContain("web_search");

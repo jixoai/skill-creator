@@ -42,15 +42,18 @@ const repoRoot = sourceMode
 
 /**
  * 内核工具面收窄：这些 dsh-base rows 注册模型可见的通用 fs/shell/web 工具。
- * product 会话默认不可见（design D1）；唯一例外：tool-bash 行保留激活，作为
- * 开放模式（free，显示名 Open）的原生能力——专注模式经 agent restrict 拒绝
- * （applyProductToolSurface 按模式计算 deny 名单）。disable 的是「通用能力行」，
- * 不是 sandbox/permission 等执行策略服务。skill-filesystem/tool-skill 同步收窄：
- * 宿主机个人 skills 目录的自动发现注入（system-reminder catalog）越出 Manager
- * 的技能真相边界——技能目录由 skill-creator-mcp + 提示词最佳实践供给（task 4.x）。
+ * product 会话默认不可见（design D1）；唯一例外：平台原生 shell 行保留激活
+ * （`bash`@POSIX / `pwsh`@win32，官方 dsh-base cordis.patch.yml 的平台矩阵），
+ * 作为开放模式（free，显示名 Open）的原生能力——专注模式经 agent restrict
+ * 拒绝（applyProductToolSurface 按模式计算 deny 名单）。注意 tool-pwsh 不进
+ * 本列表：官方 patch 已按平台互斥启用（win32 上它是原生 shell 行；2026-09-25
+ * Windows 测试债修正——此前无条件禁用使 Windows 开放模式无任何 shell）。
+ * disable 的是「通用能力行」，不是 sandbox/permission 等执行策略服务。
+ * skill-filesystem/tool-skill 同步收窄：宿主机个人 skills 目录的自动发现注入
+ * （system-reminder catalog）越出 Manager 的技能真相边界——技能目录由
+ * skill-creator-mcp + 提示词最佳实践供给（task 4.x）。
  */
 const KERNEL_DISABLED_TOOL_ROWS = [
-  "tool-pwsh",
   "tool-fs",
   "tool-fs-search",
   "tool-jobs",
@@ -58,6 +61,12 @@ const KERNEL_DISABLED_TOOL_ROWS = [
   "skill-filesystem",
   "tool-skill",
 ] as const;
+
+/**
+ * 开放模式放行的平台原生 shell 工具名（官方平台矩阵：同一时刻至多一个在
+ * 全局表中；两个名字并列表达「平台原生 shell」这一不变量，无平台分支）。
+ */
+export const KERNEL_NATIVE_SHELL_TOOL_NAMES: readonly string[] = ["bash", "pwsh"];
 
 /**
  * 产品会话的显式工具 allowlist（design D1：全局工具表 = capability 注册 + 显式

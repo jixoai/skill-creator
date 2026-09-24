@@ -105,6 +105,11 @@ export default defineConfig({
         test: {
           name: "webui",
           environment: "node",
+          // jsdom 文件的 webstorage 全局重绑：Node ≥25 实验 webstorage 遮蔽 jsdom
+          // 注入的 localStorage/sessionStorage（setup 内自守卫，node 环境零副作用）。
+          setupFiles: [
+            path.join(projectRoot, "webui/src/lib/__tests__/stubs/webstorage-globals-setup.ts"),
+          ],
           include: ["webui/src/**/*.test.ts"],
           globals: false,
           fileParallelism: false,

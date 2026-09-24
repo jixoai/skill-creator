@@ -26,6 +26,7 @@ import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import {
   createRepositoryService,
+  toContractRelativePath,
   type RepositoryInstaller,
 } from "../src/daemon/repository-service.js";
 import { createSkillService } from "../src/daemon/skill-service.js";
@@ -777,5 +778,17 @@ describe("repository service", () => {
       }),
     ).rejects.toThrow("Remote skill not found in scan session");
     expect(fs.existsSync(destinationPath)).toBe(false);
+  });
+});
+
+describe("contract relative path normalization (windows test debt 2026-09-25)", () => {
+  it("normalizes win32 path.relative separators to the contract `/` form", () => {
+    // Windows 上 path.relative 产出 `skills\reviewed`（两处 Windows 失败的根因：
+    // 契约字段/测试等值比较/rsk_ 摘要都按 `/` 形状冻结）。显式构造 Windows
+    // 形状输入钉住归一化，不依赖 Windows 主机。
+    expect(toContractRelativePath("skills\\reviewed")).toBe("skills/reviewed");
+    expect(toContractRelativePath("skills\\nested\\deep")).toBe("skills/nested/deep");
+    expect(toContractRelativePath(".")).toBe(".");
+    expect(toContractRelativePath("skills/reviewed")).toBe("skills/reviewed");
   });
 });

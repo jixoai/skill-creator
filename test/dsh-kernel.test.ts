@@ -132,13 +132,14 @@ describe("dsh-mcp-client bridge over the kernel (task 4.1b)", () => {
         expect(createDeny).not.toContain("role_reviewer");
         expect(createDeny).not.toContain("role_writer");
         expect(createDeny).toContain("role_researcher");
-        // 收窄不变量保持：通用 fs 工具缺席；bash 是开放模式的例外（行激活，
-        // 专注模式经 agent restrict 拒绝——productToolDenyList 单测钉死）。
+        // 收窄不变量保持：通用 fs 工具缺席；平台原生 shell 行（bash@POSIX /
+        // pwsh@win32，官方 dsh-base 平台矩阵）是开放模式的例外——行激活，
+        // 专注模式经 agent restrict 拒绝（productToolDenyList 单测钉死）。
         const leaked = kernel
           .globalToolNames()
           .filter((name) => ["read", "write", "edit", "glob", "grep"].includes(name));
         expect(leaked).toEqual([]);
-        expect(kernel.globalToolNames()).toContain("bash");
+        expect(kernel.globalToolNames()).toContain(process.platform === "win32" ? "pwsh" : "bash");
       } finally {
         await web.stop({ graceMs: 0 });
         await domain.repository.dispose();
@@ -178,9 +179,12 @@ describe("headless dsh kernel (task 2.1)", () => {
       const kernel = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
       booted.push(kernel);
       const globalTools = kernel.globalToolNames();
-      // bash 例外（开放模式原生能力，2026-09-09）；其余通用工具仍禁用。
+      // 平台原生 shell 例外（开放模式原生能力，2026-09-09；平台矩阵 2026-09-25：
+      // bash@POSIX / pwsh@win32 互斥——另一侧的名字必须缺席）。
+      const nativeShell = process.platform === "win32" ? "pwsh" : "bash";
+      const oppositeShell = process.platform === "win32" ? "bash" : "pwsh";
       const forbidden = [
-        "pwsh",
+        oppositeShell,
         "read",
         "write",
         "edit",
@@ -193,6 +197,7 @@ describe("headless dsh kernel (task 2.1)", () => {
         "web_fetch",
         "web_search",
       ];
+      expect(globalTools).toContain(nativeShell);
       const leaked = globalTools.filter((name) => forbidden.includes(name));
       expect(leaked).toEqual([]);
     },

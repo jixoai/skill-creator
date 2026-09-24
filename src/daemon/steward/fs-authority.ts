@@ -57,20 +57,40 @@ export async function assertNoSymlinkAncestors(to: string, root: string): Promis
   }
 }
 
-/** 目录 fsync（崩溃持久化栅栏；失败 = typed UNAVAILABLE，不静默放行）。 */
+/**
+ * Windows 目录 fsync 平台上限：libuv 的 O_DIRECTORY 句柄只读打开，而
+ * FlushFileBuffers 要求 GENERIC_WRITE 句柄——win32 上目录 fsync 恒 EPERM，
+ * 且无 libuv 可达的替代入口。NTFS 自带元数据日志，POSIX dir-fsync 的持久化
+ * 语义在 Windows 无系统等价物；该 EPERM 是平台天花板，不是 I/O 故障。
+ */
+export function isDirSyncPlatformCeiling(error: unknown): boolean {
+  return process.platform === "win32" && (error as NodeJS.ErrnoException)?.code === "EPERM";
+}
+
+/**
+ * 目录 fsync（崩溃持久化栅栏；失败 = typed UNAVAILABLE，不静默放行）。
+ * Windows 平台上限（isDirSyncPlatformCeiling）在此唯一边界归一化：栅栏取平台
+ * 可达的最强形式（文件 fsync 仍逐字节强制），不逐调用点写平台分支。
+ */
 export async function syncDir(dir: string): Promise<void> {
+  const handle = await fs
+    .open(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY)
+    .catch((error) => {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `durability sync failed for ${dir} (${error instanceof Error ? error.message : String(error)}); recovery required`,
+      );
+    });
   try {
-    const handle = await fs.open(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close().catch(() => undefined);
-    }
+    await handle.sync();
   } catch (error) {
+    if (isDirSyncPlatformCeiling(error)) return;
     throw new DomainError(
       "UNAVAILABLE",
       `durability sync failed for ${dir} (${error instanceof Error ? error.message : String(error)}); recovery required`,
     );
+  } finally {
+    await handle.close().catch(() => undefined);
   }
 }
 
@@ -102,6 +122,41 @@ async function captureLeafIdentity(
     );
   }
   return { dev: stat.dev, ino: stat.ino, nlink: stat.nlink, size: stat.size };
+}
+
+/**
+ * Windows O_NOFOLLOW 缺口封堵（2026-09-25 Windows 测试债）：libuv 在 win32 不把
+ * O_NOFOLLOW 映射为 OPEN_REPARSE_POINT——open 直接穿透 symlink，open 时拒绝的
+ * 防线在该平台缺席。fd 锚定补位：lstat 在 win 上查询 reparse tag（S_IFLNK
+ * 可靠），预置 symlink/目录在 open 前即拒绝；open 后由调用方以 fstat 身份
+ * 全等复验换体。锚不存在（leaf 尚未创建）返回 null，交由 open 旗标与后续
+ * 复验把关。
+ */
+async function anchorLeafForNoFollow(leaf: string, label: string): Promise<LeafIdentity | null> {
+  const stat = await fs.lstat(leaf).catch(() => null);
+  if (stat === null) return null;
+  if (!stat.isFile()) {
+    throw new Error(`${label} exists but is not a regular file (symlink or directory): ${leaf}`);
+  }
+  return { dev: stat.dev, ino: stat.ino, nlink: stat.nlink, size: stat.size };
+}
+
+/** fd ↔ 锚 身份全等复验（anchor 为 null 时只校验 regular file）。 */
+async function assertFdMatchesAnchor(
+  handle: import("node:fs/promises").FileHandle,
+  anchor: LeafIdentity | null,
+  label: string,
+): Promise<import("node:fs").Stats> {
+  const stat = await handle.stat();
+  if (!stat.isFile()) {
+    throw new Error(`${label} opened as a non-regular file; recovery required`);
+  }
+  if (anchor !== null && (stat.dev !== anchor.dev || stat.ino !== anchor.ino)) {
+    throw new Error(
+      `${label} identity drifted between validation and open (path race); recovery required`,
+    );
+  }
+  return stat;
 }
 
 /**
@@ -462,28 +517,34 @@ export async function writeBackupWithManifest(options: {
   // 外部文件时 open 失败（ELOOP），manager 字节不越界落地。
   // Codex R10/R11 P1-1：manifest fd 打开（fd 锚定 inode），打开后、追加前复验
   // backup root 身份——open 边界的目录换体在字节落盘前拦截。
+  // Windows O_NOFOLLOW 缺口：win32 不映射该旗标（open 穿透 symlink）——open 前
+  // lstat 锚定 + open 后 fd 身份全等，预置/换体 symlink 同样 typed 拒绝。
+  const manifestAnchor = await anchorLeafForNoFollow(
+    path.join(root, "manifest.jsonl"),
+    "backup manifest",
+  );
   const manifestHandle = await fs.open(
     path.join(root, "manifest.jsonl"),
     fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | O_NOFOLLOW,
     0o600,
   );
   await verifyDirIdentity(root, rootIdentity);
-  // Codex R8 P1-2：打开后立即确认 leaf 是 regular file（预置 FIFO/socket 等
-  // 非常规 leaf 一律拒绝，append 字节只落 Manager-owned regular 文件）。
-  const manifestStat = await manifestHandle.stat();
-  if (!manifestStat.isFile()) {
-    await manifestHandle.close().catch(() => undefined);
-    throw new Error(`backup manifest is not a regular file: ${path.join(root, "manifest.jsonl")}`);
-  }
-  // Codex R9 P1-1：manifest 首次创建语义 + 独占 inode——hardlink 到外部文件的
-  // manifest（nlink > 1）在打开即拒绝，追加字节不可能落进外部 inode。
-  if (manifestStat.nlink !== 1) {
-    await manifestHandle.close().catch(() => undefined);
-    throw new Error(
-      `backup manifest is hardlinked (nlink=${manifestStat.nlink}); manager refuses to append: ${path.join(root, "manifest.jsonl")}`,
-    );
-  }
   try {
+    // Codex R8 P1-2：打开后立即确认 leaf 是 regular file（预置 FIFO/socket 等
+    // 非常规 leaf 一律拒绝，append 字节只落 Manager-owned regular 文件）；
+    // fd ↔ 锚 身份全等复验（win32 O_NOFOLLOW 缺口的换体防线）。
+    const manifestStat = await assertFdMatchesAnchor(
+      manifestHandle,
+      manifestAnchor,
+      "backup manifest",
+    );
+    // Codex R9 P1-1：manifest 首次创建语义 + 独占 inode——hardlink 到外部文件的
+    // manifest（nlink > 1）在打开即拒绝，追加字节不可能落进外部 inode。
+    if (manifestStat.nlink !== 1) {
+      throw new Error(
+        `backup manifest is hardlinked (nlink=${manifestStat.nlink}); manager refuses to append: ${path.join(root, "manifest.jsonl")}`,
+      );
+    }
     const line = `${JSON.stringify({
       ref: parsedRef,
       seq,
@@ -517,12 +578,23 @@ export async function readBackupManifest(journalPath: string): Promise<BackupMan
   try {
     // Codex R8 P1-2：读取同样走 O_NOFOLLOW fd——symlink leaf（即便指向同根文件）
     // 不是 Manager 持有的事实文件；非常规 leaf 直接拒绝。
+    // Windows O_NOFOLLOW 缺口（2026-09-25）：win32 open 穿透 symlink——读取侧同样
+    // lstat 锚定 + fd 身份全等 + 读后复验（对齐 readJournal 的漂移防线）。
+    const anchor = await anchorLeafForNoFollow(manifestPath, "backup manifest");
     const handle = await fs.open(manifestPath, fs.constants.O_RDONLY | O_NOFOLLOW);
     try {
-      if (!(await handle.stat()).isFile()) {
-        throw new Error(`backup manifest is not a regular file: ${manifestPath}`);
-      }
+      await assertFdMatchesAnchor(handle, anchor, "backup manifest");
       raw = await handle.readFile("utf8");
+      const after = await fs.lstat(manifestPath).catch(() => null);
+      if (
+        after === null ||
+        !after.isFile() ||
+        (anchor !== null && (after.dev !== anchor.dev || after.ino !== anchor.ino))
+      ) {
+        throw new Error(
+          `backup manifest identity drifted after read (path race or symlink); recovery required: ${manifestPath}`,
+        );
+      }
     } finally {
       await handle.close().catch(() => undefined);
     }

@@ -47,7 +47,7 @@ import { DomainError } from "../domain-error.js";
 import { isTextualFileName } from "../agent-files.js";
 import { AGENT_MODE_ROLES, agentRoleToolName } from "../../shared/contracts/agent-roles.js";
 import type { DshKernelHandle } from "./dsh-kernel.js";
-import { KERNEL_AGENT_TOOL_ALLOWLIST } from "./dsh-kernel.js";
+import { KERNEL_AGENT_TOOL_ALLOWLIST, KERNEL_NATIVE_SHELL_TOOL_NAMES } from "./dsh-kernel.js";
 import { applyAgentMode } from "./agent-modes.js";
 import { registerProductPromptSections } from "./product-prompt.js";
 import { runSessionCleanup } from "./session-cleanup.js";
@@ -1726,13 +1726,15 @@ function applyProductToolSurface(agentCtx: Context, mode: DshAgentMode): void {
 
 /**
  * 模式感知的全局工具 deny 名单（导出供单测）：显式 allowlist 与 mcp capability
- * 工具（mcp__skill-creator__*）永远保留；原生 bash 只在开放模式（free/Open）
- * 放行，专注模式拒绝；角色工具（role_*）按 AGENT_MODE_ROLES 的模式暴露矩阵
- * 放行（free 全放）。
+ * 工具（mcp__skill-creator__*）永远保留；平台原生 shell（bash@POSIX /
+ * pwsh@win32，官方平台矩阵）只在开放模式（free/Open）放行，专注模式拒绝；
+ * 角色工具（role_*）按 AGENT_MODE_ROLES 的模式暴露矩阵放行（free 全放）。
  */
 export function productToolDenyList(globalNames: readonly string[], mode: DshAgentMode): string[] {
   const nativeAllowed =
-    mode === "free" ? [...KERNEL_AGENT_TOOL_ALLOWLIST, "bash"] : KERNEL_AGENT_TOOL_ALLOWLIST;
+    mode === "free"
+      ? [...KERNEL_AGENT_TOOL_ALLOWLIST, ...KERNEL_NATIVE_SHELL_TOOL_NAMES]
+      : KERNEL_AGENT_TOOL_ALLOWLIST;
   const modeRoles = AGENT_MODE_ROLES[mode];
   const roleAllowed = modeRoles.map(agentRoleToolName);
   return globalNames.filter(
