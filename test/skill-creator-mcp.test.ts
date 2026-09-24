@@ -232,7 +232,11 @@ describe("skill-creator mcp server (task 4.1)", () => {
     expect(notMounted.status).toBe(404);
 
     web.mountMcp(() =>
-      createSkillCreatorMcpServer({ capabilities: domain.managerCapabilities, face: "in-process" }),
+      createSkillCreatorMcpServer({
+        capabilities: domain.managerCapabilities,
+        proposals: domain.mcpProposals,
+        face: "in-process",
+      }),
     );
 
     // 无/错 token → 401（不进入 transport）。
@@ -302,7 +306,14 @@ describe("skill-creator mcp server (task 4.1)", () => {
     try {
       expect(modernClient.getProtocolEra?.()).not.toBe("legacy");
       const modernTools = await modernClient.listTools();
-      expect(modernTools.tools.map((tool) => tool.name)).toContain("workspace_list");
+      const modernNames = modernTools.tools.map((tool) => tool.name);
+      expect(modernNames).toContain("workspace_list");
+      // wiki 投影（r2 复验补强）：readonly 三面 + propose 变体在真实 Bearer
+      // /mcp 面可见；直接 mutation 名缺席（authority 红线）。
+      for (const wikiTool of ["wiki_scopes", "wiki_list", "wiki_read", "wiki_append_propose"]) {
+        expect(modernNames).toContain(wikiTool);
+      }
+      expect(modernNames).not.toContain("wiki_append");
       const call = await modernClient.callTool({ name: "workspace_list", arguments: {} });
       const callText = (call.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
       expect(JSON.parse(callText)).toMatchObject({ kind: "ok" });
