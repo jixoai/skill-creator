@@ -99,7 +99,7 @@ export interface DaemonDomain {
   agentSessions: AgentSessionsService;
   /** 后端文件选择器服务（R17-B）：真实路径浏览/预览 + prompt 附件 path 通道读盘。 */
   agentFiles: AgentFilesService;
-  /** pi-ai 装配目录（models.dev 镜像）的 provider 画廊投影。 */
+  /** zcode Registry 预设生成物（zcode-presets.ts）的 provider 画廊投影。 */
   modelCatalog: ModelCatalogService;
   /** 内核句柄注入（index 在 boot 成功后调用；降级时保持缺席 → typed UNAVAILABLE）。 */
   setKernelHost: (handle: DshKernelHandle) => void;

@@ -436,7 +436,7 @@
 
         <div class="space-y-1">
           <span class="text-[10px] font-medium text-muted-foreground">
-            Catalog ({catalog.providers.length} providers, from models.dev)
+            Catalog ({catalog.providers.length} providers, from zcode Registry)
           </span>
           <div class="grid grid-cols-1 gap-1.5 min-[520px]:grid-cols-2">
             {#each filteredProviders as entry (entry.provider)}

@@ -380,7 +380,7 @@
         >
           <p class="text-xs font-medium">Add your first model route</p>
           <p class="max-w-[320px] text-[10px] leading-snug text-muted-foreground">
-            Pick a provider from the catalog (models.dev mirror) with its models, or point at any
+            Pick a provider from the catalog (zcode Registry) with its models, or point at any
             custom OpenAI/Anthropic-compatible endpoint.
           </p>
           <div class="mt-1 flex gap-2">

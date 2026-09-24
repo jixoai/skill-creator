@@ -1,91 +1,149 @@
 /**
- * 模型目录投影单测（openspec add-agent-settings-modes 迭代四）。
+ * 模型目录投影单测（settings-panel-zcode-source：数据源换 zcode Registry）。
  *
- * 用户原始需求 [2026-09-11]：「直接基于 models.generated.js 去提供可用提供商。」
+ * 用户原始需求 [2026-09-25]（Owner 裁决）：「不再依赖 models.dev……使用 shufa-server
+ * 那套数据结构和 zcode 源更新脚本。」
  *
  * 正交意图：
- *   [1] 数据源真实性：从 pi-ai 装配目录（models.dev 镜像）resolve 出 data JSON，
- *       重点 provider（zai/anthropic/openai 等）在列且形状完整。
- *   [2] 投影法则：baseURL 非空、image 标志与 input 声明一致、faux 排除、
- *       重点 provider 置顶。
+ *   [1] 数据源真实性：目录来自 zcode-presets 生成物（provider = zcode templateId
+ *       口径），重点 provider 在列且形状完整、重点置顶。
+ *   [2] 投影法则：baseURL 非空、协议三值映射、image 与 inputTypes 一致、efforts
+ *       剔开关型档、supportsReasoningEffort 不伪造、icon 回退序。
  */
 import { describe, expect, it } from "vitest";
-import { listModelProviders } from "../src/daemon/model-catalog.js";
+import {
+  listModelProviders,
+  projectPreset,
+  resolveProviderIcon,
+} from "../src/daemon/model-catalog.js";
 
 describe("model provider catalog", () => {
-  it("projects the pi-ai catalog with complete shapes", () => {
+  it("projects the zcode preset registry with complete shapes", () => {
     const providers = listModelProviders();
-    expect(providers.length).toBeGreaterThan(20);
+    expect(providers.length).toBeGreaterThanOrEqual(20);
     for (const entry of providers) {
       expect(entry.provider).toMatch(/^[a-z0-9-]+$/);
       expect(entry.label.length).toBeGreaterThan(0);
       expect(entry.baseURL).toMatch(/^https?:\/\//);
+      // api 三值枚举（ZCode 协议映射后的本仓口径）。
+      expect(["anthropic-messages", "openai-completions", "openai-responses"]).toContain(entry.api);
       expect(entry.models.length).toBeGreaterThan(0);
-      // icon：dataURL 或 null（字母回退），不可能是外链。
-      if (entry.icon !== null) expect(entry.icon).toMatch(/^data:image\/svg\+xml;base64,/);
+      // icon：本仓 dataURL 或 models.dev 外链或 null（字母回退）。
+      if (entry.icon !== null) {
+        expect(entry.icon).toMatch(
+          /^(data:image\/svg\+xml;base64,|https:\/\/models\.dev\/logos\/)/,
+        );
+      }
     }
   });
 
-  it("covers the user-named providers and marks vision models", () => {
-    const providers = listModelProviders();
-    const ids = providers.map((entry) => entry.provider);
+  it("covers the pinned providers from the zcode registry", () => {
+    const ids = listModelProviders().map((entry) => entry.provider);
     for (const expected of [
-      "zai-coding-cn",
-      "moonshotai-cn",
+      "zai-api",
+      "zai-standard-api",
+      "bigmodel-api",
+      "bigmodel-standard-api",
+      "moonshot-kimi",
+      "minimax",
       "deepseek",
-      "minimax-cn",
-      "qwen-token-plan-cn",
+      "qwen-alibaba-model-studio-cn",
+      "qwen-alibaba-model-studio-intl",
+      "xiaomi-mimo",
       "openai",
       "anthropic",
-      "google",
+      "xai",
     ]) {
       expect(ids).toContain(expected);
     }
-    const anthropic = providers.find((entry) => entry.provider === "anthropic");
-    expect(anthropic?.models.some((model) => model.image)).toBe(true);
-    expect(anthropic?.icon).toMatch(/^data:image\/svg\+xml;base64,/);
-    // 用户点名厂商必须带图标（models.dev 有 logo）。
-    for (const expected of [
-      "zai-coding-cn",
-      "moonshotai-cn",
-      "minimax-cn",
-      "deepseek",
-      "openai",
-      "google",
-    ]) {
-      expect(providers.find((entry) => entry.provider === expected)?.icon).toBeTruthy();
-    }
   });
 
-  it("pins known providers first and excludes internal routes", () => {
-    const providers = listModelProviders();
-    expect(providers[0]?.provider).toBe("zai-coding-cn");
-    expect(providers.map((entry) => entry.provider)).not.toContain("faux");
+  it("pins known providers first in zcode templateId order", () => {
+    const ids = listModelProviders().map((entry) => entry.provider);
+    expect(ids[0]).toBe("zai-api");
+    // 未置顶尾部按 provider 字母序（opencode-* 先于 openrouter）。
+    const tail = ids.slice(13);
+    expect([...tail].sort((a, b) => a.localeCompare(b))).toEqual(tail);
   });
 
-  it("passes through pi-ai compat.supportsReasoningEffort verbatim (missing stays undefined)", () => {
+  it("maps protocol names and brand labels from presets", () => {
     const providers = listModelProviders();
-    // ant-ling Ling-2.6-1T 的 compat 显式声明 false（pi-ai 数据钉死事实）。
-    const antLing = providers.find((entry) => entry.provider === "ant-ling");
-    expect(
-      antLing?.models.find((model) => model.id === "Ling-2.6-1T")?.supportsReasoningEffort,
-    ).toBe(false);
-    // zai-coding-cn 存在声明 true 的模型（补全候选门只挡 false）。
-    const zai = providers.find((entry) => entry.provider === "zai-coding-cn");
-    expect(zai?.models.some((model) => model.supportsReasoningEffort === true)).toBe(true);
-    // 全集只可能是 boolean / undefined——缺失不伪造（大多数模型无 compat 声明）。
-    for (const entry of providers) {
+    // 协议映射：上游 openai-chat-completions → 本仓 openai-completions。
+    expect(providers.find((p) => p.provider === "zai-api")?.api).toBe("anthropic-messages");
+    expect(providers.find((p) => p.provider === "zai-standard-api")?.api).toBe(
+      "openai-completions",
+    );
+    expect(providers.find((p) => p.provider === "openai")?.api).toBe("openai-responses");
+    // label = 生成物品牌名（zh-CN 优先）。
+    expect(providers.find((p) => p.provider === "qwen-alibaba-model-studio-cn")?.label).toBe(
+      "阿里云百炼（中国）",
+    );
+  });
+
+  it("passes contextWindow through and marks vision models from inputTypes", () => {
+    const zai = listModelProviders().find((entry) => entry.provider === "zai-api");
+    expect(zai).toBeDefined();
+    const glm = zai!.models.find((model) => model.id === "GLM-5.3");
+    expect(glm).toBeDefined();
+    expect(glm!.contextWindow).toBe(1_000_000);
+    expect(glm!.inputTypes).toEqual(["text", "image"]);
+    expect(glm!.image).toBe(true);
+    // 同名模型在 openai-completions 端点上无视觉声明（provider-site 规则差异）。
+    const standard = listModelProviders().find((entry) => entry.provider === "zai-standard-api");
+    const glmStandard = standard!.models.find((model) => model.id === "GLM-5.3");
+    expect(glmStandard!.image).toBe(false);
+  });
+
+  it("strips switch-style effort tiers and keeps real ones", () => {
+    const zai = listModelProviders().find((entry) => entry.provider === "zai-api")!;
+    // GLM-5.3：真实档位 low/high/max 全保留。
+    const glm = zai.models.find((model) => model.id === "GLM-5.3")!;
+    expect(glm.effortTiers).toEqual(["low", "high", "max"]);
+    expect(glm.supportsReasoningEffort).toBe(true);
+    // GLM-5-Turbo：只有 disabled/enabled 开关档 → 声明了 effort 但无真实档位。
+    const turbo = zai.models.find((model) => model.id === "GLM-5-Turbo")!;
+    expect(turbo.effortTiers).toBeUndefined();
+    expect(turbo.supportsReasoningEffort).toBe(false);
+    for (const entry of listModelProviders()) {
       for (const model of entry.models) {
-        expect(
-          model.supportsReasoningEffort === undefined ||
-            typeof model.supportsReasoningEffort === "boolean",
-        ).toBe(true);
+        if (model.effortTiers !== undefined) {
+          expect(model.effortTiers).not.toContain("disabled");
+          expect(model.effortTiers).not.toContain("enabled");
+          expect(new Set(model.effortTiers).size).toBe(model.effortTiers.length);
+        }
       }
     }
-    // 大多数模型缺失 compat 声明 → 投影必须保留 undefined（不降级为 false）。
-    const all = providers.flatMap((entry) => entry.models);
-    expect(
-      all.filter((model) => model.supportsReasoningEffort === undefined).length,
-    ).toBeGreaterThan(all.length / 2);
+  });
+
+  it("falls back through PROVIDER_ICONS → preset iconUrl → null", () => {
+    // 真实数据：zcode templateId 不在本仓 pi-ai 口径的 PROVIDER_ICONS 键里 → 外链。
+    expect(listModelProviders().find((p) => p.provider === "zai-api")?.icon).toBe(
+      "https://models.dev/logos/zai.svg",
+    );
+    // 单元级回退序（注入假 icons 表）。
+    const icons = { "zai-api": "data:image/svg+xml;base64,AAA" };
+    expect(resolveProviderIcon("zai-api", "https://x/l.svg", icons)).toBe(
+      "data:image/svg+xml;base64,AAA",
+    );
+    expect(resolveProviderIcon("deepseek", "https://x/d.svg", icons)).toBe("https://x/d.svg");
+    expect(resolveProviderIcon("nope", undefined, icons)).toBeNull();
+  });
+
+  it("projects synthetic presets without fabricating missing declarations", () => {
+    // efforts 缺省 → supportsReasoningEffort/effortTiers 均不伪造；maxOutputTokens
+    // 不投影（预设形状无此字段——契约 optional）。
+    const entry = projectPreset({
+      provider: "t-api",
+      name: "",
+      baseURL: "https://t.example.com/v1",
+      api: "openai-completions",
+      models: [{ id: "m1", inputTypes: ["text"] }],
+    });
+    expect(entry.label).toBe("t-api"); // 空品牌名回退 templateId
+    const model = entry.models[0]!;
+    expect(model.supportsReasoningEffort).toBeUndefined();
+    expect(model.effortTiers).toBeUndefined();
+    expect(model.maxOutputTokens).toBeUndefined();
+    expect(model.image).toBe(false);
   });
 });
