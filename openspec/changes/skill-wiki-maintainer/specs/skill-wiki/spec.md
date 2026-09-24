@@ -72,8 +72,14 @@ contentHash 去重 + 命中回填足迹。IO 失败 typed 上抛。
 
 #### Scenario: 崩溃后重放
 
-- **WHEN** 页写入后进程崩溃，重启后重放同一提案
-- **THEN** 结果 idempotent（ledger/afterHash 判定），不产生重复页
+- **WHEN** 页写入后进程崩溃，重启后重放同一提案（absorb 或 create）
+- **THEN** 结果 idempotent（absorb 走 ledger/afterHash 判定；create 走
+  contentHash 去重），不产生重复页
+
+#### Scenario: create 同名人工页零覆盖
+
+- **WHEN** create 项的目标 name 已存在且 contentHash 不等于 afterHash
+- **THEN** 该项 stale 零写，既有同名页逐字节不变
 
 ### Requirement: 宿主蒸馏编排（run registry + 审批红线）
 
@@ -91,13 +97,23 @@ approved 执行入口 = per-run 串行队列投递（与 cancel/重启扫描同�
 可串行化）；执行经 proposal 审批（human-ui）。`wiki.distill.start/
 status/cancel` RPC/CLI 同一 schema（src/shared/contracts/wiki-distill.ts
 冻结；无 phase 字段，RunState 即阶段真相；--limit 默认 20 ≤ 100）。
-workspace 原文 MUST 零改动。
+workspace 原文 MUST 零改动。决定竞争 MUST 按决定点胜者表唯一收敛：
+pending 上 human reject → proposal rejected(cause=human) + ledger
+rejected；pending 上 cancel → proposal rejected(cause=cancelled) +
+ledger expired + run cancelled；approved（token 已发）后 cancel → run
+cancelled + apply 二次校验失败 → proposal failed + ledger expired，
+迟到 reject 不可覆盖 token。run 终态 MUST 按优先级判定：零合法提案 →
+failed(no-valid-proposals)；全部 not-proposed → failed(capacity)；ledger
+非空且全终态 → completed（末项终态任务迁移）。DISTILL_IO / DISTILL_
+LIMIT / DISTILL_RUN_NOT_FOUND / DISTILL_STALE / DISTILL_ACTIVE_RUN
+MUST 进 RPC 错误闭合集合（404/409/409/422/503 家族），capability 与
+MCP 面以 CapabilityFailureDetail 同码投影。
 
 #### Scenario: 手动蒸馏闭环
 
 - **WHEN** 对某 workspace distill 并审批全部提案
 - **THEN** global 出现泛化页（足迹引用来源 pattern），workspace patterns
-  逐字节不变，ledger 逐项可审计
+  逐字节不变，ledger 逐项可审计，run 收敛 completed
 
 #### Scenario: 伪造提案引用
 
@@ -108,13 +124,31 @@ workspace 原文 MUST 零改动。
 
 - **WHEN** 有效提案数超过「剩余容量 + 可回收 terminal 总量」
 - **THEN** typed DISTILL_LIMIT（含 --limit 提示），store 逐字节不变
-  （terminal 一个不删、pending 零淘汰）；部分可容纳时也不产生半批
+  （terminal 一个不删、pending 零淘汰）；部分可容纳时也不产生半批；
+  run failed(reason=capacity)
 
 #### Scenario: 审批与取消并发
 
 - **WHEN** approve 与 cancel 对同一 run 并发提交
-- **THEN** 两操作经 per-run 串行队列化，终态唯一可串行化；取消后到达的
-  approve → typed DISTILL_STALE 零写
+- **THEN** 两操作经 per-run 串行队列化，终态唯一可串行化；pending 上
+  取消胜出 → rejected(cause=cancelled) + ledger expired；approve 已胜
+  （token 已发）后取消 → run cancelled + 该项 proposal failed + ledger
+  expired，迟到决定不覆盖 token
+
+#### Scenario: 用户取消与人工拒绝二分
+
+- **WHEN** 同一 awaiting-approval run 中一项被人在 proposal 面拒绝、
+  其余项随后被用户取消 run
+- **THEN** 前者 proposal rejected(cause=human) + ledger rejected；后者
+  proposal rejected(cause=cancelled) + ledger expired；已执行项保留
+
+#### Scenario: 零合法提案与容量失败的终态优先级
+
+- **WHEN** kernel 输出全部非法（无合法提案），或全部合法项因容量整批
+  拒绝（全部 not-proposed）
+- **THEN** 前者 run failed(no-valid-proposals)、后者 run
+  failed(reason=capacity)；两者都不是 completed；终态后同 source 可
+  重新 start
 
 #### Scenario: 模型输出混合有效性
 

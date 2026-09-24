@@ -5,6 +5,12 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r8（2026-09-25）：按 r7 评审（/tmp/maintain-design-review-r7.md，7.0/10）
+> H 按 kind 分支重写（absorb/create 双序列双矩阵；create 无 beforeHash，
+> afterHash===contentHash 冻结）；R 增决定点胜者表；S 增终态判定优先级
+> （零合法→no-valid-proposals / 全 not-proposed→capacity / 全终态→
+> completed）；U 冻结 CapabilityFailureDetail + 五码传输状态 + cause
+> 公开化（rejectedCause 字段 + reject async）。
 > r7（2026-09-25）：按 r6 评审（/tmp/maintain-design-review-r6.md，6.8/10）
 > 新增补遗 Q-V（决定 CAS/取消-拒绝二分/completed 收敛式/admission API
 > 统一 + terminal 闭合 + approved 瞬态/错误码接入/create record 判别联合）。
@@ -266,24 +272,34 @@ webui/src/lib/stores/__tests__/wiki-distill.test.ts`；全 change 收口 =
 
 ## r4 补遗（闭合 r3 评审：/tmp/maintain-design-review-r3.md）
 
-### H. 崩溃提交协议（r3 D2/P1-2；r4 P1-1 改写：index 恢复 + ledger 读取 + 人工回退）
+### H. 崩溃提交协议（r3 D2/P1-2；r4 P1-1 改写；r8 按 kind 分支重写）
 
 applyDistillation 单项序列（ledger-先行 + 幂等恢复；ledger 由
 DistillJobService 的 per-run 串行队列驱动——同 run 的 apply 永不并发，
-无需 CAS）：
+无需 CAS）。intent 行 = E 的 `DistillLedgerRecord` 判别联合（absorb 双
+hash / create 仅 afterHash——r8：create 无目标旧页，`afterHash ===
+contentHash(正文)` 字节级冻结，不做 beforeHash 伪装值）：
 
 ```text
-1. ledger intent：{ordinal, status:"applying", beforeHash, afterHash}
-   （proposals.jsonl 整文件原子重写；此步之后任何时刻崩溃都可恢复）
-2. 页面原子写（temp+rename；SDK 既有纪律）
+kind="absorb"：
+1. ledger intent：{kind:"absorb", ordinal, status:"applying",
+   beforeHash, afterHash}
+2. 目标页原子写（temp+rename；在钉死 body 上应用 edits）
 3. index rebuild（派生物）
 4. ledger commit：{status:"applied", appliedHash}
+
+kind="create"：
+1. ledger intent：{kind:"create", ordinal, status:"applying", afterHash}
+2. appendPattern 原子写（contentHash 去重原语；afterHash 即其锚）
+3. index rebuild
+4. ledger commit：{status:"applied", appliedHash}
+
+（proposals.jsonl 整文件原子重写；step1 之后任何时刻崩溃都可恢复）
 ```
 
 - 任何 commit 之前 index 必为已重建状态：恢复分支
-  `applying|applied 且 当前==afterHash` **必须先 rebuild index 再补写
-  commit**；rebuild 失败 → typed DISTILL_IO，项保持 applying（仍可恢复）。
-- `afterBodyHash` 必填（create 与 absorb 都是；§2 已改写，无旧可选态）。
+  `applying|applied 且 已落盘` **必须先 rebuild index 再补写 commit**；
+  rebuild 失败 → typed DISTILL_IO，项保持 applying（仍可恢复）。
 - SDK/宿主边界：`applyDistillation(globalWikiDir, item, provenance,
 options?)`——`options.hooks = { onIntent(record), onCommit(record) }`
   （可选）。SDK 驱动顺序契约：onIntent → 页原子写 → index rebuild →
@@ -292,11 +308,10 @@ options?)`——`options.hooks = { onIntent(record), onCommit(record) }`
   不变。
 - **ledger 读取语义（r4 P1-1）**：宿主读 proposals.jsonl 该 ordinal 的
   最近行，作为 typed 输入 `options.ledgerRecord?: DistillLedgerRecord`
-  （strictObject：ordinal/status/beforeHash/afterHash/appliedHash?）
-  传入；整文件原子重写保证行只有旧/新两态，无半行。SDK 不读 ledger 存储
-  （§7 边界不变）。
+  （判别联合；整文件原子重写保证行只有旧/新两态，无半行）传入。SDK 不读
+  ledger 存储（§7 边界不变）。
 
-**恢复矩阵（入口统一执行；区分人工回退，r4 P1-1 裁决）**：
+**absorb 恢复矩阵（当前页 body hash 判定；区分人工回退）**：
 
 ```text
 ledgerRecord 无（首放）：==beforeHash → 执行；==afterHash → rebuild
@@ -317,8 +332,30 @@ status ∈ 终态（stale/patch-failed/expired/rejected/not-proposed/
   idempotent）→ 报告原终态，零写（幂等重放不复活）
 ```
 
-负测试：`applied` + 人工恢复 before 内容 → 重放必须零写 + stale
-（manual-rollback）。
+**create 恢复矩阵（按目标 name 是否存在 + contentHash 判定；无
+beforeHash 比较——r8）**：
+
+```text
+ledgerRecord 无（首放）：name 不存在 → 执行；存在且 contentHash ==
+  afterHash → rebuild index + 补 commit（idempotent）；存在但 hash 异
+  → stale 零写（同名人工页，绝不覆盖）
+status == "pending"    → 不执行
+status == "applying"：
+  存在且 hash == afterHash → rebuild index → 补 commit（idempotent）
+  不存在 → 重新执行（崩溃于写前）
+  存在但 hash 异 → stale 零写，行落终态 stale
+status == "applied"：
+  hash == afterHash → no-op idempotent
+  不存在 → 人工删除检测：零写，报告 stale（detail=manual-rollback），
+    ledger 保持 applied——绝不重放（与 absorb 对称）
+  hash 异 → stale 零写（人工编辑）
+status ∈ 终态 → 报告原终态，零写
+```
+
+负测试：absorb `applied` + 人工恢复 before 内容 → 零写 + stale
+（manual-rollback）；create `applied` + 人工删除页 → 零写 + stale
+（manual-rollback）；create 写后崩溃重放 → 去重 + idempotent（spec
+fixture 已列）。
 
 ### I. 容量 slot 单一模型 + admission 全事务（r3 P1-3；r4 P1-2 改写；r6 修上限口径）
 
@@ -507,9 +544,9 @@ approve / reject / cancel（service 侧主动 reject）**先在同一串行决�
 - 负测试（tasks 1.3）：approve+reject 并发、approve+approve 并发——
   proposal/ledger/run 三面终态唯一且可串行化
 
-### R. 用户取消 vs 人工拒绝的 ledger 终态二分（r6 P1-2）
+### R. 用户取消 vs 人工拒绝的 ledger 终态二分（r6 P1-2；r8 胜者表）
 
-两条原因两个终态，全文唯一映射（N 映射表已同步）：
+两条原因两个终态（N 映射表已同步）：
 
 ```text
 用户取消（wiki.distill.cancel / 重启扫描）：
@@ -518,25 +555,52 @@ approve / reject / cancel（service 侧主动 reject）**先在同一串行决�
   proposal = rejected(cause=human)       ledger = rejected
 ```
 
+**决定点胜者表（r8 P1-2：approve/cancel/reject 竞争的唯一规则；R 的
+二分仅适用于 pending 决定，Q 的 token 不可覆盖）**：
+
+```text
+决定点时 proposal == pending：
+  human reject 胜 → proposal rejected(cause=human) + ledger rejected
+                   + run 不变（其余项继续走自己的决定）
+  cancel 胜       → proposal rejected(cause=cancelled) + ledger expired
+                   + run cancelled（R 二分）
+决定点时 proposal == approved（token 已发放）：
+  cancel 只迁移 run → cancelled（proposal/ledger 不在决定点变动）；
+    其后 apply 队列任务二次校验 DISTILL_STALE 零写 → proposal failed +
+    ledger 行 → expired（与取消语义一致；N 的 failed ↔ expired 映射）
+  迟到的 human reject → 不执行（token 不可覆盖；幂等返回 approved/executed
+    现状 + typed PROPOSAL_STALE 提示）
+  迟到的重复 approve → 幂等（Q）
+```
+
 onRejected 为 awaitable（Promise），失败补偿见 N（proposal 决定不可逆 +
 ledger pending fail-closed）。负测试：cancel-awaiting、direct-reject、
-reject 时 ledger 队列 IO 失败三组断言（tasks 1.3）。
+reject 时 ledger 队列 IO 失败、**approved 后 cancel → failed+expired、
+approved 后迟到 reject 不覆盖**（tasks 1.3）。
 
-### S. RunState.completed 收敛式（r6 P1-3）
+### S. RunState.completed 收敛式（r6 P1-3；r8 终态优先级）
 
-唯一收敛规则：
+**终态判定顺序（唯一，自上而下首个命中生效——空集与全 not-proposed 的
+歧义由优先级消解）**：
 
-- kernel 结束（进入 awaiting-approval）且**全部 ledger 行 ∈ 终态** →
-  run → `completed`；迁移由「末项终态写入」的队列任务执行（每项决定/
-  执行完成的任务检查全终态，最后一项负责迁移——无需额外定时器）
-- 零有效 proposal / 容量整批拒绝（全部项 not-proposed）→ run →
-  `failed(reason=no-valid-proposals | capacity)`；failed reason 集合
-  扩 `capacity`（E 同步）
+```text
+1. validProposalCount == 0（零合法提案：model-invalid-only 或零提案）
+   → failed(reason=no-valid-proposals)
+2. ledger 全部行 status == not-proposed（容量整批拒绝）
+   → failed(reason=capacity)
+3. ledgerRows.length > 0 且全部 ∈ 终态 → completed
+   （迁移由「末项终态写入」的队列任务执行——每项决定/执行完成的任务
+   检查全终态，最后一项负责迁移；无需定时器）
+```
+
+- mixed（model-invalid + 合法提案）走 3 的正常路径（invalid 项无 ledger
+  行，不参与判定）
 - 终态幂等行为：completed/cancelled/failed 上 approve → typed
   DISTILL_STALE；cancel → 幂等返回既有终态（不报错）；status → 终态
   恒可轮询；同 source 活跃 run 解锁 = run 进入任一终态（之后 start 允许）
 - 负测试（tasks 1.3）：末项 terminal 触发 completed；completed 后同
-  source 二次 start 允许；零 proposal → failed(no-valid-proposals)
+  source 二次 start 允许；零 proposal → failed(no-valid-proposals)；
+  全 not-proposed → failed(capacity)；mixed → completed
 
 ### T. admission API 统一 + terminal 闭合集（r6 P2-2/P2-4）
 
@@ -549,21 +613,33 @@ refused: number}`；单一临界区锁；旧 `createBatch` 名只存在于 B 墓
   admissionCapacity 与淘汰排序）；`approved` = 瞬态（决定 CAS 后、队列
   终态前）——占 slot、**不可回收**、不进 LRU 候选；`pending` 永不回收
 
-### U. DISTILL 错误码接入闭合集合（r6 P2-3）
+### U. DISTILL 错误码接入闭合集合（r6 P2-3；r8 共享 schema 具体化）
 
-- `src/shared/contracts/errors.ts` 的 RpcErrorCodeSchema 扩入
-  DISTILL_IO / DISTILL_LIMIT / DISTILL_RUN_NOT_FOUND / DISTILL_STALE /
-  DISTILL_ACTIVE_RUN（RPC 面可穿越）
-- capability 面：`CapabilityCallResult` 闭合码保持不动，DISTILL_* 以
-  result.detail 携带（capability 面是域内投影，不扩全局闭合联合）
-- MCP result text JSON 携带同一 code 字段；proposal `failed` 的 result
-  含 DISTILL_*（N 映射）
+- `src/shared/contracts/errors.ts` 的 RpcErrorCodeSchema 扩入五码，
+  RpcErrorDefinitions 同步冻结传输状态：
+  `DISTILL_RUN_NOT_FOUND: 404`、`DISTILL_STALE: 409`、
+  `DISTILL_ACTIVE_RUN: 409`、`DISTILL_LIMIT: 422`、`DISTILL_IO: 503`
+  （message 文案实现轮随表登记；RPC 面可穿越）
+- capability 面：`CapabilityCallResult` 闭合码保持不动；shared contracts
+  冻结 **`CapabilityFailureDetail` strictObject**（r8 P2-1）：
+  `{ code: string（DISTILL_* | 既有域码）, message: string,
+runId?: string, ordinal?: int ≥0 }`——`failed.detail` 携带该形状
+  （TS + Zod 双冻结）
+- 三面同码可验证投影：capability result `failed.detail` ↔ MCP tool
+  result text JSON 的 `detail` 字段 ↔ proposal view 的 `result`（含
+  failure detail——GUI 审批面可见失败原因；`AgentMcpProposalViewSchema`
+  实现轮补 `result` 投影）↔ RPC error `code`。tasks 1.4 三面负测以
+  同一 Zod schema 解析断言（不是字符串包含）
 - WIKI_PATCH_FAILED 透传既有 wiki 域码，不重复登记
-- tasks 1.4 补 typecheck + 序列化负测（三面同码）
+- **cause 公开化（r8 P2-2）**：`McpProposalView` 与 shared 投影扩
+  `rejectedCause?: "human" | "cancelled"`（audit 行 detail 同步）；
+  store `reject(proposalId, cause?) → Promise<{view} | null>`
+  （默认 human；await onRejected）；rpc-router 的 reject handler 变
+  await 语义——契约清单与 tasks 1.3/1.4 同步
 
-### V. create 项 ledger record 判别联合（r6 P2-1）
+### V. create 项 ledger record 判别联合（r6 P2-1；r8 矩阵入 H）
 
 E 已改写：absorb 带 beforeHash/afterHash；create 只带 afterHash（无目标
-旧页，不做 absent 哨铃）。create 恢复矩阵 = 既有 contentHash 幂等
-（appendPattern 语义）+ afterHash 判定 idempotent；崩溃重放 fixture 补
-create 分支（tasks 1.2）。
+旧页，不做 absent 哨兵；`afterHash === contentHash` 字节级冻结）。create
+恢复矩阵由 H（r8 kind 分支版）唯一持有；崩溃重放 fixture 补 create 分支
+（tasks 1.2 + spec scenario 已列）。
