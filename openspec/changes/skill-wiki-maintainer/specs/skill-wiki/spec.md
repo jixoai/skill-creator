@@ -103,11 +103,18 @@ rejected；pending 上 cancel → proposal rejected(cause=cancelled) +
 ledger expired + run cancelled；approved（token 已发）后 cancel → run
 cancelled + apply 二次校验失败 → proposal failed + ledger expired，
 迟到 reject 不可覆盖 token。run 终态 MUST 按优先级判定：零合法提案 →
-failed(no-valid-proposals)；全部 not-proposed → failed(capacity)；ledger
-非空且全终态 → completed（末项终态任务迁移）。DISTILL_IO / DISTILL_
-LIMIT / DISTILL_RUN_NOT_FOUND / DISTILL_STALE / DISTILL_ACTIVE_RUN
-MUST 进 RPC 错误闭合集合（404/409/409/422/503 家族），capability 与
-MCP 面以 CapabilityFailureDetail 同码投影。
+failed(no-valid-proposals)；全部 not-proposed → failed(capacity)；
+全部 io-failed → failed(io)；ledger 非空全终态 → completed（末项终态
+任务迁移；mixed 含 io-failed 亦 completed，计数在 counters）。
+create 项的目标 name（targetPatternName）MUST 持久化于 ledger record
+（重放写确切 name，禁止 -N 自动改名；同 run slug 冲突在 plan 期以
+model-invalid(target-collision) 拒绝，ordinal 先到先得）。
+DISTILL_IO / DISTILL_LIMIT / DISTILL_RUN_NOT_FOUND / DISTILL_STALE /
+DISTILL_ACTIVE_RUN / PROPOSAL_STALE MUST 进 RPC 错误闭合集合
+（404/409/409/422/503 家族；PROPOSAL_STALE = 迟到 reject，detail 携带
+current view），capability 与 MCP 面以 CapabilityFailureDetail（闭合
+enum）同码投影；DISTILL_TIMEOUT / DISTILL_CANCELLED /
+WIKI_INVALID_PATTERN 为 kernel/daemon-local，不进跨面闭集。
 
 #### Scenario: 手动蒸馏闭环
 
@@ -149,6 +156,34 @@ MCP 面以 CapabilityFailureDetail 同码投影。
 - **THEN** 前者 run failed(no-valid-proposals)、后者 run
   failed(reason=capacity)；两者都不是 completed；终态后同 source 可
   重新 start
+
+#### Scenario: IO 重试耗尽的三面终态
+
+- **WHEN** 某项 apply 的页写/rebuild IO 失败且有界重试（≤3）耗尽
+- **THEN** proposal failed（detail.code=DISTILL_IO）、ledger 行终态
+  io-failed、counters["io-failed"] 计入；全部项皆 io-failed → run
+  failed(reason=io)；部分成功 → run completed 且失败计数可见
+
+#### Scenario: pending 项绝不被执行路径迁移
+
+- **WHEN** absorb 目标页在审批前被删除/损坏，随后任何 status 轮询或
+  重放路径经过该项
+- **THEN** pending 项零写、ledger 不动（缺页 preflight 只作用于已批准/
+  applying/applied 路径）；只有 approve 才驱动 apply，apply 时才判
+  missing-target → stale
+
+#### Scenario: 同 run 目标名冲突 plan 期拒绝
+
+- **WHEN** 模型输出两个 create 的 title 经 slugify 得同名（或与某
+  absorb target 相同）
+- **THEN** 后 ordinal 项 model-invalid(target-collision)（确定性
+  先到先得），不产 plan item 不进 proposal；先项不受影响
+
+#### Scenario: 迟到拒绝
+
+- **WHEN** proposal 已 approved（token 已发）后人工点 Reject
+- **THEN** typed PROPOSAL_STALE（detail 携带当前 view），不覆盖
+  token、不改 ledger；重复同 cause 的终态 reject 幂等返回 view
 
 #### Scenario: 模型输出混合有效性
 

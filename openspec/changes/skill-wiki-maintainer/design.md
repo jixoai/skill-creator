@@ -5,25 +5,33 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
-> r9（2026-09-25）：按 r8 评审（/tmp/maintain-design-review-r8.md，7.1/10）
-> create targetPatternName 冻结（禁 -N 改名）/absorb 补 missing/invalid
-> target 分支与 applying 窗口语义裁决/late reject 统一抛 PROPOSAL_STALE/
-> apply IO 三面协议（io-failed 终态 + 有界重试）/CapabilityFailureCode
-> 闭合 enum/W：Terminal 谓词集合 + Corpus 可复现冻结 + ephemeral 异步契约。
-> r8（2026-09-25）：按 r7 评审（/tmp/maintain-design-review-r7.md，7.0/10）
-> H 按 kind 分支重写（absorb/create 双序列双矩阵；create 无 beforeHash，
-> afterHash===contentHash 冻结）；R 增决定点胜者表；S 增终态判定优先级
-> （零合法→no-valid-proposals / 全 not-proposed→capacity / 全终态→
-> completed）；U 冻结 CapabilityFailureDetail + 五码传输状态 + cause
-> 公开化（rejectedCause 字段 + reject async）。
-> r7（2026-09-25）：按 r6 评审（/tmp/maintain-design-review-r6.md，6.8/10）
-> 新增补遗 Q-V（决定 CAS/取消-拒绝二分/completed 收敛式/admission API
-> 统一 + terminal 闭合 + approved 瞬态/错误码接入/create record 判别联合）。
-> r6（2026-09-25）：按 r5 评审（/tmp/maintain-design-review-r5.md，7.2/10）
-> **废止旧 r3 补遗 A/B/D**（三套冲突规范值源头；重启语义并入 C）；
-> admissionCapacity 改含可回收 terminal；N 冻结 enqueue 完成语义/
-> reject seam（onRejected）/McpProposal↔Ledger 状态映射；L 键序精确化
-> （递归字典序 + exact bytes）；M 补损坏 pin fail-closed 边界。
+> r10（2026-09-25）：按 r9 评审（/tmp/maintain-design-review-r9.md，7.2/10）
+> 终极归一：E 为状态/record 唯一规范源（create targetPatternName 入
+> record；io-failed 入 ItemStatus；§2 引用 E）；H pending 优先红线 +
+> create intent 带目标名；S 增 2.5 全-io-failed → failed(io)；U 六码
+> 闭集（+PROPOSAL_STALE 409 + currentView detail）+ kernel-local 边界
+>
+> - PROPOSAL_IO 并入 DISTILL_IO；W Corpus score/阈值版本化/digest
+>   输入冻结 + 同 run slug 冲突 plan 期拒绝；K 块声明 W 为规范源。
+>   r9（2026-09-25）：按 r8 评审（/tmp/maintain-design-review-r8.md，7.1/10）
+>   create targetPatternName 冻结（禁 -N 改名）/absorb 补 missing/invalid
+>   target 分支与 applying 窗口语义裁决/late reject 统一抛 PROPOSAL_STALE/
+>   apply IO 三面协议（io-failed 终态 + 有界重试）/CapabilityFailureCode
+>   闭合 enum/W：Terminal 谓词集合 + Corpus 可复现冻结 + ephemeral 异步契约。
+>   r8（2026-09-25）：按 r7 评审（/tmp/maintain-design-review-r7.md，7.0/10）
+>   H 按 kind 分支重写（absorb/create 双序列双矩阵；create 无 beforeHash，
+>   afterHash===contentHash 冻结）；R 增决定点胜者表；S 增终态判定优先级
+>   （零合法→no-valid-proposals / 全 not-proposed→capacity / 全终态→
+>   completed）；U 冻结 CapabilityFailureDetail + 五码传输状态 + cause
+>   公开化（rejectedCause 字段 + reject async）。
+>   r7（2026-09-25）：按 r6 评审（/tmp/maintain-design-review-r6.md，6.8/10）
+>   新增补遗 Q-V（决定 CAS/取消-拒绝二分/completed 收敛式/admission API
+>   统一 + terminal 闭合 + approved 瞬态/错误码接入/create record 判别联合）。
+>   r6（2026-09-25）：按 r5 评审（/tmp/maintain-design-review-r5.md，7.2/10）
+>   **废止旧 r3 补遗 A/B/D**（三套冲突规范值源头；重启语义并入 C）；
+>   admissionCapacity 改含可回收 terminal；N 冻结 enqueue 完成语义/
+>   reject seam（onRejected）/McpProposal↔Ledger 状态映射；L 键序精确化
+>   （递归字典序 + exact bytes）；M 补损坏 pin fail-closed 边界。
 
 ## 0. 裁决沉淀（不可违背）
 
@@ -242,30 +250,33 @@ RunState = collecting | kernel-running | awaiting-approval | completed
          | failed | cancelled          // 终态幂等可轮询
 DistillItemStatus = applied | idempotent | stale | patch-failed
                   | model-invalid | rejected | expired | not-proposed
+                  | io-failed    // r10：与 §2 同集（E 为唯一规范源，§2 引用）
 DistillLedgerStatus = pending | applying | applied | idempotent | stale
                     | patch-failed | expired | rejected | not-proposed
-                    | io-failed   // r9：apply 写路径 IO 失败终态（N/W）
+                    | io-failed
 TerminalDistillLedgerStatus = applied | idempotent | stale | patch-failed
-                    | expired | rejected | not-proposed | io-failed（W）
+                    | expired | rejected | not-proposed | io-failed
                     // model-invalid 无 ledger 行（plan 期诊断，不产 plan
                     // item），故 LedgerStatus ⊂ ItemStatus
-DistillLedgerRecord = 判别联合（r7-V：create 无目标旧页，beforeHash
-  无值可钉——不做 absent 哨兵伪装）：
+DistillLedgerRecord = 判别联合（r7-V；r10-P1：create 目标名持久化——
+  重启后从 record 复原确切写路径）：
   | { kind:"absorb"; ordinal; status: DistillLedgerStatus;
       beforeHash; afterHash; appliedHash? }
   | { kind:"create"; ordinal; status: DistillLedgerStatus;
-      afterHash; appliedHash? }   // create 恢复 = contentHash 幂等
-错误码（contracts 错误表）：DISTILL_IO / DISTILL_LIMIT /
-DISTILL_RUN_NOT_FOUND / DISTILL_STALE / DISTILL_ACTIVE_RUN
+      targetPatternName: PatternName; afterHash; appliedHash? }
+      // create 恢复 = contentHash 幂等（确切 name 占用检查，禁 -N 改名）
+错误码（contracts 错误表，r10 终版闭集——见 U）：DISTILL_IO /
+DISTILL_LIMIT / DISTILL_RUN_NOT_FOUND / DISTILL_STALE /
+DISTILL_ACTIVE_RUN / PROPOSAL_STALE（RPC 面）
 ```
 
 ### F. 字段级 Zod（r2 P2-1）与审计一致性（P2-3）
 
 - title 上限对齐既有 frontmatter/RPC 契约：1..120（不是 200）；
   body 1..20_000；sourcePatternIds 1..50（元素 PatternName）；
-  edits 1..10（WikiEdit）；Corpus 契约 {clusters: SimilarCluster[],
-  candidates: Array<{name, body, contentHash}>（top-K=5 全文）,
-  budgets: 消耗快照}
+  edits 1..10（WikiEdit）；Corpus 契约以 W（r9）的 DistillCorpus 为
+  唯一规范源（本条旧三字段形状作废；candidate 含 title/sourceScope/
+  score，retrieval/阈值/digest 冻结见 W）
 - promotedFrom 空值语义：无足迹 = null（非空数组/字符串）；canonical
   JSON = 键排序、无空白；同 run 重放 union sourcePatternIds
 - ItemResultStatus 枚举即 E 的 counters 键；四文档（proposal/design/
@@ -301,7 +312,8 @@ kind="absorb"：
 4. ledger commit：{status:"applied", appliedHash}
 
 kind="create"：
-1. ledger intent：{kind:"create", ordinal, status:"applying", afterHash}
+1. ledger intent：{kind:"create", ordinal, status:"applying",
+   targetPatternName, afterHash}   // 目标名持久化（E 判别联合成员）
 2. appendPattern 原子写（contentHash 去重原语；afterHash 即其锚）
 3. index rebuild
 4. ledger commit：{status:"applied", appliedHash}
@@ -326,11 +338,15 @@ options?)`——`options.hooks = { onIntent(record), onCommit(record) }`
 **absorb 恢复矩阵（当前页 body hash 判定；区分人工回退）**：
 
 ```text
-前置分支（r9-P1.4，先于 hash 比较）：目标页不存在（readPattern
-  NOT_FOUND）或 frontmatter 畸形（WIKI_INVALID_PATTERN typed 失败）
-  → 任何 ledger 状态都 stale 零写（detail=missing-target /
-  invalid-target），行落终态 stale——缺页/坏页不可重建锚定，人工修复
-  或重跑 distill；绝不凭空创建目标页
+前置分支顺序（r10-P1.3：pending 优先——审批红线，未审批项绝不
+  被执行路径迁移状态）：status == "pending" → 不执行、零写、ledger
+  不动（无论目标页状态；apply 只由 approve 驱动）；
+此后（approved/applying/applied/重放路径）preflight：目标页不存在
+  （readPattern NOT_FOUND）或 frontmatter 畸形（WIKI_INVALID_PATTERN
+  typed 失败，仅 daemon 日志——item 结果 = stale detail=
+  invalid-target，不跨面抛 transport error，r10-P2.5）→ stale 零写
+  （detail=missing-target / invalid-target），行落终态 stale——缺页/
+  坏页不可重建锚定，人工修复或重跑 distill；绝不凭空创建目标页
 ledgerRecord 无（首放）：==beforeHash → 执行；==afterHash → rebuild
   index + 补 commit（前次崩溃于 step1 前；step1 后崩溃必有记录——
   「写前必 intent」不变式）；其余 → stale 零写
@@ -398,7 +414,8 @@ free < need            → 回收候选 = terminal 条目（decidedAt 升序）�
     删除决策与容量计算同在提交临界区内，绝无先删后拒的中间态）
   否则 → 同一临界区：淘汰最旧 (need - free) 个 terminal + 全批 create，
     一次持久化提交；持久化 IO 失败 → 内存态回滚进入前快照，
-    typed PROPOSAL_IO，不部分落盘
+    typed DISTILL_IO（detail.phase=admission，r10-P2.5：并入统一闭集，
+    不另立 PROPOSAL_IO），不部分落盘
 ```
 
 - pending 永不淘汰（全局废除静默淘汰的完成态表述）；蒸馏批量上限 =
@@ -419,6 +436,9 @@ expired 扫描、LRU 淘汰判定）**全部经 DistillJobService 的同一 per-
 
 ```ts
 // dsh-kernel 扩展（tasks 1.3a 实现 + 单测）
+// ⚠️ r10：本块签名以 W（r9）异步契约为唯一规范源——create 返回
+// Promise（含 bridge ready）、prompt 带 signal/deadline、dispose 带
+// deadline；下方同步形状为 r3 历史骨架，实现以 W 为准。
 interface EphemeralSession {
   /** 单轮 prompt（无历史、无续写）；结果 = 模型最终文本（typed 失败上抛）。 */
   prompt(input: string): Promise<{ text: string }>;
@@ -507,12 +527,15 @@ union sourcePatternIds 后**按 runId 升序**重排序落盘。**键序 = 递�
   （result.detail.code=DISTILL_IO）+ io-failed ∈
   TerminalDistillLedgerStatus（W），run 可继续收敛；重启扫描不复活
   io-failed 行。
-  McpProposalStatus ↔ DistillLedgerStatus 映射：proposal `pending` ↔
-  ledger `pending`；`approved` = 瞬态（决定 CAS 后、队列终态前——占 slot、
-  不可回收、不进 LRU 候选，见 T）；`executed` ↔ ledger item 终态族
-  {applied/idempotent/stale/patch-failed}；`rejected`（cause=human）↔
+  McpProposalStatus ↔ DistillLedgerStatus 映射（r10 补 io-failed）：
+  proposal `pending` ↔ ledger `pending`；`approved` = 瞬态（决定 CAS
+  后、队列终态前——占 slot、不可回收、不进 LRU 候选，见 T）；
+  `executed` ↔ ledger item 终态族 {applied/idempotent/stale/
+  patch-failed}；io-failed 项的 queue 任务以 typed failed（DISTILL_IO）
+  返回 → proposal `failed` + ledger `io-failed` +
+  counters["io-failed"]++；`rejected`（cause=human）↔
   ledger `rejected`；`rejected`（cause=cancelled）↔ ledger `expired`；
-  `failed` ↔ ledger 保持 C 语义的 `expired`/`stale`
+  `failed` ↔ ledger {expired（取消/重启竞争）, io-failed（IO 重试耗尽）}
 - **reject seam（r6 P2-5；r7-R awaitable + cause）**：McpProposalStore
   增加可选构造注入 `onRejected?: (view: ProposalView, cause: "human" |
 "cancelled") => Promise<void>`（现有 reject 只改内存 view，无 registry
@@ -618,6 +641,10 @@ approved 后迟到 reject 不覆盖**（tasks 1.3）。
    → failed(reason=no-valid-proposals)
 2. ledger 全部行 status == not-proposed（容量整批拒绝）
    → failed(reason=capacity)
+2.5 ledger 非空且全部行 io-failed（IO 重试全耗尽，无一成功）
+   → failed(reason=io)（r10-P2.2；mixed applied+io-failed → 走 3
+   completed——部分成功是有效收敛，io-failed 计数在 counters 呈现，
+   失败项人工重跑 distill）
 3. ledgerRows.length > 0 且全部 ∈ 终态 → completed
    （迁移由「末项终态写入」的队列任务执行——每项决定/执行完成的任务
    检查全终态，最后一项负责迁移；无需定时器）
@@ -645,19 +672,29 @@ refused: number}`；单一临界区锁；旧 `createBatch` 名只存在于 B 墓
 
 ### U. DISTILL 错误码接入闭合集合（r6 P2-3；r8 共享 schema 具体化）
 
-- `src/shared/contracts/errors.ts` 的 RpcErrorCodeSchema 扩入五码，
-  RpcErrorDefinitions 同步冻结传输状态：
+- `src/shared/contracts/errors.ts` 的 RpcErrorCodeSchema 扩入六码
+  （r10 终版），RpcErrorDefinitions 同步冻结传输状态：
   `DISTILL_RUN_NOT_FOUND: 404`、`DISTILL_STALE: 409`、
+  `PROPOSAL_STALE: 409`（late reject 专用，R）、
   `DISTILL_ACTIVE_RUN: 409`、`DISTILL_LIMIT: 422`、`DISTILL_IO: 503`
   （message 文案实现轮随表登记；RPC 面可穿越）
+- **kernel-local 边界（r10-P2.3）**：`DISTILL_TIMEOUT` /
+  `DISTILL_CANCELLED`（W 的 ephemeral prompt typed 结果）仅 daemon
+  内部（ephemeral 面 + daemon 日志 + run reason=timeout 投影），不进
+  RPC/MCP 闭集；`WIKI_INVALID_PATTERN`（absorb 畸形目标）仅 daemon
+  日志，item 结果 = stale(detail=invalid-target)
 - capability 面：`CapabilityCallResult` 闭合码保持不动；shared contracts
   冻结 **`CapabilityFailureDetail` strictObject**（r8 P2-1）：
-  `{ code: DistillErrorCode（**闭合 Zod enum**：DISTILL_IO/DISTILL_LIMIT/
-DISTILL_RUN_NOT_FOUND/DISTILL_STALE/DISTILL_ACTIVE_RUN/
-WIKI_PATCH_FAILED，r9-P2.1——未知串拒绝）, message: string,
-runId?: string, ordinal?: int ≥0 }`——`failed.detail` 携带该形状
-  （TS + Zod 双冻结）；MCP text envelope = `{ detail }` 包一层、proposal
-  result 与 RPC error 以同一 schema 解析
+  `{ code: DistillErrorCode（**闭合 Zod enum**：DISTILL_IO/DISTILL_
+LIMIT/DISTILL_RUN_NOT_FOUND/DISTILL_STALE/DISTILL_ACTIVE_RUN/
+PROPOSAL_STALE/WIKI_PATCH_FAILED，r10——未知串拒绝）, message:
+string, currentView?: ProposalView（仅 PROPOSAL_STALE 携带，R 的
+late reject detail）, runId?: string, ordinal?: int ≥0 }`——
+  `failed.detail` 携带该形状（TS + Zod 双冻结）；MCP text envelope =
+  `{ detail }` 包一层、proposal result 与 RPC error 以同一 schema
+  解析；reject 调用联合 = 成功路径 view / 失败路径 typed throw
+  （late reject → PROPOSAL_STALE + currentView；ledger IO 失败 →
+  DISTILL_IO）——不再有「返回 view 且报错」的歧义形状
 - 三面同码可验证投影：capability result `failed.detail` ↔ MCP tool
   result text JSON 的 `detail` 字段 ↔ proposal view 的 `result`（含
   failure detail——GUI 审批面可见失败原因；`AgentMcpProposalViewSchema`
@@ -700,19 +737,35 @@ S 的判定量冻结：ledgerRows = proposals.jsonl 全行（= plan item 总数�
 DistillCorpus = strictObject({
   clusters: ReadonlyArray<SimilarCluster>,
   candidates: ReadonlyArray<strictObject({
-    name: PatternName; title: string; body: string;   // top-K 全文
-    contentHash: string; sourceScope: string;         // 来源 workspace 标识
+    name: PatternName; title: string; body: string;   // top-K 全文（模型可见
+    contentHash: string; sourceScope: string;         // 语料边界 = 全文，非摘要
+    score: number,                                    // 检索得分（排序键）
   })>,                                               // K = 5，稳定排序：
                                                     // score 降序 → name 升序
   retrieval: strictObject({ query: string; limit: 5 }),  // 相似检索参数
-  evidenceThreshold: number,                        // 冻结常量：候选 score
-                                                    // < 阈值 → 模型侧禁 absorb
+  evidenceThreshold: number,                        // 版本化常量
+                                                    // DISTILL_EVIDENCE_THRESHOLD
+                                                    // （v1 = 0.30，@jixoai/search
+                                                    // 归一化分数域）；候选自身
+                                                    // score < 阈值 → 该候选证据
+                                                    // 不足，模型侧禁对其 absorb
   budgets: 消耗快照,
-  corpusDigest: string,                             // 全语料 canonical hash，
-                                                    // 写入 run.json（同语料
-                                                    // 跨重启候选序一致）
+  corpusDigest: string,                             // sha256(canonical JSON(
+                                                    // candidates 按 name 升序的
+                                                    // {name,title,body,
+                                                    // contentHash,sourceScope,
+                                                    // score}——递归字典序键、
+                                                    // 无空白))；写入 run.json
+                                                    // （同语料跨重启候选序一致）
 })
 ```
+
+**同 run target 冲突（r8-P2.4，r10 裁决：plan 期拒绝，不做审批序胜者）**：
+planDistillation 检测同 run 内多 create 的 targetPatternName 相同、或
+create 目标与某 absorb targetPatternId 相同 → 后 ordinal 项判
+model-invalid（诊断 target-collision，确定性：ordinal 升序先到先得）；
+冲突项不产 plan item、不进 proposal。负测：两 create 同 slug → 仅先项
+成案，后项 model-invalid(target-collision)。
 
 **EphemeralSession 异步契约（r8 P2-4；K 同步修正）**：
 
