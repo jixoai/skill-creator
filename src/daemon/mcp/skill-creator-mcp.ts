@@ -77,7 +77,9 @@ function withCard(
 } {
   const base = toToolResult(result);
   const card = uiCardForCapability(capabilityName, result);
-  if (!card) return base;
+  // stdio 形态不携带 UI 卡注册表（client 不渲染 ui:// 资源）——命中卡的能力
+  // 降级为纯文本结果，不因缺注册表面崩（wiki-mcp-surface 实证）。
+  if (!card || !cards) return base;
   const resourceUri = cards.register(card);
   // 值内嵌引用（面板流经 tool-result text 解析）。
   const enriched = safeJson({

@@ -215,6 +215,30 @@ export function uiCardForCapability(capabilityName: string, result: unknown): Ui
         nav: { label: "Review in Workspaces", path: "/workspaces" },
       };
     }
+    case "wiki.read": {
+      // wiki-mcp-surface：pattern 全文 → finding 形状卡（闭合卡类型集不加新面；
+      // body 截断预览，全文走工具结果文本）。
+      const pattern = value as {
+        name?: string;
+        title?: string;
+        updated?: string;
+        origin?: string;
+        body?: string;
+      };
+      if (typeof pattern.name !== "string") return null;
+      const bodyPreview = (pattern.body ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
+      return {
+        type: "finding",
+        title: `Wiki — ${pattern.title ?? pattern.name}`,
+        fields: [
+          { label: "Pattern", value: pattern.name },
+          { label: "Updated", value: pattern.updated ?? "-" },
+          { label: "Origin", value: pattern.origin ?? "-" },
+          { label: "Body", value: bodyPreview || "-" },
+        ],
+        nav: { label: "Open the Wiki panel", path: "/wiki" },
+      };
+    }
     default:
       return null;
   }

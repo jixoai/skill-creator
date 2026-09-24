@@ -308,3 +308,112 @@ describe("skill-creator mcp server (task 4.1)", () => {
     }
   });
 });
+
+describe("wiki capability face (wiki-mcp-surface)", () => {
+  const previousWikiHome = process.env.SKILL_WIKI_HOME;
+
+  function sandboxWikiHome(): string {
+    const wikiHome = path.join(sandbox, "wiki-home");
+    process.env.SKILL_WIKI_HOME = wikiHome;
+    return wikiHome;
+  }
+
+  afterEach(() => {
+    if (previousWikiHome === undefined) delete process.env.SKILL_WIKI_HOME;
+    else process.env.SKILL_WIKI_HOME = previousWikiHome;
+  });
+
+  it("projects wiki readonly tools on stdio and keeps append propose-only", async () => {
+    const { client, server } = await connectedClient();
+    try {
+      const tools = await client.listTools();
+      const names = tools.tools.map((tool) => tool.name);
+      expect(names).toContain("wiki_scopes");
+      expect(names).toContain("wiki_list");
+      expect(names).toContain("wiki_read");
+      // append 是 approved-mutation：stdio 无任何形态。
+      expect(names).not.toContain("wiki_append");
+      expect(names).not.toContain("wiki_append_propose");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  /** 工具结果 → 解析 JSON 文本（capability 面 toToolResult 约定）。 */
+  async function callJson(
+    client: Awaited<ReturnType<typeof connectedClient>>["client"],
+    name: string,
+    args: unknown,
+  ) {
+    const result = await client.callTool({ name, arguments: args });
+    const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+    return JSON.parse(text) as { kind: string; value?: unknown };
+  }
+
+  it("round-trips scopes/list/read against the daemon wiki data face", async () => {
+    sandboxWikiHome();
+    await domain.wiki.append("~", { title: "MCP round trip", body: "read via tools/call" });
+
+    const { client, server } = await connectedClient();
+    try {
+      const scopes = await callJson(client, "wiki_scopes", {});
+      expect(scopes.kind).toBe("ok");
+      const globalScope = (
+        (scopes.value as { scopes: Array<{ id: string; patternCount: number }> }).scopes ?? []
+      ).find((scope) => scope.id === "~");
+      expect(globalScope?.patternCount).toBe(1);
+
+      const list = await callJson(client, "wiki_list", { scope: "~" });
+      expect(list.kind).toBe("ok");
+      expect(
+        (list.value as { patterns: Array<{ name: string }> }).patterns.map((item) => item.name),
+      ).toEqual(["mcp-round-trip"]);
+
+      const read = await callJson(client, "wiki_read", { scope: "~", name: "mcp-round-trip" });
+      expect(read.kind).toBe("ok");
+      expect((read.value as { body: string }).body.trim()).toBe("read via tools/call");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("runs wiki append through the propose → approve execution chain", async () => {
+    sandboxWikiHome();
+    // in-process 面 + proposal 链：append 仅以 propose 变体出现。
+    const server = createSkillCreatorMcpServer({
+      capabilities: domain.managerCapabilities,
+      face: "in-process",
+      proposals: domain.mcpProposals,
+    });
+    const client = new Client({ name: "smoke", version: "0.0.1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+    try {
+      const tools = await client.listTools();
+      const names = tools.tools.map((tool) => tool.name);
+      expect(names).toContain("wiki_append_propose");
+      expect(names).not.toContain("wiki_append");
+
+      const proposed = await callJson(client, "wiki_append_propose", {
+        scope: "~",
+        title: "Proposed insight",
+        body: "written only after human approval",
+      });
+      expect(proposed.kind).toBe("proposed");
+      const proposalId = (proposed as unknown as { proposalId: string }).proposalId;
+
+      // 提案未决：磁盘零写。
+      expect((await domain.wiki.list("~")).patterns).toHaveLength(0);
+
+      const decision = await domain.mcpProposals.approve(proposalId);
+      expect(decision.view.status).toBe("executed");
+      const patterns = (await domain.wiki.list("~")).patterns;
+      expect(patterns.map((item) => item.name)).toEqual(["proposed-insight"]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});

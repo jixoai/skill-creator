@@ -38,6 +38,11 @@ import {
   CreatorRevisionsInputSchema,
 } from "../../shared/contracts/creator.js";
 import {
+  WikiAppendInputSchema,
+  WikiListInputSchema,
+  WikiReadInputSchema,
+} from "../../shared/contracts/wiki.js";
+import {
   ApplyUpdateInputSchema,
   UpdateCheckInputSchema,
 } from "../../shared/contracts/skills-update.js";
@@ -86,6 +91,7 @@ export type DomainCapabilityDeps = Pick<
   | "repository"
   | "sourceRegistry"
   | "skillsUpdate"
+  | "wiki"
 >;
 
 /**
@@ -332,6 +338,46 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
       input: RemoveUserSourceInputSchema,
       handler: (input) =>
         invoke(() => domain.sourceRegistry.remove(RemoveUserSourceInputSchema.parse(input).id)),
+    },
+    // wiki-mcp-surface（2026-09-22 Owner 补充需求：agent 经 MCP 管理 skill wiki）。
+    // append 落用户磁盘（新建/幂等返回 pattern 页）→ approved-mutation；MCP 面
+    // 仅 wiki_append_propose，审批执行与 GUI append 同一 daemon 数据面。
+    {
+      name: "wiki.scopes",
+      description:
+        "List wiki scopes (global first, then registered workspaces) with read-only pattern summaries.",
+      authority: "readonly",
+      input: none,
+      handler: () => invoke(() => domain.wiki.scopes()),
+    },
+    {
+      name: "wiki.list",
+      description: "List the pattern fragments captured in one wiki scope.",
+      authority: "readonly",
+      input: WikiListInputSchema,
+      handler: (input) => invoke(() => domain.wiki.list(WikiListInputSchema.parse(input).scope)),
+    },
+    {
+      name: "wiki.read",
+      description: "Read one wiki pattern fragment in full.",
+      authority: "readonly",
+      input: WikiReadInputSchema,
+      handler: (input) =>
+        invoke(() => {
+          const parsed = WikiReadInputSchema.parse(input);
+          return domain.wiki.read(parsed.scope, parsed.name);
+        }),
+    },
+    {
+      name: "wiki.append",
+      description: "Append a fragment of insight to a wiki scope (content-hash idempotent).",
+      authority: "approved-mutation",
+      input: WikiAppendInputSchema,
+      handler: (input) =>
+        invoke(() => {
+          const parsed = WikiAppendInputSchema.parse(input);
+          return domain.wiki.append(parsed.scope, { title: parsed.title, body: parsed.body });
+        }),
     },
   ];
 }
