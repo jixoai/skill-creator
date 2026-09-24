@@ -10,8 +10,11 @@ skill-wiki MUST 冻结蒸馏契约（Zod，unknown 键拒绝，预算常量版�
 （canonical JSON 单行序列化，多次泛化追加合并不覆盖）、`ItemResult`
 （applied/idempotent/stale/patch-failed/model-invalid/rejected/expired/
 not-proposed/io-failed——以 E 的 DistillItemStatus 为唯一枚举源）。
-SDK MUST NOT 引入 LLM/网络依赖；SDK MUST 导出版本化
-slugifyPatternTitle（plan/apply 同源；空 slug → model-invalid）。
+`DistillCorpusSchema` / `DistillLedgerRecordSchema`（含 attempts）/
+`CapabilityFailureDetailSchema` 为宿主与 SDK 的外部契约（closed-field
+strict parsing；设计文档 U/W 块为唯一形状源）。SDK MUST NOT 引入
+LLM/网络依赖；SDK MUST 导出版本化 slugifyPatternTitle（v1 = 现实现
+行为快照；plan/apply 同源；空 slug → model-invalid(empty-slug)）。
 
 #### Scenario: promotedFrom 追加合并
 
