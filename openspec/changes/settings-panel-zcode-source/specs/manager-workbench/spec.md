@@ -20,10 +20,12 @@ list-detail 分区结构（General/Model/Agent/Sessions）；左导航底部入�
 
 模型 provider 目录数据源 MUST 为 zcode Registry 生成物（zai-org/ZCode
 zcode-builtin.json → 生成预设文件；数据结构沿用 shufa 的 ModelPreset），
-不再读取 pi-ai 的 models.dev 镜像。投影到 ModelProviderCatalogEntry 的
-映射：api 三值直传、contextWindow 直传、efforts → effortTiers、image =
-inputTypes 含 image；provider 图标本仓 PROVIDER_ICONS 优先，缺失回退
-preset iconUrl / 字母头像。
+不再读取 pi-ai 的 models.dev 镜像（目录数据零 models.dev 依赖）。
+投影到 ModelProviderCatalogEntry 的映射：api 三值直传、contextWindow
+直传、efforts → effortTiers、image = inputTypes 含 image；provider
+图标本仓 PROVIDER_ICONS 优先，缺失回退 preset iconUrl（models.dev
+静态 logo 资产，shufa 同口径）/ 字母头像；fetch-provider-icons 刷新
+脚本的 provider 清单 MUST 来自 zcode 生成物（不再读 pi-ai 包树）。
 
 #### Scenario: 目录来自 zcode 源
 

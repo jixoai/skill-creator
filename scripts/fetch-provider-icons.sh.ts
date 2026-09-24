@@ -1,11 +1,15 @@
 /**
- * 抓取 provider 图标生成静态 map（openspec add-agent-settings-modes 迭代五）。
+ * 抓取 provider 图标生成静态 map（openspec add-agent-settings-modes 迭代五；
+ * settings-panel-zcode-source 改源：provider 清单从 pi-ai 目录改为 zcode
+ * Registry 生成物——pi-ai 目录随 models.dev 模型镜像退役）。
  *
  * 用户原始需求 [2026-09-12]：「缺少模型供应商的图标……你自己混合处理一下，
  * models.dev 这里有」+ 图标端点规律 `https://models.dev/logos/{provider}.svg`。
+ * 用户裁决 [2026-09-25]：models.dev 仅作静态 logo 资产源（shufa-server 同
+ * 口径）；模型目录数据源 = zcode Registry（extract-zcode-presets.sh.ts）。
  *
  * 正交意图：
- *   [1] 一次抓取：按本仓 pi-ai 目录 provider 列表（含 ALIASES 兜底）拉取 svg，
+ *   [1] 一次抓取：按 zcodePresets provider 列表（含 ALIASES 兜底）拉取 svg，
  *       内联为 dataURL 写 src/shared/provider-icons.generated.ts（产物入库，
  *       产品运行时零网络依赖；本脚本仅手动刷新）。
  *   [2] 占位识别：该端点对未知 id 返回统一占位 svg（HTTP 200），以两个 bogus
@@ -15,11 +19,11 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 
 const LOGO_BASE = "https://models.dev/logos";
 
-/** 跨族/变体别名（pi-ai 目录 id → models.dev provider id）。 */
+/** 跨族/变体别名（provider id → models.dev logo slug；键含 pi-ai 时代
+ *  遗留 id，zcode id 未命中时自然跳过，刷新时可按需修剪）。 */
 const ALIASES: Record<string, string> = {
   "zai-coding-cn": "zai",
   "kimi-coding": "moonshotai",
@@ -31,18 +35,13 @@ const ALIASES: Record<string, string> = {
   "vercel-ai-gateway": "vercel",
 };
 
-/** pi-ai 目录 provider 列表（与 src/daemon/model-catalog.ts 同一 resolve）。 */
-function ourProviderIds(): string[] {
-  const require = createRequire(import.meta.url);
-  const basePkg = require.resolve("@deepseek-ai/dsh-base/package.json");
-  const baseNm = path.dirname(path.dirname(path.dirname(basePkg)));
-  const hostReal = fs.realpathSync(path.join(baseNm, "@deepseek-ai/dsh-llm-pi-ai"));
-  const piAi = path.join(path.dirname(hostReal), "../@earendil-works/pi-ai");
-  const dataDir = path.join(piAi, "dist", "providers", "data");
-  return fs
-    .readdirSync(dataDir)
-    .filter((file) => file.endsWith(".json"))
-    .map((file) => file.slice(0, -".json".length));
+/** zcode Registry provider 列表（与 src/daemon/model-catalog.ts 同一生成物）。 */
+async function ourProviderIds(): Promise<string[]> {
+  const { pathToFileURL } = await import("node:url");
+  const mod = (await import(
+    pathToFileURL(path.resolve(import.meta.dirname, "../src/daemon/zcode-presets.ts")).href
+  )) as { zcodePresets: ReadonlyArray<{ provider: string }> };
+  return [...new Set(mod.zcodePresets.map((p) => p.provider))];
 }
 
 async function fetchSvg(id: string): Promise<string | null> {
@@ -68,7 +67,7 @@ const placeholderHashes = new Set(
 const isPlaceholder = (svg: string): boolean =>
   placeholderHashes.has(createHash("sha256").update(svg).digest("hex"));
 
-const ids = ourProviderIds();
+const ids = await ourProviderIds();
 const candidatesFor = (id: string): string[] => [
   id,
   ...(id.endsWith("-cn") ? [id.slice(0, -3)] : []),

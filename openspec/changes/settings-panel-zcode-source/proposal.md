@@ -23,8 +23,13 @@ Owner（2026-09-25）两点裁决：
   改为消费生成的 `zcode-presets.ts`，投影到既有
   `ModelProviderCatalogEntry`（api 三值枚举两侧一致；contextWindow 直传；
   efforts → effortTiers；image = inputTypes 含 image）
-- models.dev 依赖面清退：model-catalog 的 pi-ai JSON 镜像读取删除；
-  provider 图标沿用本仓 PROVIDER_ICONS（zcode templateId 命中则用，
+- models.dev 依赖面清退（裁决口径，r1 复核沉淀）：**模型目录数据零依赖**
+  ——pi-ai 的 models.dev JSON 镜像读取删除，model-catalog 只消费 zcode
+  生成物。models.dev 仅保留**静态 logo 资产源**角色（shufa-server 同口径：
+  extract 脚本为模板生成 `models.dev/logos/<slug>.svg` 作为 preset
+  iconUrl 回退；fetch-provider-icons.sh.ts 手动刷新仓内 dataURL 图标，
+  产品运行时零网络依赖——provider 清单已从 pi-ai 目录改为 zcode 生成物）。
+  provider 图标优先本仓 PROVIDER_ICONS（zcode templateId 命中则用，
   否则 preset iconUrl/字母头像回退）
 
 ## Non-Goals
