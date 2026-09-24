@@ -5,14 +5,16 @@
 ### Requirement: Settings 为标准页面面板（非 Dialog）
 
 Settings MUST 以 shell 页面面板呈现（路由 /settings，App 语义），内部保留
-list-detail 分区结构（General/Model/Agent/Sessions）；左导航底部入口点击
-= 导航到 /settings（不再开 Dialog）。SettingsDialog MUST 退役。
+list-detail 分区结构（General/Model/Agent/Sessions，窄屏 ≤720px 分区导航
+折叠为 44px 横向 chip 行）；入口 = shell App 主列表齿轮（与其他 App 同列，
+单入口——vision 走查裁决底部 Dialog 时代常驻齿轮退役，双入口无法区分）。
+SettingsDialog MUST 退役。
 
 #### Scenario: 入口导航
 
-- **WHEN** 点击左导航底部 Settings
+- **WHEN** 点击左导航 App 列表中的 Settings 齿轮
 - **THEN** 主区切换为 /settings 页面（URL 变化、可刷新恢复），
-  不出现 Dialog 遮罩
+  不出现 Dialog 遮罩，也不出现第二个齿轮入口
 
 ## ADDED Requirements (cont.)
 
