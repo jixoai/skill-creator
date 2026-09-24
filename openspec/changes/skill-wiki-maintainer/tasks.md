@@ -28,7 +28,9 @@ pnpm exec vp fmt --check`
       per-run 队列 enqueue，与 cancel 同队列可串行化）
       门禁：`pnpm exec vitest run test/wiki-distill-service.test.ts
 test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
-      容量事务「terminal 不足整批字节级不变」/approve-cancel 并发终态唯一）
+      容量事务「terminal 不足整批字节级不变 + 全 terminal 满载可回收」/
+      approve-cancel 并发终态唯一/enqueue 完成语义 executed 仅在队列终态后
+      投影/onRejected ledger 收敛/损坏 run 目录 pin fail-closed）
 - [ ] 1.4 proposal 桥：容量 admission（§5/I）+ wiki.distill_apply
       capability（registry digest 校验；approved 入口 = per-run 队列
       enqueue）+ MCP 投影 + 伪造/跨 scope/stale 负面

@@ -3,8 +3,13 @@
 > r2（2026-09-25）：按设计评审 r1（/tmp/maintain-design-review.md，5.0/10
 > DESIGN-NEEDS-WORK）逐条闭合 P1-1..P1-6 与 P2-1..P2-6；章节编号对齐评审。
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
-> **直接改写** §2/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
+> **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r6（2026-09-25）：按 r5 评审（/tmp/maintain-design-review-r5.md，7.2/10）
+> **废止旧 r3 补遗 A/B/D**（三套冲突规范值源头；重启语义并入 C）；
+> admissionCapacity 改含可回收 terminal；N 冻结 enqueue 完成语义/
+> reject seam（onRejected）/McpProposal↔Ledger 状态映射；L 键序精确化
+> （递归字典序 + exact bytes）；M 补损坏 pin fail-closed 边界。
 
 ## 0. 裁决沉淀（不可违背）
 
@@ -97,7 +102,7 @@ DistillJobService（daemon 内，独立于 agentSessions/转录存储）：
   未决 proposal 主动 reject）
 - kernel 调用有界：默认 120s 超时；daemon stop → dispose + run → failed
   (reason=cancelled-by-shutdown)，重启后不自动续跑（corpus 快照在，人工
-  重跑）；重启扫描见 B（awaiting-approval → cancelled(restarted)）
+  重跑）；重启扫描见 C（awaiting-approval → cancelled(restarted)）
 - distiller 会话**不进**面板列表与持久转录（一次性 ctx；原始输出只落
   run 目录）；工具面 allowlist = mcp__skill-creator__wiki_list /
   wiki_read / wiki_scopes 三个完整 scoped 注册名的 closed union
@@ -160,48 +165,19 @@ tests（stop/cancel/timeout/restart 矩阵）+ 伪造与竞争负面用例
 
 ## r3 补遗（闭合 r2 评审：/tmp/maintain-design-review-r2.md）
 
-### A. 崩溃提交协议（r2 P1-2/D2 FAIL）
+### A. 崩溃提交协议（r2 P1-2/D2 FAIL）——已废止（r6）
 
-applyDistillation 单项序列（ledger-先行 + 幂等恢复；ledger 由
-DistillJobService 的 per-run 串行队列驱动——同 run 的 apply 永不并发，
-无需 CAS）：
+本节旧恢复矩阵（`applying|applied + beforeHash → 重新执行`）**作废**：
+该分支会覆盖人工回退。唯一规范源 = r4 补遗 H（r5 改写版）：typed
+`ledgerRecord` 输入 + `applying+before → 重做` / `applied+before →
+manual-rollback stale 零写` 全矩阵。保留标题仅为评审对照。
 
-```text
-1. ledger intent：{ordinal, status:"applying", beforeHash, afterHash}
-   （proposals.jsonl 整文件原子重写；此步之后任何时刻崩溃都可恢复）
-2. 页面原子写（temp+rename；SDK 既有纪律）
-3. index rebuild（派生物）
-4. ledger commit：{status:"applied", appliedHash}
-恢复/重放判定（applyDistillation 入口统一执行）：
-  ledger 该项 ∈ {applying, applied} 且 当前 bodyHash == afterHash
-    → idempotent（补写 commit 即返回）
-  ledger 该项 ∈ {applying, applied} 且 当前 == beforeHash
-    → 重新执行（写入幂等）
-  ledger 无记录（首放）：== beforeHash → 执行；== afterHash →
-    idempotent（前次崩溃于 step1 之前；step1 之后的崩溃必有记录——
-    「写前必 intent」是不变式）；其余 → stale 零写
-```
+### B. 容量原子预约（r2 P1-3 FAIL）——已废止（r6）
 
-`afterBodyHash` 由 planDistillation 必填（create 与 absorb 都是）；选项
-取消。editPattern 不改签名——applyDistillation 自读目标页做哈希判定，
-在钉死 body 上应用 edits 后走既有原子写原语。
-
-### B. 容量原子预约（r2 P1-3 FAIL）
-
-McpProposalStore 扩展（本 change 一并实现）：
-
-- `pendingCapacity(): number`（剩余可创建数 = MAX - pending 数）
-- `createBatch(items: {capability, input}[]): {created: ProposalView[];
-refused: number}` —— 单次原子 admission：容量不足则整批拒绝
-  （refused>0 时 created=[]，不部分创建、不淘汰任何既有项）
-- 蒸馏路径：proposal 生成走 createBatch 一次预约（有效项 ≤ min(32,
-  pendingCapacity())；不足 → typed DISTILL_LIMIT + ledger 记
-  not-proposed），**消除预检-创建竞态**；其它 capability 的单条 create
-  语义不变（容量满 → typed PROPOSAL_LIMIT，替代静默淘汰——容量纪律
-  全局收紧，含负测试）
-- daemon 重启丢 pending（store 内存态）：DistillJobService 启动扫描
-  awaiting-approval 的 run → ledger 未决项标 expired、run →
-  cancelled(reason=restarted)；approve 已失效引用 → DISTILL_RUN_NOT_FOUND
+本节旧容量模型（`pendingCapacity`/`createBatch` 挂 pending 差额）**作废**。
+唯一规范源 = r4 补遗 I（r5 改写版）：全集 slot + `admissionCapacity =
+free + |terminal|` + admitBatch 单临界区全事务。重启扫描语义已并入 C。
+保留标题仅为评审对照。
 
 ### C. 取消失效语义（r2 新 P1-1）
 
@@ -209,25 +185,20 @@ refused: number}` —— 单次原子 admission：容量不足则整批拒绝
 
 - run → cancelled（原子）；ledger 全部 pending 项 → expired
 - 对应 store 内未决 proposal 由 service 主动 reject（proposal 面 可见
-  rejected）；已执行项保留结果
+  rejected；路由 seam 见 N 的 onRejected——r6 P2-5 补）；已执行项保留结果
 - approve handler 二次校验：run 状态非 awaiting-approval/completed →
   typed DISTILL_STALE 零写（取消/重启后不可再执行）
-- 重启路径见 B（expired + cancelled(restarted)）
+- 重启路径（自 r6 起本节持有）：daemon 重启丢 pending（store 内存态）→
+  DistillJobService 启动扫描 awaiting-approval 的 run → ledger 未决项
+  标 expired、run → cancelled(reason=restarted)；approve 已失效引用 →
+  DISTILL_RUN_NOT_FOUND；扫描先于任何 LRU 淘汰判定（M 的顺序不变式）
 
-### D. Kernel 只读面（r2 P1-4/D4 FAIL——机制落地，不再「复用」措辞）
+### D. Kernel 只读面（r2 P1-4/D4 FAIL）——已废止（r6）
 
-本 change 扩展 `DshKernelHandle`：`createEphemeralSession(options:
-{ systemPrompt: string; toolAllowlist: readonly string[] }) →
-EphemeralSession`：
-
-- 工具面 = deny-all 基线 + allowlist 白名单（inverse of 现产品 deny-list
-  机制；allowlist 仅含 wiki_list/wiki_read/wiki_scopes 三个 MCP 注册名 +
-  模型调用本身）；propose/apply 全部不可见——负测试钉死
-  （EphemeralSession 工具枚举不含 mcp__skill-creator__*_propose）
-- EphemeralSession：不注册 agentSessions 列表/转录（一次性 ctx，接口层
-  冻结「无持久化」），dispose 有界（stop/timeout/cancel 全路径）；
-  dsh-kernel 单测覆盖（创建/allowlist 过滤/dispose 无泄漏）
-- tasks 1.3 拆出 1.3a：kernel ephemeral 面 + 测试先行
+本节旧接口（`toolAllowlist: readonly string[]` + 裸 `wiki_list/...` 名）
+**作废**。唯一规范源 = r4 补遗 K（r5 改写版）：`DistillReadonlyToolName`
+closed union（三个完整 scoped 名）+ 运行时注册名 fail-closed 二次校验 +
+EphemeralSession 完整接口。保留标题仅为评审对照。
 
 ### E. 共享契约冻结（r2 item-11/P2-5 FAIL；r5-O 统一 phase 契约）
 
@@ -341,11 +312,13 @@ status ∈ 终态（stale/patch-failed/expired/rejected/not-proposed/
 负测试：`applied` + 人工恢复 before 内容 → 重放必须零写 + stale
 （manual-rollback）。
 
-### I. 容量 slot 单一模型 + admission 全事务（r3 P1-3；r4 P1-2 改写）
+### I. 容量 slot 单一模型 + admission 全事务（r3 P1-3；r4 P1-2 改写；r6 修上限口径）
 
 容量以 store 全集计（含 terminal 历史，对齐 Map.size 事实）：
 
-- `admissionCapacity() = MAX_PROPOSALS - size()`
+- `admissionCapacity() = (MAX_PROPOSALS - size()) + |terminal 条目|`
+  （r6：**含可回收 terminal**——`size=MAX` 且全 terminal 时上限非 0，
+  r5 的 `MAX - size()` 口径会把可容纳批次错判为 0）
 - **admitBatch(items) 单一临界区事务（r4 P1-2 裁决；create = admitBatch
   长度 1 的同一 primitive）**：
 
@@ -362,9 +335,11 @@ free < need            → 回收候选 = terminal 条目（decidedAt 升序）�
 ```
 
 - pending 永不淘汰（全局废除静默淘汰的完成态表述）；蒸馏批量上限 =
-  min(32, admissionCapacity())；普通单条 create 同一模型
+  min(32, admissionCapacity())（即乐观上限含可回收 terminal；真正适配
+  在临界区内按上式判定）；普通单条 create 同一模型
 - 负测试：pending 满载 create → PROPOSAL_LIMIT 且 store 逐字节不变；
-  「terminal 不足整批」→ 拒绝后 terminal 全部仍在（字节级断言）
+  「terminal 不足整批」→ 拒绝后 terminal 全部仍在（字节级断言）；
+  全 terminal 满载 → admissionCapacity ≥ 1 且 admitBatch 正常回收执行
 
 ### J. cancel/approve 同队列串行（r3 P1-4/C）
 
@@ -403,22 +378,30 @@ type DistillReadonlyToolName =
 （接口层不存在列表面）；dispose 于 stop/timeout/cancel 全路径。负测试：
 `listTools()` 不含任何 `*_propose`/`*distill*`。
 
-### L. promotedFrom 精确信封（r3 新 P2-8）
+### L. promotedFrom 精确信封（r3 新 P2-8；r6 键序精确化）
 
 存储值恒为 **JSON 数组**（单条也是 `[{...}]`）；entry strictObject
 （unknown 键拒绝）；解析失败（历史/手改坏值）→ 读投影 null、merge
 typed WIKI_INVALID_PATTERN（提示人工修复，不覆盖）；同 run 重放 =
-union sourcePatternIds 后**按 runId 升序**重排序落盘。spec 增加
-null/单条/双条/坏值四个 round-trip fixture 场景。
+union sourcePatternIds 后**按 runId 升序**重排序落盘。**键序 = 递归
+字典序（r6 P2-7）**：冻结序列化器 = 深层 sortKeys 后 `JSON.stringify`
+（无空白），fixture 断言 exact bytes，坏值场景断言 merge 拒绝后原值
+**逐字节保留**。spec 增加 null/单条/双条/坏值四个 round-trip fixture
+场景。
 
-### M. LRU pin 与 status 契约严格化（r3 新 P2-9/10；r4 P2-8 补真相源）
+### M. LRU pin 与 status 契约严格化（r3 新 P2-9/10；r4 P2-8 真相源；r6 边界）
 
 - **引用真相 = 持久 ledger（r4 P2-8）**：pin/淘汰判定读 proposals.jsonl，
   不信 store 内存态——重启后 store pending 为空 ≠ 无引用。pin 条件：
   run 非终态，或 ledger 存在 status ∈ {pending, applying} 的行。
-  顺序不变式：LRU 扫描前先执行 B 的重启 expired 收敛（保证 pending 引用
+  顺序不变式：LRU 扫描前先执行 C 的重启 expired 收敛（保证 pending 引用
   已被清理后再判淘汰）。活跃 run（collecting/kernel-running/
   awaiting-approval）恒 pin
+- **损坏边界（r6 P2-9）**：run 目录缺失、run.json/proposals.jsonl 解析
+  失败 → typed DISTILL_IO 记 daemon 日志 + 该 run **pin fail-closed**
+  （不淘汰、不入 LRU 候选，等待人工 purge；绝不因读取失败而误判「无
+  引用」）；LRU 淘汰动作对该 run 的队列串行（淘汰经全局启动扫描投递，
+  per-run 队列确认无 pending 后执行删除）。损坏恢复负测进 tasks 1.3
 - `DistillStatusOutput` strictObject：`counters` 为**全键 Record**
   （DistillItemStatus 枚举每个键必现，缺项 0 补齐；unknown 键拒绝）；
   `proposalRefs[].ordinal` int ≥0、`proposalId: string | null`、
@@ -434,23 +417,41 @@ null/单条/双条/坏值四个 round-trip fixture 场景。
 > （skill-wiki-maintainer 与 windows-test-debt 两份 tasks.md 均过
 > `vp fmt --check`）。
 
-### N. proposal store → per-run 队列接缝（r4 P2-3）
+### N. proposal store → per-run 队列接缝（r4 P2-3；r6 冻结完成语义）
 
 现 McpProposalStore.approve/reject 直接调用 registry 执行
-（src/daemon/mcp/proposals.ts:42-53,96-112）；本 change 冻结执行入口归属：
+（src/daemon/mcp/proposals.ts:42-53,96-112）；本 change 冻结执行入口
+归属与完成契约：
 
 - `wiki.distill_apply` 的 approved 执行入口 = DistillJobService 注册的
   **enqueue 函数**：capability registry 中该 capability 的 handler 不是
   直接写盘，而是 `enqueue(runId, ordinal)` 投递到对应 run 的 per-run
-  串行队列（J）。store 的 approve 状态迁移 → registry 执行 → enqueue
-  返回（apply 异步发生于队列）；reject 同理投递 `markRejected(ordinal)`
+  串行队列（J）并**等待该队列任务终态后才返回**——store 的
+  `executed/failed` 投影因此保持真相（r6 P1-1：入队受理 ≠ executed；
+  approve 调用会阻塞到 apply 完成，apply 是本地文件操作，有界）
+- **完成映射（r6 P2-4/P2-8）**：queue 任务成功完成（item 终态无论
+  applied/idempotent/stale/patch-failed——那是 item 级结果，由 ledger/
+  counters 呈现）→ registry 返回 ok → proposal `executed`；queue 任务
+  typed 失败（run 已 cancelled/restarted → DISTILL_STALE、
+  DISTILL_RUN_NOT_FOUND 等）→ proposal `failed`。
+  McpProposalStatus ↔ DistillLedgerStatus 映射表：proposal `pending` ↔
+  ledger `pending`；`executed` ↔ ledger ∈ {applying 瞬态→applied/
+  idempotent/stale/patch-failed}（终态）；`rejected` ↔ ledger
+  `rejected`；`failed` ↔ ledger 保持 C 语义的 `expired`/`stale`
+- **reject seam（r6 P2-5）**：McpProposalStore 增加可选构造注入
+  `onRejected?: (view: ProposalView) => void`（现有 reject 只改内存
+  view，无 registry 路径）；daemon 接线 = DistillJobService 的
+  `enqueueRejected`：capability == wiki.distill_apply 时按 input
+  {runId, ordinal} 投递队列把 ledger 行 → `rejected`（否则 LRU pin 与
+  counters 永久错误）；无监听者（未接线/其它 capability）行为不变
 - 路由 = proposal input {runId, ordinal}（D5 冻结）；store 不需要知道
   run/proposalId→runId 映射（capability 名即路由键）
 - 其它 capability 的 approve→registry 直执行语义不变（不引入新抽象）
 - 可串行化保证：approve-decision 与 queued-apply 之间到达的 cancel 进入
   同一队列 → 先 cancel 后 apply 时，apply 任务按 C 的二次状态校验拒绝
   （DISTILL_STALE 零写）；负测试 = approve 与 cancel 并发提交终态唯一
-- tasks 1.3 门禁补该接缝用例（enqueue 路由 + cancel 竞争终态断言）
+- tasks 1.3 门禁补该接缝用例（enqueue 路由 + cancel 竞争终态断言 +
+  executed-仅在-队列-终态后投影 + onRejected ledger 行收敛）
 
 ### O. 单一 status/ledger 契约（r4 P2-6）
 
