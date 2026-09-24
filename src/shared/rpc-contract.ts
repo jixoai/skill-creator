@@ -437,7 +437,7 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
         .input(z.object({ mode: z.enum(["image", "file"]) }))
         .output(z.object({ paths: z.array(z.string().min(1)) })),
     },
-    /** pi-ai 装配目录（models.dev 镜像）投影：全量 provider 画廊（filter 在 UI）。 */
+    /** zcode Registry 预设生成物投影：全量 provider 画廊（filter 在 UI）。 */
     models: {
       catalog: oc
         .input(z.object({}))

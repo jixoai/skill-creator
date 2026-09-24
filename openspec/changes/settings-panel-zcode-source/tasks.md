@@ -9,3 +9,8 @@
 - [x] 1.3 Settings 页面化：App 注册 + /settings 路由 + 四分区平移 +
       左导航底部入口改导航 + SettingsDialog 删除 + settingsUi store 收敛 + route-match/组件测试更新
 - [ ] 1.4 门禁（含 webui check + 全量）+ dev 走查（探针 + vision：桌面/窄屏）+ codex 复核 + 归档
+      （走查 r1：双阻塞（窄屏 nav 未折叠/Save 禁用态 2.02:1）+ 双齿轮 → 三修复；
+      vision 复判 r2：A 单齿轮 PASS / B Save ghost 3.71:1 PASS / D 画廊 PASS /
+      C chip 行残差（可见横滚 thumb + Sessions 齐边裁切，P2）→ no-scrollbar +
+      右缘渐隐 mask 处置，像素带扫描 thumb 零命中；门禁 webui check/
+      typecheck/聚焦测试 62 项全绿——证据 /tmp/settings-walkthrough-r2/）

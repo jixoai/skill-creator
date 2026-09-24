@@ -7,7 +7,9 @@
   正交意图：
   1. list-detail 骨架平移（原 SettingsDialog）：左分区导航 + 右内容容器；
      分区 = /settings/:section 路由参数（URL 即状态，可刷新恢复），/settings
-     默认 General。
+     默认 General。窄屏（≤720px）分区导航折叠为顶部横向 chip 行（44px 触控
+     目标），内容区独占全宽——vision 走查实证 176px 侧栏在 390px 视口把内容
+     挤到 ~160px 触发 pervasive 截断。
   2. 挂载即拉一次 agent settings 投影（Model/Agent 分区共享同一视图）。
   滚动所有权法则（skill-refs-and-platform-fixes C2 裁决）原样保留：Model 分区自管
   唯一纵滚（tab 内容容器，R16 裁决），右栏 overflow-hidden 只供高度链；其余分区
@@ -70,13 +72,20 @@
     </div>
   </header>
 
-  <div class="grid min-h-0 flex-1 grid-cols-[176px_1fr]">
-    <div class="flex min-h-0 flex-col border-r border-border bg-muted/30">
-      <nav class="flex flex-col gap-0.5 p-2" aria-label="Settings sections">
+  <div
+    class="grid min-h-0 flex-1 grid-cols-[176px_1fr] max-[720px]:grid-cols-1 max-[720px]:grid-rows-[auto_minmax(0,1fr)]"
+  >
+    <div
+      class="flex min-h-0 flex-col border-r border-border bg-muted/30 max-[720px]:min-h-0 max-[720px]:border-r-0 max-[720px]:border-b"
+    >
+      <nav
+        class="no-scrollbar flex flex-col gap-0.5 p-2 max-[720px]:flex-row max-[720px]:gap-1 max-[720px]:overflow-x-auto max-[720px]:[mask-image:linear-gradient(to_right,black_calc(100%-14px),transparent)]"
+        aria-label="Settings sections"
+      >
         {#each sections as item (item.id)}
           {@const Icon = item.icon}
           <button
-            class="flex h-8 items-center gap-2 rounded-md px-2 text-xs transition-colors {section ===
+            class="flex h-8 items-center gap-2 rounded-md px-2 text-xs transition-colors max-[720px]:h-11 max-[720px]:shrink-0 max-[720px]:px-3 {section ===
             item.id
               ? 'bg-primary/10 text-primary'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"

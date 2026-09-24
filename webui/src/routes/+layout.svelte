@@ -31,7 +31,6 @@
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
   import IconPlus from "@lucide/svelte/icons/folder-plus";
   import IconAgent from "@lucide/svelte/icons/message-square";
-  import IconSettings from "@lucide/svelte/icons/settings";
   import AgentPanel from "$lib/components/agent/AgentPanel.svelte";
   import { agentPanel, setAgentPanelOpen } from "$lib/stores/agent.svelte";
 
@@ -173,21 +172,9 @@
         >
           <IconPlus class="h-5 w-5" />
         </button>
-
-        <!-- 全局设置入口（settings-panel-zcode-source：Settings 页面化——底部常驻
-             mt-auto，点击 = 导航 /settings；活跃态/aria-current 与其他导航一致）。 -->
-        <button
-          class="mt-auto flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-muted {activeAppId ===
-          'settings'
-            ? 'bg-accent text-primary ring-1 ring-inset ring-primary/25'
-            : 'text-muted-foreground hover:text-foreground'}"
-          title="Settings"
-          aria-label="Settings"
-          aria-current={activeAppId === "settings" ? "page" : undefined}
-          onclick={() => switchApp("settings")}
-        >
-          <IconSettings class="h-5 w-5" />
-        </button>
+        <!-- Settings 入口 = settingsApp manifest 注册的主列表项（页面化裁决：
+             标准页面面板与其他 App 同列，不再保留底部 Dialog 时代的常驻齿轮——
+             vision 走查实证双齿轮无法区分）。 -->
       </nav>
 
       <!-- 右侧：Shell 内容区 + Agent 面板 drawer（shell 级、跨 tab 存活）。R17-C：

@@ -316,7 +316,7 @@
         </button>
         <Button
           size="sm"
-          class="relative h-9 px-3 text-xs after:absolute after:-top-1 after:-bottom-1 after:left-0 after:right-0 after:content-['']"
+          class="relative h-9 px-3 text-xs after:absolute after:-top-1 after:-bottom-1 after:left-0 after:right-0 after:content-[''] disabled:opacity-100 disabled:bg-muted disabled:text-muted-foreground"
           data-route-save="true"
           disabled={saveDisabled}
           onclick={() => void saveAll()}
