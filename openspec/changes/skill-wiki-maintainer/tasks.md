@@ -46,9 +46,11 @@ test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
       enqueue）+ MCP 投影 + 伪造/跨 scope/stale 负面
       门禁：`pnpm exec vitest run test/skill-creator-mcp.test.ts
 test/mcp-proposals.test.ts test/wiki-distill-service.test.ts`
-      （DISTILL_* 错误码三面同码：RpcErrorCode 扩入五码 404/409/409/
-      422/503/capability detail（CapabilityFailureCode 闭合 enum）/
-      MCP result envelope——同一 Zod schema 解析五码逐一断言 +
+      （错误码四面同码（r11 六码）：RpcErrorCode 扩入 DISTILL_*
+      五码 + PROPOSAL_STALE（404/409/409/409/422/503）/
+      CapabilityFailureDetail（闭合 enum + currentView）/
+      MCP result envelope——同一 Zod schema（CapabilityFailureDetailSchema）
+      四面（capability/MCP/proposal/RPC）逐码解析断言 +
       typecheck 负测）
 - [ ] 1.5 CLI `wiki distill`（--workspace/--limit 默认20≤100/--json 同
       schema）+ 端到端（kernel stub：合法/混合非法/全非法）

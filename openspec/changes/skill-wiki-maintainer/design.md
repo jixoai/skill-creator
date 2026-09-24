@@ -5,6 +5,14 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r11（2026-09-25）：按 r10 评审（/tmp/maintain-design-review-r10.md，7.0/10）
+> H/V 两处旧 create 句归一为 targetPatternName+afterHash 口径；H 终态
+> 集合补 io-failed（重放零写不复活）+ durable retry（attempts 持久化、
+> 重启判定、三面原子迁移）；U 落 exact shared schemas（DistillErrorCode/
+> CapabilityFailureDetail/reject 传输联合——设计即实现形状）；W 阈值改
+> 原始 score 口径（不虚构归一化）+ digest 输入完整化（全 Corpus 对象）；
+> slugifyPatternTitle 导出契约 + empty-slug model-invalid；spec ItemResult
+> 补 io-failed；tasks 门禁改六码四面。
 > r10（2026-09-25）：按 r9 评审（/tmp/maintain-design-review-r9.md，7.2/10）
 > 终极归一：E 为状态/record 唯一规范源（create targetPatternName 入
 > record；io-failed 入 ItemStatus；§2 引用 E）；H pending 优先红线 +
@@ -261,10 +269,12 @@ TerminalDistillLedgerStatus = applied | idempotent | stale | patch-failed
 DistillLedgerRecord = 判别联合（r7-V；r10-P1：create 目标名持久化——
   重启后从 record 复原确切写路径）：
   | { kind:"absorb"; ordinal; status: DistillLedgerStatus;
-      beforeHash; afterHash; appliedHash? }
+      beforeHash; afterHash; appliedHash?; attempts: int ≥0 }
   | { kind:"create"; ordinal; status: DistillLedgerStatus;
-      targetPatternName: PatternName; afterHash; appliedHash? }
-      // create 恢复 = contentHash 幂等（确切 name 占用检查，禁 -N 改名）
+      targetPatternName: PatternName; afterHash; appliedHash?;
+      attempts: int ≥0 }
+      // create 恢复 = contentHash 幂等（确切 name 占用检查，禁 -N 改名）；
+      // attempts = durable retry 计数（H r11）
 错误码（contracts 错误表，r10 终版闭集——见 U）：DISTILL_IO /
 DISTILL_LIMIT / DISTILL_RUN_NOT_FOUND / DISTILL_STALE /
 DISTILL_ACTIVE_RUN / PROPOSAL_STALE（RPC 面）
@@ -300,8 +310,9 @@ webui/src/lib/stores/__tests__/wiki-distill.test.ts`；全 change 收口 =
 applyDistillation 单项序列（ledger-先行 + 幂等恢复；ledger 由
 DistillJobService 的 per-run 串行队列驱动——同 run 的 apply 永不并发，
 无需 CAS）。intent 行 = E 的 `DistillLedgerRecord` 判别联合（absorb 双
-hash / create 仅 afterHash——r8：create 无目标旧页，`afterHash ===
-contentHash(正文)` 字节级冻结，不做 beforeHash 伪装值）：
+hash / create 带 targetPatternName + afterHash——create 无目标旧页
+可比 beforeHash（r11 唯一口径）；`afterHash === contentHash(正文)`
+字节级冻结，不做 beforeHash 伪装值）：
 
 ```text
 kind="absorb"：
@@ -324,6 +335,13 @@ kind="create"：
 - 任何 commit 之前 index 必为已重建状态：恢复分支
   `applying|applied 且 已落盘` **必须先 rebuild index 再补写 commit**；
   rebuild 失败 → typed DISTILL_IO，项保持 applying（仍可恢复）。
+- **durable retry（r11-P1.2）**：intent 行携带 `attempts: int ≥0`
+  （每次队列重试整文件原子重写 +1；预算 = 3）。运行中重试耗尽 →
+  队列任务一次原子迁移三面：ledger 行 applying→io-failed + proposal →
+  failed（detail DISTILL_IO）+ S 优先级重算（同队列任务内顺序写；
+  崩溃则下次恢复扫描按行状态重放迁移）。重启恢复：attempts ≥ 3 →
+  直接落 io-failed（不再重试）；< 3 的 applying 行经宿主重放路径按
+  H 矩阵处理（不消耗新预算）。
 - SDK/宿主边界：`applyDistillation(globalWikiDir, item, provenance,
 options?)`——`options.hooks = { onIntent(record), onCommit(record) }`
   （可选）。SDK 驱动顺序契约：onIntent → 页原子写 → index rebuild →
@@ -364,7 +382,9 @@ status == "applied"（已 commit）：
                  人工回退）；需再泛化 → 人工重跑产新提案
   其余         → stale 零写（人工编辑/竞争）
 status ∈ 终态（stale/patch-failed/expired/rejected/not-proposed/
-  idempotent）→ 报告原终态，零写（幂等重放不复活）
+  idempotent/io-failed——E/W 全集，r11）→ 报告原终态，零写（幂等
+  重放不复活；io-failed 行同样零写报告，人工修复后重跑 distill 产新
+  提案——不自动复活、不自动重试）
 ```
 
 **create 恢复矩阵（name = item/ledger intent 冻结的 targetPatternName
@@ -695,11 +715,44 @@ late reject detail）, runId?: string, ordinal?: int ≥0 }`——
   解析；reject 调用联合 = 成功路径 view / 失败路径 typed throw
   （late reject → PROPOSAL_STALE + currentView；ledger IO 失败 →
   DISTILL_IO）——不再有「返回 view 且报错」的歧义形状
+- **exact shared schemas（r11-P1.3：设计即冻结实现形状，无「实现轮
+  补」）**——`src/shared/contracts/wiki-distill.ts` 与 contracts 改动的
+  唯一权威定义：
+
+```ts
+export const DistillErrorCodeSchema = z.enum([
+  "DISTILL_IO",
+  "DISTILL_LIMIT",
+  "DISTILL_RUN_NOT_FOUND",
+  "DISTILL_STALE",
+  "DISTILL_ACTIVE_RUN",
+  "PROPOSAL_STALE",
+  "WIKI_PATCH_FAILED",
+]);
+export const CapabilityFailureDetailSchema = z.strictObject({
+  code: DistillErrorCodeSchema,
+  message: z.string(),
+  currentView: McpProposalViewSchema.optional(), // 仅 PROPOSAL_STALE
+  runId: z.string().optional(),
+  ordinal: z.number().int().nonnegative().optional(),
+});
+// proposal view 扩展（contracts/agent.ts）：
+//   result?: CapabilityFailureDetailSchema（failed 的失败详情——GUI 可见）
+//   rejectedCause?: z.enum(["human", "cancelled"])
+// reject 传输联合（store/RPC 同形）：
+//   成功 → { view: McpProposalViewSchema }
+//   late reject → typed throw PROPOSAL_STALE（oRPC error data =
+//     CapabilityFailureDetailSchema.currentView 携带当前 view）
+//   ledger IO 失败 → typed throw DISTILL_IO
+// CapabilityCallResult.failed 增补 detail?: CapabilityFailureDetailSchema
+// RpcErrorCodeSchema 增六码（前列传输状态映射表）
+```
+
 - 三面同码可验证投影：capability result `failed.detail` ↔ MCP tool
-  result text JSON 的 `detail` 字段 ↔ proposal view 的 `result`（含
-  failure detail——GUI 审批面可见失败原因；`AgentMcpProposalViewSchema`
-  实现轮补 `result` 投影）↔ RPC error `code`。tasks 1.4 三面负测以
-  同一 Zod schema 解析断言（不是字符串包含）
+  result text JSON 的 `detail` 字段（envelope = strictObject
+  `{ detail: CapabilityFailureDetailSchema }`）↔ proposal view 的
+  `result` ↔ RPC error `code`。tasks 1.4 四面（capability/MCP/
+  proposal/RPC）负测以同一 Zod schema 解析断言（不是字符串包含）
 - WIKI_PATCH_FAILED 透传既有 wiki 域码，不重复登记
 - **cause 公开化（r8 P2-2）**：`McpProposalView` 与 shared 投影扩
   `rejectedCause?: "human" | "cancelled"`（audit 行 detail 同步）；
@@ -709,8 +762,9 @@ late reject detail）, runId?: string, ordinal?: int ≥0 }`——
 
 ### V. create 项 ledger record 判别联合（r6 P2-1；r8 矩阵入 H）
 
-E 已改写：absorb 带 beforeHash/afterHash；create 只带 afterHash（无目标
-旧页，不做 absent 哨兵；`afterHash === contentHash` 字节级冻结）。create
+E 已改写：absorb 带 beforeHash/afterHash；create 带 targetPatternName +
+afterHash（无目标旧页不做 absent 哨铃；`afterHash === contentHash`
+字节级冻结——r11 与 E/H 同一口径，本节历史描述作废）。create
 恢复矩阵由 H（r8 kind 分支版）唯一持有；崩溃重放 fixture 补 create 分支
 （tasks 1.2 + spec scenario 已列）。
 
@@ -745,20 +799,36 @@ DistillCorpus = strictObject({
   retrieval: strictObject({ query: string; limit: 5 }),  // 相似检索参数
   evidenceThreshold: number,                        // 版本化常量
                                                     // DISTILL_EVIDENCE_THRESHOLD
-                                                    // （v1 = 0.30，@jixoai/search
-                                                    // 归一化分数域）；候选自身
-                                                    // score < 阈值 → 该候选证据
-                                                    // 不足，模型侧禁对其 absorb
+                                                    // （v1 = 0.30，作用域 =
+                                                    // @jixoai/search 冻结 BM25
+                                                    // 打分的原始 score——r11：
+                                                    // 仓库无归一化函数，不虚构；
+                                                    // 阈值随 TOKENIZER/打分版本
+                                                    // 联动重校准并 bump 版本）；
+                                                    // 候选自身 score < 阈值 →
+                                                    // 证据不足，禁对其 absorb
   budgets: 消耗快照,
-  corpusDigest: string,                             // sha256(canonical JSON(
-                                                    // candidates 按 name 升序的
-                                                    // {name,title,body,
-                                                    // contentHash,sourceScope,
-                                                    // score}——递归字典序键、
-                                                    // 无空白))；写入 run.json
-                                                    // （同语料跨重启候选序一致）
+  corpusDigest: string,                             // r11：digest 输入 =
+                                                    // 全 DistillCorpus 对象
+                                                    // （clusters + candidates
+                                                    // 按 name 升序 + retrieval +
+                                                    // evidenceThreshold +
+                                                    // budgets；排除
+                                                    // corpusDigest 自身）的
+                                                    // canonical JSON（递归
+                                                    // 字典序键、无空白）sha256；
+                                                    // 写入 run.json（同语料
+                                                    // 跨重启候选序与参数一致）
 })
 ```
+
+**slugify 共享契约（r11-P2.3）**：SDK 导出版本化
+`slugifyPatternTitle(title) → PatternName`（现 workspace.ts 私有
+slugify 提升为导出；行为冻结：非 ASCII 折叠/小写/分隔符归一/截断至
+PatternName 上限/空结果 → plan 期 model-invalid(empty-slug)）；蒸馏
+plan/apply 只用该导出（appendPattern 内部同名函数同一实现）；apply 的
+create 写路径 = exact-name 原语（占用检查 + 原子写），不复用
+appendPattern 的 -N 分支。fixture：非 ASCII 标题/空标题/截断/同名冲突。
 
 **同 run target 冲突（r8-P2.4，r10 裁决：plan 期拒绝，不做审批序胜者）**：
 planDistillation 检测同 run 内多 create 的 targetPatternName 相同、或

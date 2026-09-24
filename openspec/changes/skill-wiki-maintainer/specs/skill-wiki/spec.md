@@ -9,7 +9,9 @@ skill-wiki MUST 冻结蒸馏契约（Zod，unknown 键拒绝，预算常量版�
 `expectedBeforeBodyHash` 与 edits 复用 WikiEdit 原语）、`PromotedFromEntry`
 （canonical JSON 单行序列化，多次泛化追加合并不覆盖）、`ItemResult`
 （applied/idempotent/stale/patch-failed/model-invalid/rejected/expired/
-not-proposed）。SDK MUST NOT 引入 LLM/网络依赖。
+not-proposed/io-failed——以 E 的 DistillItemStatus 为唯一枚举源）。
+SDK MUST NOT 引入 LLM/网络依赖；SDK MUST 导出版本化
+slugifyPatternTitle（plan/apply 同源；空 slug → model-invalid）。
 
 #### Scenario: promotedFrom 追加合并
 
