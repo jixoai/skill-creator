@@ -11,8 +11,8 @@ pnpm exec vp fmt --check`
       输入：首放/applying/applied×before-after 全分支，含 applied+
       beforeHash 人工回退 stale 零写）+ 足迹回填 + ledger 行产出 +
       IO typed
-      门禁：同上（含：崩溃重放/人工编辑后 stale/人工回退不重放/
-      同 target 竞争）
+      门禁：同上（含：崩溃重放 absorb+create 双分支/人工编辑后 stale/
+      人工回退不重放/同 target 竞争）
 - [ ] 1.3a kernel ephemeral 面：DshKernelHandle.createEphemeralSession
       （deny-all + DistillReadonlyToolName closed union + 运行时注册名
       fail-closed 二次校验；不进面板/转录；dispose 有界）
@@ -29,13 +29,19 @@ pnpm exec vp fmt --check`
       门禁：`pnpm exec vitest run test/wiki-distill-service.test.ts
 test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
       容量事务「terminal 不足整批字节级不变 + 全 terminal 满载可回收」/
-      approve-cancel 并发终态唯一/enqueue 完成语义 executed 仅在队列终态后
-      投影/onRejected ledger 收敛/损坏 run 目录 pin fail-closed）
+      决定 CAS：approve+reject 与 approve+approve 并发三面终态唯一/
+      enqueue 完成语义 executed 仅在队列终态后投影/取消=expired vs
+      人工拒绝=rejected 二分 + reject 队列 IO 失败 fail-closed/
+      末项终态触发 completed + 终态后同 source 二次 start 允许 +
+      零 proposal → failed(no-valid-proposals)/损坏 run 目录 pin
+      fail-closed）
 - [ ] 1.4 proposal 桥：容量 admission（§5/I）+ wiki.distill_apply
       capability（registry digest 校验；approved 入口 = per-run 队列
       enqueue）+ MCP 投影 + 伪造/跨 scope/stale 负面
       门禁：`pnpm exec vitest run test/skill-creator-mcp.test.ts
 test/mcp-proposals.test.ts test/wiki-distill-service.test.ts`
+      （DISTILL_* 错误码三面同码：RpcErrorCode 扩入/capability detail
+      携带/MCP result code 字段——typecheck + 序列化负测）
 - [ ] 1.5 CLI `wiki distill`（--workspace/--limit 默认20≤100/--json 同
       schema）+ 端到端（kernel stub：合法/混合非法/全非法）
       门禁：`pnpm exec vitest run test/skill-creator-wiki-cli.test.ts`
