@@ -5,6 +5,11 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r9（2026-09-25）：按 r8 评审（/tmp/maintain-design-review-r8.md，7.1/10）
+> create targetPatternName 冻结（禁 -N 改名）/absorb 补 missing/invalid
+> target 分支与 applying 窗口语义裁决/late reject 统一抛 PROPOSAL_STALE/
+> apply IO 三面协议（io-failed 终态 + 有界重试）/CapabilityFailureCode
+> 闭合 enum/W：Terminal 谓词集合 + Corpus 可复现冻结 + ephemeral 异步契约。
 > r8（2026-09-25）：按 r7 评审（/tmp/maintain-design-review-r7.md，7.0/10）
 > H 按 kind 分支重写（absorb/create 双序列双矩阵；create 无 beforeHash，
 > afterHash===contentHash 冻结）；R 增决定点胜者表；S 增终态判定优先级
@@ -66,9 +71,13 @@ DistillProposal = 判别联合（unknown 键拒绝）：
       sourcePatternIds: string[] }
 
 DistillPlanItem = proposal + ordinal + digest + afterBodyHash（必填）
+  + create 项额外冻结 targetPatternName: PatternName（r9-P1：plan 阶段由
+    SDK 同源 slugify(title) 计算并写入 item 与 ledger intent——apply 写
+    该确切 name，**禁止 appendPattern 的 -N 自动改名分支**（存在同名页
+    即 stale 零写，spec「同名人工页零覆盖」）；重放目标因此确定）
 ItemResult = { ordinal; status: DistillItemStatus; detail?; appliedHash? }
 DistillItemStatus = applied|idempotent|stale|patch-failed|model-invalid|
-                    rejected|expired|not-proposed   // counters 全键（O）
+                    rejected|expired|not-proposed|io-failed   // counters 全键（O；r9-P1.3）
 RunState = collecting|kernel-running|awaiting-approval|completed|
            failed|cancelled   // 无独立 phase 字段——RunState 即阶段真相（O）
 DistillFailReason = no-valid-proposals|capacity|io|timeout|
@@ -235,6 +244,9 @@ DistillItemStatus = applied | idempotent | stale | patch-failed
                   | model-invalid | rejected | expired | not-proposed
 DistillLedgerStatus = pending | applying | applied | idempotent | stale
                     | patch-failed | expired | rejected | not-proposed
+                    | io-failed   // r9：apply 写路径 IO 失败终态（N/W）
+TerminalDistillLedgerStatus = applied | idempotent | stale | patch-failed
+                    | expired | rejected | not-proposed | io-failed（W）
                     // model-invalid 无 ledger 行（plan 期诊断，不产 plan
                     // item），故 LedgerStatus ⊂ ItemStatus
 DistillLedgerRecord = 判别联合（r7-V：create 无目标旧页，beforeHash
@@ -314,13 +326,20 @@ options?)`——`options.hooks = { onIntent(record), onCommit(record) }`
 **absorb 恢复矩阵（当前页 body hash 判定；区分人工回退）**：
 
 ```text
+前置分支（r9-P1.4，先于 hash 比较）：目标页不存在（readPattern
+  NOT_FOUND）或 frontmatter 畸形（WIKI_INVALID_PATTERN typed 失败）
+  → 任何 ledger 状态都 stale 零写（detail=missing-target /
+  invalid-target），行落终态 stale——缺页/坏页不可重建锚定，人工修复
+  或重跑 distill；绝不凭空创建目标页
 ledgerRecord 无（首放）：==beforeHash → 执行；==afterHash → rebuild
   index + 补 commit（前次崩溃于 step1 前；step1 后崩溃必有记录——
   「写前必 intent」不变式）；其余 → stale 零写
 status == "pending"    → 不执行（审批未决；approve 才驱动 apply）
 status == "applying"（intent 后、commit 前崩溃）：
   ==afterHash  → rebuild index → 补 commit（idempotent）
-  ==beforeHash → 重新执行（崩溃于页面写前；写入幂等）
+  ==beforeHash → 重新执行（语义裁决 r9：applying = 已批准未完成的意图，
+    该窗口人工把页恢复为 before 内容时重放 = 执行既定审批意图，合法——
+    与 applied+before（已完成后的人工回退，绝不重放）的区别在 commit）
   其余         → stale 零写（执行窗口内人工改页），行落终态 stale
 status == "applied"（已 commit）：
   ==afterHash  → no-op idempotent（applied 蕴含 index 已重建）
@@ -332,17 +351,20 @@ status ∈ 终态（stale/patch-failed/expired/rejected/not-proposed/
   idempotent）→ 报告原终态，零写（幂等重放不复活）
 ```
 
-**create 恢复矩阵（按目标 name 是否存在 + contentHash 判定；无
-beforeHash 比较——r8）**：
+**create 恢复矩阵（name = item/ledger intent 冻结的 targetPatternName
+（r9-P1）；按存在性 + contentHash 判定；无 beforeHash 比较）**：
 
 ```text
+写路径原语 = 确切 name 占用检查 + 原子写（禁止 appendPattern 的 -N
+  自动改名——同名即 stale，绝不换名落盘）
 ledgerRecord 无（首放）：name 不存在 → 执行；存在且 contentHash ==
   afterHash → rebuild index + 补 commit（idempotent）；存在但 hash 异
   → stale 零写（同名人工页，绝不覆盖）
 status == "pending"    → 不执行
 status == "applying"：
   存在且 hash == afterHash → rebuild index → 补 commit（idempotent）
-  不存在 → 重新执行（崩溃于写前）
+  不存在 → 重新执行（崩溃于写前；applying 窗口人工删除 = 意图未完成，
+    重放 append 是执行既定审批——与 applied+删除的绝不重放对称区别）
   存在但 hash 异 → stale 零写，行落终态 stale
 status == "applied"：
   hash == afterHash → no-op idempotent
@@ -393,7 +415,7 @@ expired 扫描、LRU 淘汰判定）**全部经 DistillJobService 的同一 per-
 串行队列**（与 H 的 hooks 写同队列）——取消与审批执行不可能交错写入；
 队列化负测试：cancel 与 approve 并发提交 → 结果可串行化（终态唯一）。
 
-### K. EphemeralSession 完整接口（r3 P1-4/D）
+### K. EphemeralSession 完整接口（r3 P1-4/D；r9-W 异步化：Promise 创建/prompt signal+deadline/dispose deadline）
 
 ```ts
 // dsh-kernel 扩展（tasks 1.3a 实现 + 单测）
@@ -474,11 +496,17 @@ union sourcePatternIds 后**按 runId 升序**重排序落盘。**键序 = 递�
   串行队列（J）并**等待该队列任务终态后才返回**——store 的
   `executed/failed` 投影因此保持真相（r6 P1-1：入队受理 ≠ executed；
   approve 调用会阻塞到 apply 完成，apply 是本地文件操作，有界）
-- **完成映射（r6 P2-4/P2-8；r7-R 二分）**：queue 任务成功完成（item 终态
-  无论 applied/idempotent/stale/patch-failed——那是 item 级结果，由 ledger/
-  counters 呈现）→ registry 返回 ok → proposal `executed`；queue 任务
-  typed 失败（run 已 cancelled/restarted → DISTILL_STALE、
-  DISTILL_RUN_NOT_FOUND 等）→ proposal `failed`。
+- **完成映射（r6 P2-4/P2-8；r7-R 二分；r9-P1.3 补 IO 分支）**：queue
+  任务成功完成（item 终态无论 applied/idempotent/stale/patch-failed——
+  item 级结果由 ledger/counters 呈现）→ registry 返回 ok → proposal
+  `executed`；queue 任务 typed 失败（run 已 cancelled/restarted →
+  DISTILL_STALE、DISTILL_RUN_NOT_FOUND）→ proposal `failed`。
+  **apply IO 失败（页写/rebuild 抛 DISTILL_IO）**：队列任务有界自动重试
+  （≤3 次退避）；仍失败 → ledger 行落终态 `io-failed`（写路径状态未知，
+  人工检查后重跑 distill——不自动恢复）+ proposal `failed`
+  （result.detail.code=DISTILL_IO）+ io-failed ∈
+  TerminalDistillLedgerStatus（W），run 可继续收敛；重启扫描不复活
+  io-failed 行。
   McpProposalStatus ↔ DistillLedgerStatus 映射：proposal `pending` ↔
   ledger `pending`；`approved` = 瞬态（决定 CAS 后、队列终态前——占 slot、
   不可回收、不进 LRU 候选，见 T）；`executed` ↔ ledger item 终态族
@@ -568,9 +596,11 @@ approve / reject / cancel（service 侧主动 reject）**先在同一串行决�
   cancel 只迁移 run → cancelled（proposal/ledger 不在决定点变动）；
     其后 apply 队列任务二次校验 DISTILL_STALE 零写 → proposal failed +
     ledger 行 → expired（与取消语义一致；N 的 failed ↔ expired 映射）
-  迟到的 human reject → 不执行（token 不可覆盖；幂等返回 approved/executed
-    现状 + typed PROPOSAL_STALE 提示）
-  迟到的重复 approve → 幂等（Q）
+  迟到的 human reject → **统一抛 typed PROPOSAL_STALE**（error detail
+    携带 current view 投影；r9-P1.2：结果联合唯一——不返回 view 也不静默；
+    GUI/RPC 面把该错误呈现为「该提案已进入执行」）
+  迟到的重复 approve → 幂等返回现状（Q）
+  重复同 cause reject（终态已 rejected）→ 幂等返回 view，不抛错
 ```
 
 onRejected 为 awaitable（Promise），失败补偿见 N（proposal 决定不可逆 +
@@ -622,9 +652,12 @@ refused: number}`；单一临界区锁；旧 `createBatch` 名只存在于 B 墓
   （message 文案实现轮随表登记；RPC 面可穿越）
 - capability 面：`CapabilityCallResult` 闭合码保持不动；shared contracts
   冻结 **`CapabilityFailureDetail` strictObject**（r8 P2-1）：
-  `{ code: string（DISTILL_* | 既有域码）, message: string,
+  `{ code: DistillErrorCode（**闭合 Zod enum**：DISTILL_IO/DISTILL_LIMIT/
+DISTILL_RUN_NOT_FOUND/DISTILL_STALE/DISTILL_ACTIVE_RUN/
+WIKI_PATCH_FAILED，r9-P2.1——未知串拒绝）, message: string,
 runId?: string, ordinal?: int ≥0 }`——`failed.detail` 携带该形状
-  （TS + Zod 双冻结）
+  （TS + Zod 双冻结）；MCP text envelope = `{ detail }` 包一层、proposal
+  result 与 RPC error 以同一 schema 解析
 - 三面同码可验证投影：capability result `failed.detail` ↔ MCP tool
   result text JSON 的 `detail` 字段 ↔ proposal view 的 `result`（含
   failure detail——GUI 审批面可见失败原因；`AgentMcpProposalViewSchema`
@@ -643,3 +676,60 @@ E 已改写：absorb 带 beforeHash/afterHash；create 只带 afterHash（无目
 旧页，不做 absent 哨兵；`afterHash === contentHash` 字节级冻结）。create
 恢复矩阵由 H（r8 kind 分支版）唯一持有；崩溃重放 fixture 补 create 分支
 （tasks 1.2 + spec scenario 已列）。
+
+---
+
+## r9 补遗（闭合 r8 评审：/tmp/maintain-design-review-r8.md）
+
+### W. 终态谓词集合 + Corpus 输入冻结 + ephemeral 异步契约（r8 P2-2/3/4）
+
+**TerminalDistillLedgerStatus（共享契约导出，E 同步）**：
+
+```text
+TerminalDistillLedgerStatus = { applied, idempotent, stale, patch-failed,
+  expired, rejected, not-proposed, io-failed }   // 闭合集，含 not-proposed
+非终态 = { pending, applying }
+S 的判定量冻结：ledgerRows = proposals.jsonl 全行（= plan item 总数）；
+  「零合法提案」判据 = ledgerRows.length === 0（model-invalid 不产行）；
+  mixed（部分 not-proposed + 部分其它终态）→ 走 completed 路径（全终态即真）
+```
+
+**Corpus 输入冻结（r8 P2-3；可复现性契约）**：
+
+```ts
+DistillCorpus = strictObject({
+  clusters: ReadonlyArray<SimilarCluster>,
+  candidates: ReadonlyArray<strictObject({
+    name: PatternName; title: string; body: string;   // top-K 全文
+    contentHash: string; sourceScope: string;         // 来源 workspace 标识
+  })>,                                               // K = 5，稳定排序：
+                                                    // score 降序 → name 升序
+  retrieval: strictObject({ query: string; limit: 5 }),  // 相似检索参数
+  evidenceThreshold: number,                        // 冻结常量：候选 score
+                                                    // < 阈值 → 模型侧禁 absorb
+  budgets: 消耗快照,
+  corpusDigest: string,                             // 全语料 canonical hash，
+                                                    // 写入 run.json（同语料
+                                                    // 跨重启候选序一致）
+})
+```
+
+**EphemeralSession 异步契约（r8 P2-4；K 同步修正）**：
+
+```ts
+createEphemeralSession(options): Promise<EphemeralSession>
+  // 内含 MCP tool bridge ready 等待；bridge 未就绪/注册名校验失败 →
+  // 创建即 typed 失败（fail-closed，绝不半可用 session）
+interface EphemeralSession {
+  prompt(input: string, opts?: { signal?: AbortSignal;
+    deadlineMs?: number }): Promise<{ text: string }>;
+    // 超时/取消 → typed DISTILL_TIMEOUT / DISTILL_CANCELLED 结果上抛
+  listTools(): readonly string[];
+  dispose(opts?: { deadlineMs?: number }): Promise<void>;
+    // 有界强制释放（超时后内核侧 session 销毁）；重复调用幂等
+}
+```
+
+tasks 1.3a 补负测：bridge 未 ready 创建即拒 / prompt 超时 typed /
+dispose 超时强制释放；tasks 1.1 补 Corpus fixture（同语料两次构建候选
+序与 digest 一致）。

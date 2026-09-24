@@ -12,12 +12,15 @@ pnpm exec vp fmt --check`
       beforeHash 人工回退 stale 零写）+ 足迹回填 + ledger 行产出 +
       IO typed
       门禁：同上（含：崩溃重放 absorb+create 双分支/人工编辑后 stale/
-      人工回退不重放/同 target 竞争）
+      人工回退不重放（applied+before/删除）/absorb 目标缺页与畸形页
+      stale/同 target 竞争/create 同名人工页零覆盖且不 -N 改名/
+      同语料两次构建候选序与 corpusDigest 一致）
 - [ ] 1.3a kernel ephemeral 面：DshKernelHandle.createEphemeralSession
       （deny-all + DistillReadonlyToolName closed union + 运行时注册名
       fail-closed 二次校验；不进面板/转录；dispose 有界）
       门禁：`pnpm exec vitest run test/dsh-kernel.test.ts`
-      （allowlist 过滤/未知名创建即拒/propose 不可见/
+      （allowlist 过滤/未知名创建即拒/bridge 未 ready 创建即拒/
+      prompt 超时与取消 typed/dispose 超时强制释放/propose 不可见/
       stop-timeout-cancel dispose 矩阵）
 - [ ] 1.3 daemon DistillJobService：run registry（0700/0600/原子写/
       LRU≤20/purge + 活跃 run LRU 保护——引用真相 = 持久 ledger，先
@@ -30,9 +33,12 @@ pnpm exec vp fmt --check`
 test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
       容量事务「terminal 不足整批字节级不变 + 全 terminal 满载可回收」/
       决定 CAS：approve+reject 与 approve+approve 并发三面终态唯一/
-      enqueue 完成语义 executed 仅在队列终态后投影/取消=expired vs
-      人工拒绝=rejected 二分 + reject 队列 IO 失败 fail-closed/
-      末项终态触发 completed + 终态后同 source 二次 start 允许 +
+      approved 后 cancel → failed+expired、迟到 reject 抛 PROPOSAL_STALE
+      且重复同 cause reject 幂等/enqueue 完成语义 executed 仅在队列终态后
+      投影/apply IO 失败：重试耗尽 → io-failed 终态 + proposal failed
+      (DISTILL_IO) + run 收敛/取消=expired vs 人工拒绝=rejected 二分 +
+      reject 队列 IO 失败 fail-closed/末项终态触发 completed + 终态后
+      同 source 二次 start 允许 + 全 not-proposed → failed(capacity)/
       零 proposal → failed(no-valid-proposals)/损坏 run 目录 pin
       fail-closed）
 - [ ] 1.4 proposal 桥：容量 admission（§5/I）+ wiki.distill_apply
@@ -40,8 +46,10 @@ test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
       enqueue）+ MCP 投影 + 伪造/跨 scope/stale 负面
       门禁：`pnpm exec vitest run test/skill-creator-mcp.test.ts
 test/mcp-proposals.test.ts test/wiki-distill-service.test.ts`
-      （DISTILL_* 错误码三面同码：RpcErrorCode 扩入/capability detail
-      携带/MCP result code 字段——typecheck + 序列化负测）
+      （DISTILL_* 错误码三面同码：RpcErrorCode 扩入五码 404/409/409/
+      422/503/capability detail（CapabilityFailureCode 闭合 enum）/
+      MCP result envelope——同一 Zod schema 解析五码逐一断言 +
+      typecheck 负测）
 - [ ] 1.5 CLI `wiki distill`（--workspace/--limit 默认20≤100/--json 同
       schema）+ 端到端（kernel stub：合法/混合非法/全非法）
       门禁：`pnpm exec vitest run test/skill-creator-wiki-cli.test.ts`
