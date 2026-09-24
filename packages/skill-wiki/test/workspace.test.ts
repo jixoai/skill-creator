@@ -16,7 +16,7 @@ import {
   openWikiWorkspace,
   patternContentHash,
   resolveWikiDirectory,
-  countWikiPatterns,
+  wikiPatternSummary,
   workspaceWikiDirectory,
 } from "../src/index.js";
 
@@ -385,15 +385,18 @@ describe("WikiWorkspace logs and impact", () => {
   });
 });
 
-describe("countWikiPatterns (read-only projection, codex r1 P1)", () => {
+describe("wikiPatternSummary (read-only projection, codex r1 P1/r2 P2)", () => {
   it("counts valid pattern pages without creating any directory", () => {
     const workspace = makeTempDir();
     const wikiDir = workspaceWikiDirectory(workspace);
     fs.mkdirSync(wikiDir, { recursive: true });
     // 部分初始化：root 存在、patterns/ 缺失 → 计数 0 且绝不 mkdir。
-    expect(countWikiPatterns(wikiDir)).toBe(0);
+    expect(wikiPatternSummary(wikiDir)).toEqual({ patternCount: 0, lastUpdated: null });
     expect(fs.existsSync(path.join(wikiDir, "patterns"))).toBe(false);
-    expect(countWikiPatterns(path.join(workspace, "not-initialized"))).toBe(0);
+    expect(wikiPatternSummary(path.join(workspace, "not-initialized"))).toEqual({
+      patternCount: 0,
+      lastUpdated: null,
+    });
     expect(fs.existsSync(path.join(workspace, "not-initialized"))).toBe(false);
   });
 
@@ -410,7 +413,11 @@ describe("countWikiPatterns (read-only projection, codex r1 P1)", () => {
     fs.writeFileSync(path.join(wikiDirOf(workspace), "patterns", "Bad_Name.md"), legal);
     const listed = openWikiWorkspace(wikiDirOf(workspace)).listPatterns();
     expect(listed).toHaveLength(2);
-    expect(countWikiPatterns(wikiDirOf(workspace))).toBe(2);
+    const summary = wikiPatternSummary(wikiDirOf(workspace));
+    expect(summary.patternCount).toBe(2);
+    // lastUpdated = 成员 pattern 的 frontmatter updated 最大值（非法名/畸形页不计入）。
+    const listedUpdates = listed.map((item) => item.updated).sort();
+    expect(summary.lastUpdated).toBe(listedUpdates.at(-1));
   });
 
   it("maps unreadable patterns directory to typed WIKI_IO, not zero", () => {
@@ -420,7 +427,7 @@ describe("countWikiPatterns (read-only projection, codex r1 P1)", () => {
     fs.mkdirSync(path.join(wikiDir, "patterns"), { recursive: true });
     fs.chmodSync(path.join(wikiDir, "patterns"), 0o000);
     try {
-      countWikiPatterns(wikiDir);
+      wikiPatternSummary(wikiDir);
       expect.unreachable("unreadable patterns dir must throw");
     } catch (error) {
       expect(error).toBeInstanceOf(SkillWikiError);

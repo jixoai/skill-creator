@@ -116,6 +116,7 @@ interface ScopeJsonRow {
   workspacePath: string;
   exists: boolean;
   patternCount: number;
+  lastUpdated: string | null;
 }
 
 describe("CLI wiki subcommand (in-process, no daemon)", () => {
@@ -201,27 +202,30 @@ describe("CLI wiki subcommand (in-process, no daemon)", () => {
     const json = await sandbox.run(["scopes", "--json"]);
     expect(json.code).toBe(0);
     const payload = JSON.parse(json.stdout) as { scopes: ScopeJsonRow[] };
-    expect(payload.scopes[0]).toEqual({
+    expect(payload.scopes[0]).toMatchObject({
       id: "~",
       label: "global",
       workspacePath: "~",
       exists: true,
       patternCount: 1,
+      lastUpdated: expect.any(String),
     });
     const byId = new Map(payload.scopes.map((row) => [row.id, row]));
-    expect(byId.get(frontend.id)).toEqual({
+    expect(byId.get(frontend.id)).toMatchObject({
       id: frontend.id,
       label: "Frontend",
       workspacePath: frontend.path,
       exists: true,
       patternCount: 2,
+      lastUpdated: expect.any(String),
     });
-    expect(byId.get(docs.id)).toEqual({
+    expect(byId.get(docs.id)).toMatchObject({
       id: docs.id,
       label: "Docs",
       workspacePath: docs.path,
       exists: false,
       patternCount: 0,
+      lastUpdated: null,
     });
 
     const human = await sandbox.run(["scopes"]);
@@ -242,12 +246,13 @@ describe("CLI wiki subcommand (in-process, no daemon)", () => {
     expect(json.code).toBe(0);
     const payload = JSON.parse(json.stdout) as { scopes: ScopeJsonRow[] };
     const row = payload.scopes.find((entry) => entry.id === partial.id);
-    expect(row).toEqual({
+    expect(row).toMatchObject({
       id: partial.id,
       label: "Partial",
       workspacePath: partial.path,
       exists: true,
       patternCount: 0,
+      lastUpdated: null,
     });
     expect(fs.existsSync(path.join(partial.path, ".agents", "skill-wiki", "patterns"))).toBe(false);
   }, 60_000);

@@ -142,7 +142,8 @@
                 {#if scope.exists}
                   <span class="block truncate text-xs text-muted-foreground">
                     {scope.patternCount}
-                    {scope.patternCount === 1 ? "fragment" : "fragments"} captured
+                    {scope.patternCount === 1 ? "fragment" : "fragments"} captured{#if scope.lastUpdated}
+                      · updated {scope.lastUpdated.slice(0, 10)}{/if}
                   </span>
                 {:else}
                   <span class="block truncate text-xs text-muted-foreground/80">

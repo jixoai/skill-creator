@@ -61,8 +61,14 @@ describe("WikiHome", () => {
   it("renders the scope index: global card, counts, and Not initialized empty state", async () => {
     rpcMock.wiki.scopes.mockResolvedValue({
       scopes: [
-        { id: "~", label: "Global", patternCount: 2, exists: true },
-        { id: WS, label: "registered", patternCount: 0, exists: false },
+        {
+          id: "~",
+          label: "Global",
+          patternCount: 2,
+          exists: true,
+          lastUpdated: "2026-09-22T01:00:00.000Z",
+        },
+        { id: WS, label: "registered", patternCount: 0, exists: false, lastUpdated: null },
       ],
     });
     const instance = mountHome();
@@ -82,8 +88,14 @@ describe("WikiHome", () => {
   it("navigates to /wiki/:wsId on card click (global id encoded as %7E)", async () => {
     rpcMock.wiki.scopes.mockResolvedValue({
       scopes: [
-        { id: "~", label: "Global", patternCount: 0, exists: false },
-        { id: WS, label: "registered", patternCount: 1, exists: true },
+        { id: "~", label: "Global", patternCount: 0, exists: false, lastUpdated: null },
+        {
+          id: WS,
+          label: "registered",
+          patternCount: 1,
+          exists: true,
+          lastUpdated: "2026-09-22T02:00:00.000Z",
+        },
       ],
     });
     const instance = mountHome();
@@ -112,7 +124,7 @@ describe("WikiHome", () => {
 
     // Retry 走同一加载面（错误可恢复，不伪装成空索引）。
     rpcMock.wiki.scopes.mockResolvedValue({
-      scopes: [{ id: "~", label: "Global", patternCount: 0, exists: false }],
+      scopes: [{ id: "~", label: "Global", patternCount: 0, exists: false, lastUpdated: null }],
     });
     const retry = Array.from(target?.querySelectorAll("button") ?? []).find((button) =>
       button.textContent?.includes("Retry"),

@@ -60,7 +60,7 @@ Code + Evidence
 ## 2. 产品真相
 
 ```text
-Skill Creator（当前代码：ChromeTabs Shell，三个 App；DSH composition 尚未实现）
+Skill Creator（当前代码：ChromeTabs Shell，四个 App；DSH composition 尚未实现）
 |
 |-- /workspaces -------------- Workspaces App
 |   |-- home tab ------------- Workspace 索引 / import-remove recovery
@@ -71,11 +71,14 @@ Skill Creator（当前代码：ChromeTabs Shell，三个 App；DSH composition �
 |                              创建/编辑技能 + change log（单列编辑器；Agent
 |                              会话由 DSH host 承载，内嵌 ACP 面板已移除）
 |
+|-- /wiki -------------------- Wiki App：碎片认知知识库（2026-09-22 第四个一级
+|                              面板；home = scope 索引，/wiki/:wsId = patterns）
+|
 `-- /repository -------------- Repository App：固定 Git commit 后预览/安装
                                + curated/user sources Discover feed
 ```
 
-当前一级导航是 Workspaces、Creator、Repository；旧 Steward 是 Workspaces 下的 activity。URL 由 shell route registry 解析，SvelteKit 仅 catch-all 承载。旧实现不满足本轮技能管家目标。批准的目标是复用 DSH Web client plugins 与现有 Manager views，合为一个产品 Shell；任务归属以 GOAL.md 的五阶段顺序和 active changes 为准，不提前把目标写成实现事实。
+当前一级导航是 Workspaces、Creator、Wiki、Repository（wiki-directory-standard 2026-09-22 归档：目录映射标准——wiki 目录 = `<workspace>/.agents/skill-wiki/`，global 为 `~` 特例；slug 登记表与中央根退役；skill-creator CLI 带 `wiki` 子命令，经 skill-wiki cli-kit 组装）。旧 Steward 是 Workspaces 下的 activity。URL 由 shell route registry 解析，SvelteKit 仅 catch-all 承载。旧实现不满足本轮技能管家目标。批准的目标是复用 DSH Web client plugins 与现有 Manager views，合为一个产品 Shell；任务归属以 GOAL.md 的五阶段顺序和 active changes 为准，不提前把目标写成实现事实。
 
 ```text
 Workspace                  = skills 作用域第一层
@@ -500,8 +503,7 @@ src/
 |   |-- domain.ts ------------- [2] domain module composition / dependency wiring
 |   |-- rpc-router.ts ---------- [5] skill+update / workspace+creator / repository+sources / agent+card+proposals / status+acp / error boundary
 |   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
-|   |-- wiki-service.ts ------- [3] 双级 wiki（skill-wiki 委派 + WorkspaceId→slug 映射 + scope 闸）
-|   |-- wiki-root-migration.ts  [2] legacy 侧车一次性 mv+symlink 三态迁移（冲突 CONFLICT）
+|   |-- wiki-service.ts ------- [3] 双级 wiki（skill-wiki 委派 + 目录映射标准解析 + scope 闸；scopes 只读摘要零写副作用）
 |   |-- skill-search/
 |   |   |-- tokenizer.ts -------- [3] 冻结规则分词器（已下沉 @jixoai/search；此处 re-export 过渡；版本化+探针降级）
 |   |   |-- scanner.ts ---------- [2] provider roots 扫描（symlink 入口层跟进 / 递归≤2 / broken 跳过）
@@ -553,7 +555,7 @@ src/
     `-- src/
         |-- routes/ ------------ SvelteKit catch-all 承载点（+layout/+page/[...catch]）
         |-- lib/shell/ --------- ChromeTabs shell / route registry / nav / device prefs
-        |-- lib/apps/ ---------- workspaces / creator / repository 三个 App manifest + 视图
+        |-- lib/apps/ ---------- workspaces / creator / wiki / repository 四个 App manifest + 视图
         |-- lib/stores/ -------- connection / request generation / workspace / skills / creator / repository / agent（含 composer 双轨与 submission 面）
         |-- lib/components/ ---- product composition（agent composer 家族：ComposerCard/TriggerMenu/SlashMenu/QueueDock/DropOverlay + composer-keymap/trigger 内核；creator 子视图、source-card 等）
         `-- lib/components/ui/ - shadcn-svelte generated primitives

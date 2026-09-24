@@ -261,7 +261,13 @@ describe("readWikiPattern", () => {
 });
 
 function makeScope(id: "~" | string, label: string, patternCount: number, exists: boolean) {
-  return { id: id === "~" ? "~" : WorkspaceIdSchema.parse(id), label, patternCount, exists };
+  return {
+    id: id === "~" ? "~" : WorkspaceIdSchema.parse(id),
+    label,
+    patternCount,
+    exists,
+    lastUpdated: patternCount > 0 ? "2026-09-22T03:00:00.000Z" : null,
+  };
 }
 
 describe("loadWikiScopes", () => {

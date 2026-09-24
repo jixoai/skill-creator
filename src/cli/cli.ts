@@ -536,6 +536,7 @@ interface WikiScopeRow {
   workspacePath: string;
   exists: boolean;
   patternCount: number;
+  lastUpdated: string | null;
 }
 
 /**
@@ -592,10 +593,10 @@ async function runWiki(): Promise<number> {
     import("../daemon/workspace-registry/state.js"),
   ]);
   const {
-    countWikiPatterns: countWikiPatternsIn,
     createWikiCli,
     globalWikiDirectory,
     resolveWikiDirectory,
+    wikiPatternSummary,
     workspaceWikiDirectory,
     WikiUsageError,
   } = wikiKit;
@@ -603,10 +604,12 @@ async function runWiki(): Promise<number> {
   const rest = argv.slice(argv.indexOf("wiki") + 1);
   const stateSchema = registryState.WorkspaceRegistryStateSchema;
 
-  /** wiki 目录 → 存在性 + pattern 计数（只读：不创建 patterns/，codex r1 P1）。 */
-  const countWikiPatterns = (wikiDirectory: string): { exists: boolean; patternCount: number } => ({
+  /** wiki 目录 → 存在性 + 只读摘要（不创建 patterns/，codex r1 P1）。 */
+  const wikiScopeFacts = (
+    wikiDirectory: string,
+  ): { exists: boolean } & ReturnType<typeof wikiPatternSummary> => ({
     exists: fs.existsSync(wikiDirectory),
-    patternCount: countWikiPatternsIn(wikiDirectory),
+    ...wikiPatternSummary(wikiDirectory),
   });
 
   /** resolveScope（registry 只读解析）：`~`/路径直传默认解析；裸 token = label 前缀或 ws_* id。 */
@@ -647,7 +650,7 @@ async function runWiki(): Promise<number> {
     );
   };
 
-  /** scopes：global + registry 全部 workspace 的 pattern 计数与 label（全局视角）。 */
+  /** scopes：global + registry 全部 workspace 的只读摘要（全局视角）。 */
   const scopes: WikiCliCommand = {
     usage: "[--json]",
     minPositionals: 0,
@@ -658,26 +661,26 @@ async function runWiki(): Promise<number> {
           id: "~",
           label: "global",
           workspacePath: "~",
-          ...countWikiPatterns(globalWikiDirectory()),
+          ...wikiScopeFacts(globalWikiDirectory()),
         },
         ...loadWikiRegistryEntries(stateSchema).map((entry) => ({
           id: entry.id,
           label: entry.label,
           workspacePath: entry.path,
-          ...countWikiPatterns(workspaceWikiDirectory(entry.path)),
+          ...wikiScopeFacts(workspaceWikiDirectory(entry.path)),
         })),
       ];
       if (ctx.options.has("json")) {
         ctx.io.stdout(`${JSON.stringify({ scopes: rows }, null, 2)}\n`);
       } else {
         ctx.io.stdout(
-          `${"scope".padEnd(28)}${"label".padEnd(18)}${"patterns".padStart(8)}  workspace\n`,
+          `${"scope".padEnd(28)}${"label".padEnd(18)}${"patterns".padStart(8)}  ${"last updated".padEnd(24)}workspace\n`,
         );
         for (const row of rows) {
           const missing = row.exists ? "" : "  (missing)";
           ctx.io.stdout(
             `${row.id.padEnd(28)}${row.label.padEnd(18)}${String(row.patternCount).padStart(8)}  ` +
-              `${row.workspacePath}${missing}\n`,
+              `${(row.lastUpdated ?? "—").padEnd(24)}${row.workspacePath}${missing}\n`,
           );
         }
       }

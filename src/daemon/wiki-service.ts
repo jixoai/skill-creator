@@ -21,10 +21,10 @@
 import fs from "node:fs";
 import {
   SkillWikiError,
-  countWikiPatterns,
   globalWikiDirectory,
   openWikiWorkspace,
   patternContentHash,
+  wikiPatternSummary,
   workspaceWikiDirectory,
   type PatternListItem,
 } from "skill-wiki";
@@ -79,13 +79,13 @@ export function createWikiService(
 
   const openScope = (scope: WorkspaceId) => openWikiWorkspace(resolveScope(scope).wikiDirectory);
 
-  // 计数走只读投影（codex r1 P1）：countWikiPatterns 不触发 patterns/ 惰性
+  // 计数走只读投影（codex r1 P1）：wikiPatternSummary 不触发 patterns/ 惰性
   // mkdir——「root 存在但 patterns 缺失」的部分初始化目录在 scopes() 下零写。
   const scopeProjection = (id: WorkspaceId, label: string, wikiDirectory: string): WikiScope => ({
     id,
     label,
     exists: fs.existsSync(wikiDirectory),
-    patternCount: countWikiPatterns(wikiDirectory),
+    ...wikiPatternSummary(wikiDirectory),
   });
 
   return {

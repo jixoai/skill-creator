@@ -200,7 +200,13 @@ describe("wiki.scopes RPC surface", () => {
     const { scopes } = await client.wiki.scopes({});
 
     // global 恒列且在首位（SKILL_WIKI_HOME 指向的目录首次写入前不存在 → 空态）。
-    expect(scopes[0]).toEqual({ id: "~", label: "Global", patternCount: 0, exists: false });
+    expect(scopes[0]).toEqual({
+      id: "~",
+      label: "Global",
+      patternCount: 0,
+      exists: false,
+      lastUpdated: null,
+    });
     const byId = new Map(scopes.map((scope) => [scope.id, scope]));
     // 无 wiki 的 workspace：exists=false、计数 0（显示空态而非隐藏）。
     expect(byId.get(REGISTERED_WS)).toEqual({
@@ -208,13 +214,15 @@ describe("wiki.scopes RPC surface", () => {
       label: "registered",
       patternCount: 0,
       exists: false,
+      lastUpdated: null,
     });
     // 有 wiki 的 workspace：目录映射解析 + listPatterns 计数正确。
-    expect(byId.get(SEEDED_WS)).toEqual({
+    expect(byId.get(SEEDED_WS)).toMatchObject({
       id: SEEDED_WS,
       label: "seeded",
       patternCount: 2,
       exists: true,
+      lastUpdated: expect.any(String),
     });
     expect(scopes).toHaveLength(3);
   });
@@ -253,11 +261,8 @@ describe("wiki.scopes RPC surface", () => {
 
     const { scopes } = await client.wiki.scopes({});
     const registered = scopes.find((scope) => scope.id === REGISTERED_WS);
-    expect(registered).toEqual({
-      id: REGISTERED_WS,
-      label: "registered",
-      patternCount: 2,
-      exists: true,
-    });
+    expect(registered?.patternCount).toBe(2);
+    // Bad_Name.md 不计（同成员判定）；lastUpdated = 两次 append 的较大 updated。
+    expect(registered?.lastUpdated).not.toBeNull();
   });
 });

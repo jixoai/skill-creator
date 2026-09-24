@@ -57,6 +57,8 @@ export const WikiScopeSchema = z
     patternCount: z.number().int().nonnegative(),
     /** wiki 目录（目录映射标准）是否已在磁盘初始化；false 时不隐藏，显示空态。 */
     exists: z.boolean(),
+    /** 成员 pattern 的最近 updated（ISO）；无成员/未初始化 = null（只读投影）。 */
+    lastUpdated: z.string().nullable(),
   })
   .strict();
 /** scope 索引条目。 */

@@ -1,5 +1,54 @@
 # Changelog
 
+## 2.3.0 (2026-09-22)
+
+Wikis move in with their workspaces, a fourth top-level Wiki panel, a
+`skill-creator wiki` subcommand, and the search engine swap that retires
+MiniSearch.
+
+### Added
+
+- **Wiki directory-mapping standard** — a workspace's wiki now lives at
+  `<workspace>/.agents/skill-wiki/` (a `.git/`-style directory property), and
+  global lives at `~/.agents/skill-wiki` (`SKILL_WIKI_HOME` overrides). Scope
+  is decided by the path itself: the slug registry, the central root, and the
+  `~/.skill-creator/wiki` sidecar are retired, and a one-shot migration script
+  carries existing data over (conflicts are refused conservatively). Project
+  wikis need no registry at all.
+- **Fourth top-level Wiki panel** — `/wiki` lists every scope (global card plus
+  each registered workspace, with read-only counts, latest update, and honest
+  "Not initialized" empty states); `/wiki/:wsId` is the per-scope fragment list
+  with filter, append form, similarity warning, and draft-preserving
+  disconnects. The legacy view under Workspaces is gone and its entries point
+  at the new panel.
+- **`wiki.scopes` RPC** — global is always listed, uninitialized scopes are
+  never lazily created by a read, and counts share one read-only membership
+  rule with the list view (illegal file names and malformed frontmatter are
+  dropped in both places).
+- **`skill-creator wiki` subcommand** — assembled in-process from the new
+  skill-wiki cli-kit (`createWikiCli` host slots: resolveScope, commandPrefix,
+  extraCommands). `--workspace` accepts a registry label, a `ws_*` id, a path,
+  `~`, or `./` (default); `wiki scopes` gives the global overview with
+  `--json`.
+
+### Changed
+
+- **@jixoai/search replaces MiniSearch** — the org-level package keeps recall
+  and persistence in pluggable backends (sqlite FTS5 by default, Tantivy in
+  single-process deployments) with BM25 scoring frozen in a shared JS layer;
+  the daemon/CLI default is sqlite because Tantivy's directory lock is
+  single-writer (`SKILL_CREATOR_SEARCH_BACKEND` switches).
+
+### Fixed
+
+- **Search-engine handles now close** — the persistent index exposes `close()`
+  and daemon teardown awaits it, so stopping or restarting no longer leaks the
+  sqlite handle (on Windows this made every later index-directory delete fail
+  with EPERM). Cross-platform validation on a real Windows host covered the
+  packages, the search/wiki surfaces, and CLI smoke runs; 63 pre-existing
+  Windows-only failures outside these areas are catalogued in
+  `docs/search-design.md` §17 for a follow-up change.
+
 ## 2.2.0 (2026-09-20)
 
 A local BM25 skill-search index under the whole product, a first screen that

@@ -1,6 +1,6 @@
 {
   "name": "skill-creator",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "A local-first CLI and tray workbench for discovering, creating, validating, and installing agent skills.",
   "keywords": [
     "ccski",

@@ -163,27 +163,36 @@ export interface WikiWorkspace {
   rebuildIndex(): void;
 }
 
+/** 只读 scope 摘要：pattern 计数 + 最近 updated（单次遍历，零目录副作用）。 */
+export interface WikiPatternSummary {
+  patternCount: number;
+  /** 该 scope 全部成员 pattern 的 frontmatter `updated` 最大值；无成员 = null。 */
+  lastUpdated: string | null;
+}
+
 /**
- * 只读 pattern 计数（codex r1 P1）：与 listPatterns 同语义（仅统计 frontmatter
- * 可解析的 *.md，畸形页丢弃），但绝不创建任何目录——openWikiWorkspace 的
- * patterns/ 惰性 mkdir 不适用于读面（wiki.scopes / CLI scopes 索引）。目录
- * 未初始化（ENOENT/ENOTDIR）计 0；其它读取故障（EACCES/EIO）typed 上抛，
- * 不伪装成空。单页读取失败按集合语义丢弃该页。
+ * 只读 pattern 摘要（codex r1 P1 / r2 P2 语义）：与 listPatterns 同成员
+ * 判定（文件名过 PatternNameSchema + frontmatter 可解析，两处同弃），但
+ * 绝不创建任何目录——openWikiWorkspace 的 patterns/ 惰性 mkdir 不适用于
+ * 读面（wiki.scopes / CLI scopes 索引）。目录未初始化（ENOENT/ENOTDIR）
+ * 计 0 / null；其它读取故障（EACCES/EIO）typed 上抛，不伪装成空。单页
+ * 读取失败按集合语义丢弃该页。
  */
-export function countWikiPatterns(wikiDirectory: string): number {
+export function wikiPatternSummary(wikiDirectory: string): WikiPatternSummary {
   const patternsDir = path.join(wikiDirectory, "patterns");
   let entries: string[];
   try {
     entries = fs.readdirSync(patternsDir);
   } catch (error) {
     const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
-    if (code === "ENOENT" || code === "ENOTDIR") return 0;
+    if (code === "ENOENT" || code === "ENOTDIR") return { patternCount: 0, lastUpdated: null };
     throw new SkillWikiError(
       "WIKI_IO",
       `Cannot read the wiki patterns directory ${patternsDir}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   let count = 0;
+  let lastUpdated: string | null = null;
   for (const entry of entries.filter((name) => name.endsWith(".md")).sort()) {
     // 成员判定与 listPatterns 全等（codex r2 P2）：文件名去掉 .md 后须过
     // PatternNameSchema，frontmatter 须可解析——「frontmatter 合法但文件名
@@ -191,12 +200,16 @@ export function countWikiPatterns(wikiDirectory: string): number {
     if (!PatternNameSchema.safeParse(entry.replace(/\.md$/, "")).success) continue;
     try {
       const raw = fs.readFileSync(path.join(patternsDir, entry), "utf8");
-      if (parseFrontmatter(raw)) count += 1;
+      const frontmatter = parseFrontmatter(raw);
+      if (frontmatter) {
+        count += 1;
+        if (frontmatter.updated > (lastUpdated ?? "")) lastUpdated = frontmatter.updated;
+      }
     } catch {
       // 单页读取失败：按集合语义丢弃（计数的成员级降级，不影响其余页）。
     }
   }
-  return count;
+  return { patternCount: count, lastUpdated };
 }
 
 export function openWikiWorkspace(directory: string): WikiWorkspace {
