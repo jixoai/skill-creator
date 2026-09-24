@@ -35,13 +35,26 @@ const ALIASES: Record<string, string> = {
   "vercel-ai-gateway": "vercel",
 };
 
-/** zcode Registry provider 列表（与 src/daemon/model-catalog.ts 同一生成物）。 */
-async function ourProviderIds(): Promise<string[]> {
+/** zcode Registry provider 清单（与 model-catalog 同一生成物），附带
+ *  preset iconUrl——其 slug 是 logo 命中的第一候选（templateId→slug 映射
+ *  与 extractor 的 LOGO_SLUGS 同源，settings r2 P2：旧 ALIASES 不含
+ *  zai-api 等 templateId，14/20 provider 曾因此漏抓回退远程 URL）。 */
+async function ourProviders(): Promise<ReadonlyArray<{ provider: string; iconUrl?: string }>> {
   const { pathToFileURL } = await import("node:url");
   const mod = (await import(
     pathToFileURL(path.resolve(import.meta.dirname, "../src/daemon/zcode-presets.ts")).href
-  )) as { zcodePresets: ReadonlyArray<{ provider: string }> };
-  return [...new Set(mod.zcodePresets.map((p) => p.provider))];
+  )) as {
+    zcodePresets: ReadonlyArray<{ provider: string; iconUrl?: string }>;
+  };
+  const seen = new Map<string, { provider: string; iconUrl?: string }>();
+  for (const p of mod.zcodePresets) seen.set(p.provider, p);
+  return [...seen.values()];
+}
+
+/** preset.iconUrl（https://models.dev/logos/<slug>.svg）→ slug。 */
+function iconUrlSlug(iconUrl: string | undefined): string | null {
+  const m = iconUrl?.match(/^https:\/\/models\.dev\/logos\/([a-z0-9-]+)\.svg$/);
+  return m ? m[1]! : null;
 }
 
 async function fetchSvg(id: string): Promise<string | null> {
@@ -67,8 +80,10 @@ const placeholderHashes = new Set(
 const isPlaceholder = (svg: string): boolean =>
   placeholderHashes.has(createHash("sha256").update(svg).digest("hex"));
 
-const ids = await ourProviderIds();
-const candidatesFor = (id: string): string[] => [
+const providers = await ourProviders();
+const candidatesFor = (id: string, iconUrl: string | undefined): string[] => [
+  // 第一候选 = preset iconUrl 的 slug（extractor LOGO_SLUGS 同源映射）。
+  ...(iconUrlSlug(iconUrl) ? [iconUrlSlug(iconUrl)!] : []),
   id,
   ...(id.endsWith("-cn") ? [id.slice(0, -3)] : []),
   ...(ALIASES[id] ? [ALIASES[id]!] : []),
@@ -76,10 +91,10 @@ const candidatesFor = (id: string): string[] => [
 
 const entries: Array<[string, string]> = [];
 const missing: string[] = [];
-for (const id of ids) {
+for (const { provider: id, iconUrl } of providers) {
   let matched: string | null = null;
   let svg: string | null = null;
-  for (const candidate of candidatesFor(id)) {
+  for (const candidate of candidatesFor(id, iconUrl)) {
     const fetched = await fetchSvg(candidate);
     if (fetched !== null && !isPlaceholder(fetched)) {
       matched = candidate;

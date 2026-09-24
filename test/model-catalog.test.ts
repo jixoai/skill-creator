@@ -116,10 +116,11 @@ describe("model provider catalog", () => {
   });
 
   it("falls back through PROVIDER_ICONS → preset iconUrl → null", () => {
-    // 真实数据：zcode templateId 不在本仓 pi-ai 口径的 PROVIDER_ICONS 键里 → 外链。
-    expect(listModelProviders().find((p) => p.provider === "zai-api")?.icon).toBe(
-      "https://models.dev/logos/zai.svg",
-    );
+    // 真实数据：刷新脚本按 preset iconUrl slug 抓取（settings r2 P2）——
+    // zcode provider 全量命中仓内 dataURL，图标面运行时零网络。
+    for (const entry of listModelProviders()) {
+      expect(entry.icon).toMatch(/^data:image\/svg\+xml;base64,/);
+    }
     // 单元级回退序（注入假 icons 表）。
     const icons = { "zai-api": "data:image/svg+xml;base64,AAA" };
     expect(resolveProviderIcon("zai-api", "https://x/l.svg", icons)).toBe(
