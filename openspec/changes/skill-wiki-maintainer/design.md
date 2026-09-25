@@ -5,6 +5,12 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r14（2026-09-25）：按 r13 评审（/tmp/maintain-design-review-r13.md，7.2/10）
+> N/spec 重试口径同步 H 计数表（最多 2 次重试/共 3 次写页——消除跨面
+> 上限冲突）；U schema 块声明改依赖拓扑序（snapshot/detail 先于 view，
+> 原样可编译无 TDZ）；slugifyPatternTitle 返回 raw string（空串不冒充
+> PatternName，plan 收窄阶段单列）；cluster 排序全成员向量字典序（并列
+> 唯一可序）；scoreVersion 格式冻结（TOKENIZER_VERSION 拼接）。
 > r13（2026-09-25）：按 r12 评审（/tmp/maintain-design-review-r12.md，7.4/10）
 > McpProposalViewSchema 完整五分支判别联合（failed 强制 failureDetail/
 > rejected 携带 cause + McpProposalStatusSchema 定义）；attempts 计数表
@@ -578,8 +584,10 @@ union sourcePatternIds 后**按 runId 升序**重排序落盘。**键序 = 递�
   item 级结果由 ledger/counters 呈现）→ registry 返回 ok → proposal
   `executed`；queue 任务 typed 失败（run 已 cancelled/restarted →
   DISTILL_STALE、DISTILL_RUN_NOT_FOUND）→ proposal `failed`。
-  **apply IO 失败（页写/rebuild 抛 DISTILL_IO）**：队列任务有界自动重试
-  （≤3 次退避）；仍失败 → ledger 行落终态 `io-failed`（写路径状态未知，
+  **apply IO 失败（页写/rebuild 抛 DISTILL_IO）**：队列任务按 H 的
+  attempts 计数表有界重试（最多 2 次重试、共 3 次写页尝试——与 H/
+  tasks exact-bytes 同口径，r14）；仍失败 → ledger 行落终态
+  `io-failed`（写路径状态未知，
   人工检查后重跑 distill——不自动恢复）+ proposal `failed`
   （result.detail.code=DISTILL_IO）+ io-failed ∈
   TerminalDistillLedgerStatus（W），run 可继续收敛；重启扫描不复活
@@ -775,8 +783,33 @@ export const McpProposalStatusSchema = z.enum([
   "executed",
   "failed",
 ]);
+export const ProposalDecisionSnapshotSchema = z.strictObject({
+  proposalId: z.string(),
+  capability: z.string(),
+  input: z.unknown(),
+  status: McpProposalStatusSchema,
+  rejectedCause: z.enum(["human", "cancelled"]).optional(),
+  decidedAt: z.string().optional(),
+}); // 从 view 核心字段派生的非递归快照（currentView 载荷）
+export const CapabilityFailureDetailSchema = z.discriminatedUnion("code", [
+  z.strictObject({
+    code: z.literal("PROPOSAL_STALE"),
+    message: z.string(),
+    currentView: ProposalDecisionSnapshotSchema,
+    runId: z.string().optional(),
+    ordinal: z.number().int().nonnegative().optional(),
+  }),
+  z.strictObject({
+    code: DistillErrorCodeSchema.exclude(["PROPOSAL_STALE"]),
+    message: z.string(),
+    runId: z.string().optional(),
+    ordinal: z.number().int().nonnegative().optional(),
+  }),
+]); // currentView 条件由 discriminatedUnion 强制（非注释约束）
 // r13-P1.1：完整 proposal view 判别联合——failed 分支 schema 级强制
 // failureDetail，其余分支禁带；rejected 分支携带 cause。
+// r14-P2.1：声明顺序 = 依赖拓扑序（snapshot/detail 先于 view，原样
+// 可编译无 TDZ）。
 export const McpProposalViewSchema = z.discriminatedUnion("status", [
   z.strictObject({
     proposalId: z.string(),
@@ -822,29 +855,6 @@ export const McpProposalViewSchema = z.discriminatedUnion("status", [
     failureDetail: CapabilityFailureDetailSchema,
   }), // failed 必带（强制）
 ]);
-export const ProposalDecisionSnapshotSchema = z.strictObject({
-  proposalId: z.string(),
-  capability: z.string(),
-  input: z.unknown(),
-  status: McpProposalStatusSchema,
-  rejectedCause: z.enum(["human", "cancelled"]).optional(),
-  decidedAt: z.string().optional(),
-}); // 从 view 核心字段派生的非递归快照（currentView 载荷）
-export const CapabilityFailureDetailSchema = z.discriminatedUnion("code", [
-  z.strictObject({
-    code: z.literal("PROPOSAL_STALE"),
-    message: z.string(),
-    currentView: ProposalDecisionSnapshotSchema,
-    runId: z.string().optional(),
-    ordinal: z.number().int().nonnegative().optional(),
-  }),
-  z.strictObject({
-    code: DistillErrorCodeSchema.exclude(["PROPOSAL_STALE"]),
-    message: z.string(),
-    runId: z.string().optional(),
-    ordinal: z.number().int().nonnegative().optional(),
-  }),
-]); // currentView 条件由 discriminatedUnion 强制（非注释约束）
 // proposal view 扩展（contracts/agent.ts）：既有 result?: CapabilityCall
 // Result 在 executed/failed 分支保留（不改既有消费者）；failureDetail
 // 由 failed 分支强制、rejectedCause 由 rejected 分支强制（上方判别联合
@@ -902,9 +912,11 @@ SimilarClusterSchema = strictObject({
   members: ReadonlyArray<PatternName>   // 1..50；成员 name 升序（组内
                                         // canonical 排序，去重）
   score: number,                        // 聚类代表分
-})                                      // 数组序：score 降序 → 首成员
-                                        // name 升序（稳定 tie-break；
-                                        // r13-P2.2 冻结）
+})                                      // 数组序（r14-P2.3 完整键）：
+                                        // score 降序 → members 全向量
+                                        // 字典序升序（并列 cluster 唯一
+                                        // 可序；成员已组内排序去重 →
+                                        // 向量字典序无并列）
 DistillCorpus = strictObject({
   clusters: ReadonlyArray<SimilarCluster>,
   candidates: ReadonlyArray<strictObject({
@@ -925,8 +937,10 @@ DistillCorpus = strictObject({
                                                     // 候选自身 score < 阈值 →
                                                     // 证据不足，禁对其 absorb
   budgets: 消耗快照,
-  scoreVersion: string,        // @jixoai/search 打分/分词版本标识
-                               // （TOKENIZER_VERSION + 冻结 BM25 口径）
+  scoreVersion: string,        // 格式冻结：`${TOKENIZER_VERSION}/
+                               // bm25-frozen`（@jixoai/search 导出的
+                               // TOKENIZER_VERSION 常量拼接；digest 输入
+                               // 含此字段——打分语义变更必致 digest 变）
   corpusDigest: string,        // r12：digest 输入 = 全 DistillCorpus 对象
                                // （clusters 按 score 降序→成员 name 升序
                                // 稳定排序；candidates 按 name 升序；
@@ -939,7 +953,10 @@ DistillCorpus = strictObject({
 ```
 
 **slugify 共享契约（r11-P2.3；r12 冻结 = 现实现行为快照 v1）**：SDK
-导出 `slugifyPatternTitle(title) → PatternName`（现 workspace.ts 私有
+导出 `slugifyPatternTitle(title) → string`（**raw 变换**——可为空串，
+PatternNameSchema 首字符 [a-z0-9] 不收空串，故返回类型不冒充收窄值；
+plan 收窄阶段：raw 非空且过 PatternNameSchema 才得 PatternName，
+exact-name 写只接收收窄值；现 workspace.ts 私有
 slugify 提升为导出；**v1 行为 = 现实现逐字节快照**：小写化 + 连续
 [a-z0-9] 之外字符折叠为分隔符 + 首尾分隔符剥离 + 截断至 PatternName
 上限——非 ASCII（含汉字）被删除折叠，**不引入 transliteration/NFKC**
