@@ -37,7 +37,11 @@ import {
   type DistillProvenance,
   type PromotedFromEntry,
 } from "./schema.js";
-import { formatPromotedFrom, mergePromotedFromEntry } from "./promoted-from.js";
+import {
+  formatPromotedFrom,
+  inspectPromotedFrom,
+  mergePromotedFromEntry,
+} from "./promoted-from.js";
 
 /**
  * H 重放矩阵的「报告原终态，零写」集合：≠ E 的 TerminalDistillLedgerStatus——
@@ -304,7 +308,25 @@ export function applyDistillation(
       });
     }
     if (record?.status === "applying") {
-      // 崩溃于写后：纯恢复（rebuild + 补 commit；页已带本 run 足迹，不写页）。
+      // 崩溃恢复。hash 匹配只证明正文，足迹可能尚未落盘（onIntent 后、
+      // merge 写前崩溃——首放去重窗口）。校验信封含本 run 条目：缺则按
+      // 去重同款回填（frontmatter 原子写、正文逐字节不变 → hash 恒等），
+      // 杜绝把「正文已存在」当成「足迹已写入」提交 idempotent。
+      if (page === null) {
+        return result(typedItem.ordinal, "stale", { detail: "invalid-target" });
+      }
+      const envelope = inspectPromotedFrom(page.frontmatter.promotedFrom);
+      const hasFootprint =
+        envelope.kind === "present" &&
+        envelope.entries.some((candidate) => candidate.runId === entry.runId);
+      if (!hasFootprint) {
+        // 信封坏值时 merge typed 拒绝且零写（L 信封红线，与去重路径同款）。
+        const merged = mergePromotedFromEntry(page.frontmatter.promotedFrom, entry);
+        const updated = { ...page.frontmatter, updated: now, promotedFrom: merged.canonical };
+        io(`write create target ${targetName} (footprint recovery)`, () =>
+          atomicWritePatternFile(targetFile, formatPatternPage(updated, page.body)),
+        );
+      }
       io("rebuild index (create recovery)", () => reader.rebuildIndex());
       hooks?.onCommit?.({
         kind: "create",

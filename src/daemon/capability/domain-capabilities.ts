@@ -416,7 +416,10 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
       authority: "readonly",
       input: DistillStartInputSchema,
       handler: (input) =>
-        invoke(async () => domain.wikiDistill.start(DistillStartInputSchema.parse(input).source)),
+        invoke(async () => {
+          const parsed = DistillStartInputSchema.parse(input);
+          return domain.wikiDistill.start(parsed.source, parsed.limit);
+        }),
     },
     {
       name: "wiki.distill_status",

@@ -9,6 +9,14 @@
 > --limit 生效所需，缺省不变）；CLI 数据通路（IPC→oRPC 同源）与 GUI
 > 决定面就地展开（复用 AgentProposalCard，无独立 proposal 列表面）两条
 > 落地注记入 §4。
+> r19（2026-09-25，实现复核 r1 处置）：①启动重算收窄——终态 run 的
+> state/reason 冻结（timeout/kernel-unavailable 等无 ledger 行的 run 级
+> 失败原因不被 S 规则改写），counters 仍按 ledger 派生；非终态 run 维持
+> 无条件 S 重算。②CLI --json 形状澄清 = DistillStatusOutput 共享 schema
+> （proposalRefs 精简投影），ItemResult 全表语义由 ledger statuses 承载。
+> ③实现复核 r1 的四项代码缺陷（create 恢复足迹回填 / capability limit
+> 透传 / promotedFrom 坏值读投影 / admitBatch audit 尾部回滚）随本轮修复，
+> 回归测试各自钉死。
 > r17（2026-09-25）：按 r16 评审（/tmp/maintain-design-review-r16.md，7.7/10）
 > io-failed 可逆性裁决：永久终态（重启恢复仅限 applying 行；r16 的
 > 「status 轮询再触发恢复」表述作废）；N/spec 同步双预算（页写走
@@ -184,7 +192,11 @@ DistillJobService（daemon 内，独立于 agentSessions/转录存储）：
   toolFilter；deny 一切 propose/apply。
   「prompt 要求只输出 JSON」不是 authority 边界（r1 D4 评语），工具面才是。
 - CLI `wiki distill --workspace <ref> [--limit N(默认20,≤100)] [--json]`：
-  --json 输出 = start+status 轮询终态 + ItemResult 全表（同一 schema）。
+  --json 输出 = start+status 轮询至终态后的完整 `DistillStatusOutput`
+  （E 冻结共享 schema；逐项面 = proposalRefs 精简投影 ordinal/proposalId/
+  status）。「ItemResult 全表」语义由该共享 schema 的 per-proposal ledger
+  statuses 承载（与 GUI/RPC 三面同源，§O）；detail/appliedHash 是 ledger
+  行内部字段，不进 CLI 顶层输出。
   （r18 落地注记：CLI 经 IPC status 捕获 web token → daemon /ws/rpc 的
   oRPC client——与 WebUI 同一契约推导零手写镜像；awaiting-approval 时
   CLI 只提示 proposal 面审批并等待收敛，自身无决定面——审批红线在
@@ -426,10 +438,14 @@ attempts=0  未开始（或纯恢复分支已闭环）
 捕获记 daemon 日志，**不回滚①、不阻塞③**——store 为内存态非真相
 （M/LRU 同源哲学）；③ 照常执行；proposal 面短暂停留旧态（approved
 瞬态），由下次 store 写入或重启收敛；不引入跨存储补偿事务。
-**崩溃恢复 = run.json 是 ledger 的派生缓存（r12 裁决）**：store 为
-内存态（重启即空，B 既有裁决）；run.json 非真相——启动扫描对每个 run
-**无条件以 proposals.jsonl 全行按 S 优先级纯函数重算终态并回写**
-run.json（幂等；ledger-first/②后/③后任何崩溃点都收敛到同一终态）。
+**崩溃恢复 = run.json 是 ledger 的派生缓存（r12 裁决；r19 收窄）**：store 为
+内存态（重启即空，B 既有裁决）；run.json 非真相——启动扫描对每个 run 按
+proposals.jsonl 全行以 S 优先级纯函数重算并回写 run.json（幂等；ledger-
+first/②后/③后任何崩溃点都收敛到同一终态）。**非终态 run 无条件全量重算**
+（state/reason/counters）；**终态 run 的 state/reason 冻结**——timeout/
+kernel-unavailable 等无 ledger 行的 run 级失败原因不被 S 规则 1 改写为
+completed（重算会伪造从未发生的审批收敛），仅 counters 按 ledger 派生刷新
+（不同才写、时间戳保留 → 字节幂等）。
 三个崩溃点 fixture：①后②前 / ②后③前 / ③后——重启重算结果一致
 （字节级 run.json 断言）。
 

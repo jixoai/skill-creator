@@ -227,8 +227,10 @@ export function createMcpProposalStore(
           return { created: [], refused: items.length };
         }
         // 回滚快照（I 的持久化失败语义；内存态 = 原子快照）：同一临界区
-        // 回收最旧 deficit 个 terminal + 全批创建；异常恢复进入前快照。
+        // 回收最旧 deficit 个 terminal + 全批创建；异常恢复进入前快照
+        // （proposals map + audit 尾部——createAll 的 created 事件不得残留）。
         const snapshot = new Map(proposals);
+        const auditMark = auditLog.length;
         try {
           for (const victim of terminal.slice(0, deficit)) {
             proposals.delete(victim.proposalId);
@@ -237,6 +239,7 @@ export function createMcpProposalStore(
         } catch (error) {
           proposals.clear();
           for (const [id, view] of snapshot) proposals.set(id, view);
+          auditLog.length = auditMark;
           throw new DomainError(
             "DISTILL_IO",
             `proposal admission failed (phase=admission); store rolled back to the pre-admission snapshot`,
@@ -245,11 +248,13 @@ export function createMcpProposalStore(
         }
       }
       const snapshot = new Map(proposals);
+      const auditMark = auditLog.length;
       try {
         return { created: createAll(items), refused: 0 };
       } catch (error) {
         proposals.clear();
         for (const [id, view] of snapshot) proposals.set(id, view);
+        auditLog.length = auditMark;
         throw new DomainError(
           "DISTILL_IO",
           `proposal admission failed (phase=admission); store rolled back to the pre-admission snapshot`,

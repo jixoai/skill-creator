@@ -206,6 +206,37 @@ describe("manager domain capability registration (tasks 1.2)", () => {
     expect(result).toEqual({ kind: "ok", value: { results: [searchResultFixture] } });
   });
 
+  it("forwards the optional limit through wiki.distill_start (capability face parity with RPC)", async () => {
+    // 复核 r1 P2 实证：capability 面曾只透传 source，合法 limit 被静默丢弃。
+    const calls: Array<[string, number | undefined]> = [];
+    const domain = {
+      ...stubDomain(),
+      wikiDistill: {
+        start: async (source: string, limit?: number) => {
+          calls.push([source, limit]);
+          return { runId: "wd_fixture", state: "running" };
+        },
+      },
+    } as unknown as DaemonDomain;
+    const local = createManagerCapabilityRegistry(domain);
+    const withLimit = await local.call(
+      "wiki.distill_start",
+      { source: "ws_6644bf561bc3c2e7f00b1b69", limit: 7 },
+      "agent",
+    );
+    expect(withLimit.kind).toBe("ok");
+    const without = await local.call(
+      "wiki.distill_start",
+      { source: "ws_6644bf561bc3c2e7f00b1b6a" },
+      "agent",
+    );
+    expect(without.kind).toBe("ok");
+    expect(calls).toEqual([
+      ["ws_6644bf561bc3c2e7f00b1b69", 7],
+      ["ws_6644bf561bc3c2e7f00b1b6a", undefined],
+    ]);
+  });
+
   it("normalizes DomainError into typed failed results", async () => {
     const result = await registry.call(
       "workspace.add",

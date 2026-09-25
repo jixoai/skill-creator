@@ -448,6 +448,66 @@ describe("applyDistillation: create 矩阵", () => {
     expect(recorder.events.map((event) => event.phase)).toEqual(["intent", "commit"]);
   });
 
+  it("applying + same-body page missing this run's footprint (crash between intent and footprint write): recovery backfills it", () => {
+    const dir = makeTempDir();
+    seedPage(dir, "pin-exit-codes", "Gate on exit codes.\n");
+    const item = planCreate(dir, "Pin Exit Codes", "Gate on exit codes.\n");
+    // 崩溃窗口模拟：ledger 已 applying（onIntent 落盘）但足迹写尚未发生——
+    // 修复前该场景被当成「页已带足迹」直接提交 idempotent，provenance 永久丢失。
+    const recorder = hookRecorder();
+    const result = applyDistillation(dir, item, provenanceA, {
+      ledgerRecord: createRecord(item, "applying", 1),
+      hooks: recorder.hooks,
+    });
+    expect(result.status).toBe("idempotent");
+    const read = openWikiWorkspace(dir).readPattern("pin-exit-codes");
+    expect(read.frontmatter.promotedFrom).toBe(footprintA);
+    expect(read.body).toBe("Gate on exit codes.\n");
+    expect(recorder.events.map((event) => event.phase)).toEqual(["commit"]);
+  });
+
+  it("applying + page already carries this run's footprint: pure recovery, page bytes untouched", () => {
+    const dir = makeTempDir();
+    seedPage(dir, "pin-exit-codes", "Gate on exit codes.\n");
+    const item = planCreate(dir, "Pin Exit Codes", "Gate on exit codes.\n");
+    applyDistillation(dir, item, provenanceA); // 首放去重：足迹已回填
+    const bytes = readBytes(dir, "pin-exit-codes");
+    const recorder = hookRecorder();
+    const result = applyDistillation(dir, item, provenanceA, {
+      ledgerRecord: createRecord(item, "applying", 1),
+      hooks: recorder.hooks,
+    });
+    expect(result.status).toBe("idempotent");
+    expect(readBytes(dir, "pin-exit-codes")).toBe(bytes);
+    expect(recorder.events.map((event) => event.phase)).toEqual(["commit"]);
+  });
+
+  it("applying + same-body page with an invalid promotedFrom envelope: typed reject, page bytes preserved", () => {
+    const dir = makeTempDir();
+    seedPage(dir, "pin-exit-codes", "Gate on exit codes.\n");
+    const item = planCreate(dir, "Pin Exit Codes", "Gate on exit codes.\n");
+    applyDistillation(dir, item, provenanceA); // 足迹就位后在位破坏信封（正文不动 → hash 仍匹配）
+    fs.writeFileSync(
+      pageFile(dir, "pin-exit-codes"),
+      readBytes(dir, "pin-exit-codes").replace(
+        /^promotedFrom: .*$/m,
+        "promotedFrom: not-an-envelope",
+      ),
+    );
+    const bytes = readBytes(dir, "pin-exit-codes");
+    let thrown: unknown;
+    try {
+      applyDistillation(dir, item, provenanceA, {
+        ledgerRecord: createRecord(item, "applying", 1),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(SkillWikiError);
+    expect((thrown as SkillWikiError).code).toBe("WIKI_INVALID_PATTERN");
+    expect(readBytes(dir, "pin-exit-codes")).toBe(bytes);
+  });
+
   it("applied + page deleted: manual rollback — stale, never re-appends the page", () => {
     const dir = makeTempDir();
     const item = planCreate(dir, "Pin Exit Codes", "Gate on exit codes.\n");

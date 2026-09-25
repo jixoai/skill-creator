@@ -200,6 +200,29 @@ describe("mcp proposal admission transaction + decision CAS (tasks 1.3/1.4)", ()
     expect(snapshotOf(proposals)).toBe(before);
   });
 
+  it("mid-batch admission fault rolls back the proposals map and the audit tail (no ghost created events)", () => {
+    const proposals = decidedStore();
+    // getter 故障注入（复核 r1 P3 实证探针同款）：首项成功落 map+audit，
+    // 第二项在临界区内爆炸 → 回滚必须同时还原 proposals 与 audit 尾部。
+    let accesses = 0;
+    const bomb = {
+      get capability() {
+        accesses += 1;
+        if (accesses > 1) throw new Error("fault injection: second item explodes");
+        return "skills.toggle";
+      },
+      input: { skillIds: ["sk_bomb"] },
+    };
+    try {
+      proposals.admitBatch([{ capability: "skills.toggle", input: { skillIds: ["sk_a"] } }, bomb]);
+      expect.unreachable("admitBatch must propagate the fault");
+    } catch (error) {
+      expect((error as DomainError).code).toBe("DISTILL_IO");
+    }
+    expect(proposals.list()).toEqual([]);
+    expect(proposals.audit()).toEqual([]);
+  });
+
   it("reclaims oldest terminal inside the same critical section when the full batch fits", async () => {
     const proposals = decidedStore();
     await fill(proposals, 60, 4, 0); // free=0, terminal=4（decidedAt 升序 = 执行序）

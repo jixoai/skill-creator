@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   SkillWikiError,
   globalWikiDirectory,
+  listWikiPatternsReadOnly,
   openWikiWorkspace,
   patternContentHash,
   resolveWikiDirectory,
@@ -203,6 +204,36 @@ describe("WikiWorkspace patterns", () => {
     const wiki = openWikiWorkspace(dir);
     expect(wiki.listPatterns()[0]?.promotedFrom).toBeNull();
     expect(wiki.readPattern("hand-written").frontmatter.promotedFrom).toBeNull();
+  });
+
+  it("projects an invalid promotedFrom envelope to null on every read face, preserving the original bytes", () => {
+    const dir = makeTempDir();
+    const patterns = path.join(dir, "patterns");
+    fs.mkdirSync(patterns, { recursive: true });
+    // 非空坏值（非法 JSON 信封）：读投影一律 null（L 信封法——不伪装空足迹、
+    // 不清洗原文），原文件逐字节保留，等待人工修复。
+    fs.writeFileSync(
+      path.join(patterns, "bad-envelope.md"),
+      [
+        "---",
+        "title: Bad envelope",
+        "created: 2026-09-25T10:00:00.000Z",
+        "updated: 2026-09-25T10:00:00.000Z",
+        "origin: ~",
+        "promotedFrom: not-an-envelope",
+        "---",
+        "",
+        "body",
+        "",
+      ].join("\n"),
+    );
+    const pagePath = path.join(patterns, "bad-envelope.md");
+    const before = fs.readFileSync(pagePath, "utf8");
+    const wiki = openWikiWorkspace(dir);
+    expect(wiki.listPatterns()[0]?.promotedFrom).toBeNull();
+    expect(listWikiPatternsReadOnly(dir)[0]?.promotedFrom).toBeNull();
+    expect(wiki.readPattern("bad-envelope").frontmatter.promotedFrom).toBeNull();
+    expect(fs.readFileSync(pagePath, "utf8")).toBe(before);
   });
 
   it("rejects empty/oversized titles before writing anything", () => {

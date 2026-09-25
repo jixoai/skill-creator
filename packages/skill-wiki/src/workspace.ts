@@ -21,6 +21,7 @@
  * 逐行解析（title/created/updated/origin/promotedFrom 均为单行标量）。
  */
 import { createHash } from "node:crypto";
+import { inspectPromotedFrom } from "./distill/promoted-from.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -110,6 +111,12 @@ function parseFrontmatter(raw: string): PatternFrontmatter | null {
   }
   const parsed = PatternFrontmatterSchema.safeParse(fields);
   return parsed.success ? parsed.data : null;
+}
+
+/** promotedFrom 读投影：合法信封原样保留；坏值/无足迹投影 null（L 信封法——
+ *  不伪装空足迹、不清洗原文；调用方对坏值的处置是提示人工修复）。 */
+function readablePromotedFrom(raw: string | null): string | null {
+  return inspectPromotedFrom(raw).kind === "present" ? raw : null;
 }
 
 /** 页面正文剥离 frontmatter 后的剩余字节（与 listPatterns/readPattern 同口径）。 */
@@ -272,7 +279,7 @@ export function listWikiPatternsReadOnly(wikiDirectory: string): PatternListItem
         name,
         title: frontmatter.title,
         origin: frontmatter.origin,
-        promotedFrom: frontmatter.promotedFrom,
+        promotedFrom: readablePromotedFrom(frontmatter.promotedFrom),
         updated: frontmatter.updated,
         contentHash: patternContentHash(stripFrontmatter(raw)),
       });
@@ -330,7 +337,7 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
           name: file.replace(/\.md$/, ""),
           title: frontmatter.title,
           origin: frontmatter.origin,
-          promotedFrom: frontmatter.promotedFrom,
+          promotedFrom: readablePromotedFrom(frontmatter.promotedFrom),
           updated: frontmatter.updated,
           contentHash: patternContentHash(body),
         });
@@ -349,7 +356,13 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
           `Pattern frontmatter is incompatible: ${narrowed}`,
         );
       }
-      return { frontmatter, body: stripFrontmatter(raw) };
+      return {
+        frontmatter: {
+          ...frontmatter,
+          promotedFrom: readablePromotedFrom(frontmatter.promotedFrom),
+        },
+        body: stripFrontmatter(raw),
+      };
     },
 
     readPatternRaw(name) {
