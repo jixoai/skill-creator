@@ -71,4 +71,7 @@ webui/src/lib/stores/__tests__/wiki-distill.test.ts` +
       桌面/窄屏走查（探针 + vision）（r1 FAIL→窄屏修复→复判 PASS；
       promoted 幽灵徽章经 fixture 核对 + 单测 + 重启后 DOM 断言
       （正文 0 次出现）三方坐实并关闭）
-- [ ] 1.7 独立复核轮（codex；非自评）+ 全量 `pnpm check` + 归档
+- [x] 1.7 独立复核轮（codex；非自评）+ 全量 `pnpm check` + 归档
+      （五轮闭环：r1 8.0 → r2 8.2 → r3 9.0 → r4 9.0 → r5 9.5，r5 裁定
+      「可归档」无新发现；处置链 d5691d5/r19 + 8ea9e3c/r20 +
+      23e133a/r21 + d690faa/r22；全量门禁 1528 绿 + build + pack）
