@@ -59,12 +59,16 @@ test/mcp-proposals.test.ts test/wiki-distill-service.test.ts`
       MCP result envelope——同一 Zod schema（CapabilityFailureDetailSchema）
       四面（capability/MCP/proposal/RPC）逐码解析断言 +
       typecheck 负测）
-- [ ] 1.5 CLI `wiki distill`（--workspace/--limit 默认20≤100/--json 同
+- [x] 1.5 CLI `wiki distill`（--workspace/--limit 默认20≤100/--json 同
       schema）+ 端到端（kernel stub：合法/混合非法/全非法）
       门禁：`pnpm exec vitest run test/skill-creator-wiki-cli.test.ts`
-- [ ] 1.6 GUI 入口（WikiScopeView workspace scope「Distill to global」：
+      （补注：CLI 端到端实为 `test/wiki-distill-cli.test.ts`（8 用例，
+      61fd5c7..724fd99 落地；文件漏 add，随 1.6 走查修复一并补交））
+- [x] 1.6 GUI 入口（WikiScopeView workspace scope「Distill to global」：
       start→进度→跳 proposal 面）+ route/store 测试
       门禁：`pnpm --dir webui check && pnpm exec vitest run
 webui/src/lib/stores/__tests__/wiki-distill.test.ts` +
-      桌面/窄屏走查（探针 + vision）
+      桌面/窄屏走查（探针 + vision）（r1 FAIL→窄屏修复→复判 PASS；
+      promoted 幽灵徽章经 fixture 核对 + 单测 + 重启后 DOM 断言
+      （正文 0 次出现）三方坐实并关闭）
 - [ ] 1.7 独立复核轮（codex；非自评）+ 全量 `pnpm check` + 归档

@@ -234,13 +234,15 @@
 </script>
 
 <div class="flex h-full flex-col overflow-y-auto p-5">
-  <header class="flex shrink-0 items-start justify-between gap-3 border-b border-border pb-4">
-    <div class="min-w-0">
+  <header
+    class="flex shrink-0 items-start justify-between gap-3 border-b border-border pb-4 max-[720px]:flex-col max-[720px]:gap-2.5"
+  >
+    <div class="min-w-0 max-[720px]:w-full">
       <div class="flex items-center gap-2">
         <Button
           variant="ghost"
           size="icon"
-          class="h-8 w-8 shrink-0"
+          class="h-8 w-8 shrink-0 max-[720px]:h-11 max-[720px]:w-11"
           title="Back to wiki scopes"
           aria-label="Back to wiki scopes"
           onclick={() => void goto("/wiki")}
@@ -261,16 +263,16 @@
         {:else}
           <Badge variant="secondary" class="shrink-0">workspace</Badge>
         {/if}
-        <span class="min-w-0">
+        <span class="min-w-0 max-[720px]:truncate">
           Persistent notes for {scopeLabel} — fragments collected here feed skill evolution.
         </span>
       </p>
     </div>
-    <div class="flex shrink-0 items-center gap-1.5">
+    <div class="flex shrink-0 items-center gap-1.5 max-[720px]:w-full">
       <Button
         variant="ghost"
         size="icon"
-        class="h-9 w-9"
+        class="h-9 w-9 max-[720px]:h-11 max-[720px]:w-11"
         title="Refresh wiki"
         aria-label="Refresh wiki"
         disabled={wikiState.loading}
@@ -286,6 +288,7 @@
         <Button
           size="sm"
           variant="outline"
+          class="max-[720px]:h-11"
           title="Distill this workspace's fragments into the global wiki"
           disabled={distillBusy}
           onclick={() => void beginDistill()}
@@ -294,7 +297,7 @@
           Distill to global
         </Button>
       {/if}
-      <Button size="sm" onclick={openForm}>
+      <Button size="sm" class="max-[720px]:h-11" onclick={openForm}>
         <IconPlus class="h-4 w-4" />
         Add fragment
       </Button>
@@ -405,7 +408,12 @@
             </Button>
           {/if}
           {#if !distillBusy}
-            <Button size="sm" variant="ghost" onclick={() => resetWikiDistill()}>Dismiss</Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              class="max-[720px]:h-11"
+              onclick={() => resetWikiDistill()}>Dismiss</Button
+            >
           {/if}
         </div>
 
