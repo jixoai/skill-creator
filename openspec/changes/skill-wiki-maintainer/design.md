@@ -5,6 +5,11 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r15（2026-09-25）：按 r14 评审（/tmp/maintain-design-review-r14.md，8.3/10）
+> attempts 语义唯一化 = 已失败的写页尝试次数（失败后递增；剩余允许 =
+> 3 - attempts；重启重放同一条计数规则，撤销 r13「不耗新预算」例外）；
+> digest 段 clusters 排序同步全向量字典序键（与 SimilarCluster 同一
+> 规则）。
 > r14（2026-09-25）：按 r13 评审（/tmp/maintain-design-review-r13.md，7.2/10）
 > N/spec 重试口径同步 H 计数表（最多 2 次重试/共 3 次写页——消除跨面
 > 上限冲突）；U schema 块声明改依赖拓扑序（snapshot/detail 先于 view，
@@ -355,20 +360,21 @@ kind="create"：
 - 任何 commit 之前 index 必为已重建状态：恢复分支
   `applying|applied 且 已落盘` **必须先 rebuild index 再补写 commit**；
   rebuild 失败 → typed DISTILL_IO，项保持 applying（仍可恢复）。
-- **durable retry（r11-P1.2；r12-P1.1 跨存储协议；r13-P1.2 计数表）**：
-  intent 行携带 `attempts: int ≥0`（**已消耗重试次数**——语义与计数表
-  如下，r13 冻结：首放写页 = 第 1 次尝试且不计数；写页 IO 失败 → 重试
-  前 attempts 原子 +1；attempts 计到 3 时的那次尝试为最后一次，仍失败
-  → 落 io-failed）：
+- **durable retry（r11-P1.2；r12-P1.1 跨存储协议；r15 语义唯一化）**：
+  intent 行携带 `attempts: int ≥0`（r15 冻结：**已失败的写页尝试
+  次数**——每次写页尝试**失败后**原子 +1；不是「已消耗重试数」也不
+  是「重试前递增」；总预算 = 3 次写页尝试）：
 
 ```text
-attempts=0  首放写页（第 1 次尝试，未消耗重试）
- 失败 → attempts=1 → 重试（第 2 次尝试）
- 失败 → attempts=2 → 重试（第 3 次尝试）
- 失败 → attempts=3 → **不再写页**，落终态 io-failed
-（即：1 次首放 + 2 次重试 = 最多 3 次写页尝试）
-重启恢复：attempts ≥ 3 → 直接落 io-failed；< 3 → 按 H 矩阵重放，
-不消耗新预算（重放 = 恢复既有尝试，非新重试）
+attempts=0  首放写页（第 1 次尝试）
+ 失败 → attempts=1（第 1 次失败）→ 第 2 次写页
+ 失败 → attempts=2（第 2 次失败）→ 第 3 次写页
+ 失败 → attempts=3（第 3 次失败）→ **不再写页**，落终态 io-failed
+（1 次首放 + 2 次重试 = 最多 3 次写页尝试；attempts 恒 = 已失败
+ 尝试数；剩余允许尝试 = 3 - attempts）
+重启恢复：attempts ≥ 3 → 直接落 io-failed；< 3 → 按 H 矩阵重放
+（重放消耗剩余预算：attempts 会在其后的失败中继续递增——与运行中
+ 语义同一条计数规则，无「不耗新预算」例外，r15 撤销 r13 的旧表述）
 ```
 
 重试耗尽的写序与崩溃恢复：
@@ -942,8 +948,9 @@ DistillCorpus = strictObject({
                                // TOKENIZER_VERSION 常量拼接；digest 输入
                                // 含此字段——打分语义变更必致 digest 变）
   corpusDigest: string,        // r12：digest 输入 = 全 DistillCorpus 对象
-                               // （clusters 按 score 降序→成员 name 升序
-                               // 稳定排序；candidates 按 name 升序；
+                               // （clusters 按 score 降序→members 全
+                               // 向量字典序升序——与 SimilarCluster
+                               // 排序键同一规则；candidates 按 name 升序；
                                // retrieval/evidenceThreshold/budgets/
                                // scoreVersion 全纳入；排除 corpusDigest
                                // 自身）的 canonical JSON（递归字典序键、
