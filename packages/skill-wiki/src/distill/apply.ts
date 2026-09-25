@@ -244,14 +244,8 @@ export function applyDistillation(
       if (attemptsExhausted()) {
         return result(typedItem.ordinal, "io-failed", { detail: "attempts-exhausted" });
       }
-      hooks?.onIntent?.({
-        kind: "absorb",
-        ordinal: typedItem.ordinal,
-        status: "applying",
-        beforeHash,
-        afterHash,
-        attempts: intentAttempts,
-      });
+      // 纯计算前置于预留（r21/r22 同款裁决）：edits 试算 + 信封合并 + 页面
+      // 序列化零副作用——patch-failed 与坏信封 typed 拒绝都不消耗写页预算。
       let nextBody: string;
       try {
         nextBody = applyEdits(page.body, typedItem.proposal.edits);
@@ -263,9 +257,16 @@ export function applyDistillation(
       }
       const merged = mergePromotedFromEntry(page.frontmatter.promotedFrom, entry);
       const updated = { ...page.frontmatter, updated: now, promotedFrom: merged.canonical };
-      io(`write absorb target ${target}`, () =>
-        atomicWritePatternFile(targetFile, formatPatternPage(updated, nextBody)),
-      );
+      const nextRaw = formatPatternPage(updated, nextBody);
+      hooks?.onIntent?.({
+        kind: "absorb",
+        ordinal: typedItem.ordinal,
+        status: "applying",
+        beforeHash,
+        afterHash,
+        attempts: intentAttempts,
+      });
+      io(`write absorb target ${target}`, () => atomicWritePatternFile(targetFile, nextRaw));
       io("rebuild index (absorb apply)", () => reader.rebuildIndex());
       hooks?.onCommit?.({
         kind: "absorb",

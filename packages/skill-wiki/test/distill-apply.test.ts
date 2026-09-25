@@ -247,7 +247,7 @@ describe("applyDistillation: absorb 矩阵", () => {
     expect(originalBytes).not.toBe("no frontmatter at all\n");
   });
 
-  it("anchor miss during execution: patch-failed with zero page writes (intent recorded, no commit)", () => {
+  it("anchor miss during execution: patch-failed with zero page writes and zero events (budget untouched)", () => {
     const dir = makeTempDir();
     seedPage(dir, "gate-exits", "Branch on exit code.\n");
     const item = planAbsorb(dir, "gate-exits", "\nAlso use pipefail.");
@@ -267,7 +267,31 @@ describe("applyDistillation: absorb 矩阵", () => {
     const result = applyDistillation(dir, sabotaged, provenanceA, { hooks: recorder.hooks });
     expect(result).toEqual({ ordinal: 0, status: "patch-failed" });
     expect(readBytes(dir, "gate-exits")).toBe(beforeBytes);
-    expect(recorder.events.map((event) => event.phase)).toEqual(["intent"]);
+    // 纯试算前置于预留：patch-failed 终态不消耗写页预算（r22 裁决）。
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("absorb onto a bad promotedFrom envelope: typed reject before reservation (zero events, budget untouched)", () => {
+    const dir = makeTempDir();
+    seedPage(dir, "gate-exits", "Branch on exit code.\n");
+    const item = planAbsorb(dir, "gate-exits", "\nAlso use pipefail.");
+    // 在位破坏信封（正文/锚点不动 → edits 试算通过，merge 处 typed 拒绝）。
+    fs.writeFileSync(
+      pageFile(dir, "gate-exits"),
+      readBytes(dir, "gate-exits").replace(/^promotedFrom: .*$/m, "promotedFrom: not-an-envelope"),
+    );
+    const bytes = readBytes(dir, "gate-exits");
+    const recorder = hookRecorder();
+    let thrown: unknown;
+    try {
+      applyDistillation(dir, item, provenanceA, { hooks: recorder.hooks });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(SkillWikiError);
+    expect((thrown as SkillWikiError).code).toBe("WIKI_INVALID_PATTERN");
+    expect(readBytes(dir, "gate-exits")).toBe(bytes);
+    expect(recorder.events).toEqual([]);
   });
 
   it("pending ledger record: typed refusal, zero writes, no hooks — approval red line (even with a missing target)", () => {
