@@ -5,6 +5,10 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r18（2026-09-25，实现轮）：DistillStartInput 增 optional limit（CLI
+> --limit 生效所需，缺省不变）；CLI 数据通路（IPC→oRPC 同源）与 GUI
+> 决定面就地展开（复用 AgentProposalCard，无独立 proposal 列表面）两条
+> 落地注记入 §4。
 > r17（2026-09-25）：按 r16 评审（/tmp/maintain-design-review-r16.md，7.7/10）
 > io-failed 可逆性裁决：永久终态（重启恢复仅限 applying 行；r16 的
 > 「status 轮询再触发恢复」表述作废）；N/spec 同步双预算（页写走
@@ -181,6 +185,14 @@ DistillJobService（daemon 内，独立于 agentSessions/转录存储）：
   「prompt 要求只输出 JSON」不是 authority 边界（r1 D4 评语），工具面才是。
 - CLI `wiki distill --workspace <ref> [--limit N(默认20,≤100)] [--json]`：
   --json 输出 = start+status 轮询终态 + ItemResult 全表（同一 schema）。
+  （r18 落地注记：CLI 经 IPC status 捕获 web token → daemon /ws/rpc 的
+  oRPC client——与 WebUI 同一契约推导零手写镜像；awaiting-approval 时
+  CLI 只提示 proposal 面审批并等待收敛，自身无决定面——审批红线在
+  human-ui。GUI 侧 r18 落地注记：「跳 proposal 面」实现为蒸馏进度卡内
+  就地展开决定面——复用既有 AgentProposalCard 渲染 wiki.distill_apply
+  提案行（approve/reject 走 agent.proposals.* 既有路径）；因 GUI 无
+  独立 proposal 列表面，且 ephemeral 会话不进面板/转录——原「跳转」
+  措辞作废，语义 = 同一决定能力就地呈现。）
 
 ## 5. Run registry 与 proposal 容量（P1-3 / P1-5）
 
@@ -277,7 +289,10 @@ EphemeralSession 完整接口。保留标题仅为评审对照。
 **单一 phase 契约——无独立 phase 字段，RunState 即阶段真相**）：
 
 ```ts
-DistillStartInput  = { source: WorkspaceId }          // 同 source 活跃 run ≤1
+DistillStartInput  = { source: WorkspaceId;           // 同 source 活跃 run ≤1
+                    limit?: int 1..100 }   // r18 实现轮裁决：CLI
+                    // --limit 真实生效需过契约（可选、缺省行为不变；上限与
+                    // DISTILL_BUDGETS.patternsPerRun 的同源性由契约测试钉死）
 DistillStartOutput = { runId }
 DistillStatusOutput = strictObject({
   runId; state: RunState;

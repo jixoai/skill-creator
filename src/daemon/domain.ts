@@ -24,7 +24,11 @@ import { appDir } from "../shared/paths.js";
 
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
 import { createWikiService, type WikiService } from "./wiki-service.js";
-import { createWikiDistillService, type DistillJobService } from "./wiki-distill-service.js";
+import {
+  createWikiDistillService,
+  type DistillJobDeps,
+  type DistillJobService,
+} from "./wiki-distill-service.js";
 import { createSkillSearchService, type SkillSearchService } from "./skill-search/service.js";
 import { platformOpenFile, type SearchConfigOpener } from "./search-config-opener.js";
 import { createDialogService, type DialogService } from "./dialog-service.js";
@@ -124,6 +128,11 @@ export function createDaemonDomain(
     /** 测试注入 search-config 打开 stub：避免真实 OS 副作用。 */
     searchConfigOpener?: SearchConfigOpener;
     dialog?: DialogService;
+    /**
+     * 测试注入蒸馏 ephemeral 会话工厂（task 1.5 端到端）：经 DistillJobDeps 的
+     * 既有 seam（1.3）替换真实 kernel 驱动；缺省走 kernel handle（生产路径）。
+     */
+    distillSession?: DistillJobDeps["createSession"];
   } = {},
 ): DaemonDomain {
   const kernelHostRef: { handle: DshKernelHandle | null } = { handle: null };
@@ -185,6 +194,7 @@ export function createDaemonDomain(
     workspaces,
     kernel: () => kernelHostRef.handle,
     proposals: () => proposalsRef.store,
+    ...(options.distillSession ? { createSession: options.distillSession } : {}),
   });
   const domain: DaemonDomain = {
     workspaces,

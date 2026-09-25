@@ -377,15 +377,22 @@ function readPatternSnapshots(wikiDirectory: string, bodyCap: number): PatternSn
  * - clusters：source workspace 内相似簇（findSimilarPatterns 相对分 ≥ 0.35）；
  * - candidates：global wiki 对 source 语料 query 的 top-5（raw BM25 score，阈值
  *   判定在 planDistillation）；
- * - 同语料两次构建 canonical 序与 digest 一致（distillCorpusDigest 保证）。
+ * - 同语料两次构建 canonical 序与 digest 一致（distillCorpusDigest 保证）；
+ * - limit（task 1.5 CLI --limit）：source patterns 截取数，缺省
+ *   corpusPatternDefault(20)，上限 patternsPerRun(100)（防御性钳制）。
  */
 async function buildCorpus(
   sourceWikiDirectory: string,
   globalWikiDirectoryPath: string,
+  limit?: number,
 ): Promise<DistillCorpus> {
+  const patternLimit = Math.min(
+    limit ?? DISTILL_BUDGETS.corpusPatternDefault,
+    DISTILL_BUDGETS.patternsPerRun,
+  );
   const sources = readPatternSnapshots(sourceWikiDirectory, DISTILL_BUDGETS.patternBodyChars).slice(
     0,
-    DISTILL_BUDGETS.corpusPatternDefault,
+    patternLimit,
   );
   const globals = readPatternSnapshots(globalWikiDirectoryPath, DISTILL_BUDGETS.patternBodyChars);
 
@@ -501,8 +508,12 @@ export type DistillApplyFn = (
 ) => DistillItemResult | Promise<DistillItemResult>;
 
 export interface DistillJobService {
-  /** 同 source 活跃 run ≤1；corpus 落盘 → kernel（有界）→ plan → 原子 admission。 */
-  start(source: WorkspaceId): Promise<{ runId: string }>;
+  /**
+   * 同 source 活跃 run ≤1；corpus 落盘 → kernel（有界）→ plan → 原子 admission。
+   * limit（task 1.5）：语料 source patterns 截取数（缺省 corpusPatternDefault；
+   * 1..patternsPerRun，越界 typed DISTILL_LIMIT——CLI/RPC 已校验，此处防御复核）。
+   */
+  start(source: WorkspaceId, limit?: number): Promise<{ runId: string }>;
   /** 终态幂等可轮询；损坏 run → typed DISTILL_IO。 */
   status(runId: string): Promise<DistillStatusOutput>;
   /** kernel-running → dispose+cancelled；awaiting-approval → C 失效语义；终态幂等。 */
@@ -1213,12 +1224,21 @@ export function createWikiDistillService(deps: DistillJobDeps): DistillJobServic
 
   /* ---------------- 公共面 ---------------- */
 
-  async function start(source: WorkspaceId): Promise<{ runId: string }> {
+  async function start(source: WorkspaceId, limit?: number): Promise<{ runId: string }> {
     await recover();
     if (source === "~") {
       throw new DomainError(
         "INVALID_OPERATION",
         "distill source must be an imported workspace (the global scope has no source patterns)",
+      );
+    }
+    if (
+      limit !== undefined &&
+      (!Number.isSafeInteger(limit) || limit < 1 || limit > DISTILL_BUDGETS.patternsPerRun)
+    ) {
+      throw distillError(
+        "DISTILL_LIMIT",
+        `distill limit must be an integer in 1..${DISTILL_BUDGETS.patternsPerRun} (got ${String(limit)})`,
       );
     }
     const workspace = deps.workspaces.lookup(source);
@@ -1267,7 +1287,7 @@ export function createWikiDistillService(deps: DistillJobDeps): DistillJobServic
     try {
       persistRun(entry);
       appendLogFileLine(directory, `run started: source=${source}`);
-      corpus = await buildCorpusFn(workspaceWikiDirectory(workspace.path), globalDirOf());
+      corpus = await buildCorpusFn(workspaceWikiDirectory(workspace.path), globalDirOf(), limit);
       atomicWrite(path.join(directory, "corpus.json"), `${JSON.stringify(corpus, null, 2)}\n`);
       entry.file.corpusDigest = corpus.corpusDigest;
     } catch (error) {

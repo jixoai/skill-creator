@@ -111,6 +111,58 @@ export default defineConfig({
             path.join(projectRoot, "webui/src/lib/__tests__/stubs/webstorage-globals-setup.ts"),
           ],
           include: ["webui/src/**/*.test.ts"],
+          // *.dom.test.ts 归 webui-dom 项目（客户端 mount 需要 browser conditions，
+          // 不与本项目的 server 语义组件编译混跑）。
+          exclude: ["webui/src/**/*.dom.test.ts"],
+          globals: false,
+          fileParallelism: false,
+          testTimeout: 20_000,
+        },
+      },
+      {
+        // webui 组件级 DOM 测试（skill-wiki-maintainer 1.6 起）：jsdom + browser
+        // resolve conditions，使 svelte 编译为客户端运行时——mount()/事件委托可用。
+        // 与 webui 项目互斥：仅收 *.dom.test.ts。
+        plugins: [
+          createRequire(path.join(projectRoot, "webui", "package.json"))(
+            "@sveltejs/vite-plugin-svelte",
+          ).svelte(),
+        ],
+        resolve: {
+          conditions: ["browser"],
+          alias: [
+            { find: "$shared", replacement: path.join(projectRoot, "src/shared") },
+            { find: "$lib", replacement: path.join(projectRoot, "webui/src/lib") },
+            {
+              find: "$app/navigation",
+              replacement: path.join(
+                projectRoot,
+                "webui/src/lib/__tests__/stubs/app-navigation-stub.ts",
+              ),
+            },
+            {
+              find: "$app/state",
+              replacement: path.join(
+                projectRoot,
+                "webui/src/lib/__tests__/stubs/app-state-stub.ts",
+              ),
+            },
+            {
+              find: /^@lucide\/svelte\/icons\/.*$/,
+              replacement: path.join(
+                projectRoot,
+                "webui/src/lib/__tests__/stubs/lucide-icon-mocks.js",
+              ),
+            },
+          ],
+        },
+        test: {
+          name: "webui-dom",
+          environment: "jsdom",
+          setupFiles: [
+            path.join(projectRoot, "webui/src/lib/__tests__/stubs/webstorage-globals-setup.ts"),
+          ],
+          include: ["webui/src/**/*.dom.test.ts"],
           globals: false,
           fileParallelism: false,
           testTimeout: 20_000,

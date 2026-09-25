@@ -140,7 +140,7 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       // 蒸馏编排（skill-wiki-maintainer 1.3）：DomainError（DISTILL_*）经统一边界。
       distill: {
         start: rpc.wiki.distill.start.handler(async ({ input }) =>
-          domain.wikiDistill.start(input.source),
+          domain.wikiDistill.start(input.source, input.limit),
         ),
         status: rpc.wiki.distill.status.handler(async ({ input }) =>
           domain.wikiDistill.status(input.runId),

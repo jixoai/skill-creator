@@ -7,6 +7,8 @@
  * 修订 [2026-09-22]（wiki-directory-standard 2.3 spec）：`skill-creator wiki <子命令>`
  * 经 skill-wiki cli-kit 组装——--workspace 支持 registry label/ws_id 只读解析与
  * 路径直传；含 scopes 扩展命令；进程内执行（无 daemon 依赖）。
+ * 修订 [2026-09-25]（skill-wiki-maintainer tasks 1.5）：`wiki distill` 扩展命令经
+ * daemon RPC（wiki.distill.start/status）驱动——蒸馏是 daemon 编排，不本地起服务。
  * 正交意图：
  * 1. 解析并路由公开 CLI 命令。
  * 2. 通过带版本、运行时校验的 IPC 协议调用 daemon。
@@ -14,7 +16,9 @@
  * 4. 向终端投影 daemon 与 tray 状态，并只由显式命令打开系统浏览器。
  * 5. 进程内子命令装配（不 import kernel/MCP/domain，动态 import 延迟加载）：
  *    search 的 query/flag 解析与结果投影；wiki 的 createWikiCli 宿主插槽注入
- *    （registry 只读 scope 解析 + scopes 全局视角命令）与退出码透传。
+ *    （registry 只读 scope 解析 + scopes 全局视角命令 + distill 命令单元的
+ *    source 解析与 daemon RPC 装配，实现物理隔离在 src/cli/wiki-distill.ts）
+ *    与退出码透传。
  *
  * Routing:
  *   skill-creator start   -> spawn daemon + open tray window
@@ -23,7 +27,8 @@
  *   skill-creator status  -> query daemon status
  *   skill-creator stop    -> graceful daemon shutdown
  *   skill-creator search  -> in-process BM25 skill search (no daemon)
- *   skill-creator wiki    -> in-process skill-wiki kit subcommands (no daemon)
+ *   skill-creator wiki    -> in-process skill-wiki kit subcommands (no daemon),
+ *                            except `wiki distill` which drives the daemon RPC
  *   skill-creator help    -> print command help
  *   skill-creator version -> print version
  *
@@ -546,6 +551,22 @@ interface WikiScopeRow {
 }
 
 /**
+ * 路径形状判定（resolveScope 与 resolveDistillSource 共用口径）：`~`（global）、
+ * 绝对路径、./ ../ . .. 前缀、或含任一平台分隔符（codex r1 P2：Windows 的
+ * `.\foo`/`foo\bar` 曾落入 label 匹配）。
+ */
+function isPathShapedRef(trimmed: string): boolean {
+  return (
+    trimmed === "~" ||
+    trimmed === "." ||
+    trimmed === ".." ||
+    path.isAbsolute(trimmed) ||
+    trimmed.includes("/") ||
+    trimmed.includes("\\")
+  );
+}
+
+/**
  * 进程内只读读取 workspaces.json（appDir 受 SKILL_CREATOR_HOME 尊重）：
  * 文件缺失（仅 ENOENT）/ JSON 或 schema 不兼容 → 空注册面（label 解析退化
  * 为零匹配）；其它读取 IO 故障（EACCES/EIO 等）→ 上抛（非用法错误，不
@@ -591,12 +612,14 @@ function processWikiIo(): CliIo {
 /**
  * `skill-creator wiki <子命令>`（wiki-directory-standard 2.3）：argv 中 wiki 之后
  * 的部分交给 createWikiCli 组装实例。退出码透传 wiki 域（2/3/4/5）；scope 解析
- * 失败（label 歧义/零匹配）统一用法错误 exit 2。进程内执行，无 daemon 依赖。
+ * 失败（label 歧义/零匹配）统一用法错误 exit 2。进程内执行，无 daemon 依赖；
+ * 唯一例外 `wiki distill`（task 1.5）——蒸馏是 daemon 编排，经 wiki.distill RPC。
  */
 async function runWiki(): Promise<number> {
-  const [wikiKit, registryState] = await Promise.all([
+  const [wikiKit, registryState, distillModule] = await Promise.all([
     import("skill-wiki"),
     import("../daemon/workspace-registry/state.js"),
+    import("./wiki-distill.js"),
   ]);
   const {
     createWikiCli,
@@ -623,16 +646,7 @@ async function runWiki(): Promise<number> {
     const trimmed = (requested ?? "./").trim();
     // 非法形状（空/纯空白/NUL）交默认解析收窄为 typed WIKI_INVALID_SCOPE（exit 3）。
     if (trimmed.length === 0 || trimmed.includes("\0")) return resolveWikiDirectory(trimmed);
-    // 路径形状直传：`~`（global）、绝对路径、./ ../ . .. 前缀、或含任一平台
-    // 分隔符（codex r1 P2：Windows 的 `.\foo`/`foo\bar` 曾落入 label 匹配）。
-    if (
-      trimmed === "~" ||
-      trimmed === "." ||
-      trimmed === ".." ||
-      path.isAbsolute(trimmed) ||
-      trimmed.includes("/") ||
-      trimmed.includes("\\")
-    ) {
+    if (isPathShapedRef(trimmed)) {
       return resolveWikiDirectory(trimmed);
     }
     const entries = loadWikiRegistryEntries(stateSchema);
@@ -694,10 +708,79 @@ async function runWiki(): Promise<number> {
     },
   };
 
+  /**
+   * distill 的 source 解析（task 1.5）：裸 token = ws_* id 精确或 label 前缀
+   * （与 resolveScope 同口径，但返回 WorkspaceId 而非 wiki 目录）；路径形状
+   * （含缺省 `./`）→ realpath 反查 registry；`~`/未注册路径 → 用法错误
+   * （start 只接受 Imported Workspace——global 无 source patterns）。
+   */
+  const resolveDistillSource = async (requested: string | undefined): Promise<string> => {
+    const trimmed = (requested ?? "./").trim();
+    if (trimmed.length > 0 && !trimmed.includes("\0") && !isPathShapedRef(trimmed)) {
+      const entries = loadWikiRegistryEntries(stateSchema);
+      const idMatches = entries.filter((entry) => entry.id === trimmed);
+      const matches =
+        idMatches.length > 0
+          ? idMatches
+          : entries.filter((entry) => entry.label.toLowerCase().startsWith(trimmed.toLowerCase()));
+      if (matches.length === 1) return matches[0].id;
+      if (matches.length > 1) {
+        throw new WikiUsageError(
+          `ambiguous workspace "${trimmed}": matches ${matches
+            .map((entry) => `"${entry.label}" (${entry.id})`)
+            .join(", ")}`,
+        );
+      }
+      const known = entries.map((entry) => entry.id).join(", ");
+      throw new WikiUsageError(
+        `no workspace matches "${trimmed}" (${known ? `registered: ${known}` : "registry is empty"}; ` +
+          "distill requires a registered imported workspace)",
+      );
+    }
+    if (trimmed === "~") {
+      throw new WikiUsageError(
+        'distill source must be a registered imported workspace ("~" is the global scope and has no source patterns)',
+      );
+    }
+    if (trimmed.length === 0 || trimmed.includes("\0")) {
+      throw new WikiUsageError("distill requires a --workspace reference");
+    }
+    let resolved: string;
+    try {
+      resolved = fs.realpathSync(path.resolve(trimmed));
+    } catch (error) {
+      throw new WikiUsageError(
+        `cannot resolve workspace path "${trimmed}": ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    for (const entry of loadWikiRegistryEntries(stateSchema)) {
+      let registered: string | null = null;
+      try {
+        registered = fs.realpathSync(entry.path);
+      } catch {
+        continue; // 注册目录已消失：跳过（可用性由 workspace.list 投影呈现）
+      }
+      if (registered === resolved) return entry.id;
+    }
+    throw new WikiUsageError(
+      `"${trimmed}" is not a registered imported workspace (register it in the Workspaces app, ` +
+        "or address it by label/ws_* id)",
+    );
+  };
+
   const cli = createWikiCli({
     commandPrefix: "skill-creator wiki",
     resolveScope,
-    extraCommands: { scopes },
+    extraCommands: {
+      scopes,
+      distill: distillModule.createWikiDistillCommand({
+        requestStatus,
+        resolveSource: resolveDistillSource,
+        cliVersion: CLI_VERSION,
+      }),
+    },
   });
   return cli.run(rest, processWikiIo());
 }
@@ -717,7 +800,7 @@ const COMMANDS = {
   },
   wiki: {
     description:
-      "Persistent agent-experience wiki (list/show/add/find/edit/remove/log/impact/scopes)",
+      "Persistent agent-experience wiki (list/show/add/find/edit/remove/log/impact/scopes/distill)",
     run: () => runWiki(),
   },
   mcp: {

@@ -179,6 +179,32 @@ describe("WikiWorkspace patterns", () => {
     expect(read.body.replace(/\n$/, "")).toBe("content here");
   });
 
+  it("reads hand-written YAML null promotedFrom as null (no phantom badge)", () => {
+    const dir = makeTempDir();
+    const patterns = path.join(dir, "patterns");
+    fs.mkdirSync(patterns, { recursive: true });
+    // 手写 YAML 的合法 null 字面量——逐行解析器读到字符串 "null"，必须归一
+    // （走查实证：否则 promotedFrom 真值化 → UI 幽灵 promoted 徽章）。
+    fs.writeFileSync(
+      path.join(patterns, "hand-written.md"),
+      [
+        "---",
+        "title: Hand written",
+        "created: 2026-09-25T10:00:00.000Z",
+        "updated: 2026-09-25T10:00:00.000Z",
+        "origin: ~",
+        "promotedFrom: null",
+        "---",
+        "",
+        "body",
+        "",
+      ].join("\n"),
+    );
+    const wiki = openWikiWorkspace(dir);
+    expect(wiki.listPatterns()[0]?.promotedFrom).toBeNull();
+    expect(wiki.readPattern("hand-written").frontmatter.promotedFrom).toBeNull();
+  });
+
   it("rejects empty/oversized titles before writing anything", () => {
     const dir = makeTempDir();
     const wiki = openWikiWorkspace(dir);

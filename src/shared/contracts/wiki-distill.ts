@@ -106,8 +106,17 @@ export const DistillCountersSchema = z.strictObject(
 );
 export type DistillCounters = z.infer<typeof DistillCountersSchema>;
 
-/** start 输入：同 source 活跃 run ≤1（重复 → DISTILL_ACTIVE_RUN）。 */
-export const DistillStartInputSchema = z.strictObject({ source: WorkspaceIdSchema });
+/**
+ * start 输入：同 source 活跃 run ≤1（重复 → DISTILL_ACTIVE_RUN）。
+ * limit（task 1.5）：单 run 参与语料判定的 workspace pattern 数——缺省 =
+ * skill-wiki DISTILL_BUDGETS.corpusPatternDefault(20)，上限 = patternsPerRun(100)。
+ * 数值与本文件 browser-safe 约束（不 import skill-wiki）冲突，故字面量冻结；
+ * 与预算常量的同步由 test/wiki-distill-cli.test.ts 的同源断言钉死。
+ */
+export const DistillStartInputSchema = z.strictObject({
+  source: WorkspaceIdSchema,
+  limit: z.number().int().min(1).max(100).optional(),
+});
 export type DistillStartInput = z.infer<typeof DistillStartInputSchema>;
 
 /** start 输出。 */

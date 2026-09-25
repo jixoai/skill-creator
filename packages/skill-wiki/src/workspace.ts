@@ -99,9 +99,11 @@ function parseFrontmatter(raw: string): PatternFrontmatter | null {
     const pair = /^([a-zA-Z]+):\s*(.*)$/.exec(line);
     if (pair) fields[pair[1]] = pair[2].replace(/^"|"$/g, "");
   }
-  // 写入格式里 promotedFrom 为空串（本 scope 原生 null 的往返形态）；schema
-  // 侧 nullable 接受空串前先归一为 null，其余字段原样交给 strict 收窄。
-  if (fields.promotedFrom === "") {
+  // 写入格式里 promotedFrom 为空串（本 scope 原生 null 的往返形态）；手写
+  // YAML 的 null 字面量（"null"——逐行解析器不产 JS null）同归一。schema
+  // 侧 nullable 接受前先归一为 null，其余字段原样交给 strict 收窄
+  // （走查实证：手写 `promotedFrom: null` 曾被读成真值串 → 幽灵 promoted 徽章）。
+  if (fields.promotedFrom === "" || fields.promotedFrom === "null") {
     const normalized = { ...fields, promotedFrom: null } as unknown as Record<string, unknown>;
     const parsed = PatternFrontmatterSchema.safeParse(normalized);
     return parsed.success ? parsed.data : null;

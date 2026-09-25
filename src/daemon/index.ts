@@ -27,6 +27,7 @@ import { createSkillCreatorMcpServer } from "./mcp/skill-creator-mcp.js";
 import { mountTray, type TrayHost } from "./tray-host.js";
 import { log } from "./log.js";
 import type { OpenTrayAppLaunchOptions } from "opentray";
+import type { DistillJobDeps } from "./wiki-distill-service.js";
 
 /** 生产与开发 daemon 入口共享的启动配置。 */
 export interface DaemonOptions {
@@ -49,6 +50,11 @@ export interface DaemonOptions {
   appLaunch?: OpenTrayAppLaunchOptions;
   /** Native tray mount adapter; replace only at the daemon lifecycle test boundary. */
   trayMounter?: typeof mountTray;
+  /**
+   * 测试注入蒸馏 ephemeral 会话工厂（task 1.5 端到端）：经 DistillJobDeps 的
+   * 既有 seam 转发 createDaemonDomain；生产 daemon 不传（走真实 kernel）。
+   */
+  distillSession?: DistillJobDeps["createSession"];
   exitProcess?: (code: number) => void;
 }
 
@@ -184,7 +190,10 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
 
   let domain: DaemonDomain;
   try {
-    domain = createDaemonDomain();
+    domain = createDaemonDomain(
+      undefined,
+      opts.distillSession ? { distillSession: opts.distillSession } : {},
+    );
   } catch (error) {
     await ipc.stop();
     throw error;
