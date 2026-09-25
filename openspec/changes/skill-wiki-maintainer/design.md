@@ -5,6 +5,13 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r13（2026-09-25）：按 r12 评审（/tmp/maintain-design-review-r12.md，7.4/10）
+> McpProposalViewSchema 完整五分支判别联合（failed 强制 failureDetail/
+> rejected 携带 cause + McpProposalStatusSchema 定义）；attempts 计数表
+> 冻结（1 首放 + 2 重试 = 3 次写页尝试）+ 同进程 store 投影异常处置
+> （不回滚不阻塞、日志断言）；slugify raw 导出 + 空串策略二分（append
+> 保留 pattern 回退，蒸馏 empty-slug）；SimilarClusterSchema 冻结；
+> tasks 1.3 补三崩溃点/attempts 字节级/投影异常绿门。
 > r12（2026-09-25）：按 r11 评审（/tmp/maintain-design-review-r11.md，7.2/10）
 > 跨存储崩溃协议：run.json = ledger 派生缓存，启动无条件按 S 纯函数重算
 > （三崩溃点 fixture）；H intent 示例补 attempts:0；U schema 去递归
@@ -342,18 +349,36 @@ kind="create"：
 - 任何 commit 之前 index 必为已重建状态：恢复分支
   `applying|applied 且 已落盘` **必须先 rebuild index 再补写 commit**；
   rebuild 失败 → typed DISTILL_IO，项保持 applying（仍可恢复）。
-- **durable retry（r11-P1.2；r12-P1.1 补跨存储协议）**：intent 行携带
-  `attempts: int ≥0`（首放恒 0；每次重试**前**整文件原子重写 +1；
-  预算 = 3；attempts ≥ 3 → 仅终态收敛不再写页）。重试耗尽的写序与
-  崩溃恢复：
-  **写序（ledger-first）**：① ledger 行 → io-failed → ② proposal store
-  投影 failed（内存态）→ ③ run.json 按 S 优先级重算。
-  **崩溃恢复 = run.json 是 ledger 的派生缓存（r12 裁决）**：store 为
-  内存态（重启即空，B 既有裁决）；run.json 非真相——启动扫描对每个 run
-  **无条件以 proposals.jsonl 全行按 S 优先级纯函数重算终态并回写**
-  run.json（幂等；ledger-first/②后/③后任何崩溃点都收敛到同一终态）。
-  三个崩溃点 fixture：①后②前 / ②后③前 / ③后——重启重算结果一致
-  （字节级 run.json 断言）。
+- **durable retry（r11-P1.2；r12-P1.1 跨存储协议；r13-P1.2 计数表）**：
+  intent 行携带 `attempts: int ≥0`（**已消耗重试次数**——语义与计数表
+  如下，r13 冻结：首放写页 = 第 1 次尝试且不计数；写页 IO 失败 → 重试
+  前 attempts 原子 +1；attempts 计到 3 时的那次尝试为最后一次，仍失败
+  → 落 io-failed）：
+
+```text
+attempts=0  首放写页（第 1 次尝试，未消耗重试）
+ 失败 → attempts=1 → 重试（第 2 次尝试）
+ 失败 → attempts=2 → 重试（第 3 次尝试）
+ 失败 → attempts=3 → **不再写页**，落终态 io-failed
+（即：1 次首放 + 2 次重试 = 最多 3 次写页尝试）
+重启恢复：attempts ≥ 3 → 直接落 io-failed；< 3 → 按 H 矩阵重放，
+不消耗新预算（重放 = 恢复既有尝试，非新重试）
+```
+
+重试耗尽的写序与崩溃恢复：
+**写序（ledger-first）**：① ledger 行 → io-failed → ② proposal store
+投影 failed（内存态）→ ③ run.json 按 S 优先级重算。
+**同进程投影异常（r13-P1.2）**：② store 投影更新抛错/失败 → 队列任务
+捕获记 daemon 日志，**不回滚①、不阻塞③**——store 为内存态非真相
+（M/LRU 同源哲学）；③ 照常执行；proposal 面短暂停留旧态（approved
+瞬态），由下次 store 写入或重启收敛；不引入跨存储补偿事务。
+**崩溃恢复 = run.json 是 ledger 的派生缓存（r12 裁决）**：store 为
+内存态（重启即空，B 既有裁决）；run.json 非真相——启动扫描对每个 run
+**无条件以 proposals.jsonl 全行按 S 优先级纯函数重算终态并回写**
+run.json（幂等；ledger-first/②后/③后任何崩溃点都收敛到同一终态）。
+三个崩溃点 fixture：①后②前 / ②后③前 / ③后——重启重算结果一致
+（字节级 run.json 断言）。
+
 - SDK/宿主边界：`applyDistillation(globalWikiDir, item, provenance,
 options?)`——`options.hooks = { onIntent(record), onCommit(record) }`
   （可选）。SDK 驱动顺序契约：onIntent → 页原子写 → index rebuild →
@@ -743,6 +768,60 @@ export const DistillErrorCodeSchema = z.enum([
 ]);
 // currentView 携带非递归快照（r12：避免 view↔detail 循环引用——
 // 不含 result/failureDetail，仅决定时刻核心投影）
+export const McpProposalStatusSchema = z.enum([
+  "pending",
+  "approved",
+  "rejected",
+  "executed",
+  "failed",
+]);
+// r13-P1.1：完整 proposal view 判别联合——failed 分支 schema 级强制
+// failureDetail，其余分支禁带；rejected 分支携带 cause。
+export const McpProposalViewSchema = z.discriminatedUnion("status", [
+  z.strictObject({
+    proposalId: z.string(),
+    capability: z.string(),
+    input: z.unknown(),
+    status: z.literal("pending"),
+    createdAt: z.string(),
+  }),
+  z.strictObject({
+    proposalId: z.string(),
+    capability: z.string(),
+    input: z.unknown(),
+    status: z.literal("approved"),
+    createdAt: z.string(),
+    decidedAt: z.string(),
+  }),
+  z.strictObject({
+    proposalId: z.string(),
+    capability: z.string(),
+    input: z.unknown(),
+    status: z.literal("rejected"),
+    createdAt: z.string(),
+    decidedAt: z.string(),
+    rejectedCause: z.enum(["human", "cancelled"]),
+  }),
+  z.strictObject({
+    proposalId: z.string(),
+    capability: z.string(),
+    input: z.unknown(),
+    status: z.literal("executed"),
+    createdAt: z.string(),
+    decidedAt: z.string(),
+    result: CapabilityCallResultSchema,
+  }),
+  z.strictObject({
+    proposalId: z.string(),
+    capability: z.string(),
+    input: z.unknown(),
+    status: z.literal("failed"),
+    createdAt: z.string(),
+    decidedAt: z.string(),
+    result: CapabilityCallResultSchema, // 既有字段保留
+    failureDetail: CapabilityFailureDetailSchema,
+  }), // failed 必带（强制）
+]);
 export const ProposalDecisionSnapshotSchema = z.strictObject({
   proposalId: z.string(),
   capability: z.string(),
@@ -750,7 +829,7 @@ export const ProposalDecisionSnapshotSchema = z.strictObject({
   status: McpProposalStatusSchema,
   rejectedCause: z.enum(["human", "cancelled"]).optional(),
   decidedAt: z.string().optional(),
-});
+}); // 从 view 核心字段派生的非递归快照（currentView 载荷）
 export const CapabilityFailureDetailSchema = z.discriminatedUnion("code", [
   z.strictObject({
     code: z.literal("PROPOSAL_STALE"),
@@ -766,10 +845,10 @@ export const CapabilityFailureDetailSchema = z.discriminatedUnion("code", [
     ordinal: z.number().int().nonnegative().optional(),
   }),
 ]); // currentView 条件由 discriminatedUnion 强制（非注释约束）
-// proposal view 扩展（contracts/agent.ts；既有 result?:
-// CapabilityCallResult 保持不变，新增并行字段——不改既有消费者）：
-//   failureDetail?: CapabilityFailureDetailSchema（status=failed 时必带）
-//   rejectedCause?: z.enum(["human", "cancelled"])
+// proposal view 扩展（contracts/agent.ts）：既有 result?: CapabilityCall
+// Result 在 executed/failed 分支保留（不改既有消费者）；failureDetail
+// 由 failed 分支强制、rejectedCause 由 rejected 分支强制（上方判别联合
+// 即唯一 wire 形状——r13，无注释级约束）
 // reject 传输联合（store/RPC 同形）：
 //   成功 → { view: McpProposalViewSchema }
 //   late reject → typed throw PROPOSAL_STALE（oRPC error data =
@@ -819,6 +898,13 @@ S 的判定量冻结：ledgerRows = proposals.jsonl 全行（= plan item 总数�
 **Corpus 输入冻结（r8 P2-3；可复现性契约）**：
 
 ```ts
+SimilarClusterSchema = strictObject({
+  members: ReadonlyArray<PatternName>   // 1..50；成员 name 升序（组内
+                                        // canonical 排序，去重）
+  score: number,                        // 聚类代表分
+})                                      // 数组序：score 降序 → 首成员
+                                        // name 升序（稳定 tie-break；
+                                        // r13-P2.2 冻结）
 DistillCorpus = strictObject({
   clusters: ReadonlyArray<SimilarCluster>,
   candidates: ReadonlyArray<strictObject({
@@ -858,11 +944,14 @@ slugify 提升为导出；**v1 行为 = 现实现逐字节快照**：小写化 +
 [a-z0-9] 之外字符折叠为分隔符 + 首尾分隔符剥离 + 截断至 PatternName
 上限——非 ASCII（含汉字）被删除折叠，**不引入 transliteration/NFKC**
 （r12 裁决：不虚构未实现的折叠算法）；空 title 由 Zod title(1..120)
-拒绝；非空 title 但 slug 结果为空（纯汉字等）→ plan 期
-model-invalid(empty-slug)）。蒸馏 plan/apply 与 appendPattern 复用同一
-导出；apply 的 create 写路径 = exact-name 原语（占用检查 + 原子写），
-不复用 appendPattern 的 -N 分支。fixture：纯汉字标题 → empty-slug/
-非 ASCII 混合/截断/同名冲突。
+拒绝）。**空结果的调用方策略二分（r13-P2.1 闭合同源冲突）**：导出的
+`slugifyPatternTitle` 为**raw 变换**（空结果原样返回空串，不内建
+fallback）——appendPattern 以 `slugifyPatternTitle(title) || "pattern"`
+保留既有回退行为（调用方策略，行为不变）；蒸馏 plan 用 raw 结果，
+空 → model-invalid(empty-slug)。同源 = 变换函数唯一；空串策略归属
+调用方。apply 的 create 写路径 = exact-name 原语（占用检查 + 原子写），
+不复用 appendPattern 的 -N 分支。fixture：纯汉字标题 → 蒸馏 empty-slug
+且 append 落 pattern（双路断言）/非 ASCII 混合/截断/同名冲突。
 
 **同 run target 冲突（r8-P2.4，r10 裁决：plan 期拒绝，不做审批序胜者）**：
 planDistillation 检测同 run 内多 create 的 targetPatternName 相同、或

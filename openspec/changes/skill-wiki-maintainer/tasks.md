@@ -35,10 +35,15 @@ test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
       决定 CAS：approve+reject 与 approve+approve 并发三面终态唯一/
       approved 后 cancel → failed+expired、迟到 reject 抛 PROPOSAL_STALE
       且重复同 cause reject 幂等/enqueue 完成语义 executed 仅在队列终态后
-      投影/apply IO 失败：重试耗尽 → io-failed 终态 + proposal failed
-      (DISTILL_IO) + run 收敛/取消=expired vs 人工拒绝=rejected 二分 +
-      reject 队列 IO 失败 fail-closed/末项终态触发 completed + 终态后
-      同 source 二次 start 允许 + 全 not-proposed → failed(capacity)/
+      投影/apply IO 失败：attempts 计数表（0 首放/1/2 重试/3 收敛——
+      exact ledger bytes 断言）+ 重试耗尽 → io-failed 终态 +
+      proposal failed (DISTILL_IO) + run 收敛/三崩溃点 fixture
+      （①ledger 后②store 前/②后③run.json 前/③后）：重启重算
+      run.json 字节级一致 + store 空态 + 重复恢复幂等/同进程 store
+      投影异常：不回滚①不阻塞③（daemon 日志断言）/取消=expired vs
+      人工拒绝=rejected 二分 + reject 队列 IO 失败 fail-closed/
+      末项终态触发 completed + 终态后同 source 二次 start 允许 +
+      全 not-proposed → failed(capacity)/
       零 proposal → failed(no-valid-proposals)/损坏 run 目录 pin
       fail-closed）
 - [ ] 1.4 proposal 桥：容量 admission（§5/I）+ wiki.distill_apply
