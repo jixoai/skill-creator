@@ -1,7 +1,10 @@
 /**
  * 用户原始需求 [2026-09-25]（openspec change skill-wiki-maintainer design §4 / tasks 1.5）：
  * 「CLI `wiki distill --workspace <ref> [--limit N(默认20,≤100)] [--json]`：
- * --json 输出 = start+status 轮询终态 + ItemResult 全表（同一 schema，E 冻结）」。
+ * --json 输出 = start+status 轮询至终态后的完整 DistillStatusOutput（E 冻结
+ * 共享 schema；r19 澄清——「ItemResult 全表」语义由 per-proposal ledger
+ * statuses（proposalRefs 精简投影）承载，detail/appliedHash 是 ledger 行
+ * 内部字段，不进 CLI 顶层输出）」。
  *
  * 正交意图：
  *   [1] wiki distill 命令单元（skill-wiki cli-kit 的 extraCommands 形状）：

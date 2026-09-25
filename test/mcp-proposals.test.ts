@@ -223,6 +223,36 @@ describe("mcp proposal admission transaction + decision CAS (tasks 1.3/1.4)", ()
     expect(proposals.audit()).toEqual([]);
   });
 
+  it("mid-batch fault at a saturated audit ring restores the full pre-admission audit log", async () => {
+    const proposals = decidedStore();
+    // 灌满环形缓冲（created+rejected 每对 2 事件；130 对 = 260 > 256 上限，
+    // 最旧事件已被淘汰），使 createAll 的 appendAudit 在临界区内触发淘汰。
+    for (let index = 0; index < 130; index += 1) {
+      const created = proposals.create("skills.toggle", { skillIds: [`sk_r${index}`] });
+      await proposals.reject(created.proposalId);
+    }
+    const auditBefore = JSON.stringify(proposals.audit());
+    const listBefore = JSON.stringify(proposals.list());
+    let accesses = 0;
+    const bomb = {
+      get capability() {
+        accesses += 1;
+        if (accesses > 1) throw new Error("fault injection: second item explodes");
+        return "skills.toggle";
+      },
+      input: { skillIds: ["sk_bomb"] },
+    };
+    try {
+      proposals.admitBatch([{ capability: "skills.toggle", input: { skillIds: ["sk_a"] } }, bomb]);
+      expect.unreachable("admitBatch must propagate the fault");
+    } catch (error) {
+      expect((error as DomainError).code).toBe("DISTILL_IO");
+    }
+    // 满缓冲下截断无法还原被淘汰前驱——必须整表快照恢复（复核 r2 P3）。
+    expect(JSON.stringify(proposals.audit())).toBe(auditBefore);
+    expect(JSON.stringify(proposals.list())).toBe(listBefore);
+  });
+
   it("reclaims oldest terminal inside the same critical section when the full batch fits", async () => {
     const proposals = decidedStore();
     await fill(proposals, 60, 4, 0); // free=0, terminal=4（decidedAt 升序 = 执行序）

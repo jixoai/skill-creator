@@ -236,6 +236,36 @@ describe("WikiWorkspace patterns", () => {
     expect(fs.readFileSync(pagePath, "utf8")).toBe(before);
   });
 
+  it("projects an empty promotedFrom envelope [] to null (no-footprint), preserving the original bytes", () => {
+    const dir = makeTempDir();
+    const patterns = path.join(dir, "patterns");
+    fs.mkdirSync(patterns, { recursive: true });
+    // 空数组是合法 JSON 但语义 = 无足迹（design：存储值恒非空数组）——
+    // 读投影 null，不把真值空信封漏给 UI 徽章；磁盘原文不动。
+    fs.writeFileSync(
+      path.join(patterns, "empty-envelope.md"),
+      [
+        "---",
+        "title: Empty envelope",
+        "created: 2026-09-25T10:00:00.000Z",
+        "updated: 2026-09-25T10:00:00.000Z",
+        "origin: ~",
+        "promotedFrom: []",
+        "---",
+        "",
+        "body",
+        "",
+      ].join("\n"),
+    );
+    const pagePath = path.join(patterns, "empty-envelope.md");
+    const before = fs.readFileSync(pagePath, "utf8");
+    const wiki = openWikiWorkspace(dir);
+    expect(wiki.listPatterns()[0]?.promotedFrom).toBeNull();
+    expect(listWikiPatternsReadOnly(dir)[0]?.promotedFrom).toBeNull();
+    expect(wiki.readPattern("empty-envelope").frontmatter.promotedFrom).toBeNull();
+    expect(fs.readFileSync(pagePath, "utf8")).toBe(before);
+  });
+
   it("rejects empty/oversized titles before writing anything", () => {
     const dir = makeTempDir();
     const wiki = openWikiWorkspace(dir);

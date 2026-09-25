@@ -320,6 +320,19 @@ export function applyDistillation(
         envelope.kind === "present" &&
         envelope.entries.some((candidate) => candidate.runId === entry.runId);
       if (!hasFootprint) {
+        // 回填是一次写页尝试：走 attempts 预留制（H r16——onIntent 先原子
+        // +1 持久预留，再写；预算耗尽 → io-failed，绝不无预留写页）。
+        if (attemptsExhausted()) {
+          return result(typedItem.ordinal, "io-failed", { detail: "attempts-exhausted" });
+        }
+        hooks?.onIntent?.({
+          kind: "create",
+          ordinal: typedItem.ordinal,
+          status: "applying",
+          targetPatternName: targetName,
+          afterHash,
+          attempts: intentAttempts,
+        });
         // 信封坏值时 merge typed 拒绝且零写（L 信封红线，与去重路径同款）。
         const merged = mergePromotedFromEntry(page.frontmatter.promotedFrom, entry);
         const updated = { ...page.frontmatter, updated: now, promotedFrom: merged.canonical };

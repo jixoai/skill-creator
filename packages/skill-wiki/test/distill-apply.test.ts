@@ -463,7 +463,23 @@ describe("applyDistillation: create 矩阵", () => {
     const read = openWikiWorkspace(dir).readPattern("pin-exit-codes");
     expect(read.frontmatter.promotedFrom).toBe(footprintA);
     expect(read.body).toBe("Gate on exit codes.\n");
-    expect(recorder.events.map((event) => event.phase)).toEqual(["commit"]);
+    // 回填是一次写页尝试：必须先经 onIntent 预留（attempts 预留制）再写。
+    expect(recorder.events.map((event) => event.phase)).toEqual(["intent", "commit"]);
+  });
+
+  it("applying + footprint missing + attempts exhausted: io-failed, no unreserved page write", () => {
+    const dir = makeTempDir();
+    seedPage(dir, "pin-exit-codes", "Gate on exit codes.\n");
+    const item = planCreate(dir, "Pin Exit Codes", "Gate on exit codes.\n");
+    const before = readBytes(dir, "pin-exit-codes"); // 无足迹原文
+    const recorder = hookRecorder();
+    const result = applyDistillation(dir, item, provenanceA, {
+      ledgerRecord: createRecord(item, "applying", 3),
+      hooks: recorder.hooks,
+    });
+    expect(result).toEqual({ ordinal: 0, status: "io-failed", detail: "attempts-exhausted" });
+    expect(readBytes(dir, "pin-exit-codes")).toBe(before); // 预算耗尽零写
+    expect(recorder.events).toEqual([]); // 不预留、不提交
   });
 
   it("applying + page already carries this run's footprint: pure recovery, page bytes untouched", () => {

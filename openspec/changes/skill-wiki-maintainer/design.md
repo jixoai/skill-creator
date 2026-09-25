@@ -17,6 +17,12 @@
 > ③实现复核 r1 的四项代码缺陷（create 恢复足迹回填 / capability limit
 > 透传 / promotedFrom 坏值读投影 / admitBatch audit 尾部回滚）随本轮修复，
 > 回归测试各自钉死。
+> r20（2026-09-25，实现复核 r2 处置）：①恢复回填足迹 = 写页尝试，必须
+> 走 attempts 预留制（先 onIntent 原子 +1 再写；预算耗尽 → io-failed 零写）
+> ——r19 修复版的无预留直接写页作废。②promotedFrom 空数组 `[]` 语义 =
+> 无足迹：三读面投影 null（磁盘原文不动；存储值恒非空数组的 L 信封法
+> 推论）。③admitBatch 回滚 audit 改整表快照恢复（环形缓冲满载时截断
+> 无法还原被淘汰前驱）。④CLI 文件头注释同步 r19 形状。
 > r17（2026-09-25）：按 r16 评审（/tmp/maintain-design-review-r16.md，7.7/10）
 > io-failed 可逆性裁决：永久终态（重启恢复仅限 applying 行；r16 的
 > 「status 轮询再触发恢复」表述作废）；N/spec 同步双预算（页写走

@@ -113,10 +113,13 @@ function parseFrontmatter(raw: string): PatternFrontmatter | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** promotedFrom 读投影：合法信封原样保留；坏值/无足迹投影 null（L 信封法——
- *  不伪装空足迹、不清洗原文；调用方对坏值的处置是提示人工修复）。 */
+/** promotedFrom 读投影：合法非空信封原样保留；坏值/无足迹/空数组投影 null
+ *  （L 信封法——不伪装空足迹、不清洗原文；调用方对坏值的处置是提示人工修复）。 */
 function readablePromotedFrom(raw: string | null): string | null {
-  return inspectPromotedFrom(raw).kind === "present" ? raw : null;
+  const envelope = inspectPromotedFrom(raw);
+  // 空数组 `[]` = 无足迹（design：存储值恒非空 JSON 数组）——投影 null，
+  // 不把真值空信封漏给 UI 徽章；磁盘原文不动。
+  return envelope.kind === "present" && envelope.entries.length > 0 ? raw : null;
 }
 
 /** 页面正文剥离 frontmatter 后的剩余字节（与 listPatterns/readPattern 同口径）。 */
