@@ -320,11 +320,15 @@ export function applyDistillation(
         envelope.kind === "present" &&
         envelope.entries.some((candidate) => candidate.runId === entry.runId);
       if (!hasFootprint) {
-        // 回填是一次写页尝试：走 attempts 预留制（H r16——onIntent 先原子
-        // +1 持久预留，再写；预算耗尽 → io-failed，绝不无预留写页）。
+        // 回填是一次写页尝试：走 attempts 预留制（H r16——预算耗尽 →
+        // io-failed 零写；纯校验/序列化前置于预留：坏信封 typed 拒绝时
+        // 不消耗写页预算，重放不因永久坏信封耗尽 attempts）。
         if (attemptsExhausted()) {
           return result(typedItem.ordinal, "io-failed", { detail: "attempts-exhausted" });
         }
+        const merged = mergePromotedFromEntry(page.frontmatter.promotedFrom, entry);
+        const updated = { ...page.frontmatter, updated: now, promotedFrom: merged.canonical };
+        const nextRaw = formatPatternPage(updated, page.body);
         hooks?.onIntent?.({
           kind: "create",
           ordinal: typedItem.ordinal,
@@ -333,11 +337,8 @@ export function applyDistillation(
           afterHash,
           attempts: intentAttempts,
         });
-        // 信封坏值时 merge typed 拒绝且零写（L 信封红线，与去重路径同款）。
-        const merged = mergePromotedFromEntry(page.frontmatter.promotedFrom, entry);
-        const updated = { ...page.frontmatter, updated: now, promotedFrom: merged.canonical };
         io(`write create target ${targetName} (footprint recovery)`, () =>
-          atomicWritePatternFile(targetFile, formatPatternPage(updated, page.body)),
+          atomicWritePatternFile(targetFile, nextRaw),
         );
       }
       io("rebuild index (create recovery)", () => reader.rebuildIndex());
@@ -353,10 +354,14 @@ export function applyDistillation(
       return result(typedItem.ordinal, "idempotent", { appliedHash: afterHash });
     }
     // 首放命中同正文页：contentHash 去重 + mergePromotedFromEntry 回填足迹
-    // （§3 P1-1；frontmatter 原子写，正文逐字节不变）。
+    // （§3 P1-1；frontmatter 原子写，正文逐字节不变）。纯校验/序列化同样
+    // 前置于 onIntent 预留（与恢复回填同款：坏信封不消耗写页预算）。
     if (page === null) {
       return result(typedItem.ordinal, "stale", { detail: "invalid-target" });
     }
+    const merged = mergePromotedFromEntry(page.frontmatter.promotedFrom, entry);
+    const updated = { ...page.frontmatter, updated: now, promotedFrom: merged.canonical };
+    const nextRaw = formatPatternPage(updated, page.body);
     hooks?.onIntent?.({
       kind: "create",
       ordinal: typedItem.ordinal,
@@ -365,10 +370,8 @@ export function applyDistillation(
       afterHash,
       attempts: 0,
     });
-    const merged = mergePromotedFromEntry(page.frontmatter.promotedFrom, entry);
-    const updated = { ...page.frontmatter, updated: now, promotedFrom: merged.canonical };
     io(`write create target ${targetName} (footprint)`, () =>
-      atomicWritePatternFile(targetFile, formatPatternPage(updated, page.body)),
+      atomicWritePatternFile(targetFile, nextRaw),
     );
     io("rebuild index (create dedup)", () => reader.rebuildIndex());
     hooks?.onCommit?.({

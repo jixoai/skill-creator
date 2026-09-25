@@ -511,10 +511,12 @@ describe("applyDistillation: create 矩阵", () => {
       ),
     );
     const bytes = readBytes(dir, "pin-exit-codes");
+    const recorder = hookRecorder();
     let thrown: unknown;
     try {
       applyDistillation(dir, item, provenanceA, {
         ledgerRecord: createRecord(item, "applying", 1),
+        hooks: recorder.hooks,
       });
     } catch (error) {
       thrown = error;
@@ -522,6 +524,34 @@ describe("applyDistillation: create 矩阵", () => {
     expect(thrown).toBeInstanceOf(SkillWikiError);
     expect((thrown as SkillWikiError).code).toBe("WIKI_INVALID_PATTERN");
     expect(readBytes(dir, "pin-exit-codes")).toBe(bytes);
+    // 纯校验前置于预留：坏信封 typed 拒绝不消耗 attempts 预算（零事件）。
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("dedup first-placement onto a bad envelope: typed reject before reservation (zero events, budget untouched)", () => {
+    const dir = makeTempDir();
+    seedPage(dir, "pin-exit-codes", "Gate on exit codes.\n");
+    const item = planCreate(dir, "Pin Exit Codes", "Gate on exit codes.\n");
+    // 在位破坏信封（正文不动 → 首放去重窗口命中坏信封）。
+    fs.writeFileSync(
+      pageFile(dir, "pin-exit-codes"),
+      readBytes(dir, "pin-exit-codes").replace(
+        /^promotedFrom: .*$/m,
+        "promotedFrom: not-an-envelope",
+      ),
+    );
+    const bytes = readBytes(dir, "pin-exit-codes");
+    const recorder = hookRecorder();
+    let thrown: unknown;
+    try {
+      applyDistillation(dir, item, provenanceA, { hooks: recorder.hooks });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(SkillWikiError);
+    expect((thrown as SkillWikiError).code).toBe("WIKI_INVALID_PATTERN");
+    expect(readBytes(dir, "pin-exit-codes")).toBe(bytes);
+    expect(recorder.events).toEqual([]);
   });
 
   it("applied + page deleted: manual rollback — stale, never re-appends the page", () => {
