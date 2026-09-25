@@ -164,8 +164,10 @@ WIKI_INVALID_PATTERN 为 kernel/daemon-local，不进跨面闭集。
 
 #### Scenario: IO 重试耗尽的三面终态
 
-- **WHEN** 某项 apply 的页写/rebuild IO 失败且按 attempts 计数表有界重试
-  耗尽（最多 2 次重试、共 3 次写页尝试——H 唯一口径）
+- **WHEN** 某项 apply 的页写/rebuild IO 失败且有界重试耗尽（双预算：
+  页写按 attempts 预留表最多 3 次写页尝试；rebuild-only 队列内 ≤2 次
+  重试且不占 attempts——H 唯一口径；io-failed 为永久终态，重启恢复
+  仅限仍为 applying 的行）
 - **THEN** proposal failed（detail.code=DISTILL_IO）、ledger 行终态
   io-failed、counters["io-failed"] 计入；全部项皆 io-failed → run
   failed(reason=io)；部分成功 → run completed 且失败计数可见

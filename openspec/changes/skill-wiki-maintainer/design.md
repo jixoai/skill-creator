@@ -5,6 +5,12 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r17（2026-09-25）：按 r16 评审（/tmp/maintain-design-review-r16.md，7.7/10）
+> io-failed 可逆性裁决：永久终态（重启恢复仅限 applying 行；r16 的
+> 「status 轮询再触发恢复」表述作废）；N/spec 同步双预算（页写走
+> attempts 预留表 / rebuild-only 队列内 ≤2 独立上限）；tasks 补
+> rebuild-only 三态验收（不改 attempts/耗尽三面终态/applying 可恢复
+> vs io-failed 不复活）。
 > r16（2026-09-25）：按 r15 评审（/tmp/maintain-design-review-r15.md，6.9/10）
 > attempts 改预留制（写页尝试前原子 +1；崩溃窗口吃预算不超限——写页
 > 上限 3 次跨重启恒成立；intent 示例注释同步）；rebuild-only IO 终止性
@@ -387,12 +393,16 @@ attempts=0  未开始（或纯恢复分支已闭环）
  attempts ≥ 3 且仍需写页 → io-failed
 ```
 
-- **rebuild-only IO 的终止性（r16-P1：不占写页预算但必须有界）**：
-  页已写（矩阵命中 afterHash/恢复分支）而 index rebuild 反复失败 →
-  不递增 attempts（无新写页）；同一队列任务内 rebuild 重试 ≤ 2，仍
-  失败 → io-failed（页已落盘，恢复分支幂等——重启后 status 轮询可
-  再次触发恢复重试；rebuild 无写页副作用，跨重启的重复 rebuild 由
-  daemon 日志观测，不破坏写页上限不变式）。
+- **rebuild-only IO 的终止性（r16-P1；r17-P1 裁决可逆性）**：页已写
+  （矩阵命中 afterHash/恢复分支）而 index rebuild 反复失败 → 不递增
+  attempts（无新写页，预算独立：**页写走 attempts 预留表；rebuild-only
+  走队列内独立上限**）；同一队列任务内 rebuild 重试 ≤ 2，仍失败 →
+  `io-failed` **永久终态**（与通用终态矩阵一致：重放零写、不复活、
+  不自动重试；人工修复后重跑 distill 产新提案）。**重启恢复仅限仍为
+  `applying` 的行**（崩溃于队列内重试中、尚未落 io-failed——重启
+  扫描按矩阵处理，可续完 afterHash 纯恢复或继续消耗剩余规则；r16 的
+  「status 轮询可再次触发恢复重试」表述作废——它只描述 applying 行
+  的恢复，不适用于已落 io-failed 的行）。
 
 重试耗尽的写序与崩溃恢复：
 **写序（ledger-first）**：① ledger 行 → io-failed → ② proposal store
@@ -607,10 +617,10 @@ union sourcePatternIds 后**按 runId 升序**重排序落盘。**键序 = 递�
   item 级结果由 ledger/counters 呈现）→ registry 返回 ok → proposal
   `executed`；queue 任务 typed 失败（run 已 cancelled/restarted →
   DISTILL_STALE、DISTILL_RUN_NOT_FOUND）→ proposal `failed`。
-  **apply IO 失败（页写/rebuild 抛 DISTILL_IO）**：队列任务按 H 的
-  attempts 计数表有界重试（最多 2 次重试、共 3 次写页尝试——与 H/
-  tasks exact-bytes 同口径，r14）；仍失败 → ledger 行落终态
-  `io-failed`（写路径状态未知，
+  **apply IO 失败（页写/rebuild 抛 DISTILL_IO，双预算——r17 与 H
+  同步）**：页写失败走 attempts 预留表（最多 2 次重试、共 3 次写页
+  尝试）；rebuild-only 失败走队列内独立上限（≤2 重试，不占 attempts）；
+  任一耗尽 → ledger 行落终态 `io-failed`（写路径状态未知，
   人工检查后重跑 distill——不自动恢复）+ proposal `failed`
   （result.detail.code=DISTILL_IO）+ io-failed ∈
   TerminalDistillLedgerStatus（W），run 可继续收敛；重启扫描不复活

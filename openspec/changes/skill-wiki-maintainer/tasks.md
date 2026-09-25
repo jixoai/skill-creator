@@ -42,7 +42,7 @@ test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
       proposal failed (DISTILL_IO) + run 收敛/三崩溃点 fixture
       （①ledger 后②store 前/②后③run.json 前/③后）：重启重算
       run.json 字节级一致 + store 空态 + 重复恢复幂等/同进程 store
-      投影异常：不回滚①不阻塞③（daemon 日志断言）/取消=expired vs
+      投影异常：不回滚①不阻塞③（daemon 日志断言）/rebuild-only 双预算：重建失败不改 attempts、队列内 ≤2 后三面终态、重启 applying 行可恢复 vs io-failed 永久不复活（daemon 日志断言）/取消=expired vs
       人工拒绝=rejected 二分 + reject 队列 IO 失败 fail-closed/
       末项终态触发 completed + 终态后同 source 二次 start 允许 +
       全 not-proposed → failed(capacity)/
