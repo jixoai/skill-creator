@@ -5,6 +5,11 @@
  * 按名字分目录改为目录自身的属性——wiki 目录 = <dir>/.agents/skill-wiki/；
  * global 是 `~` 特例（SKILL_WIKI_HOME 覆盖，默认 ~/.agents/skill-wiki）；
  * slug 登记表与中央根退役，scope 由路径客观决定」。
+ * 修订 [2026-09-25]（切片③ skill-wiki-maintainer）：私有 slugify 提升为导出
+ * slugifyPatternTitle（raw 语义，空串原样返回；appendPattern 以 || "pattern"
+ * 保留既有回退）；页面序列化/解析/原子写原语（formatPatternPage /
+ * parsePatternPage / atomicWritePatternFile）与只读列举 listWikiPatternsReadOnly
+ * 导出给蒸馏 SDK 共用——蒸馏写路径与 WikiWorkspace 逐字节同源。
  * 正交意图：
  *   [1] WikiWorkspace：wiki/ 目录契约（patterns 为真相源；index 为派生投影；
  *       logs 追加式；skill-impact 程序化追加）+ 目录映射标准
@@ -105,7 +110,27 @@ function parseFrontmatter(raw: string): PatternFrontmatter | null {
   return parsed.success ? parsed.data : null;
 }
 
-function formatPattern(frontmatter: PatternFrontmatter, body: string): string {
+/** 页面正文剥离 frontmatter 后的剩余字节（与 listPatterns/readPattern 同口径）。 */
+export function stripFrontmatter(raw: string): string {
+  return raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
+}
+
+/**
+ * 解析 pattern 页原文 → frontmatter + body（畸形/不兼容页 → null；不清洗）。
+ * 蒸馏执行层（distill/apply）与 WikiWorkspace 读写共用同一解析口径。
+ */
+export function parsePatternPage(
+  raw: string,
+): { frontmatter: PatternFrontmatter; body: string } | null {
+  const frontmatter = parseFrontmatter(raw);
+  return frontmatter ? { frontmatter, body: stripFrontmatter(raw) } : null;
+}
+
+/**
+ * pattern 页序列化（frontmatter 单行标量子集 + body；与库内写路径逐字节同源）。
+ * promotedFrom 恒为单行标量：null → 空串，足迹 → canonical JSON 字符串。
+ */
+export function formatPatternPage(frontmatter: PatternFrontmatter, body: string): string {
   const fm = [
     "---",
     `title: ${frontmatter.title.replace(/\n/g, " ")}`,
@@ -119,7 +144,8 @@ function formatPattern(frontmatter: PatternFrontmatter, body: string): string {
   return `${fm}${body}`;
 }
 
-function atomicWriteUtf8(file: string, content: string): void {
+/** 同目录临时文件 + rename 的原子写（md 卫生：保证以换行结尾）。 */
+export function atomicWritePatternFile(file: string, content: string): void {
   const temp = `${file}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(temp, content.endsWith("\n") ? content : `${content}\n`, "utf8");
   fs.renameSync(temp, file);
@@ -212,6 +238,50 @@ export function wikiPatternSummary(wikiDirectory: string): WikiPatternSummary {
   return { patternCount: count, lastUpdated };
 }
 
+/**
+ * 只读列出全部合法 pattern 条目（与 listPatterns 同成员判定：文件名过
+ * PatternNameSchema + frontmatter 可解析，两处同弃）——但**绝不创建任何目录**
+ * （目录缺失/非目录 = 空列表；其它读取故障 typed WIKI_IO 上抛，不伪装成空）。
+ * 供 planDistillation 等纯读路径使用（openWikiWorkspace 的 patterns/ 惰性
+ * mkdir 不适用于「不改盘」的调用方）。
+ */
+export function listWikiPatternsReadOnly(wikiDirectory: string): PatternListItem[] {
+  const patternsDir = path.join(wikiDirectory, "patterns");
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(patternsDir);
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    throw new SkillWikiError(
+      "WIKI_IO",
+      `Cannot read the wiki patterns directory ${patternsDir}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const items: PatternListItem[] = [];
+  for (const entry of entries.filter((name) => name.endsWith(".md")).sort()) {
+    const name = entry.replace(/\.md$/, "");
+    if (!PatternNameSchema.safeParse(name).success) continue;
+    try {
+      const raw = fs.readFileSync(path.join(patternsDir, entry), "utf8");
+      const frontmatter = parseFrontmatter(raw);
+      if (!frontmatter) continue;
+      const projected = PatternListItemSchema.safeParse({
+        name,
+        title: frontmatter.title,
+        origin: frontmatter.origin,
+        promotedFrom: frontmatter.promotedFrom,
+        updated: frontmatter.updated,
+        contentHash: patternContentHash(stripFrontmatter(raw)),
+      });
+      if (projected.success) items.push(projected.data);
+    } catch {
+      // 单页读取失败：按集合语义丢弃（与 wikiPatternSummary 同款成员级降级）。
+    }
+  }
+  return items;
+}
+
 export function openWikiWorkspace(directory: string): WikiWorkspace {
   const patternsDir = path.join(directory, "patterns");
   const indexFile = path.join(directory, "index.md");
@@ -253,7 +323,7 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
         const raw = fs.readFileSync(path.join(patternsDir, file), "utf8");
         const frontmatter = parseFrontmatter(raw);
         if (!frontmatter) continue;
-        const body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
+        const body = stripFrontmatter(raw);
         const projected = PatternListItemSchema.safeParse({
           name: file.replace(/\.md$/, ""),
           title: frontmatter.title,
@@ -277,7 +347,7 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
           `Pattern frontmatter is incompatible: ${narrowed}`,
         );
       }
-      return { frontmatter, body: raw.replace(/^---\n[\s\S]*?\n---\n?/, "") };
+      return { frontmatter, body: stripFrontmatter(raw) };
     },
 
     readPatternRaw(name) {
@@ -303,7 +373,7 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
           deduplicated: true,
         };
       }
-      const base = slugify(input.title);
+      const base = slugifyPatternTitle(input.title) || "pattern";
       const taken = new Set(existing.map((item) => item.name));
       let name = base;
       for (let suffix = 2; taken.has(name); suffix += 1) name = `${base}-${suffix}`;
@@ -315,7 +385,10 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
         origin: input.origin ?? "~",
         promotedFrom: null,
       };
-      atomicWriteUtf8(path.join(patternsDir, `${name}.md`), formatPattern(frontmatter, input.body));
+      atomicWritePatternFile(
+        path.join(patternsDir, `${name}.md`),
+        formatPatternPage(frontmatter, input.body),
+      );
       this.rebuildIndex();
       return {
         item: {
@@ -340,14 +413,17 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
           `Pattern frontmatter is incompatible: ${narrowed}`,
         );
       }
-      const body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "");
+      const body = stripFrontmatter(raw);
       // 纯函数先行：任一锚点未命中在写入前失败（WIKI_PATCH_FAILED，零改动）。
       const nextBody = applyEdits(body, edits);
       const updated: PatternFrontmatter = {
         ...frontmatter,
         updated: new Date().toISOString(),
       };
-      atomicWriteUtf8(path.join(patternsDir, `${narrowed}.md`), formatPattern(updated, nextBody));
+      atomicWritePatternFile(
+        path.join(patternsDir, `${narrowed}.md`),
+        formatPatternPage(updated, nextBody),
+      );
       this.rebuildIndex();
       return {
         item: {
@@ -411,17 +487,22 @@ export function openWikiWorkspace(directory: string): WikiWorkspace {
     rebuildIndex() {
       const items = this.listPatterns();
       const lines = items.map((item) => `- ${item.name} — ${item.title}`);
-      atomicWriteUtf8(indexFile, ["# Wiki Index", "", ...lines].join("\n"));
+      atomicWritePatternFile(indexFile, ["# Wiki Index", "", ...lines].join("\n"));
     },
   };
 }
 
-/** 标题 → pattern 文件名（kebab 收窄；空结果回退 "pattern"）。 */
-function slugify(title: string): string {
-  const slug = title
+/**
+ * 标题 → pattern 文件名 slug 的 raw 变换（设计 W/r12 冻结：v1 = 提升为导出的
+ * 现实现行为快照，逐字节不变——小写化 + 连续 [a-z0-9] 之外字符折叠为分隔符 +
+ * 首尾分隔符剥离 + 截断至 48）。**raw 语义**：纯非 ASCII（含汉字）标题折叠后
+ * 为空串，原样返回空串、不内建 fallback；空串策略归属调用方——appendPattern
+ * 以 `|| "pattern"` 保留既有回退，蒸馏 plan 以空串判 model-invalid(empty-slug)。
+ */
+export function slugifyPatternTitle(title: string): string {
+  return title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
-  return slug === "" ? "pattern" : slug;
 }

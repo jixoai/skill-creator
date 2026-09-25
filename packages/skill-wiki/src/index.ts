@@ -15,4 +15,5 @@ export * from "./patch.js";
 export * from "./workspace.js";
 export * from "./sampling.js";
 export * from "./gate.js";
+export * from "./distill/index.js";
 export * from "./cli.js";

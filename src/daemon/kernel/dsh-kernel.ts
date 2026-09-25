@@ -9,7 +9,9 @@
  * 正交意图：
  *   [1] headless boot：官方 profile 机制 + 单 dsh-base bundle + agent-presets
  *       行闭包（persona/ask-user/presentation，dsh-official-profile 头注教训）；
- *       全 rows 激活断言（assertEntriesActivated typed 抛错，无假成功）。
+ *       全 rows 激活断言（assertEntriesActivated typed 抛错，无假成功）；含
+ *       ephemeral distill 面的装配委托（skill-wiki-maintainer 1.3a——逻辑全部
+ *       物理拆分在 ephemeral-session.ts，此处只做 seam 装配）。
  *   [2] 内核工具面 policy：通用 fs/shell/web 工具 rows 在 user patch 层 disable
  *       （tool-bash/pwsh/fs/fs-search/jobs/web）——产品会话的工具面只能是受控
  *       注册（capability MCP 工具，task 4.1b）+ 显式 allowlist（ask_user_question）。
@@ -32,6 +34,11 @@ import {
 import type { Context } from "@deepseek-ai/cordis";
 import { completeTransitiveMirror, ensureDirLink } from "../dsh-profile-support.js";
 import { agentRoleRowsYaml } from "./agent-roles.js";
+import {
+  createEphemeralSession,
+  type CreateEphemeralSessionOptions,
+  type EphemeralSession,
+} from "./ephemeral-session.js";
 
 const modulePath = fileURLToPath(import.meta.url);
 const sourceMode = path.basename(modulePath) === "dsh-kernel.ts";
@@ -91,6 +98,13 @@ export interface DshKernelHandle {
    * dsh-tools 的 schemas() 返回 scope 可见面；无 scope = 全局视图。
    */
   globalToolNames(): string[];
+  /**
+   * 一次性只读 distill 会话（skill-wiki-maintainer 1.3a；design K/W 异步契约）：
+   * 创建即 bridge-ready 等待 + allowlist 双重运行时校验（fail-closed）；
+   * prompt 带 deadline/signal typed 结果；dispose 有界强制释放。逻辑在
+   * ephemeral-session.ts——此处只把内核面装配为 seam。
+   */
+  createEphemeralSession(options: CreateEphemeralSessionOptions): Promise<EphemeralSession>;
   /** 有界停止：fiber dispose + 还原 DSH_HOME env。幂等由调用方保证。 */
   dispose(): Promise<void>;
 }
@@ -269,6 +283,15 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
     ctx,
     record,
     globalToolNames,
+    createEphemeralSession: (ephemeralOptions) =>
+      createEphemeralSession(
+        {
+          ctx,
+          globalToolNames,
+          mcpBridgeConfigured: options.mcp !== undefined,
+        },
+        ephemeralOptions,
+      ),
     dispose: async () => {
       await (ctx as unknown as { fiber?: { dispose: () => Promise<void> } }).fiber?.dispose();
       if (previousDshHome === undefined) delete process.env.DSH_HOME;

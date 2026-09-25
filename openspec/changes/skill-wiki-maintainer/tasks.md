@@ -1,13 +1,13 @@
 # Tasks（每项绿门 = 所列命令全绿；UI 项另加桌面+窄屏视觉走查）
 
-- [ ] 1.1 SDK 契约层：DistillBudgets/PromotedFromEntry（parse/merge）/
+- [x] 1.1 SDK 契约层：DistillBudgets/PromotedFromEntry（parse/merge）/
       DistillProposal/ItemResult + planDistillation 纯函数
       门禁：`pnpm exec vitest run packages/skill-wiki && pnpm typecheck &&
 pnpm exec vp fmt --check`
       （含：追加合并/锚点未中/model-invalid 诊断/预算超限/title≤120 +
       promotedFrom 四 fixture 必过——null/单条/双条/坏值 round-trip，
       spec 场景同步先行）
-- [ ] 1.2 SDK 执行层：applyDistillation 幂等矩阵（typed ledgerRecord
+- [x] 1.2 SDK 执行层：applyDistillation 幂等矩阵（typed ledgerRecord
       输入：首放/applying/applied×before-after 全分支，含 applied+
       beforeHash 人工回退 stale 零写）+ 足迹回填 + ledger 行产出 +
       IO typed
@@ -17,7 +17,7 @@ pnpm exec vp fmt --check`
       同语料两次构建候选序与 corpusDigest 一致/cluster 并列 tie-break
       fixture（同 score 同首成员不同尾部成员 + 打乱输入序 → canonical
       序与 digest 一致））
-- [ ] 1.3a kernel ephemeral 面：DshKernelHandle.createEphemeralSession
+- [x] 1.3a kernel ephemeral 面：DshKernelHandle.createEphemeralSession
       （deny-all + DistillReadonlyToolName closed union + 运行时注册名
       fail-closed 二次校验；不进面板/转录；dispose 有界）
       门禁：`pnpm exec vitest run test/dsh-kernel.test.ts`

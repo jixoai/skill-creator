@@ -2,9 +2,11 @@
  * 用户原始需求 [2026-09-21]：「将它移植进来，用 skill-wiki 这个包来承载」
  * （WikiSkill 论文 §3.2.2 Wiki Maintainer 的编辑原语，py 参考实现移植）。
  * 正交意图：
- *   [1] 三种结构化编辑原语：append / replace / insert_after。
+ *   [1] 三种结构化编辑原语：append / replace / insert_after（TS 类型 + Zod
+ *       运行时形状 WikiEditSchema——蒸馏提案等外部输入经同一词汇表收窄）。
  *   [2] 精确子串锚定 + 原子应用：任一锚点未命中则整批失败，不落部分编辑。
  */
+import { z } from "zod";
 import { SkillWikiError } from "./schema.js";
 
 /** 单条结构化编辑（论文 Wiki Maintainer 的 patch 词汇表）。 */
@@ -12,6 +14,25 @@ export type WikiEdit =
   | { op: "append"; content: string }
   | { op: "replace"; target: string; content: string }
   | { op: "insert_after"; target: string; content: string };
+
+/**
+ * WikiEdit 的 Zod 形状（蒸馏提案等外部输入的运行时收窄面；unknown 键拒绝；
+ * replace/insert_after 的锚点 target 空串在 schema 层即拒——运行时
+ * applyEdits 对空锚点同样 WIKI_PATCH_FAILED，这里是模型输出侧的前置拒绝）。
+ */
+export const WikiEditSchema = z.discriminatedUnion("op", [
+  z.strictObject({ op: z.literal("append"), content: z.string() }),
+  z.strictObject({
+    op: z.literal("replace"),
+    target: z.string().min(1),
+    content: z.string(),
+  }),
+  z.strictObject({
+    op: z.literal("insert_after"),
+    target: z.string().min(1),
+    content: z.string(),
+  }),
+]);
 
 /**
  * 校验整批编辑可达：按序模拟应用，任何一步的 replace/insert_after 锚点在该步
