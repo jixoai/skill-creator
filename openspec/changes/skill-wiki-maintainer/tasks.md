@@ -14,7 +14,9 @@ pnpm exec vp fmt --check`
       门禁：同上（含：崩溃重放 absorb+create 双分支/人工编辑后 stale/
       人工回退不重放（applied+before/删除）/absorb 目标缺页与畸形页
       stale/同 target 竞争/create 同名人工页零覆盖且不 -N 改名/
-      同语料两次构建候选序与 corpusDigest 一致）
+      同语料两次构建候选序与 corpusDigest 一致/cluster 并列 tie-break
+      fixture（同 score 同首成员不同尾部成员 + 打乱输入序 → canonical
+      序与 digest 一致））
 - [ ] 1.3a kernel ephemeral 面：DshKernelHandle.createEphemeralSession
       （deny-all + DistillReadonlyToolName closed union + 运行时注册名
       fail-closed 二次校验；不进面板/转录；dispose 有界）
@@ -35,7 +37,7 @@ test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
       决定 CAS：approve+reject 与 approve+approve 并发三面终态唯一/
       approved 后 cancel → failed+expired、迟到 reject 抛 PROPOSAL_STALE
       且重复同 cause reject 幂等/enqueue 完成语义 executed 仅在队列终态后
-      投影/apply IO 失败：attempts 计数表（0 首放/1/2 重试/3 收敛——
+      投影/apply IO 失败：attempts 预留制计数（写前 +1：1/2/3 为三次尝试、3 后不再写页——
       exact ledger bytes 断言）+ 重试耗尽 → io-failed 终态 +
       proposal failed (DISTILL_IO) + run 收敛/三崩溃点 fixture
       （①ledger 后②store 前/②后③run.json 前/③后）：重启重算

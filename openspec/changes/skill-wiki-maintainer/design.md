@@ -5,6 +5,11 @@
 > r5（2026-09-25）：按 r4 评审（/tmp/maintain-design-review-r4.md，7.0/10）
 > **直接改写** §2/§3/§4/§5 与 H/I/K/M 旧文（r4 P2-5 裁决：全文只剩一套规范
 > 值，不再以补丁覆盖补丁），并新增 r5 补遗 N-P。
+> r16（2026-09-25）：按 r15 评审（/tmp/maintain-design-review-r15.md，6.9/10）
+> attempts 改预留制（写页尝试前原子 +1；崩溃窗口吃预算不超限——写页
+> 上限 3 次跨重启恒成立；intent 示例注释同步）；rebuild-only IO 终止性
+> 单列（不占写页预算，任务内 ≤2 重试后 io-failed，跨重启幂等无写页
+> 副作用）；tasks 补 cluster 并列 tie-break fixture。
 > r15（2026-09-25）：按 r14 评审（/tmp/maintain-design-review-r14.md，8.3/10）
 > attempts 语义唯一化 = 已失败的写页尝试次数（失败后递增；剩余允许 =
 > 3 - attempts；重启重放同一条计数规则，撤销 r13「不耗新预算」例外）；
@@ -342,7 +347,7 @@ hash / create 带 targetPatternName + afterHash——create 无目标旧页
 ```text
 kind="absorb"：
 1. ledger intent：{kind:"absorb", ordinal, status:"applying",
-   beforeHash, afterHash, attempts: 0}   // 首放恒 0；每次重试前原子 +1
+   beforeHash, afterHash, attempts: 0}   // 首放恒 0；写页尝试前原子 +1（预留制，见 durable retry）
 2. 目标页原子写（temp+rename；在钉死 body 上应用 edits）
 3. index rebuild（派生物）
 4. ledger commit：{status:"applied", appliedHash}
@@ -360,22 +365,34 @@ kind="create"：
 - 任何 commit 之前 index 必为已重建状态：恢复分支
   `applying|applied 且 已落盘` **必须先 rebuild index 再补写 commit**；
   rebuild 失败 → typed DISTILL_IO，项保持 applying（仍可恢复）。
-- **durable retry（r11-P1.2；r12-P1.1 跨存储协议；r15 语义唯一化）**：
-  intent 行携带 `attempts: int ≥0`（r15 冻结：**已失败的写页尝试
-  次数**——每次写页尝试**失败后**原子 +1；不是「已消耗重试数」也不
-  是「重试前递增」；总预算 = 3 次写页尝试）：
+- **durable retry（r11-P1.2；r12-P1.1 跨存储协议；r16 预留制终局）**：
+  intent 行携带 `attempts: int ≥0`（r16 冻结：**已开始的写页尝试
+  次数——预留制**：每次写页尝试**前**原子 +1（含首放 0→1）；「失败
+  后计数」与「重试前计数」两歧义源全部废除——预留已持久，崩溃窗口
+  吃预算但不产生超限写页，**写页上限 3 次跨重启恒成立**）：
 
 ```text
-attempts=0  首放写页（第 1 次尝试）
- 失败 → attempts=1（第 1 次失败）→ 第 2 次写页
- 失败 → attempts=2（第 2 次失败）→ 第 3 次写页
- 失败 → attempts=3（第 3 次失败）→ **不再写页**，落终态 io-failed
-（1 次首放 + 2 次重试 = 最多 3 次写页尝试；attempts 恒 = 已失败
- 尝试数；剩余允许尝试 = 3 - attempts）
-重启恢复：attempts ≥ 3 → 直接落 io-failed；< 3 → 按 H 矩阵重放
-（重放消耗剩余预算：attempts 会在其后的失败中继续递增——与运行中
- 语义同一条计数规则，无「不耗新预算」例外，r15 撤销 r13 的旧表述）
+attempts=0  未开始（或纯恢复分支已闭环）
+写页需要 → 先 +1 再执行：
+ attempts=1  第 1 次写页尝试（首放）
+ attempts=2  第 2 次写页尝试
+ attempts=3  第 3 次写页尝试（最后一次）
+ 第 3 次仍失败（或矩阵不可恢复）→ io-failed 终态
+（1 次首放 + 2 次重试 = 最多 3 次写页尝试；attempts = 已开始的
+ 尝试数；剩余 = 3 - attempts）
+重启/重放入口（唯一规则）：
+ 按矩阵判定——afterHash 分支（页已写）= 纯恢复（rebuild+commit，
+ 不写页、不计数）；需写页分支 → attempts < 3：+1 后执行（新尝试，
+ 无论上次是干净失败还是崩溃——崩溃窗口的预留已计入）；
+ attempts ≥ 3 且仍需写页 → io-failed
 ```
+
+- **rebuild-only IO 的终止性（r16-P1：不占写页预算但必须有界）**：
+  页已写（矩阵命中 afterHash/恢复分支）而 index rebuild 反复失败 →
+  不递增 attempts（无新写页）；同一队列任务内 rebuild 重试 ≤ 2，仍
+  失败 → io-failed（页已落盘，恢复分支幂等——重启后 status 轮询可
+  再次触发恢复重试；rebuild 无写页副作用，跨重启的重复 rebuild 由
+  daemon 日志观测，不破坏写页上限不变式）。
 
 重试耗尽的写序与崩溃恢复：
 **写序（ledger-first）**：① ledger 行 → io-failed → ② proposal store
