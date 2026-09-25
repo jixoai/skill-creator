@@ -7,6 +7,8 @@
  * WikiCliHost / WikiCliCommand / CliIo 等）自根导出——skill-creator CLI 经包根
  * 组装 wiki 子命令；daemon bundle 已因 skill-search service 内联 @jixoai/search，
  * 导出 kit 不再改变 daemon 的依赖面。
+ * 修订 [2026-09-25]（skill-wiki-maintainer 1.3）：similarity（查重索引 + 近邻
+ * 检索）自根导出——DistillJobService 的 corpus 构建消费同一检索面。
  * 正交意图：
  *   [1] 孵化期公共出口：src 直出、全量再导出；稳定发版时在此收窄面。
  */
@@ -15,5 +17,6 @@ export * from "./patch.js";
 export * from "./workspace.js";
 export * from "./sampling.js";
 export * from "./gate.js";
+export * from "./similarity.js";
 export * from "./distill/index.js";
 export * from "./cli.js";

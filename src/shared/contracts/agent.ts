@@ -31,6 +31,12 @@ import {
 } from "./dsh-runtime.js";
 import { ProviderIdSchema, WorkspaceIdSchema } from "./workspaces.js";
 import { SkillIdSchema } from "./skills.js";
+import {
+  CapabilityCallResultSchema,
+  CapabilityFailureDetailSchema,
+  McpProposalStatusSchema,
+  ProposalRejectCauseSchema,
+} from "./wiki-distill.js";
 
 /** 面板可见的 agent 生命周期状态（AgentStatus 两态 + 服务层 disposed 投影）。 */
 export const AgentSessionStatusSchema = z.enum(["idle", "running", "disposed"]);
@@ -356,13 +362,24 @@ export const AgentCardGetResultSchema = z.object({
 });
 
 /** MCP mutation proposal 的浏览器安全投影（task 4.4）。 */
+/**
+ * proposal 投影（宽松 z.object——既有消费者不受 strict 联合约束）。
+ * skill-wiki-maintainer（design U/r8 cause 公开化）扩三字段：
+ * rejectedCause（rejected 分支强制，store 侧保证）、result（executed/failed 的
+ * 一次性执行结果投影）、failureDetail（failed 分支的 CapabilityFailureDetail；
+ * 蒸馏面必带，legacy 失败可缺省）。strict wire 形状 =
+ * contracts/wiki-distill.ts 的 McpProposalViewSchema（判别联合）。
+ */
 export const AgentMcpProposalViewSchema = z.object({
   proposalId: z.string().min(1),
   capability: z.string().min(1),
   input: z.unknown(),
-  status: z.enum(["pending", "approved", "rejected", "executed", "failed"]),
+  status: McpProposalStatusSchema,
   createdAt: z.string().min(1),
   decidedAt: z.string().optional(),
+  rejectedCause: ProposalRejectCauseSchema.optional(),
+  result: CapabilityCallResultSchema.optional(),
+  failureDetail: CapabilityFailureDetailSchema.optional(),
 });
 /** proposal 投影。 */
 export type AgentMcpProposalView = z.infer<typeof AgentMcpProposalViewSchema>;

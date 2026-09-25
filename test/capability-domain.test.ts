@@ -137,6 +137,12 @@ const DOMAIN_AUTHORITY: Record<string, string> = {
   "wiki.list": "readonly",
   "wiki.read": "readonly",
   "wiki.append": "approved-mutation",
+  // skill-wiki-maintainer 1.4：蒸馏编排。start/status/cancel 只触 daemon-owned
+  // run registry（readonly）；apply 是写盘执行（approved-mutation）。
+  "wiki.distill_start": "readonly",
+  "wiki.distill_status": "readonly",
+  "wiki.distill_cancel": "readonly",
+  "wiki.distill_apply": "approved-mutation",
 };
 
 describe("manager domain capability registration (tasks 1.2)", () => {
@@ -181,6 +187,11 @@ describe("manager domain capability registration (tasks 1.2)", () => {
       "wiki.list",
       "wiki.read",
       "wiki.append",
+      // 蒸馏能力面（skill-wiki-maintainer 1.4）。
+      "wiki.distill_start",
+      "wiki.distill_status",
+      "wiki.distill_cancel",
+      "wiki.distill_apply",
     ];
     expect([...registry.names()].sort()).toEqual([...mapProcedures].sort());
   });

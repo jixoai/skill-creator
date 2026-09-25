@@ -22,6 +22,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ORPCError, createRouterClient } from "@orpc/server";
 import {
   Client,
   InMemoryTransport,
@@ -29,9 +30,15 @@ import {
 } from "@modelcontextprotocol/client";
 import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
 import { createSkillCreatorMcpServer, mcpToolName } from "../src/daemon/mcp/skill-creator-mcp.js";
+import { createRpcRouter } from "../src/daemon/rpc-router.js";
 import { WebServer } from "../src/daemon/web-server.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 import { randomBytes } from "node:crypto";
+import {
+  CapabilityFailureDetailSchema,
+  McpProposalViewSchema,
+} from "../src/shared/contracts/wiki-distill.js";
+import { RpcErrorDefinitions } from "../src/shared/contracts/errors.js";
 
 let sandbox = "";
 let domain: DaemonDomain;
@@ -75,6 +82,8 @@ afterEach(async () => {
   web = null;
   await domain.repository.dispose();
   await domain.steward.dispose();
+  // 蒸馏 Job 服务：daemon 生命周期回收面（无 kernel 资源时幂等无害）。
+  await domain.wikiDistill.dispose();
   // 搜索 watcher 的 recursive fs.watch 句柄不释放，Windows 上沙箱 rmSync 恒
   // EPERM（windows-test-debt 实证；daemon stop coordinator 本有此步）。
   await domain.skillSearch.dispose();
@@ -482,5 +491,135 @@ describe("wiki capability contract fidelity (codex r1 P2-2 + 补强)", () => {
       "agent",
     );
     expect(result.kind).toBe("denied");
+  });
+});
+
+/**
+ * 蒸馏能力投影 + 错误码四面同码（skill-wiki-maintainer task 1.4 门禁）：
+ * capability result.detail ↔ MCP 工具结果 text JSON 的 detail ↔ proposal view 的
+ * failureDetail ↔ RPC error code——同一 CapabilityFailureDetailSchema 逐码解析断言。
+ */
+describe("wiki distill capability face (skill-wiki-maintainer 1.4)", () => {
+  const previousWikiHome = process.env.SKILL_WIKI_HOME;
+
+  afterEach(() => {
+    if (previousWikiHome === undefined) delete process.env.SKILL_WIKI_HOME;
+    else process.env.SKILL_WIKI_HOME = previousWikiHome;
+  });
+
+  async function inProcessClient() {
+    const server = createSkillCreatorMcpServer({
+      capabilities: domain.managerCapabilities,
+      face: "in-process",
+      proposals: domain.mcpProposals,
+    });
+    const client = new Client({ name: "distill-smoke", version: "0.0.1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+    return { client, server };
+  }
+
+  it("projects distill tools: readonly trio everywhere, apply propose-only on in-process", async () => {
+    const stdio = await connectedClient();
+    try {
+      const names = (await stdio.client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("wiki_distill_start");
+      expect(names).toContain("wiki_distill_status");
+      expect(names).toContain("wiki_distill_cancel");
+      // approved-mutation：stdio 无任何形态（含 propose）。
+      expect(names).not.toContain("wiki_distill_apply");
+      expect(names).not.toContain("wiki_distill_apply_propose");
+    } finally {
+      await stdio.client.close();
+      await stdio.server.close();
+    }
+    const inProcess = await inProcessClient();
+    try {
+      const names = (await inProcess.client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("wiki_distill_apply_propose");
+      expect(names).not.toContain("wiki_distill_apply");
+    } finally {
+      await inProcess.client.close();
+      await inProcess.server.close();
+    }
+  });
+
+  it("parses the forged-apply failure detail identically on all four faces (DISTILL_RUN_NOT_FOUND)", async () => {
+    const forgedRun = `wd_${"0".repeat(24)}`;
+    // 面 1（capability）：registry 直调（human-ui 主体）。
+    const capability = await domain.managerCapabilities.call(
+      "wiki.distill_apply",
+      { runId: forgedRun, ordinal: 0 },
+      "human-ui",
+    );
+    expect(capability.kind).toBe("failed");
+    if (capability.kind !== "failed") return;
+    const capabilityDetail = CapabilityFailureDetailSchema.parse(capability.detail);
+    expect(capabilityDetail.code).toBe("DISTILL_RUN_NOT_FOUND");
+
+    // 面 2（MCP）：readonly status 工具结果的 detail 字段以同一 schema 解析。
+    const inProcess = await inProcessClient();
+    try {
+      const result = await inProcess.client.callTool({
+        name: "wiki_distill_status",
+        arguments: { runId: forgedRun },
+      });
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+      const payload = JSON.parse(text) as { detail?: unknown };
+      const mcpDetail = CapabilityFailureDetailSchema.parse(payload.detail);
+      expect(mcpDetail.code).toBe("DISTILL_RUN_NOT_FOUND");
+
+      // 面 3（proposal）：伪造引用走 propose → approve → failed + failureDetail。
+      const proposed = await inProcess.client.callTool({
+        name: "wiki_distill_apply_propose",
+        arguments: { runId: forgedRun, ordinal: 3 },
+      });
+      const proposedText =
+        (proposed.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+      const proposalId = (JSON.parse(proposedText) as { kind: string; proposalId?: string })
+        .proposalId;
+      expect(proposalId).toBeTruthy();
+      const decision = await domain.mcpProposals.approve(proposalId as string);
+      const parsedView = McpProposalViewSchema.parse(decision.view);
+      expect(parsedView.status).toBe("failed");
+      const proposalDetail = CapabilityFailureDetailSchema.parse(parsedView.failureDetail);
+      expect(proposalDetail.code).toBe("DISTILL_RUN_NOT_FOUND");
+      expect(proposalDetail.runId).toBe(forgedRun);
+      expect(proposalDetail.ordinal).toBe(3);
+    } finally {
+      await inProcess.client.close();
+      await inProcess.server.close();
+    }
+
+    // 面 4（RPC）：router client 的 typed error code（经统一 DomainError 边界）。
+    const client = createRouterClient(
+      createRpcRouter({
+        status: () => ({
+          active: true,
+          pid: process.pid,
+          version: "test",
+          port: 0,
+          startedAt: 0,
+          tray: "headless",
+        }),
+        domain,
+      }),
+    );
+    const caught = await client.wiki.distill
+      .status({ runId: forgedRun })
+      .catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(ORPCError);
+    expect((caught as ORPCError).code).toBe("DISTILL_RUN_NOT_FOUND");
+    expect((caught as ORPCError).status).toBe(RpcErrorDefinitions.DISTILL_RUN_NOT_FOUND.status);
+  });
+
+  it("rejects wiki.distill_apply on the agent principal (authority red line)", async () => {
+    const result = await domain.managerCapabilities.call(
+      "wiki.distill_apply",
+      { runId: `wd_${"0".repeat(24)}`, ordinal: 0 },
+      "agent",
+    );
+    expect(result).toMatchObject({ kind: "denied", reason: "principal-forbidden" });
   });
 });

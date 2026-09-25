@@ -24,7 +24,7 @@ pnpm exec vp fmt --check`
       （allowlist 过滤/未知名创建即拒/bridge 未 ready 创建即拒/
       prompt 超时与取消 typed/dispose 超时强制释放/propose 不可见/
       stop-timeout-cancel dispose 矩阵）
-- [ ] 1.3 daemon DistillJobService：run registry（0700/0600/原子写/
+- [x] 1.3 daemon DistillJobService：run registry（0700/0600/原子写/
       LRU≤20/purge + 活跃 run LRU 保护——引用真相 = 持久 ledger，先
       expired 收敛再 LRU）+ ephemeral job（120s）+ wiki.distill.start/
       status/cancel RPC（awaiting-approval 取消失效语义 + 重启 expired
@@ -48,7 +48,7 @@ test/dsh-kernel.test.ts`（stop/timeout/restart/cancel-awaiting/
       全 not-proposed → failed(capacity)/
       零 proposal → failed(no-valid-proposals)/损坏 run 目录 pin
       fail-closed）
-- [ ] 1.4 proposal 桥：容量 admission（§5/I）+ wiki.distill_apply
+- [x] 1.4 proposal 桥：容量 admission（§5/I）+ wiki.distill_apply
       capability（registry digest 校验；approved 入口 = per-run 队列
       enqueue）+ MCP 投影 + 伪造/跨 scope/stale 负面
       门禁：`pnpm exec vitest run test/skill-creator-mcp.test.ts

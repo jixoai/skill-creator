@@ -9,6 +9,10 @@
  * tasks 字面「creator 读写（approved-mutation）」窄化为写面，见 artifacts 差异表）。
  * 修订 [2026-09-17]（skill-search-integration C2）：登记 skills.search（readonly——
  * BM25 检索不写盘；结果携带稳定 sk_ id 与作用域三元组）。
+ * 修订 [2026-09-25]（skill-wiki-maintainer 1.4）：登记蒸馏四能力——
+ * wiki.distill_start/status/cancel（readonly——run registry 是 daemon-owned 状态，
+ * 不落用户技能数据；写盘仍必经 wiki.distill_apply 审批）与 wiki.distill_apply
+ * （approved-mutation；approved 入口 = per-run 队列 enqueue 并等待终态，N）。
  *
  * 正交意图：
  *   [1] 领域能力面：Manager RPC procedure 的同名能力登记（输入 schema 与
@@ -43,6 +47,11 @@ import {
   WikiReadInputSchema,
 } from "../../shared/contracts/wiki.js";
 import {
+  DistillApplyInputSchema,
+  DistillRunInputSchema,
+  DistillStartInputSchema,
+} from "../../shared/contracts/wiki-distill.js";
+import {
   ApplyUpdateInputSchema,
   UpdateCheckInputSchema,
 } from "../../shared/contracts/skills-update.js";
@@ -53,10 +62,26 @@ import {
 } from "../../shared/contracts/repository.js";
 import { z } from "zod";
 
-/** DomainError → capability failed（code 值域一致：4 词有限表）。 */
+/** DomainError.code → capability failed 的闭合码（RpcErrorCode 四码同名映射；
+ * STALE 结果码不经 DomainError 产生——蒸馏 STALE 走 detail.code=DISTILL_STALE）。 */
+const RESULT_CODE_MAP: Partial<
+  Record<DomainError["code"], Extract<CapabilityCallResult, { kind: "failed" }>["code"]>
+> = {
+  NOT_FOUND: "NOT_FOUND",
+  CONFLICT: "CONFLICT",
+  INVALID_OPERATION: "INVALID_OPERATION",
+  UNAVAILABLE: "UNAVAILABLE",
+};
+
+/** DomainError → capability failed（5 词闭合码不变；detail 透传——蒸馏码走 detail）。 */
 function toResult(error: unknown): CapabilityCallResult {
   if (error instanceof DomainError) {
-    return { kind: "failed", code: error.code, message: error.message };
+    return {
+      kind: "failed",
+      code: RESULT_CODE_MAP[error.code] ?? "UNAVAILABLE",
+      message: error.message,
+      ...(error.detail === undefined ? {} : { detail: error.detail }),
+    };
   }
   return {
     kind: "failed",
@@ -92,6 +117,7 @@ export type DomainCapabilityDeps = Pick<
   | "sourceRegistry"
   | "skillsUpdate"
   | "wiki"
+  | "wikiDistill"
 >;
 
 /**
@@ -378,6 +404,44 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
           const parsed = WikiAppendInputSchema.parse(input);
           return domain.wiki.append(parsed.scope, { title: parsed.title, body: parsed.body });
         }),
+    },
+    // skill-wiki-maintainer 1.4：蒸馏编排能力面。start/status/cancel 只触
+    // daemon-owned run registry（readonly）；apply 是写盘执行（approved-mutation，
+    // MCP 面自然投影 wiki_distill_apply_propose；输入 {runId, ordinal}——提案体由
+    // handler 从 ledger 反查 digest 校验，伪造 → DISTILL_RUN_NOT_FOUND detail）。
+    {
+      name: "wiki.distill_start",
+      description:
+        "Start a wiki distillation run for one workspace source (read-only kernel job; proposals await approval).",
+      authority: "readonly",
+      input: DistillStartInputSchema,
+      handler: (input) =>
+        invoke(async () => domain.wikiDistill.start(DistillStartInputSchema.parse(input).source)),
+    },
+    {
+      name: "wiki.distill_status",
+      description: "Read one distill run's state, counters, and per-proposal ledger statuses.",
+      authority: "readonly",
+      input: DistillRunInputSchema,
+      handler: (input) =>
+        invoke(async () => domain.wikiDistill.status(DistillRunInputSchema.parse(input).runId)),
+    },
+    {
+      name: "wiki.distill_cancel",
+      description: "Cancel one distill run (dispose kernel session; expire undecided proposals).",
+      authority: "readonly",
+      input: DistillRunInputSchema,
+      handler: (input) =>
+        invoke(async () => domain.wikiDistill.cancel(DistillRunInputSchema.parse(input).runId)),
+    },
+    {
+      name: "wiki.distill_apply",
+      description:
+        "Execute one approved distill proposal item (enqueue per-run and await its terminal result).",
+      authority: "approved-mutation",
+      input: DistillApplyInputSchema,
+      // N：enqueue 并等待队列任务终态——不走 invoke 的 ok 包装（结果即闭合 result）。
+      handler: (input) => domain.wikiDistill.apply(input),
     },
   ];
 }

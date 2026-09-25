@@ -41,6 +41,9 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           status: RpcErrorDefinitions[error.code].status,
           message: error.message,
           cause: error,
+          // U：结构化 detail（如 PROPOSAL_STALE 的 currentView）作 oRPC error data
+          // ——与 capability/MCP/proposal 面同一 CapabilityFailureDetailSchema。
+          ...(error.detail === undefined ? {} : { data: error.detail }),
         });
       }
       throw error;
@@ -134,6 +137,18 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       append: rpc.wiki.append.handler(({ input }) =>
         domain.wiki.append(input.scope, { title: input.title, body: input.body }),
       ),
+      // 蒸馏编排（skill-wiki-maintainer 1.3）：DomainError（DISTILL_*）经统一边界。
+      distill: {
+        start: rpc.wiki.distill.start.handler(async ({ input }) =>
+          domain.wikiDistill.start(input.source),
+        ),
+        status: rpc.wiki.distill.status.handler(async ({ input }) =>
+          domain.wikiDistill.status(input.runId),
+        ),
+        cancel: rpc.wiki.distill.cancel.handler(async ({ input }) =>
+          domain.wikiDistill.cancel(input.runId),
+        ),
+      },
     },
     daemon: {
       status: rpc.daemon.status.handler(() => status()),
@@ -202,8 +217,10 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         approve: rpc.agent.proposals.approve.handler(async ({ input }) => ({
           proposal: (await domain.mcpProposals.approve(input.proposalId)).view,
         })),
-        reject: rpc.agent.proposals.reject.handler(({ input }) => {
-          const rejected = domain.mcpProposals.reject(input.proposalId);
+        // reject 变 await 语义（N/U）：late reject → typed PROPOSAL_STALE（data =
+        // CapabilityFailureDetail.currentView）；ledger 迁移 IO 失败 → DISTILL_IO。
+        reject: rpc.agent.proposals.reject.handler(async ({ input }) => {
+          const rejected = await domain.mcpProposals.reject(input.proposalId);
           if (!rejected)
             throw new DomainError("NOT_FOUND", `proposal not found: ${input.proposalId}`);
           return { proposal: rejected.view };

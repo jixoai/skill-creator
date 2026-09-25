@@ -144,6 +144,13 @@ import {
   WikiReadResultSchema,
   WikiScopesResultSchema,
 } from "./contracts/wiki.js";
+import {
+  DistillCancelOutputSchema,
+  DistillStartInputSchema,
+  DistillStartOutputSchema,
+  DistillStatusOutputSchema,
+  DistillRunInputSchema,
+} from "./contracts/wiki-distill.js";
 import { PatternListItemSchema } from "skill-wiki/schema";
 
 const WorkspaceProviderReadInputSchema = z.object({
@@ -311,6 +318,18 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     read: oc.input(WikiReadInputSchema).output(WikiReadResultSchema),
     /** 追加碎片认知（contentHash 幂等去重；deduplicated=true 表示未新建页）。 */
     append: oc.input(WikiAppendInputSchema).output(WikiAppendResultSchema),
+    /**
+     * 蒸馏编排面（skill-wiki-maintainer E：三面同源、无 phase 字段——RunState
+     * 即阶段真相；同 source 活跃 run ≤1；执行经 proposal 审批（wiki.distill_apply）。
+     */
+    distill: {
+      /** 启动蒸馏 run（corpus → kernel → plan → 原子 admission；阻塞到 admission）。 */
+      start: oc.input(DistillStartInputSchema).output(DistillStartOutputSchema),
+      /** run 状态投影（终态幂等可轮询；counters 全键 + proposalRefs ledger 状态）。 */
+      status: oc.input(DistillRunInputSchema).output(DistillStatusOutputSchema),
+      /** 取消（kernel-running → dispose；awaiting-approval → C 失效语义；终态幂等）。 */
+      cancel: oc.input(DistillRunInputSchema).output(DistillCancelOutputSchema),
+    },
   },
   daemon: {
     /** Read the live daemon and tray status. */

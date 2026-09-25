@@ -11,10 +11,21 @@
  *   [3] 清单投影：describe() 供 MCP descriptors / agent 面投影 / 对照表。
  * 妥协声明：无——runtime 不持文件句柄；真实 mutation 由调用方注入的 handler
  * 背后的领域服务拥有。
+ * 修订 [2026-09-25]（skill-wiki-maintainer design U）：CapabilityCallResult 的
+ * TS 类型改自 shared 契约 CapabilityCallResultSchema 推导（failed.detail 增补
+ * CapabilityFailureDetail；闭合码值域不变），单一事实源移至
+ * src/shared/contracts/wiki-distill.ts。
  */
 import type { ZodType } from "zod";
+import {
+  CapabilityCallResultSchema,
+  type CapabilityCallResult,
+  type CapabilityFailureDetail,
+} from "../../shared/contracts/wiki-distill.js";
 
-/** 能力权威等级（design D3）：读观察 / 产 proposal 待审批 / 已审批 mutation。 */
+export type { CapabilityCallResult, CapabilityFailureDetail };
+
+/** 能力权威等级（design D3）：读观察 / 产 proposal 待审批 / 已批准 mutation。 */
 export type CapabilityAuthority = "readonly" | "proposal" | "approved-mutation";
 
 /**
@@ -24,22 +35,11 @@ export type CapabilityAuthority = "readonly" | "proposal" | "approved-mutation";
 export type CapabilityPrincipal = "agent" | "human-ui" | "manager-recovery";
 
 /**
- * 能力调用的闭合结果 union。值形状与 skill-steward 的 SkillToolCallResult
- * 兼容（ok / denied / failed）；capability-core 独立声明以避免通用层反向依赖
- * 领域契约。
+ * 能力调用的闭合结果 union（TS 类型自 shared 契约的 Zod schema 推导——单一
+ * 事实源；值形状与 skill-steward 的 SkillToolCallResult 兼容 ok/denied/failed）。
+ * skill-wiki-maintainer（design U）：failed 分支增补 detail?: CapabilityFailureDetail
+ * （蒸馏面失败以闭合 DistillErrorCode 同码投影四面）。
  */
-export type CapabilityCallResult =
-  | { kind: "ok"; value: unknown }
-  | {
-      kind: "denied";
-      reason: "unsupported-capability" | "principal-forbidden";
-      requestedOperation: string;
-    }
-  | {
-      kind: "failed";
-      code: "NOT_FOUND" | "CONFLICT" | "INVALID_OPERATION" | "UNAVAILABLE" | "STALE";
-      message: string;
-    };
 
 /** 能力定义。handler 自行解析 unknown input 并产出领域错误消息（行为由调用方拥有）。 */
 export interface CapabilityDefinition {

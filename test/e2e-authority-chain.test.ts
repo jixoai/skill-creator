@@ -149,7 +149,8 @@ describe("end-to-end authority chain (task 6.1)", () => {
     const text = (proposed.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
     if (proposed.isError) throw new Error(`propose failed: ${text}`);
     const { proposalId } = JSON.parse(text) as { proposalId: string };
-    const rejected = domain.mcpProposals.reject(proposalId);
+    // reject 变 await 语义（skill-wiki-maintainer N/U：onRejected 接缝 + cause 二分）。
+    const rejected = await domain.mcpProposals.reject(proposalId);
     expect(rejected?.view.status).toBe("rejected");
     expect(fs.existsSync(skillFile())).toBe(true); // 磁盘不变。
     // 拒绝后审批幂等返回 rejected，不执行。

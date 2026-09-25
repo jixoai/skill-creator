@@ -24,6 +24,7 @@ import { appDir } from "../shared/paths.js";
 
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
 import { createWikiService, type WikiService } from "./wiki-service.js";
+import { createWikiDistillService, type DistillJobService } from "./wiki-distill-service.js";
 import { createSkillSearchService, type SkillSearchService } from "./skill-search/service.js";
 import { platformOpenFile, type SearchConfigOpener } from "./search-config-opener.js";
 import { createDialogService, type DialogService } from "./dialog-service.js";
@@ -85,6 +86,8 @@ export interface DaemonDomain {
   dialog: DialogService;
   /** 双级 wiki 知识库（skill-wiki 领域库委派；direct mutation 面）。 */
   wiki: WikiService;
+  /** 蒸馏 Job 编排（skill-wiki-maintainer 1.3：run registry + kernel job + 审批桥）。 */
+  wikiDistill: DistillJobService;
   /** ACP 子进程池 + stdio↔WS 帧桥 + 安全门。 */
   acpBridge: AcpBridgeService;
   /** 只读技能分析 + proposal 草稿审批服务。 */
@@ -174,6 +177,15 @@ export function createDaemonDomain(
   const dialog = options.dialog ?? createDialogService();
   // wiki 随 workspace 目录同居（目录映射标准 2026-09-22）；global 由库解析。
   const wiki = createWikiService(workspaces);
+  // 蒸馏 Job 服务先于 capability registry 构造（handler 闭包消费 domain.wikiDistill）；
+  // proposal store 晚绑定注入（store 依赖 registry → registry 依赖 domain 的环由
+  // 访问子切断）；store 的 onRejected 反向接线到本服务（N reject seam）。
+  const proposalsRef: { store: McpProposalStore | null } = { store: null };
+  const wikiDistill = createWikiDistillService({
+    workspaces,
+    kernel: () => kernelHostRef.handle,
+    proposals: () => proposalsRef.store,
+  });
   const domain: DaemonDomain = {
     workspaces,
     skills,
@@ -186,6 +198,7 @@ export function createDaemonDomain(
     searchConfigOpener,
     dialog,
     wiki,
+    wikiDistill,
     acpBridge: createAcpBridgeService(workspaces),
     skillIntelligence,
     steward: createStewardService(workspaces, skills, skillIntelligence, {
@@ -210,8 +223,12 @@ export function createDaemonDomain(
     enumerable: true,
     writable: false,
   });
+  const mcpProposals = createMcpProposalStore(managerCapabilities, {
+    onRejected: (view, cause) => wikiDistill.onProposalRejected(view, cause),
+  });
+  proposalsRef.store = mcpProposals;
   Object.defineProperty(domain, "mcpProposals", {
-    value: createMcpProposalStore(managerCapabilities),
+    value: mcpProposals,
     enumerable: true,
     writable: false,
   });

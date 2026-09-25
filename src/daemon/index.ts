@@ -275,6 +275,9 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
         settleTeardown("acp bridge", () => domain.acpBridge.dispose()),
         // steward：取消活动 run、回收隔离 execution root、dispose backend adapter。
         settleTeardown("steward service", () => domain.steward.dispose()),
+        // 蒸馏 Job（skill-wiki-maintainer §4）：dispose kernel 会话 + 活动 kernel
+        // run → failed(cancelled-by-shutdown)；重启后不自动续跑。
+        settleTeardown("wiki distill jobs", () => domain.wikiDistill.dispose()),
         // skill search：关闭 provider root watchers（persistent:false 之外的显式回收）。
         settleTeardown("skill search", () => domain.skillSearch.dispose()),
       ];
