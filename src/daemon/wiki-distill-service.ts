@@ -51,11 +51,11 @@ import {
   findSimilarPatterns,
   globalWikiDirectory,
   listWikiPatternsReadOnly,
-  openWikiSearchIndex,
   openWikiWorkspace,
   parsePatternPage,
   planDistillation,
   stripFrontmatter,
+  withWikiSearchIndex,
   workspaceWikiDirectory,
   type DistillCorpus,
   type DistillInvalidDiagnostic,
@@ -398,17 +398,23 @@ async function buildCorpus(
 
   const clusters: DistillCorpus["clusters"] = [];
   if (sources.length > 1) {
-    const index = await openWikiSearchIndex(sourceWikiDirectory, () => sources);
-    for (const source of sources) {
-      const similar = await findSimilarPatterns(index, source);
-      if (similar.length === 0) continue;
-      clusters.push({
-        members: [source.name, ...similar.map((hit) => hit.name)]
-          .sort()
-          .filter((name, position, all) => all.indexOf(name) === position),
-        score: similar[0]?.score ?? 0,
-      });
-    }
+    // 会话边界必 close：sqlite 句柄泄漏会在 Windows 锁住 wiki 目录 unlink。
+    await withWikiSearchIndex(
+      sourceWikiDirectory,
+      () => sources,
+      async (index) => {
+        for (const source of sources) {
+          const similar = await findSimilarPatterns(index, source);
+          if (similar.length === 0) continue;
+          clusters.push({
+            members: [source.name, ...similar.map((hit) => hit.name)]
+              .sort()
+              .filter((name, position, all) => all.indexOf(name) === position),
+            score: similar[0]?.score ?? 0,
+          });
+        }
+      },
+    );
   }
 
   let query = "";
@@ -426,20 +432,25 @@ async function buildCorpus(
 
   const candidates: DistillCorpus["candidates"] = [];
   if (globals.length > 0 && query.trim().length > 0) {
-    const index = await openWikiSearchIndex(globalWikiDirectoryPath, () => globals);
-    const result = await index.search(query, { limit: 5 });
-    for (const hit of result.hits) {
-      const pattern = globals.find((item) => item.name === hit.id);
-      if (!pattern) continue;
-      candidates.push({
-        name: pattern.name,
-        title: pattern.title,
-        body: pattern.body,
-        contentHash: pattern.contentHash,
-        sourceScope: globalWikiDirectoryPath,
-        score: hit.score,
-      });
-    }
+    await withWikiSearchIndex(
+      globalWikiDirectoryPath,
+      () => globals,
+      async (index) => {
+        const result = await index.search(query, { limit: 5 });
+        for (const hit of result.hits) {
+          const pattern = globals.find((item) => item.name === hit.id);
+          if (!pattern) continue;
+          candidates.push({
+            name: pattern.name,
+            title: pattern.title,
+            body: pattern.body,
+            contentHash: pattern.contentHash,
+            sourceScope: globalWikiDirectoryPath,
+            score: hit.score,
+          });
+        }
+      },
+    );
   }
 
   const corpus = {

@@ -34,10 +34,10 @@ import type { WikiEdit } from "./patch.js";
 import { openWikiWorkspace, resolveWikiDirectory, type WikiWorkspace } from "./workspace.js";
 import {
   findSimilarPatterns,
-  openWikiSearchIndex,
   patternSearchDoc,
   registerWikiCorpusEntries,
   unregisterWikiCorpusEntries,
+  withWikiSearchIndex,
   type PatternDocSource,
   type SimilarPattern,
 } from "./similarity.js";
@@ -226,18 +226,15 @@ function loadPatternDocSources(wiki: WikiWorkspace): PatternDocSource[] {
 /**
  * 查重索引维护会话：打开（必要时全量重灌）→ 执行 → 必 close。
  * SearchError 由调用方决定降级（add/edit/remove 警告；find 上抛）。
+ * close 纪律由 similarity.ts 的 withWikiSearchIndex 单点承载（Windows sqlite
+ * 句柄锁 unlink；CLI 短命进程只是未爆雷，不是豁免理由）。
  */
 async function withWikiIndex<T>(
   wikiDirectory: string,
   wiki: WikiWorkspace,
   action: (index: SearchIndex) => Promise<T>,
 ): Promise<T> {
-  const index = await openWikiSearchIndex(wikiDirectory, () => loadPatternDocSources(wiki));
-  try {
-    return await action(index);
-  } finally {
-    await index.close();
-  }
+  return withWikiSearchIndex(wikiDirectory, () => loadPatternDocSources(wiki), action);
 }
 
 function errorMessage(error: unknown): string {

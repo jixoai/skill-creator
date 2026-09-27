@@ -210,6 +210,25 @@ export async function openWikiSearchIndex(
   return index;
 }
 
+/**
+ * 查重索引维护会话：open → action → 必 close（成功与异常路径同样关闭）。
+ * sqlite 句柄未关会在 Windows 上锁住目录 unlink（EBUSY）；POSIX 对打开中文件
+ * 的 unlink 宽容只是假象（2026-09-28 Windows 实机轮：distill corpus 构建泄漏
+ * 句柄）。daemon 生命周期内的每次打开都必须经本会话边界。
+ */
+export async function withWikiSearchIndex<T>(
+  wikiDirectory: string,
+  loadPatterns: () => PatternDocSource[],
+  action: (index: SearchIndex) => Promise<T>,
+): Promise<T> {
+  const index = await openWikiSearchIndex(wikiDirectory, loadPatterns);
+  try {
+    return await action(index);
+  } finally {
+    await index.close();
+  }
+}
+
 /** 调用方增量 upsert 后同步 corpus 登记（幂等：同 hash 重写）。 */
 export function registerWikiCorpusEntries(
   wikiDirectory: string,
