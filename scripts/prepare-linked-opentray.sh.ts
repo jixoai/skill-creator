@@ -53,11 +53,19 @@ export async function prepareLinkedOpenTray(consumerRoot: string): Promise<void>
   }
 
   console.log(`Preparing linked OpenTray workspace: ${workspaceRoot}`);
+  // vite-plus 托管的 pnpm 是 native exe（npm_execpath = pnpm.native.exe）——
+  // `node <exe>` 会把 PE 头当 JS 加载；exe 直接执行，JS 入口才经 node。
+  const directExecutable = packageManagerEntry.toLowerCase().endsWith(".exe");
   const code = await new Promise<number | null>((resolve, reject) => {
-    const child = spawn(nodeExecutable, [packageManagerEntry, "run", "prepare:linked-consumer"], {
-      cwd: workspaceRoot,
-      stdio: "inherit",
-    });
+    const child = directExecutable
+      ? spawn(packageManagerEntry, ["run", "prepare:linked-consumer"], {
+          cwd: workspaceRoot,
+          stdio: "inherit",
+        })
+      : spawn(nodeExecutable, [packageManagerEntry, "run", "prepare:linked-consumer"], {
+          cwd: workspaceRoot,
+          stdio: "inherit",
+        });
     child.once("error", reject);
     child.once("exit", resolve);
   });
