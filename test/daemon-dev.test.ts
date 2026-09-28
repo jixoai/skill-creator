@@ -4,11 +4,17 @@
  * User input [2026-07-15]: "按照你自己的节奏去推进开发迭代。"
  * Architecture decision [2026-07-15]: a Vite config restart must await the
  * previous daemon's release before the replacement server starts a new child.
+ * Revision [2026-09-28] (windows real-machine round): the tsx loader passed to
+ * node --import must be a file:// URL — a bare Windows absolute path (E:\...)
+ * is rejected by the ESM loader as an unsupported URL scheme, which had gone
+ * unseen because the restart fixture skips on win32 and uses a .cjs entry.
  *
  * Orthogonal intents:
  *   [1] Exercise the real Vite restart order against a singleton fake daemon.
  *   [2] Prove duplicate closeBundle hooks terminate each child exactly once.
  *   [3] Prove Vite starts its daemon through an absolute runtime without PATH lookup.
+ *   [4] Pin the --import specifier shape for .ts daemon entries (file:// URL,
+ *       platform-agnostic — POSIX bare paths only work by leniency).
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -16,8 +22,27 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
+import { resolveDevDaemonArgs } from "../webui/config/daemon-dev.js";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
+
+describe("resolveDevDaemonArgs (tsx loader specifier)", () => {
+  it("passes a non-.ts entry through unchanged", () => {
+    const entry = path.join(repoRoot, "dist", "daemon.js");
+    expect(resolveDevDaemonArgs(entry)).toEqual([entry]);
+  });
+
+  it("converts the tsx loader to a file:// URL for .ts entries on every platform", () => {
+    const args = resolveDevDaemonArgs(path.join(repoRoot, "src", "daemon", "index.ts"));
+    expect(args).toHaveLength(3);
+    expect(args[0]).toBe("--import");
+    expect(args[2]).toBe(path.join(repoRoot, "src", "daemon", "index.ts"));
+    // specifier 必须是合法 file:// URL——Windows 裸绝对路径会被 ESM loader 拒绝。
+    const parsed = new URL(args[1] as string);
+    expect(parsed.protocol).toBe("file:");
+    expect(() => fs.statSync(new URL(args[1] as string))).not.toThrow();
+  });
+});
 
 describe("Vite development daemon", () => {
   it.skipIf(process.platform === "win32")(

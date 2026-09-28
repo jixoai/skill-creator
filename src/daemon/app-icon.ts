@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AppIcon } from "opentray";
+import type { AppIcon, IconImage } from "opentray";
 
 const LINUX_ICON_SIZES = [16, 32, 48, 64, 128, 256, 512] as const;
 
@@ -82,6 +82,22 @@ export function resolveAppIcon(
   }
 
   return null;
+}
+
+/**
+ * 窗口级 App identity 图标（win32 专用，2026-09-28 Windows 实机轮）：show 命令的
+ * `icon` 选项 → HWND WM_SETICON（标题栏/任务栏/alt-tab）。wire 形状是裸
+ * IconImage（`{type:"file"}`；原生侧按 `type` tag 反序列化，Icon 候选 map 会被
+ * 拒绝）。macOS 的窗口身份由 app bundle 再生承载，非 win32 一律返回 null 保持
+ * 既有行为。资产取 default/light 变体（win32 任务栏无亮暗切换语义，不消费 dark）。
+ */
+export function resolveWindowIcon(
+  webuiDir: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): IconImage | null {
+  if (platform !== "win32") return null;
+  const lightPath = resolveNativeAppIconPath("win32-light.ico", webuiDir);
+  return lightPath === null ? null : { type: "file", path: lightPath };
 }
 
 function resolveNativeVariantPair(

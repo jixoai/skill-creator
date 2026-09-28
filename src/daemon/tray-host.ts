@@ -36,7 +36,7 @@ import {
   WINDOW_HEIGHT,
   WINDOW_WIDTH,
 } from "../shared/index.js";
-import { resolveAppIcon } from "./app-icon.js";
+import { resolveAppIcon, resolveWindowIcon } from "./app-icon.js";
 import { configureOpenTrayWindowsHostTopology } from "./opentray-windows-host.js";
 import { log } from "./log.js";
 
@@ -234,6 +234,8 @@ async function mountWindowedTray(opts: MountTrayOptions): Promise<{
     // tray 通知栏小图标（resources/README.md §4 Monochrome Mini）：极小容器专用。
     const iconPath = resolveTrayIconPath(opts.webuiDir);
     const appIcon = resolveAppIcon(opts.webuiDir);
+    // win32 窗口身份（show `icon` → WM_SETICON：任务栏/alt-tab）；macOS 由 bundle 承载返回 null。
+    const windowIcon = resolveWindowIcon(opts.webuiDir);
     const icon: Icon | undefined = iconPath
       ? {
           // macOS template icon：透明背景单色图，系统按深浅色自适应反相。
@@ -265,15 +267,19 @@ async function mountWindowedTray(opts: MountTrayOptions): Promise<{
     });
     tray = baseTray.extend(ext.WebviewExt);
 
-    // macOS overlays its native controls in the WebUI titlebar; Windows keeps its native frame.
-    const usesWindowControlsOverlay = process.platform !== "win32";
-    panel = tray.createWebviewWindow({
+    const webviewWindowOptions = (windowControlsOverlay: boolean) => ({
       url: opts.url,
       width: WINDOW_WIDTH,
       height: WINDOW_HEIGHT,
       title: APP_TITLE,
       nativeWindowApi: true,
-      windowControlsOverlay: usesWindowControlsOverlay,
+      // 统一自定义标题栏（2026-09-28 Windows 实机轮裁决）：内容延伸入 titlebar，
+      // 系统绘制 caption 按钮并投影 titlebar-area 几何（macOS NSWindow overlay /
+      // win32 AppWindow ExtendsContentIntoTitlebar）。frameless 保持 false——
+      // 边框/阴影/resize 与 caption 所有权仍归系统（§2 约束 7）。
+      windowControlsOverlay,
+      // win32 窗口身份（WM_SETICON：任务栏/alt-tab）；与 overlay 正交，降级重试仍生效。
+      ...(windowIcon === null ? {} : { icon: windowIcon }),
       ...(opts.enableDevtools ? { devtools: true } : {}),
       style: {
         // Application mode supplies normal taskbar/Dock discoverability and native z-order.
@@ -285,8 +291,21 @@ async function mountWindowedTray(opts: MountTrayOptions): Promise<{
       },
     });
 
-    // 首次 show() 真正加载原生扩展并创建 native window session。
-    await panel.show();
+    // 首次 show() 真正加载原生扩展并创建 native window session。win32 overlay 经
+    // AppWindow 需要 Windows App Runtime bootstrap（Bootstrap.dll 随 WinAppSDK
+    // redist 分发，CBS 发行不含）；缺失机器上 show 会失败——降级关 overlay 重试，
+    // 绝不让 overlay 缺席把窗口打成 headless（icon 独立于 overlay，重试仍生效）。
+    panel = tray.createWebviewWindow(webviewWindowOptions(true));
+    try {
+      await panel.show();
+    } catch (overlayError) {
+      log(
+        `overlay window show failed (${errorToLogMessage(overlayError)}) — retrying without windowControlsOverlay`,
+      );
+      await panel.destroy();
+      panel = tray.createWebviewWindow(webviewWindowOptions(false));
+      await panel.show();
+    }
     log("tray window shown on mount");
 
     if (opts.enableDevtools) {

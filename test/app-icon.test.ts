@@ -1,15 +1,18 @@
 /**
  * 用户原始需求 [2026-07-20]：「light 资产声明 default/light，dark 资产声明 dark；
  * Linux 保留 Vite 生成的 default PNG。」
+ * 修订 [2026-09-28]（windows-window-identity-overlay）：新增窗口级身份投影
+ * 用例——win32 show `icon` 裸 file IconImage（wire 形状，WM_SETICON），非 win32 恒 null。
  * 正交意图：
  * 1. 证明 Darwin/Windows 手工目录的变体投影与 staged 路径优先级。
  * 2. 证明 Linux 仍使用省略 variant 的 Vite 尺寸 PNG。
+ * 3. 证明窗口级图标只在 win32 投影 default(light) ICO 裸 IconImage。
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveAppIcon } from "../src/daemon/app-icon.js";
+import { resolveAppIcon, resolveWindowIcon } from "../src/daemon/app-icon.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -85,6 +88,24 @@ describe("AppIcon platform catalog", () => {
         },
       })),
     );
+  });
+});
+
+describe("resolveWindowIcon (window-level app identity)", () => {
+  it("projects the win32 default (light) ICO as a bare file IconImage (wire shape)", () => {
+    const webuiDir = createWebuiDir(["app-icon/win32-light.ico", "app-icon/win32-dark.ico"]);
+
+    expect(resolveWindowIcon(webuiDir, "win32")).toEqual({
+      type: "file",
+      path: path.join(webuiDir, "icons", "app-icon", "win32-light.ico"),
+    });
+  });
+
+  it("returns null outside win32 (macOS window identity rides the app bundle)", () => {
+    const webuiDir = createWebuiDir(["app-icon/darwin-light.icns", "app-icon/darwin-dark.icns"]);
+
+    expect(resolveWindowIcon(webuiDir, "darwin")).toBeNull();
+    expect(resolveWindowIcon(webuiDir, "linux")).toBeNull();
   });
 });
 

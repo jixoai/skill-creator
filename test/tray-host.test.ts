@@ -1,5 +1,8 @@
 /**
  * 用户原始需求 [2026-07-19]：「移除目前关于窗口半透明、倒计时关闭的相关前后端代码。」
+ * 修订 [2026-09-28]（windows-window-identity-overlay）：补 home 隔离——TrayHost
+ * 的 best-effort log 会写默认 home 的 daemon.log，测试不隔离即污染操作者日志
+ * （Windows 实机轮曾被 "fixture.emitState" 假失败误导）。
  * 正交意图：
  *   [1] 证明原生 isVisible()/visibleChange 是可见性真相，菜单据此切换 Show/Hide。
  *   [2] 证明 retained session 用 toVisible()/close() 复用，操作串行化不反转 stale 状态。
@@ -8,10 +11,22 @@
  * 妥协声明：四项共享同一 TrayHost fixture 与原生窗口事件 seam；拆分会复制状态机装配并削弱行为断言。
  */
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { TrayEventByType } from "opentray";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { TrayHost } from "../src/daemon/tray-host.js";
 import { MENU_OPEN_ID, MENU_QUIT_ID } from "../src/shared/index.js";
+import { setHomeOverride } from "../src/shared/paths.js";
+
+// TrayHost 的 log() 落默认 home 的 daemon.log；隔离到临时 home，测试零外泄。
+const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-tray-test-home-"));
+setHomeOverride(isolatedHome);
+afterAll(() => {
+  setHomeOverride(null);
+  fs.rmSync(isolatedHome, { recursive: true, force: true });
+});
 
 class MockWindow extends EventEmitter {
   toVisible = vi.fn(async () => {

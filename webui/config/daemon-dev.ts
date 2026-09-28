@@ -11,7 +11,7 @@ import http from "node:http";
 import net, { type AddressInfo } from "node:net";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { execa, type ResultPromise } from "execa";
 import httpProxy from "http-proxy";
 import type { Plugin } from "vite";
@@ -137,10 +137,14 @@ export function skillCreatorDaemonDev(): Plugin {
   };
 }
 
-function resolveDevDaemonArgs(entry: string): string[] {
+/** 源码态 daemon 的 argv（导出供测试钉死 specifier 形状）。 */
+export function resolveDevDaemonArgs(entry: string): string[] {
   if (!entry.endsWith(".ts")) return [entry];
   const tsxLoader = createRequire(import.meta.url).resolve("tsx");
-  return ["--import", tsxLoader, entry];
+  // --import 的值是 module specifier：Windows 裸绝对路径（E:\...）的盘符会被
+  // ESM loader 当 URL 协议拒绝（ERR_UNSUPPORTED_ESM_URL_SCHEME）；POSIX 裸路径
+  // 只是恰好宽容。统一转 file:// URL（两平台同形）。
+  return ["--import", pathToFileURL(tsxLoader).href, entry];
 }
 
 /** Resolve the PATH-independent Vite supervisor that owns daemon and WebView together. */
