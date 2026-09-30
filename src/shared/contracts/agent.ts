@@ -60,6 +60,38 @@ export const AgentSessionSummarySchema = z.object({
 /** 会话摘要。 */
 export type AgentSessionSummary = z.infer<typeof AgentSessionSummarySchema>;
 
+/**
+ * 会话 seed 元数据（creator-test-session A4/A′3 + intelligence-proposal-parity
+ * C1）：产品 seed 入口创建的会话在转录 meta 里携带来源记录（目标技能三元组 +
+ * revision + 模板 ID/版本）——供 GOAL 完成审计与后续评估追溯。
+ */
+export const AgentSessionSeedMetadataSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("test-run"),
+    workspaceId: WorkspaceIdSchema,
+    providerId: ProviderIdSchema,
+    skillId: SkillIdSchema,
+    /** 被测技能文档 revision（creator.load 同源）。 */
+    revision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    templateId: z.string().min(1),
+    templateVersion: z.number().int().positive(),
+  }),
+  z.strictObject({
+    kind: z.literal("finding-propose"),
+    action: z.enum(["edit", "disable", "split", "merge"]),
+    findingId: z.string().min(1),
+    /** finding 观察时的技能 revision（stale 判定基准）。 */
+    observedRevision: z.string().min(1),
+    workspaceId: WorkspaceIdSchema,
+    providerId: ProviderIdSchema,
+    skillId: SkillIdSchema,
+    templateId: z.string().min(1),
+    templateVersion: z.number().int().positive(),
+  }),
+]);
+/** 会话 seed 元数据。 */
+export type AgentSessionSeedMetadata = z.infer<typeof AgentSessionSeedMetadataSchema>;
+
 /** 会话创建输入。 */
 export const AgentSessionCreateInputSchema = z.object({
   /** 会话工作目录（缺省 daemon cwd；产品面通常传 Workspace 目录）。 */
@@ -68,6 +100,8 @@ export const AgentSessionCreateInputSchema = z.object({
   prompt: z.string().min(1).max(20_000).optional(),
   /** 会话模式（缺省取 settings.defaultMode）。 */
   mode: DshAgentModeSchema.optional(),
+  /** seed 来源记录（可选；写入转录 meta 的 seed 块）。 */
+  metadata: AgentSessionSeedMetadataSchema.optional(),
 });
 /** 会话创建输入。 */
 export type AgentSessionCreateInput = z.infer<typeof AgentSessionCreateInputSchema>;

@@ -39,12 +39,13 @@ pending testRun 元数据 + 开面板 + 不自动发送。`seedComposerPrompt(te
 
 ```text
 templateId: probe-recall-v1  version: 1
-正文（逐字；占位符 ${skillName}）：
-  请阅读引用的技能文档（${skillName} 芯片）。然后：
+正文（逐字；占位符 ${skillName}；渲染输出含 `$name` token——芯片配对按文中
+token 匹配，正文必须携带 `$` 前缀，r4 实现轮测试实证）：
+  请阅读引用的技能文档（$${skillName} 芯片）。然后：
   1. 复述该技能的触发条件与适用场景；
   2. 列出它声明提供的工具与参考文件；
   3. 给出一个你会使用它的典型任务示例。
-替换示例：name="code-review" → 「请阅读引用的技能文档（code-review 芯片）。…」
+替换示例：name="code-review" → 「请阅读引用的技能文档（$code-review 芯片）。…」
 替换：纯文本；编辑：用户改最终 prompt，模板版本仍落档；自动发送：false。
 ```
 

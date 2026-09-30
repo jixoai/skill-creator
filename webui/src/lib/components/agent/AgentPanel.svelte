@@ -28,7 +28,7 @@
     setAgentPanelWidth,
   } from "$lib/stores/agent.svelte";
   import { connectionState } from "$lib/stores/connection.svelte";
-  import { agentComposer } from "$lib/stores/agent-composer.svelte";
+  import { agentComposer, addComposerReference } from "$lib/stores/agent-composer.svelte";
   import AgentHeader from "./AgentHeader.svelte";
   import TranscriptView from "./TranscriptView.svelte";
   import DropOverlay from "./DropOverlay.svelte";
@@ -55,14 +55,18 @@
     }
   });
 
-  // 首屏行动的 composer 种子：面板挂载即一次性填入（不自动发送；R12-B 8 后
-  // startAgentAction 不再 eager 建会话——会话由首条消息惰性创建，种子无需等待
-  // sessionId）。
+  // composer 种子（creator-test-session A2/A′2）：面板挂载即一次性消费——文本
+  // 填入（不覆盖已有草稿）+ 引用经 addComposerReference 注册（registry 唯一
+  // 写者；test-run 的技能三元组芯片由此入轨）。不自动发送；会话由首条消息惰性
+  // 创建，种子无需等待 sessionId。
   $effect(() => {
-    if (agentPanel.seedPrompt) {
-      const seed = agentPanel.seedPrompt;
-      agentPanel.seedPrompt = null;
-      if (agentComposer.text.length === 0) agentComposer.text = seed;
+    if (agentPanel.seed) {
+      const seed = agentPanel.seed;
+      agentPanel.seed = null;
+      if (agentComposer.text.length === 0) agentComposer.text = seed.text;
+      if (seed.reference !== undefined && agentComposer.text.includes(seed.reference.token)) {
+        addComposerReference(seed.reference);
+      }
     }
   });
 

@@ -137,8 +137,10 @@ import {
   agentRuntimeConfig,
   agentSession,
   agentSessionsList,
+  seedAgentTestRun,
 } from "../stores/agent.svelte";
 import { agentComposer, resetAllComposerTracks } from "../stores/agent-composer.svelte";
+import type { SkillId, WorkspaceProviderTarget } from "../types";
 import type { DshStewardSettingsView } from "$shared/contracts/dsh-runtime.js";
 import type { AgentSessionSummary } from "$shared/contracts/agent.js";
 
@@ -270,7 +272,7 @@ beforeEach(() => {
   connection.rpc = agentRpc();
   connection.generation = 0;
   agentPanel.open = false;
-  agentPanel.seedPrompt = null;
+  agentPanel.seed = null;
   agentSession.sessionId = null;
   agentSession.mode = null;
   agentSession.pendingMode = "free";
@@ -488,6 +490,51 @@ describe("truncated cleanup with kernel-only re-projection (R15 追加 P1-5)", (
     agentSessionsList.sessions = [{ ...sessionSummary("agent-k9", "free"), hasTranscript: false }];
     await cleanupAgentSessions({ beforeDays: 30 });
     await vi.waitFor(() => expect(agentSession.sessionId).toBeNull());
+    ctx.cleanup();
+  });
+});
+
+describe("creator-test-session seed consumption (A2 panel effect)", () => {
+  it("consumes a test-run seed once: fills the composer text and registers the skill reference", () => {
+    const ctx = mountPanel();
+    seedAgentTestRun({
+      text: "请阅读引用的技能文档（$code-review 芯片）。",
+      skill: {
+        workspaceId: "ws_0123456789abcdef01234567" as WorkspaceProviderTarget["workspaceId"],
+        providerId: "claude-code" as WorkspaceProviderTarget["providerId"],
+        skillId: "sk_0123456789abcdef01234567" as SkillId,
+      },
+      skillName: "code-review",
+      revision: `sha256:${"a".repeat(64)}`,
+      templateId: "probe-recall-v1",
+      templateVersion: 1,
+    });
+    flushSync();
+    expect(agentComposer.text).toContain("$code-review 芯片");
+    expect(agentPanel.seed).toBeNull();
+    expect(agentComposer.references).toHaveLength(1);
+    const reference = agentComposer.references[0];
+    expect(reference.kind).toBe("skill");
+    if (reference.kind !== "skill") return;
+    expect(reference.skill).toMatchObject({
+      workspaceId: "ws_0123456789abcdef01234567",
+      providerId: "claude-code",
+      skillId: "sk_0123456789abcdef01234567",
+    });
+    expect(reference.token).toBe("$code-review");
+    ctx.cleanup();
+  });
+
+  it("seed consumption never overwrites an existing draft and skips references whose token is absent", () => {
+    const ctx = mountPanel();
+    agentComposer.text = "用户已有草稿";
+    flushSync();
+    // 直接置 seed（不经 beginNewAgentSession——显式新建清 new-session 草稿桶是
+    // R17-A 设计行为；本例测的是消费效果自身的守卫）。
+    agentPanel.seed = { text: "probe text" };
+    flushSync();
+    expect(agentComposer.text).toBe("用户已有草稿");
+    expect(agentPanel.seed).toBeNull();
     ctx.cleanup();
   });
 });

@@ -15,6 +15,7 @@
   import ChangeLog from "$lib/components/creator/change-log.svelte";
   import PreviewView from "$lib/components/creator/preview.svelte";
   import ValidationView from "$lib/components/creator/validation-view.svelte";
+  import TestRunView from "$lib/components/creator/test-run-view.svelte";
   import {
     provideCreatorEditor,
     placeholderDraft,
@@ -144,15 +145,7 @@
         {:else if subview === "validate"}
           <ValidationView />
         {:else if subview === "test"}
-          <div
-            class="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground"
-          >
-            <div class="space-y-1">
-              <p class="font-medium text-foreground">Test run</p>
-              <p>Exercising this skill inside the DSH-hosted agent session lands here.</p>
-              <p class="text-muted-foreground/60">(Not yet implemented.)</p>
-            </div>
-          </div>
+          <TestRunView />
         {:else}
           <FileBrowser />
         {/if}

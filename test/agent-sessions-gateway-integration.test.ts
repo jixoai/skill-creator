@@ -185,5 +185,61 @@ describe.skipIf(!gatewayReachable)(
         expect(dropped).toEqual([]);
       },
     );
+
+    it(
+      "persists a test-run seed metadata block and replays it after restart (creator-test-session A4/A5)",
+      { timeout: 120_000 },
+      async () => {
+        kernel = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
+        const transcriptsRoot = path.join(sandbox, "transcripts");
+        service = createAgentSessionsService({
+          kernel: () => kernel,
+          modelSelection: async () => ({ provider: "local-gateway", model: GATEWAY_MODEL }),
+          defaultMode: async () => "free",
+          retention: 50,
+          transcripts: createSessionTranscripts(transcriptsRoot),
+        });
+        service.attach(kernel);
+
+        const session = await service.create({
+          cwd: sandbox,
+          prompt: "Reply with exactly: ok",
+          metadata: {
+            kind: "test-run",
+            workspaceId: "ws_0123456789abcdef01234567",
+            providerId: "claude-code",
+            skillId: "sk_0123456789abcdef01234567",
+            revision: `sha256:${"a".repeat(64)}`,
+            templateId: "probe-recall-v1",
+            templateVersion: 1,
+          },
+        });
+
+        // 落盘断言：meta.json 携带 seed 块（真实内核链路，非单测桩）。日期桶按
+        // 本地时区分段，路径以 sessionId 扫描定位（时区无关）。
+        const sessionDir = fs
+          .readdirSync(path.join(transcriptsRoot), { recursive: true })
+          .map((entry) => path.join(transcriptsRoot, String(entry)))
+          .find((candidate) => fs.existsSync(candidate) && candidate.endsWith(session.sessionId));
+        expect(sessionDir).toBeDefined();
+        const meta = JSON.parse(fs.readFileSync(path.join(sessionDir!, "meta.json"), "utf8")) as {
+          seed?: unknown;
+        };
+        expect(meta.seed).toMatchObject({
+          kind: "test-run",
+          templateId: "probe-recall-v1",
+          templateVersion: 1,
+        });
+
+        // 重启回放：同根新实例（模拟 daemon 重启）读回 seed 块。
+        const replayed = createSessionTranscripts(transcriptsRoot)
+          .listAll()
+          .find((item) => item.sessionId === session.sessionId);
+        expect(replayed?.seed).toMatchObject({
+          kind: "test-run",
+          skillId: "sk_0123456789abcdef01234567",
+        });
+      },
+    );
   },
 );

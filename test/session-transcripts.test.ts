@@ -149,3 +149,52 @@ describe("session transcripts store", () => {
     expect(reread.listAll().find((meta) => meta.sessionId === "agent-legacy")?.mode).toBe("free");
   });
 });
+
+describe("session transcript seed metadata (creator-test-session A4)", () => {
+  it("persists the test-run seed block and reads it back", () => {
+    const store = createSessionTranscripts(root);
+    store.recordStart({
+      sessionId: "agent-seed",
+      title: "",
+      createdAt: "2026-09-30T00:00:00.000Z",
+      cwd: "/tmp/ws",
+      mode: "free",
+      seed: {
+        kind: "test-run",
+        workspaceId: "ws_0123456789abcdef01234567",
+        providerId: "claude-code",
+        skillId: "sk_0123456789abcdef01234567",
+        revision: `sha256:${"a".repeat(64)}`,
+        templateId: "probe-recall-v1",
+        templateVersion: 1,
+      },
+    });
+    const meta = store.listAll().find((item) => item.sessionId === "agent-seed");
+    expect(meta?.seed).toMatchObject({
+      kind: "test-run",
+      templateId: "probe-recall-v1",
+      skillId: "sk_0123456789abcdef01234567",
+    });
+  });
+
+  it("drops a corrupt seed block without losing the session", () => {
+    const store = createSessionTranscripts(root);
+    store.recordStart({
+      sessionId: "agent-bad-seed",
+      title: "",
+      createdAt: "2026-09-30T00:00:00.000Z",
+      cwd: "/tmp/ws",
+      mode: "free",
+    });
+    const dir = fs.readdirSync(path.join(root, "2026", "09", "30"))[0];
+    const metaPath = path.join(root, "2026", "09", "30", dir, "meta.json");
+    const raw = JSON.parse(fs.readFileSync(metaPath, "utf8")) as Record<string, unknown>;
+    raw.seed = { kind: "test-run", bogus: true };
+    fs.writeFileSync(metaPath, JSON.stringify(raw));
+    const meta = createSessionTranscripts(root)
+      .listAll()
+      .find((item) => item.sessionId === "agent-bad-seed");
+    expect(meta).toBeDefined();
+    expect(meta?.seed).toBeUndefined();
+  });
+});

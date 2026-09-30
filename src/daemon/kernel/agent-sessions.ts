@@ -36,6 +36,7 @@ import {
 } from "../../shared/contracts/dsh-runtime.js";
 import type {
   AgentQueueItem,
+  AgentSessionSeedMetadata,
   AgentSessionStatus,
   AgentSessionSummary,
   AgentSessionsCleanupInput,
@@ -1301,11 +1302,13 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       }
       return summaries;
     },
-    /** 创建产品会话（产品 preset + 按模式的工具面收窄 setup；可选首 prompt）。 */
+    /** 创建产品会话（产品 preset + 按模式的工具面收窄 setup；可选首 prompt 与 seed 元数据）。 */
     async create(input: {
       cwd?: string;
       prompt?: string;
       mode?: DshAgentMode;
+      /** seed 来源记录（creator-test-session A4）：写入转录 meta 供审计追溯。 */
+      metadata?: AgentSessionSeedMetadata;
     }): Promise<AgentSessionSummary> {
       const kernel = requireKernel();
       const agents = agentsService(kernel.ctx);
@@ -1353,6 +1356,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         createdAt: new Date().toISOString(),
         cwd: input.cwd ?? process.cwd(),
         mode,
+        ...(input.metadata ? { seed: input.metadata } : {}),
       });
       if (input.prompt) {
         handle.agent.followup(

@@ -26,7 +26,11 @@ import {
   type DshAgentMode,
   type DshSessionStreamFrame,
 } from "../../shared/contracts/dsh-runtime.js";
-import type { AgentSessionSummary } from "../../shared/contracts/agent.js";
+import type {
+  AgentSessionSeedMetadata,
+  AgentSessionSummary,
+} from "../../shared/contracts/agent.js";
+import { AgentSessionSeedMetadataSchema } from "../../shared/contracts/agent.js";
 
 /** 转录元数据（meta.json；全部字段按外部输入 safeParse）。 */
 export interface SessionTranscriptMeta {
@@ -36,6 +40,8 @@ export interface SessionTranscriptMeta {
   cwd: string;
   /** 会话模式（add-agent-settings-modes；缺失/非法读 free——旧会话创建时即全工具面）。 */
   mode: DshAgentMode;
+  /** seed 来源记录（creator-test-session A4：产品 seed 入口建会话时携带；缺失 = 非 seed 会话）。 */
+  seed?: AgentSessionSeedMetadata;
 }
 
 /** 日期桶（目录段 YYYY/MM/DD 的投影；R14-C 清理消费）。 */
@@ -75,15 +81,18 @@ function parseMeta(raw: unknown): SessionTranscriptMeta | null {
     createdAt?: unknown;
     cwd?: unknown;
     mode?: unknown;
+    seed?: unknown;
   };
   if (typeof meta.sessionId !== "string" || meta.sessionId.length === 0) return null;
   if (typeof meta.createdAt !== "string" || meta.createdAt.length === 0) return null;
+  const seed = AgentSessionSeedMetadataSchema.safeParse(meta.seed);
   return {
     sessionId: meta.sessionId,
     title: typeof meta.title === "string" ? meta.title : "",
     createdAt: meta.createdAt,
     cwd: typeof meta.cwd === "string" ? meta.cwd : "",
     mode: DshAgentModeSchema.safeParse(meta.mode).success ? (meta.mode as DshAgentMode) : "free",
+    ...(seed.success ? { seed: seed.data } : {}),
   };
 }
 

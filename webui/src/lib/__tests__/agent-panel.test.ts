@@ -35,11 +35,19 @@ import {
   answerAgentApproval,
   createAgentSession,
   pollAgentStream,
+  seedAgentTestRun,
+  seedComposerPrompt,
   selectAgentSession,
   sendAgentPrompt,
   setAgentPanelOpen,
   setAgentSessionMode,
 } from "../stores/agent.svelte";
+import {
+  addComposerReference,
+  agentComposer,
+  resetAllComposerTracks,
+} from "../stores/agent-composer.svelte";
+import type { SkillId, WorkspaceProviderTarget } from "../types";
 
 function frame(seq: number, kind: string, extra: Record<string, unknown> = {}) {
   return {
@@ -56,7 +64,7 @@ beforeEach(() => {
   connection.rpc = null;
   connection.generation = 0;
   agentPanel.open = false;
-  agentPanel.seedPrompt = null;
+  agentPanel.seed = null;
   agentSession.sessionId = null;
   agentSession.mode = null;
   agentSession.items = [];
@@ -819,5 +827,118 @@ describe("agent panel store (task 3.x)", () => {
       images: ["data:image/png;base64,xx"],
       files: ["b.txt", "c.jpg"],
     });
+  });
+});
+
+describe("creator-test-session seed (A5 store matrix)", () => {
+  const skill = {
+    workspaceId: "ws_0123456789abcdef01234567" as WorkspaceProviderTarget["workspaceId"],
+    providerId: "claude-code" as WorkspaceProviderTarget["providerId"],
+    skillId: "sk_0123456789abcdef01234567" as SkillId,
+  };
+  const revision = `sha256:${"a".repeat(64)}`;
+
+  function sessionRpc() {
+    return {
+      agent: {
+        session: {
+          create: vi.fn().mockResolvedValue({
+            session: {
+              sessionId: "agent-t1",
+              title: "",
+              status: "idle",
+              cwd: "/tmp",
+              createdAt: "2026-09-30T00:00:00.000Z",
+              mode: "free",
+            },
+          }),
+          prompt: vi.fn().mockResolvedValue({ accepted: true }),
+          stream: vi.fn().mockResolvedValue({ frames: [], status: "idle" }),
+        },
+        sessions: { list: vi.fn().mockResolvedValue({ sessions: [] }) },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    agentSession.pendingMode = "free";
+    resetAllComposerTracks();
+  });
+
+  it("seeds text + skill reference + metadata; wire prompt carries the opaque triple and create carries metadata", async () => {
+    const rpc = sessionRpc();
+    connection.rpc = rpc;
+    seedAgentTestRun({
+      text: "请阅读引用的技能文档（code-review 芯片）。",
+      skill,
+      skillName: "code-review",
+      revision,
+      templateId: "probe-recall-v1",
+      templateVersion: 1,
+    });
+    expect(agentPanel.open).toBe(true);
+    expect(agentPanel.seed?.reference?.kind).toBe("skill");
+    expect(agentPanel.seed?.metadata).toMatchObject({
+      kind: "test-run",
+      templateId: "probe-recall-v1",
+      revision,
+    });
+    // 面板消费效果注册的引用（registry 唯一写者）——提交时随 wire 走。
+    addComposerReference(agentPanel.seed!.reference!);
+    await sendAgentPrompt("$code-review 试跑", [], [], "queue", agentComposer.references);
+    const createCall = rpc.agent.session.create.mock.calls[0][0];
+    expect(createCall.metadata).toMatchObject({
+      kind: "test-run",
+      workspaceId: "ws_0123456789abcdef01234567",
+      providerId: "claude-code",
+      skillId: "sk_0123456789abcdef01234567",
+      templateVersion: 1,
+    });
+    const promptCall = rpc.agent.session.prompt.mock.calls[0][0];
+    expect(promptCall.references[0]).toEqual({
+      kind: "skill",
+      workspaceId: "ws_0123456789abcdef01234567",
+      providerId: "claude-code",
+      skillId: "sk_0123456789abcdef01234567",
+    });
+  });
+
+  it("retains seed metadata for retry when the lazy create fails", async () => {
+    const rpc = sessionRpc();
+    rpc.agent.session.create.mockRejectedValueOnce(new Error("kernel down")).mockResolvedValueOnce({
+      session: {
+        sessionId: "agent-t2",
+        title: "",
+        status: "idle",
+        cwd: "/tmp",
+        createdAt: "2026-09-30T00:00:00.000Z",
+        mode: "free",
+      },
+    });
+    connection.rpc = rpc;
+    seedAgentTestRun({
+      text: "probe",
+      skill,
+      skillName: "code-review",
+      revision,
+      templateId: "probe-recall-v1",
+      templateVersion: 1,
+    });
+    await sendAgentPrompt("first try", [], [], "queue", []);
+    expect(agentSession.sessionId).toBeNull();
+    await sendAgentPrompt("retry", [], [], "queue", []);
+    expect(agentSession.sessionId).toBe("agent-t2");
+    const retryCreate = rpc.agent.session.create.mock.calls[1][0];
+    expect(retryCreate.metadata?.kind).toBe("test-run");
+  });
+
+  it("generic seedComposerPrompt never attaches reference or seed metadata", async () => {
+    const rpc = sessionRpc();
+    connection.rpc = rpc;
+    seedComposerPrompt("帮我看下技能库");
+    expect(agentPanel.seed).toEqual({ text: "帮我看下技能库" });
+    await sendAgentPrompt("帮我看下技能库", [], [], "queue", []);
+    const createCall = rpc.agent.session.create.mock.calls[0][0];
+    expect("metadata" in createCall).toBe(false);
   });
 });

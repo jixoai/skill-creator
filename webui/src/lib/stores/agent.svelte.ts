@@ -34,10 +34,12 @@ import {
   type AgentQueueUpdateInput,
   type AgentSessionsCleanupInput,
   type AgentSessionsCleanupResult,
+  type AgentSessionSeedMetadata,
   type AgentSessionSummary,
 } from "$shared/contracts/agent.js";
 import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
 import type { SkillId } from "$shared/contracts/skills.js";
+import type { ComposerReferenceInput } from "$lib/components/agent/composer-chips.js";
 import {
   DshAgentModeSchema,
   DshUserTextAttachmentSchema,
@@ -164,13 +166,30 @@ function readStoredAgentPanelWidth(): number {
   }
 }
 
-/** drawer 开合（跨 tab 存活，开关=收起不销毁）；seedPrompt 为首屏行动塞进
- * composer 的一次性种子；width 为 ≥720px 侧栏宽度（初始化自 sessionStorage）。 */
+/**
+ * 面板种子（creator-test-session A′2/A′4）：一次性 composer 种子——通用预填
+ * 只带 text；test-run/finding-propose 种子额外带 reference（经
+ * addComposerReference 注册的唯一通道）与 seed 元数据（惰性建会话时透传）。
+ */
+export interface AgentPanelSeed {
+  text: string;
+  reference?: ComposerReferenceInput;
+  metadata?: AgentSessionSeedMetadata;
+}
+
+/** drawer 开合（跨 tab 存活，开关=收起不销毁）；seed 为塞进 composer 的一次性
+ * 种子（面板挂载即消费）；width 为 ≥720px 侧栏宽度（初始化自 sessionStorage）。 */
 export const agentPanel = $state({
   open: false,
-  seedPrompt: null as string | null,
+  seed: null as AgentPanelSeed | null,
   width: readStoredAgentPanelWidth(),
 });
+
+/**
+ * 待建会话的 seed 元数据（A′3）：seed 入口存入；sendAgentPrompt 惰性建会话时
+ * 透传入 agent.session.create，创建成功即消费（失败保留供重试）。
+ */
+let pendingSeedMetadata: AgentSessionSeedMetadata | null = null;
 
 /** 当前会话与帧视图（跨 tab 存活；切会话清空重载）。 */
 export const agentSession = $state({
@@ -337,15 +356,21 @@ export async function cleanupAgentSessions(
 }
 
 /** 新建会话（可选首 prompt）；成功后切换到该会话并开始轮询。 */
-export async function createAgentSession(prompt?: string, mode?: DshAgentMode): Promise<void> {
+export async function createAgentSession(
+  prompt?: string,
+  mode?: DshAgentMode,
+  metadata?: AgentSessionSeedMetadata,
+): Promise<void> {
   const request = createGate.issue();
   agentSession.sending = true;
   try {
     const result = await requireRpc().agent.session.create({
       ...(prompt ? { prompt } : {}),
       ...(mode ? { mode } : {}),
+      ...(metadata ? { metadata } : {}),
     });
     if (!request.isCurrent()) return;
+    if (metadata !== undefined) pendingSeedMetadata = null;
     resetSessionView(result.session.sessionId, result.session.status, result.session.mode);
     agentSessionsList.loaded = false;
     void loadAgentSessions();
@@ -359,15 +384,64 @@ export async function createAgentSession(prompt?: string, mode?: DshAgentMode): 
 }
 
 /**
- * 首屏快速行动：打开面板进入 New Session 态并预选模式；seedPrompt 在面板就绪
- * 后一次性填入 composer（不自动发送——会话由首条消息惰性创建，用户保有最后
- * 一步）。
+ * 首屏快速行动：打开面板进入 New Session 态并预选模式；seed 在面板就绪后一次
+ * 性填入 composer（不自动发送——会话由首条消息惰性创建，用户保有最后一步）。
+ * A′4：通用预填走 seedComposerPrompt（无模板/引用/元数据，永不标 test-run）。
  */
 export function startAgentAction(mode: DshAgentMode, seedPrompt?: string): void {
+  seedComposerPrompt(seedPrompt);
   beginNewAgentSession();
   agentPanel.open = true;
-  agentPanel.seedPrompt = seedPrompt ?? null;
   agentSession.pendingMode = mode;
+}
+
+/**
+ * 通用 composer 预填（A′4）：仅文本种子；startAgentAction 与其它通用入口共用。
+ * 与 seedAgentTestRun 的区别：无 reference、无 seed 元数据、不改变 pending 元
+ * 数据——普通行动永不伪装成 test-run。
+ */
+export function seedComposerPrompt(text: string | undefined): void {
+  if (text === undefined) return;
+  agentPanel.seed = { text };
+}
+
+/**
+ * test-run 种子（creator-test-session A1/A2）：模板正文 + 技能引用（完整三元
+ * 组，经面板消费时的 addComposerReference 注册）+ seed 元数据（revision 与模
+ * 板版本随惰性建会话透传进转录 meta）。不自动发送。
+ */
+export function seedAgentTestRun(seed: {
+  text: string;
+  skill: { workspaceId: WorkspaceId; providerId: ProviderId; skillId: SkillId };
+  skillName: string;
+  revision: string;
+  templateId: string;
+  templateVersion: number;
+}): void {
+  beginNewAgentSession();
+  agentPanel.open = true;
+  const metadata: AgentSessionSeedMetadata = {
+    kind: "test-run",
+    workspaceId: seed.skill.workspaceId,
+    providerId: seed.skill.providerId,
+    skillId: seed.skill.skillId,
+    revision: seed.revision,
+    templateId: seed.templateId,
+    templateVersion: seed.templateVersion,
+  };
+  agentPanel.seed = {
+    text: seed.text,
+    reference: {
+      kind: "skill",
+      token: `$${seed.skillName}`,
+      target: seed.skill.skillId,
+      label: seed.skillName,
+      skill: seed.skill,
+    },
+    metadata,
+  };
+  pendingSeedMetadata = metadata;
+  agentSession.pendingMode = "free";
 }
 
 /**
@@ -497,7 +571,7 @@ export async function sendAgentPrompt(
   // W4：running 中以 queue 模式提交 → 发件箱投影（durable 帧到达退队）。
   if (mode === "queue" && agentSession.status === "running") trackQueuedSend(text);
   if (!agentSession.sessionId) {
-    await createAgentSession(undefined, agentSession.pendingMode);
+    await createAgentSession(undefined, agentSession.pendingMode, pendingSeedMetadata ?? undefined);
     // 创建失败（含被代次门取代）：sessionId 仍为 null，错误已进 error 面。
     if (!agentSession.sessionId) return;
     // R17-A：惰性建会话换轨后，把 "__new__" 桶的在途草稿迁到新会话轨——草稿在
