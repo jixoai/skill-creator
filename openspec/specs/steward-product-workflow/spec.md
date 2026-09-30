@@ -10,24 +10,35 @@ Steward 工作流 UI 已按 2026-09-11 用户裁决退役（Agent 面板是唯�
 
 ## Requirements
 
-### Requirement: Steward is a complete Manager workflow
+### Requirement: Steward workflow is agent-internal with Manager authority
 
-The UI MUST provide task and scope selection, runtime configuration, event/tool visibility, evidence, patch diff, validation, approval, rollback and terminal recovery in one Manager-owned workflow.
+The steward analysis pipeline (snapshot, evidence, finding, proposal, validation,
+approval, apply, audit, rollback) MUST remain Manager-owned and complete, and
+MUST operate as an agent-facing internal surface (capability/MCP tools and
+kernel agent runs) instead of a dedicated Manager workflow UI. Steward
+proposals MUST surface to the user through the proposal approval faces (the
+MCP mutation proposal chain and the skillSteward grant chain). The WebUI MUST
+NOT add a steward entry that consumes the `steward.*` RPC face; the daemon
+keeps that face as an internal/diagnostic surface.
 
-This workflow MUST run inside the Skill Creator shell as a Manager surface, with the Agent panel available in the same shell. It MUST NOT depend on the DSH client composition, a Svelte island channel, or a DSH-hosted entry; store semantics (generation gates, terminal polling stop, scope guards) carry over unchanged.
+**Reason**: The owner decision (2026-09-11) removed the standalone Steward UI;
+the in-shell Agent panel is the only agent face. Codex review r1 (2026-09-30)
+scoped the retirement to UI/hosted semantics — Manager authority, proposals,
+approval, audit and rollback all stay.
 
-**Reason**: Change `dsh-kernel-rebase` retires the DSH web-hosted product path; the workflow keeps its Manager-owned semantics but rebinds to the Skill Creator shell.
+#### Scenario: Agent-initiated proposal reaches approval
 
-#### Scenario: User approves an optimization
+- **WHEN** a steward run produces a proposal
+- **THEN** it reaches the user through a proposal approval face with validation
+  results and revision bindings
+- **AND** no standalone steward workflow view is required to operate the
+  pipeline
 
-- **WHEN** validation succeeds for the exact observed revisions
-- **THEN** the UI shows the patch, affected skills and one explicit approval action before apply
+#### Scenario: No standalone steward entry
 
-#### Scenario: Workflow after host inversion
-
-- **WHEN** the product runs in the Skill Creator shell
-- **THEN** the steward workflow is reachable as a Manager surface with the Agent panel in-shell
-- **AND** no DSH web composition, island channel, or entry handshake is required to operate the workflow.
+- **WHEN** the WebUI is navigated
+- **THEN** no route or activity consumes the `steward.*` RPC face, and the
+  daemon retains the steward services as an internal surface
 
 ### Requirement: Failure states are actionable
 
