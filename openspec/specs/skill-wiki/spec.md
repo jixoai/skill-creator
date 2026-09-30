@@ -2,7 +2,8 @@
 
 ## Purpose
 
-TBD - created by archiving change skill-wiki-incubation. Update Purpose after archive.
+skill-wiki 领域库：双级 wiki（global + workspace）的目录契约、pattern 读写与
+查重；skill-creator 经目录映射标准消费（wiki-service 委派 + cli-kit 组装）。
 
 ## Requirements
 

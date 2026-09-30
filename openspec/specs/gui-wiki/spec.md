@@ -2,7 +2,9 @@
 
 ## Purpose
 
-TBD - created by archiving change wiki-directory-standard. Update Purpose after archive.
+WebUI 第四个一级 Wiki 面板：home = scope 索引（global 卡 + 各 workspace 只读
+摘要），/wiki/:wsId = scope 内 pattern 列表（过滤/追加/相似预警/断线保草稿）；
+目录映射遵循 wiki-directory-standard（workspace 同居目录）。
 
 ## Requirements
 

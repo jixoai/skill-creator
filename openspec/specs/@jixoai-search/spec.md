@@ -2,7 +2,9 @@
 
 ## Purpose
 
-TBD - created by archiving change jixoai-search-core. Update Purpose after archive.
+org 级通用检索包：索引/召回后端可插拔（sqlite FTS5 默认、tantivy 单进程）+
+JS 冻结 BM25 打分与字段加权；供 skill-creator 检索索引消费，零引擎实现
+泄漏的领域 API。
 
 ## Requirements
 

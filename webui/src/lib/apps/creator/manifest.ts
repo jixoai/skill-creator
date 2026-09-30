@@ -1,7 +1,6 @@
 /**
  * 用户原始需求 [2026-07-27]：「Creator 用来编写 Skill，深度融合 AI」。
  * 正交意图：[1] 声明 Creator App 的 manifest（home + 编辑/新建实例 activity）。
- * 妥协声明：当前只声明 manifest 骨架，视图组件后续 change 5 填充。
  */
 import IconPen from "@lucide/svelte/icons/file-pen-line";
 import { defineApp, defineActivity, defineRoute, leafRoute } from "$lib/shell";
