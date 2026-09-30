@@ -23,5 +23,5 @@
       P2-1（installedVia: manual 不可观测→改 "unknown"）、P2-2（stdio 蒸馏语义
       改 run failed(kernel-unavailable)）、P2-3（main.ts 意图头）、P2-4（本勾选）、
       P2-5（--json 字段标注主要字段）已修；proposal 夸大措辞已修
-- [ ] 5.2 同步 AGENTS.md（产品真相/安全边界一行）+ i18n.zh.md 词汇；归档 change；
+- [x] 5.2 同步 AGENTS.md（产品真相/安全边界一行）+ i18n.zh.md 词汇；归档 change；
       commit

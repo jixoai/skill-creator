@@ -129,6 +129,12 @@ SkillTokenizer     = 冻结规则的检索分词器：NFKC + Intl.Segmenter(zh) 
                       URL）；query/doc 同管线，TOKENIZER_VERSION 版本化，
                       small-ICU 探针降级 pure-bigram；冻结期望表为逐字契约
 Skill Steward      = Manager-owned domain tools + snapshot + proposal + approval + audit
+Self Skill         = 产品自描述技能 skill-creator-v2（~/.agents/skills/skill-creator-v2，
+                      生产 daemon 入口自举；2026-09-30）：文档=对外行为面（CLI+MCP
+                      readonly）单一事实投影，frontmatter 所有权标记（x-managed-by/
+                      version）管理升级，禁用痕迹(.SKILL.md)/用户内容/同版本不触碰；
+                      产品提示词 v2 起不内嵌用法，经 skills_search→skills_info 指针
+                      读取（dev daemon 不挂载、测试走 SKILL_CREATOR_SELF_SKILL_ROOT）
 Agent Kernel       = headless DSH 内核：单 dsh-base bundle + 产品 preset（persona/ask-user）
                       + 工具面收窄（专注模式禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
 Agent Role         = 官方原生子代理的受控暴露：一条 dsh-tool-subagent 行 = 一个角色
@@ -606,6 +612,7 @@ user source gitUrl ------------> https-only + dedupe + user_ id -----> Discover 
 skills-CLI lock (v3/v1) -------> safeParse ---------------------------> null -> skipped update
 search-index.json -------------> JSON parse + 五版本信封 + payloadDigest + 逐层校验 -> 空索引重建 / IO hard error
 search SKILL.md 读取 ----------> lstat regular + O_NOFOLLOW fd + fstat 身份校验 -> 拒绝候选 / typed read error
+自举技能根（~/.agents/skills/skill-creator-v2）-> frontmatter 所有权标记判级 -> 仅缺失/产品旧版整组原子写；禁用痕迹/无标记/同版本不触碰；IO 失败不阻塞启动
 GitHub Trees API response -----> JSON parse + tree parser ------------> unavailable（不抛错）
 npx skills list --json ---------> JSON parse + schema ----------------> empty path map
 ACP agent discovery which -----> exit-code projection ----------------> available/missing
