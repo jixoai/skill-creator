@@ -241,5 +241,81 @@ describe.skipIf(!gatewayReachable)(
         });
       },
     );
+
+    it(
+      "completes a provider-model evaluation run with real-model version evidence (evaluation-corpus 4.4)",
+      { timeout: 180_000 },
+      async () => {
+        const { createEvaluationService } = await import("../src/daemon/evaluation/service.js");
+        const { createEvaluationStore } = await import("../src/daemon/evaluation/store.js");
+        const { createProviderSessionAdapter } = await import(
+          "../src/daemon/evaluation/provider-adapter.js"
+        );
+        kernel = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
+        const transcriptsRoot = path.join(sandbox, "transcripts");
+        const sessions = createAgentSessionsService({
+          kernel: () => kernel,
+          modelSelection: async () => ({ provider: "local-gateway", model: GATEWAY_MODEL }),
+          defaultMode: async () => "free",
+          retention: 50,
+          transcripts: createSessionTranscripts(transcriptsRoot),
+          // 评估 runner 的引用展开（daemon 域内同源语义：stub 投影最小文本块）。
+          expandSkillReferences: async (references) =>
+            references.map((reference) => `[reference: skill ${reference.skillId}]\nprobe body`),
+        });
+        sessions.attach(kernel);
+        const store = createEvaluationStore(path.join(sandbox, "state"));
+        const target = {
+          workspaceId: "ws_0123456789abcdef01234567",
+          providerId: "claude-code",
+          skillId: "sk_0123456789abcdef01234567",
+        } as const;
+        const bound = `sha256:${"c".repeat(64)}`;
+        // 技能语料 stub：真实 revision 匹配 bound（provider 分支的 revision 闸）。
+        const skills = {
+          info: async () => ({
+            id: target.skillId,
+            name: "probe-skill",
+            content: "---\nname: probe-skill\ndescription: probe\n---\n\nbody\n",
+            revision: bound,
+            disabled: false,
+          }),
+          list: async () => [],
+        };
+        const service = createEvaluationService({
+          skills,
+          store,
+          providerAdapter: () =>
+            createProviderSessionAdapter({ sessions, cwd: sandbox, stepDelayMs: 1000, maxSteps: 120 }),
+        });
+        const caseId = ("ev_" + "1".repeat(24)) as never;
+        store.saveCase(target, {
+          schemaVersion: 1,
+          caseId,
+          enabled: true,
+          createdAt: "2026-09-30T00:00:00.000Z",
+          updatedAt: "2026-09-30T00:00:00.000Z",
+          source: "user",
+          boundRevision: bound,
+          input: {
+            prompt: "Reply with exactly: ok-probe-token",
+            assertions: [{ kind: "contains", value: "ok" }],
+          },
+        });
+        const start = service.startRun({ target, caseIds: [caseId], runner: "provider-model" });
+        for (let i = 0; i < 120; i += 1) {
+          const status = service.runStatus(start.runId);
+          if (status.status === "completed" || status.status === "cancelled") break;
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+        const [result] = await service.results(target);
+        // GOAL 107 实证字段：真实模型轮完成（非 unavailable/error），版本三元组落档。
+        expect(result.outcome).not.toBe("unavailable");
+        expect(result.outcome).not.toBe("error");
+        expect(result.runner.kind).toBe("provider-model");
+        expect(result.runner.version.dshVersion).toMatch(/^[0-9]/);
+        expect(result.runner.version.promptVersion.length).toBeGreaterThan(0);
+      },
+    );
   },
 );

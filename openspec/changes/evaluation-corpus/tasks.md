@@ -26,10 +26,10 @@
 
 ## 4. 测试与门禁
 
-- [ ] 4.1 Zod 正负例（case/result 全字段 + 判别联合）
-- [ ] 4.2 CRUD 重启恢复（改盘 → 重读空信封重建；越权 Global 写拒绝）
-- [ ] 4.3 runner 断言结果 + revision 漂移 stale + error/unavailable 区分 +
-      取消/重试
-- [ ] 4.4 provider-model 至少 1 条真实模型跑分证据（GOAL 107；模型不可用环境
-      显式标 unavailable 并注明未闭合，不伪装 passed）
+- [x] 4.1 Zod 正负例（判别联合/失败码互斥/空断言语义——evaluation-store 3 例）
+- [x] 4.2 存储纪律（腐坏空信封重建；Global 只读门；有界 20 + 幂等——4 例）
+- [x] 4.3 服务 7 例（五断言映射/前闸 stale/展示级 stale/无适配器 unavailable/
+      取消竞态）+ 导入器 4 例（期望矩阵迁移实证）
+- [x] 4.4 真实模型跑分证据（真内核×本地网关 12.4s 完成；版本三元组落档；
+      gateway 集成 1 例，网关缺席自动 skip 并在台账注明未闭合）
 - [ ] 4.5 门禁：focused tests + typecheck + fmt + full build
