@@ -21,3 +21,14 @@ export const PROBE_RECALL_V1 = {
 3. 给出一个你会使用它的典型任务示例。`;
   },
 } as const;
+
+/** seedAgentTestRun 的输入形状（codex r5 P1：模板 ID/version 与 seed 输入同源
+ * 冻结——webui 内部面；跨 wire 的部分由 AgentSessionSeedMetadata 契约承载）。 */
+export interface CreatorTestSeedInput {
+  text: string;
+  skill: { workspaceId: string; providerId: string; skillId: string };
+  skillName: string;
+  revision: string;
+  templateId: typeof PROBE_RECALL_V1.id;
+  templateVersion: typeof PROBE_RECALL_V1.version;
+}

@@ -40,6 +40,7 @@ import {
 import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
 import type { SkillId } from "$shared/contracts/skills.js";
 import type { ComposerReferenceInput } from "$lib/components/agent/composer-chips.js";
+import type { CreatorTestSeedInput } from "$lib/components/creator/test-probe.js";
 import {
   DshAgentModeSchema,
   DshUserTextAttachmentSchema,
@@ -397,27 +398,28 @@ export function startAgentAction(mode: DshAgentMode, seedPrompt?: string): void 
 
 /**
  * 通用 composer 预填（A′4）：仅文本种子；startAgentAction 与其它通用入口共用。
- * 与 seedAgentTestRun 的区别：无 reference、无 seed 元数据、不改变 pending 元
- * 数据——普通行动永不伪装成 test-run。
+ * 与 seedAgentTestRun 的区别：无 reference、无 seed 元数据，且**清除**遗留的
+ * pending 元数据——普通行动永不伪装成 test-run（codex r5 P1：不清除会让通用
+ * 行动继承上一次 test-run 的 metadata 落进转录）。
  */
 export function seedComposerPrompt(text: string | undefined): void {
+  pendingSeedMetadata = null;
   if (text === undefined) return;
   agentPanel.seed = { text };
 }
+
+/** 显式新建/退出会话视图时，未消费的 seed 元数据一并作废（见 beginNewAgentSession）。 */
 
 /**
  * test-run 种子（creator-test-session A1/A2）：模板正文 + 技能引用（完整三元
  * 组，经面板消费时的 addComposerReference 注册）+ seed 元数据（revision 与模
  * 板版本随惰性建会话透传进转录 meta）。不自动发送。
  */
-export function seedAgentTestRun(seed: {
-  text: string;
-  skill: { workspaceId: WorkspaceId; providerId: ProviderId; skillId: SkillId };
-  skillName: string;
-  revision: string;
-  templateId: string;
-  templateVersion: number;
-}): void {
+export function seedAgentTestRun(
+  seed: Omit<CreatorTestSeedInput, "skill"> & {
+    skill: { workspaceId: WorkspaceId; providerId: ProviderId; skillId: SkillId };
+  },
+): void {
   beginNewAgentSession();
   agentPanel.open = true;
   const metadata: AgentSessionSeedMetadata = {
@@ -450,6 +452,9 @@ export function seedAgentTestRun(seed: {
  * pendingMode 复位 free：空态默认选中 General。
  */
 export function beginNewAgentSession(): void {
+  // codex r5 P1：任何非 test-run 的显式新建都作废未消费的 seed 元数据
+  // （seedAgentTestRun 在本函数返回后才 stash，不受影响）。
+  pendingSeedMetadata = null;
   stopPolling();
   agentSession.sessionId = null;
   agentSession.status = "idle";

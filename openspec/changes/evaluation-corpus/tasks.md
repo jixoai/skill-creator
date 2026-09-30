@@ -5,14 +5,17 @@
 - [ ] 1.1 `src/shared/contracts/evaluation.ts`（case/result Zod 冻结 + 失败码枚举）
 - [ ] 1.2 `src/daemon/evaluation/store.ts`（B1 布局；原子写；safeParse 空信封；
       Imported-only 写门；results 有界 20/case）
-- [ ] 1.3 rpc-contract `evaluation.*` 六过程 + errors 词表对齐
+- [ ] 1.3 rpc-contract `evaluation.*` 八过程（cases×4 + run.start/status/cancel +
+      results.list）+ errors 词表对齐
 
 ## 2. runner
 
 - [ ] 2.1 analyzer runner（analyzeDocuments 路径 + 模块版本常量）
-- [ ] 2.2 builtin-fixture 导入器（10 条 → Imported 副本，source 标注）
-- [ ] 2.3 provider-model runner（seed 内核会话；取消映射；版本三元组
-      promptVersion/toolVersion/DSH version 写入 runner.version）
+- [ ] 2.2 builtin-fixture 导入器（B4 细则：caseId/prompt/synthetic target/
+      boundRevision=SKILL.md sha256/corpusDigest=语料拼接 sha256/finding-triggered
+      布尔断言 + finding-kind；导入落用户选择的 Imported 目标）
+- [ ] 2.3 provider-model runner（B7 adapter：create/prompt+references/
+      readTranscript 至 turn-end 终态/cancel 竞态胜者/结构化版本三元组）
 
 ## 3. 协议执行
 

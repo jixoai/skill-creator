@@ -932,9 +932,20 @@ describe("creator-test-session seed (A5 store matrix)", () => {
     expect(retryCreate.metadata?.kind).toBe("test-run");
   });
 
-  it("generic seedComposerPrompt never attaches reference or seed metadata", async () => {
+  it("generic seedComposerPrompt never attaches reference or seed metadata, and drops a stale pending test-run seed (codex r5 P1)", async () => {
     const rpc = sessionRpc();
     connection.rpc = rpc;
+    // 先种一次 test-run（stash pending metadata），紧接一次通用行动——普通行动
+    // 不得继承上一次的 test-run 元数据。
+    seedAgentTestRun({
+      text: "probe",
+      skill,
+      skillName: "code-review",
+      revision,
+      templateId: "probe-recall-v1",
+      templateVersion: 1,
+    });
+    agentPanel.seed = null;
     seedComposerPrompt("帮我看下技能库");
     expect(agentPanel.seed).toEqual({ text: "帮我看下技能库" });
     await sendAgentPrompt("帮我看下技能库", [], [], "queue", []);

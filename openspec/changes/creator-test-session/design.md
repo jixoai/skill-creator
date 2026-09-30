@@ -12,8 +12,9 @@
   「请阅读引用的技能文档（code-review 芯片）。」芯片来自 references 通道，
   不来自文本解析。
 - **A′3 revision + 透传**：`CreatorTestSeed.revision: "sha256:…"`（creator.load
-  同源）；`SessionTranscriptMeta` 增可选 `testRun` 块；`agent.session.create`
-  契约增可选 `metadata` 输入（破坏性，无兼容）；seed 存 pending testRun meta，
+  同源）；`SessionTranscriptMeta` 增可选 `seed` 块（r5 勘误：实现字段名 = seed，
+  与 agent.ts 契约/实现/测试统一）；`agent.session.create`
+  契约增可选 `metadata` 输入（破坏性，无兼容）；seed 存 pending 元数据，
   首次 prompt 触发 createAgentSession 时透传写 transcript。
 - **A′4 分流**：`seedComposerPrompt(text)`（通用；startAgentAction/
   WorkspacesHome 行为不变）与 `seedAgentTestRun(seed)`（模板+引用+元数据）
@@ -35,7 +36,8 @@ interface CreatorTestSeed {
 ## A2 入口（冻结，A′4 分流后）
 
 `seedAgentTestRun(seed)`：写文本 + 经 addComposerReference 注册芯片 + 存
-pending testRun 元数据 + 开面板 + 不自动发送。`seedComposerPrompt(text)`：通用
+pending 元数据 + 开面板 + 不自动发送（通用行动/显式新建会作废未消费的
+pending 元数据——codex r5 P1 修复）。`seedComposerPrompt(text)`：通用
 预填（无模板/引用/元数据）。startAgentAction 字符串路径委托 seedComposerPrompt。
 
 ## A3 探针模板协议（冻结，A′2 语法）

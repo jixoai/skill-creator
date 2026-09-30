@@ -14,8 +14,9 @@
   server-owned；写仅 Imported Workspace，Global 只读；文件事实源 + safeParse
   空值重建；单 daemon 串行。
 - **case schema**（Zod 冻结）：caseId/prompt/assertions（contains /
-  not-contains / finding-severity）/enabled/时间戳/source（user |
-  builtin-fixture）/boundRevision。
+  not-contains / finding-kind / finding-triggered（布尔）/ finding-severity，
+  min(1)）/enabled/时间戳/source（user | builtin-fixture）/boundRevision（技能
+  文档域）+ corpusDigest（语料域，仅 fixture 样本）。
 - **result schema**（五态判别联合冻结）：passed/failed/error/unavailable/stale；
   携带 caseId/runId/目标三元组/expectedRevision + observedStart/EndRevision/
   runner{kind,version}/逐 assertion 结果/typed failure。stale 转移冻结：run 前
@@ -24,8 +25,8 @@
 - **双 runner**：`analyzer`（确定性；fixture 作 builtin-fixture 样本导入）+
   `provider-model`（经 creator-test-session 的 seed 机制跑内核会话；runner.
   version = promptVersion/toolVersion/DSH version——GOAL 107 实证字段）。
-- **RPC**：`evaluation.cases.list|create|update|remove`、`evaluation.run.start`、
-  `evaluation.results.list`。
+- **RPC（八过程）**：`evaluation.cases.list|create|update|remove`、
+  `evaluation.run.start|status|cancel`、`evaluation.results.list`。
 - 批量 UI 在契约测试绿后另批任务（本 change 交付契约 + runner + 测试）。
 
 ## Impact

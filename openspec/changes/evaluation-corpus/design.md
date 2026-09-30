@@ -61,36 +61,52 @@ appDir()/evaluation/<workspaceId>/<providerId>/<skillId>/
       | { kind: "finding-severity"; value: "info"|"warning"|"error"; description? }>> }
 ```
 
-## B3 result schema（冻结；五态）
+## B3 result schema（冻结；五态；r5 勘误：failure 枚举补全 + 结构化版本）
 
 ```ts
 // B′1：Zod discriminatedUnion 按 outcome 收紧（非注释约定）
 { resultId, runId, caseId, target: {workspaceId, providerId, skillId},
   expectedRevision, observedStartRevision, observedEndRevision,
-  runner: { kind: "analyzer" | "provider-model"; version },
-    // analyzer: 模块冻结常量; provider-model:
-    // `${promptVersion}/${toolVersion}/${DSH version}`
+  runner: {
+    kind: "analyzer" | "provider-model",
+    version: { promptVersion: string; toolVersion: string; dshVersion: string },
+  },  // 结构化三元组（r5 勘误：不再拍平字符串；analyzer 路径 dshVersion="n/a"）
   outcome: "passed" | "failed" | "error" | "unavailable" | "stale",
   assertions: Array<{ ref: number; outcome: "passed"|"failed"|"error" }>,
-  failure?: { code: "MODEL_UNAVAILABLE" | "DSH_UNAVAILABLE" |
-    "PROVIDER_ROUTE_MISSING" | "RUNNER_ERROR"; detail: string },
+    // unavailable/stale 结果的 assertions 为空数组（未执行）
+  failure?: { code: EvaluationFailureCode; detail: string },
     // error|unavailable 时必填；passed|failed|stale 时缺席（schema refine）
   startedAt, endedAt }
+
+// EvaluationFailureCode（全枚举；与 outcome 的合法配对由 refine 强制）：
+//   error        → "RUNNER_ERROR" | "ASSERTION_ERROR"（执行族）
+//   unavailable  → "MODEL_UNAVAILABLE" | "DSH_UNAVAILABLE" | "PROVIDER_ROUTE_MISSING"（依赖族）
+// 互斥：error 不携带依赖族码；unavailable 不携带执行族码。
 ```
 
 转移（冻结）：run 前实测 ≠ bound → `stale`（不执行）；run 中漂移 → `stale`
 （作废）；run 后漂移 → 结果不可变、展示标 stale。`unavailable` = 外部依赖缺席
-（MODEL_UNAVAILABLE / DSH_UNAVAILABLE / PROVIDER_ROUTE_MISSING…failure.code
-枚举）；`error` = 执行异常。passed 仅来自全部 assertion 通过；transcript 长度、
-文本相似度、unavailable 永不产生 passed。
+（依赖族 failure.code）；`error` = 执行异常（执行族）。**passed 仅来自全部
+assertion 执行且通过**——unavailable/stale 结果的 assertions 恒空数组，不可能
+出现 passed 断言；transcript 长度、文本相似度永不产生 passed。
 
-## B4 runner（冻结）
+## B4 runner（冻结；fixture 导入细则 r5 补全）
 
-- `analyzer`：analyzeDocuments 确定性路径；fixture 10 条以
-  `source:"builtin-fixture"` 导入。
-- `provider-model`：seed 机制（creator-test-session）跑内核会话 → 断言跑在
-  会话产出文本上；取消映射内核会话 cancel（有界）；重试 = 新 runId，旧结果
-  保留；版本三元组如实写入 runner.version。
+- `analyzer`：analyzeDocuments 确定性路径。
+- **fixture 导入**（细则冻结）：`skill-creator` 侧导入器遍历
+  `test/fixtures/steward/evaluation/{should-trigger,no-trigger}/` 十条语料；
+  每条生成一个 case：`caseId = ev_<uuid>`；`prompt` = fixture 语料的任务
+  描述文本（scenario 正文）；synthetic target = 语料目录内首个技能；
+  `boundRevision` = 该技能 SKILL.md 字节 sha256（技能域）；
+  `corpusDigest` = 语料目录全部文件内容拼接的 sha256（语料域，算法冻结为
+  「相对路径排序 + 内容字节序拼接」）；断言集 =
+  `[{kind:"finding-triggered", value: expectTrigger}] ∪
+  expectedKinds.map(k => {kind:"finding-kind", value:k})`；
+  `source:"builtin-fixture"`；导入落 Imported Workspace（用户显式选择的目标
+  workspace+provider；Global 只读不落）。
+- `provider-model`：B7 adapter 跑内核会话 → 断言跑在会话产出文本上；取消映射
+  内核会话 cancel（有界）；重试 = 新 runId，旧结果保留；版本三元组如实写入
+  runner.version。
 
 ## B5 RPC（冻结，八过程，含 B′4 run 全集与竞态胜者）
 
@@ -102,7 +118,7 @@ resultIds}`；`evaluation.run.cancel {runId} → {runId, status}`（竞态见 B�
 `stale: boolean`）。错误走既有 errors 词表（NOT_FOUND/VALIDATION/
 UNAVAILABLE 家族），不新造传输形状。
 
-## B7 daemon 侧 provider-model 会话 adapter（r4-codex 必修 #4；Ch3 runner 消费）
+## B7 daemon 侧 provider-model 会话 adapter（r4 必修 #4；r5 生命周期冻结）
 
 runner **不依赖 webui store**——daemon 进程内经既有
 `AgentSessionsService`（agent-sessions.ts）驱动：
@@ -112,8 +128,13 @@ interface ProviderSessionAdapter {
   create(input: { cwd?: string; metadata?: AgentSessionSeedMetadata }): Promise<{ sessionId }>;
   prompt(input: { sessionId: string; text: string;
     references: Array<{kind:"skill"; workspaceId; providerId; skillId}> }): Promise<void>;
-  readTranscript(sessionId: string): Promise<string>;   // 帧流 → 断言可读文本投影
-  cancel(sessionId: string): Promise<void>;             // 内核会话有界 cancel
+  /** 轮询 stream 至终态：读到 turn-end（或 status 稳定 idle 且无 pending 轮）
+   * 即终止；投影 = 依序拼接 user-text/assistant-text/tool-result 帧 text 字段。 */
+  readTranscript(sessionId: string): Promise<string>;
+  /** 竞态胜者：completed 后 cancel 为 no-op；running → 内核会话有界 cancel，
+   * 既有帧保留；unknown sessionId → NOT_FOUND。 */
+  cancel(sessionId: string): Promise<void>;
+  /** wire 形状 = B3 runner.version 的结构化三元组（无拍平）。 */
   versions(): { promptVersion: string; toolVersion: string; dshVersion: string };
 }
 ```
@@ -121,4 +142,5 @@ interface ProviderSessionAdapter {
 实现 = createAgentSessionsService 既有 create/prompt（references 展开）/
 stream 读帧拼文本/cancel 的薄封装；`versions()` 取内核与产品 prompt 模块
 常量。Ch2 的 seed 是 **webui 入口**，本 adapter 是 **daemon 入口**——同一
-agent.session.* 契约面，两个合法调用方，无第三协议。
+agent.session.* 契约面，两个合法调用方，无第三协议。结果写入时序：case
+断言全部裁决后一次性写 results.json（无部分写）。

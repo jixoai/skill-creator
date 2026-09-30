@@ -20,11 +20,15 @@ type IntelligenceProposeInput =
 ```
 
   authority=proposal（只产草案不写盘）。
-- **C′1b 工具命名冻结**（对齐 wiki_append → wiki_append_propose 既有惯例）：
-  kernel 工具行 `intelligence_propose_edit|disable|split|merge`；MCP 面投影
-  `intelligence_propose_*_propose`（proposal authority 在 MCP 面按既有规则
-  追加 `_propose` 后缀——capability 注册时声明 authority=proposal，投影层
-  既有规则自然生效，无需新约定）。
+- **C′1b 工具命名与投影模型（r5 实证修正）**：现状 = MCP 投影层只对
+  **approved-mutation** authority 追加 `_propose` 后缀（skill-creator-mcp.ts
+  的 authority 分支）；proposal authority 会落入普通工具分支。为避免
+  `_propose` 外壳制造第二层 proposal，冻结为：capability 声明
+  `authority: "proposal"` 时，**kernel 工具行与 MCP 工具同名注册**
+  `intelligence_propose_edit | _disable | _split | _merge`（名字本身即
+  propose 语义，不再二次追加后缀）；投影层新增 proposal-authority 分支
+  （普通注册、无 mutation 变体）。模板正文一律使用实际工具名
+  （`intelligence_propose_edit` 等，下划线），四段正文已按此更新。
 - **C′2 统一投影 UnifiedProposalView（schema 冻结）**：
 
 ```ts
@@ -36,17 +40,21 @@ type IntelligenceProposeInput =
   target: SkillRef | null,                  // wiki 类无技能目标 → null
   targets?: SkillRef[],                     // split/merge 多源
   observedRevision: string | null,
+  observedRevisions?: string[],             // split/merge 多源（与 targets 对齐）
   before: string | null, after: string | null,   // 草案 diff 体（无 diff 面 → null）
   finding: { id: string; summary: string } | null,
   validation: { success: boolean; errors: string[]; warnings: string[] } | null,
-  status: "pending" | "approved" | "rejected",
-  rejectCause?: "user" | "stale" }
+  status: "pending" | "approved" | "rejected" | "executed" | "failed",
+    // r5 勘误：承载 MCP store 既有五态（proposals.ts）；si 源只有前三态
+    // （approved 即终态——执行走 skillSteward grant 链）
+  rejectCause?: "user" | "stale",           // status=rejected 时携带
+  result?: { applied: boolean; error?: string } }  // executed/failed 的执行结果
 ```
 
   `agent.proposals.list` 返回该视图；approve/reject 决策输入不变（id + 决定），
   **按前缀路由**（mcp:→McpProposalStore，si:→skillIntelligence 服务）；stale
   草稿（observedRevision ≠ 当前技能 revision）→ rejected 且 `rejectCause:
-  "stale"`；两 store 各自映射，不改存储。
+  "stale"`；两 store 各自映射，不改存储，无审计信息丢失（五态 + result 保全）。
 - **C′3 finding-propose seed 的 metadata 统一**：AgentSessionSeedMetadata 的
   `finding-propose` 分支（agent.ts 契约已冻结）为唯一元数据形状；split/merge
   的多源 revisions 进 `metadata.skillId`（主目标）+ 模板正文（全量清单），
@@ -57,24 +65,24 @@ type IntelligenceProposeInput =
 
 ```text
 finding-propose-edit-v1（version 1）：
-  请针对引用的技能（${skillName}）执行 intelligence.propose_edit 工具调用：
+  请针对引用的技能（${skillName}）执行 intelligence_propose_edit 工具调用：
   finding ${findingId}（观察于 revision ${observedRevision}）。
   依据 finding 证据起草编辑提案；先调用工具，再向我复述提案要点。
 占位符：${skillName} / ${findingId} / ${observedRevision}；替换：纯文本。
 
 finding-propose-disable-v1（version 1）：
-  请针对引用的技能（${skillName}）执行 intelligence.propose_disable 工具调用：
+  请针对引用的技能（${skillName}）执行 intelligence_propose_disable 工具调用：
   finding ${findingId}（观察于 revision ${observedRevision}）。
   起草禁用提案并说明恢复路径；先调用工具，再向我复述提案要点。
 
 finding-propose-split-v1（version 1）：
-  请针对引用的技能（${skillName}）执行 intelligence.propose_split 工具调用：
+  请针对引用的技能（${skillName}）执行 intelligence_propose_split 工具调用：
   finding ${findingId}（观察于 revision ${observedRevision}）。
   按 finding 指出的职责混同起草拆分提案（目标边界逐条列出）；先调用工具，
   再向我复述提案要点。
 
 finding-propose-merge-v1（version 1）：
-  请针对引用的技能（${skillName}）执行 intelligence.propose_merge 工具调用：
+  请针对引用的技能（${skillName}）执行 intelligence_propose_merge 工具调用：
   finding ${findingId}（观察于 revision ${observedRevision}）。
   按 finding 指出的重复职责起草合并提案（保留主体与吸收项逐条列出）；先调用
   工具，再向我复述提案要点。
@@ -95,3 +103,9 @@ finding-propose-merge-v1（version 1）：
 ## C3 时序与依赖
 
 - 依赖 Ch2 seed 机制先行；本 change 排在 Ch2 之后、Ch5-Ch7 之前（r2 裁决序）。
+
+## C′4 退役边界迁移（r5 P1）
+
+- webui 消费迁移：intelligence.svelte.ts 的 skillIntelligence.propose 直连调用随 2.2 任务移除（改 seed 发起）。
+- daemon 内部路径归类：steward-service.ts 直接创建 proposal 的内部管线调用**不是 UI 创建路径**——steward run 本身是 agent run，其服务层调用与 capability handler 同源实现；归类为 origin=agent-tool 的服务内部调用方（非第三向量），在 capability handler 注释与 spec 注记中显式声明。
+- 冻结：WebUI 零直连创建；capability 工具 = agent 唯一创建向量；steward 内部管线 = 服务内部同源调用方。
