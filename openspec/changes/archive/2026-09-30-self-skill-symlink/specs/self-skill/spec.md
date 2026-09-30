@@ -81,10 +81,10 @@ symlinked directory entry.
 
 ### Requirement: Bootstrap never clobbers user content
 
- Reason: v1 copy-based ownership markers and version negotiation are retired by
- the symlink model; detection of user-maintained entries moves to the explicit
- conflict requirement below (foreign file / user directory become conflict kinds,
- no silent skip).
+Reason: v1 copy-based ownership markers and version negotiation are retired by
+the symlink model; detection of user-maintained entries moves to the explicit
+conflict requirement below (foreign file / user directory become conflict kinds,
+no silent skip).
 
 ## ADDED Requirements
 

@@ -3,8 +3,7 @@
 - [x] 1.1 `skills/skill-creator-v2/{SKILL.md, references/tools.md}` 入仓（内容自 v1
       常量迁移 + 所有权注释改 symlink 语义）；package.json `files` += "skills"；
       pack 产物含技能目录（npm pack --dry-run 实证）
-- [x] 1.2 `src/daemon/self-skill.ts` 重写：resolveSelfSkillSource（import.meta 自定位
-      + anchor 注入；dist 内同名构建 manifest 越过继续上溯——走查实锤修复）/
+- [x] 1.2 `src/daemon/self-skill.ts` 重写：resolveSelfSkillSource（import.meta 自定位 + anchor 注入；dist 内同名构建 manifest 越过继续上溯——走查实锤修复）/
       provenanceOf / ensure 七态（linked/relinked/current/migrated/kept/failed +
       冲突 foreign-link|user-directory|foreign-entry）/ resolveConflict({backup}) /
       keepUserVersion()（appDir 指纹记录）
@@ -13,8 +12,7 @@
       形状）+ 接线 skill-service / workspace-registry 默认扫描器；全量测试无回归
 - [x] 3.1 CLI `self-skill` 子命令（status/install [--backup]/keep，用法错误 exit 1）
 - [x] 3.2 CLI `start` 冲突提醒：TTY 三选 readline 交互 / 非 TTY 提示打印
-- [x] 4.1 契约 `contracts/self-skill.ts` + rpc-contract selfSkill.{state,resolve,keep}
-      + daemon 路由接线（state 投影补 backupAvailable）
+- [x] 4.1 契约 `contracts/self-skill.ts` + rpc-contract selfSkill.{state,resolve,keep} + daemon 路由接线（state 投影补 backupAvailable）
 - [x] 4.2 WebUI：self-skill store（connected-effect 驱动——mount 时 rpc 未就绪的
       静默失败实锤后改挂 layout）+ Workspaces 首页冲突 banner + toast 终态
 - [x] 5.1 测试：self-skill 24 项（七态 + dist-manifest 源解析 + legacy 字节级迁移与

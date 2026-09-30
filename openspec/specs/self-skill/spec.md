@@ -1,6 +1,7 @@
 # self-skill Specification
 
 ## Purpose
+
 Define the product's self-describing skill bootstrap: on production daemon start, Skill Creator provides a `skill-creator-v2` skill in the community global skills root so any agent on the machine can learn to manage and search skills through Skill Creator, and the product's own embedded agent consumes the same document instead of a prompt-embedded copy.
 
 ## Requirements

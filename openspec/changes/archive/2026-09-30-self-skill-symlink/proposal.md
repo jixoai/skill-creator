@@ -42,7 +42,7 @@ skill-creator 安装里）。
   对 symlink 恒 false，实测钉死）。产品自身的两个 ccski 调用点（skill-service 发现面、
   workspace-registry 计数面）追加「symlink 条目增补」：对 root 下 symlink 条目经
   ccski `parseSkillFile` 重建同形 `{location:"user", sourceKind:"custom",
-  sourcePriority:500}` 条目（实测捕获的 customDir 形状）。这同时修复了用户手工
+sourcePriority:500}` 条目（实测捕获的 customDir 形状）。这同时修复了用户手工
   symlink 技能在 GUI 隐身的既有缺口。
 - **CLI**：新增 `skill-creator self-skill`（status / install [--backup] / keep）；
   `start` 就绪后若存在未裁决冲突——TTY 交互三选（覆盖+备份/覆盖/保留），非 TTY 打印
