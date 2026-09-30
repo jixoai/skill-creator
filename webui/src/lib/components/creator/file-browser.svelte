@@ -5,7 +5,8 @@
   2. new 模式：目录名输入框 + 模板预填草稿；保存走 creator.save(mode=create)。
   3. 保存：creator.save(mode=update) revision-safe；CONFLICT 提示 reload。
   视图状态：草稿 → 共享 creator-editor context（$state）；正文 → daemon RPC。
-  妥协声明：编辑器用 monospace textarea（CodeMirror 懒加载留待后续迭代）。
+  2026-09-30 creator-editor-polish：正文编辑器升级 CodeMirror 6（markdown-editor
+  懒加载组件）；new 模式校验改 validateNewDraft 字段级错误 + Save 禁用联动。
 -->
 <script lang="ts">
   import {
@@ -17,6 +18,8 @@
     markDraftHydrated,
     resetDraftHydration,
   } from "$lib/stores/creator-editor.svelte";
+  import { hasNewDraftErrors, validateNewDraft } from "$lib/stores/creator-draft";
+  import MarkdownEditor from "$lib/components/creator/markdown-editor.svelte";
   import { loadSkillDoc, removeSkill, saveSkill } from "$lib/store.svelte";
   import { showToast } from "$lib/toast.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
@@ -80,15 +83,16 @@
     }
   }
 
-  // 目录名校验（new 模式）。
+  // new 模式字段级校验（creator-editor-polish）；edit 模式恒通过。
+  const newDraftErrors = $derived(validateNewDraft(draft));
   const directoryNameValid = $derived(
-    draft.mode !== "new" || SkillDirectoryNameSchema.safeParse(draft.directoryName).success,
+    draft.mode !== "new" || newDraftErrors.directoryName === null,
   );
   const canSave = $derived(
     !saving &&
       draft.name.trim().length > 0 &&
       draft.description.trim().length > 0 &&
-      (draft.mode === "edit" || directoryNameValid) &&
+      (draft.mode === "edit" || !hasNewDraftErrors(newDraftErrors)) &&
       (draft.revision !== null) === (draft.mode === "edit"),
   );
 
@@ -268,6 +272,9 @@
       <label class="block space-y-1">
         <span class="text-[11px] font-medium text-muted-foreground">Name</span>
         <Input bind:value={draft.name} class="h-8 text-sm" placeholder="Skill name" />
+        {#if draft.mode === "new" && newDraftErrors.name}
+          <span class="text-[11px] text-destructive">{newDraftErrors.name}</span>
+        {/if}
       </label>
 
       <label class="block space-y-1">
@@ -277,16 +284,17 @@
           rows="2"
           class="w-full resize-y rounded-md border border-input bg-input/20 px-2 py-1 text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           placeholder="What this skill does"></textarea>
+        {#if draft.mode === "new" && newDraftErrors.description}
+          <span class="text-[11px] text-destructive">{newDraftErrors.description}</span>
+        {/if}
       </label>
 
       <label class="block flex min-h-0 flex-1 flex-col space-y-1">
         <span class="text-[11px] font-medium text-muted-foreground">Body (Markdown)</span>
-        <textarea
+        <MarkdownEditor
           bind:value={draft.body}
-          rows="16"
-          class="w-full flex-1 resize-y rounded-md border border-input bg-input/20 px-2 py-1.5 font-mono text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           placeholder="## When to Use&#10;&#10;Describe when this skill should be invoked."
-        ></textarea>
+        />
       </label>
     </div>
   {/if}

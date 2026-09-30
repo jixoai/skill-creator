@@ -16,6 +16,7 @@
     "markstream-svelte": "^2.0.8"
   },
   "devDependencies": {
+    "@codemirror/lang-markdown": "^6.5.2",
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/cordis-plugin-loader": "1.0.3",
     "@fontsource-variable/inter": "^5.2.8",
@@ -31,6 +32,7 @@
     "@types/http-proxy": "^1.17.17",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
+    "codemirror": "^6.0.2",
     "execa": "^9.6.1",
     "http-proxy": "^1.18.1",
     "jsdom": "^30.0.1",

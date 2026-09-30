@@ -3,8 +3,10 @@
  * 正交意图：
  *   [1] Creator 草稿的纯数据形状与构造器（不依赖 svelte 运行时，可单测）。
  *   [2] 草稿 → SkillFrontmatter 的投影（必填字段覆盖、未知字段透传）。
+ *   [3] new 模式草稿结构化校验（creator-editor-polish Ch5；字段级错误文案）。
  * 妥协声明：无。context 生命周期（provide/use）留在 creator-editor.svelte.ts。
  */
+import { SkillDirectoryNameSchema } from "$shared/contracts/creator.js";
 import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
 import type { SkillFrontmatter, WorkspaceProviderTarget } from "../types";
 import type { SkillId } from "../types";
@@ -92,4 +94,37 @@ export function draftToFrontmatter(draft: CreatorDraft): SkillFrontmatter {
     name: draft.name,
     description: draft.description,
   };
+}
+
+/** new 模式草稿的字段级校验结果（null = 该字段通过）。 */
+export interface NewDraftErrors {
+  directoryName: string | null;
+  name: string | null;
+  description: string | null;
+}
+
+const NEW_DRAFT_CLEAN: NewDraftErrors = {
+  directoryName: null,
+  name: null,
+  description: null,
+};
+
+/**
+ * new 模式草稿结构化校验（creator-editor-polish Ch5）：directoryName 规则 +
+ * name/description 修剪后非空；edit 模式恒通过（revision 语义由服务端契约约束）。
+ */
+export function validateNewDraft(draft: CreatorDraft): NewDraftErrors {
+  if (draft.mode !== "new") return NEW_DRAFT_CLEAN;
+  return {
+    directoryName: SkillDirectoryNameSchema.safeParse(draft.directoryName).success
+      ? null
+      : "Use lowercase letters, numbers, and hyphens.",
+    name: draft.name.trim().length > 0 ? null : "Name is required.",
+    description: draft.description.trim().length > 0 ? null : "Description is required.",
+  };
+}
+
+/** 任一字段未过 → true（Save 禁用联动）。 */
+export function hasNewDraftErrors(errors: NewDraftErrors): boolean {
+  return errors.directoryName !== null || errors.name !== null || errors.description !== null;
 }
