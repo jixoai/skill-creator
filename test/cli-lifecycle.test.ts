@@ -472,6 +472,9 @@ async function runCli(
       OPENTRAY_HOME: path.join(home, "opentray-runtime"),
       SKILL_CREATOR_DISABLE_TRAY: "1",
       SKILL_CREATOR_HOME: home,
+      // 未传 fixture entry 的 start 会 spawn 真实 daemon 入口（dist 优先）：
+      // 生产入口带 self-skill 自举（真实 homedir 写入），必须经隔离阀引走。
+      SKILL_CREATOR_SELF_SKILL_ROOT: path.join(home, "agents-skills"),
     },
     encoding: "utf8",
     timeout: 15_000,

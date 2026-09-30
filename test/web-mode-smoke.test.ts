@@ -59,6 +59,10 @@ function isolatedEnv(home: string): NodeJS.ProcessEnv {
     OPENTRAY_HOME: path.join(home, "opentray-runtime"),
     SKILL_CREATOR_DISABLE_TRAY: "1",
     SKILL_CREATOR_HOME: home,
+    // dist daemon 的生产入口会自举 self skill（self-skill-bootstrap）：HOME 未被
+    // 本函数隔离（os.homedir() 仍是真实 home），必须经隔离阀引走，否则测试向
+    // 操作员真实 ~/.agents/skills 落盘。
+    SKILL_CREATOR_SELF_SKILL_ROOT: path.join(home, "agents-skills"),
   };
 }
 
