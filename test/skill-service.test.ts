@@ -57,6 +57,40 @@ function discoveredSkill(directory: string): unknown {
 }
 
 describe("skill service", () => {
+  it("rejects toggling a symlinked entry with a typed conflict (self-skill-symlink)", async () => {
+    // P1-3 守卫：rename 穿透 symlink 会改写 root 之外的链接目标（产品技能源/
+    // 用户自有目录）；别名链（条目名 ≠ 目标名）也必须命中。
+    const previousCodexHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = path.join(sandbox, "codex-home");
+    try {
+      const root = path.join(sandbox, "codex-home", "skills");
+      const owned = path.join(sandbox, "owned-skill");
+      fs.mkdirSync(path.join(owned, "references"), { recursive: true });
+      fs.writeFileSync(
+        path.join(owned, "SKILL.md"),
+        "---\nname: linked-skill\ndescription: d\n---\nx\n",
+      );
+      fs.mkdirSync(root, { recursive: true });
+      fs.symlinkSync(owned, path.join(root, "alias-entry"), "dir");
+      const workspaces = createWorkspaceRegistry();
+      const skills = createSkillService(workspaces, {
+        discoverSkills: async () => [discoveredSkill(owned)],
+      });
+      const [skill] = await skills.list(codexTarget);
+      if (!skill) throw new Error("Expected the linked discovery fixture.");
+
+      const summary = await skills.toggle(codexTarget, [skill.id], "disable");
+      expect(summary.results[0]!.status).toBe("conflict");
+      expect(summary.conflicts).toBe(1);
+      // 链接目标未被改写。
+      expect(fs.existsSync(path.join(owned, "SKILL.md"))).toBe(true);
+      expect(fs.existsSync(path.join(owned, ".SKILL.md"))).toBe(false);
+    } finally {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+    }
+  });
+
   it("discards incompatible ccski discovery entries", async () => {
     const validDirectory = path.join(sandbox, "valid-skill");
     fs.mkdirSync(validDirectory);

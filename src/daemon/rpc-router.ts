@@ -22,6 +22,11 @@ import { rpcContract } from "../shared/rpc-contract.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
 import type { DaemonDomain } from "./domain.js";
 import { DomainError } from "./domain-error.js";
+import {
+  keepSelfSkillUserVersion,
+  resolveSelfSkillConflict,
+  selfSkillStatus,
+} from "./self-skill.js";
 
 export interface RpcRouterDeps {
   status: () => DaemonStatus;
@@ -152,6 +157,24 @@ export function createRpcRouter(deps: RpcRouterDeps) {
     },
     daemon: {
       status: rpc.daemon.status.handler(() => status()),
+    },
+    selfSkill: {
+      // self-skill-symlink：fs 直达的 server-owned 逻辑（与 CLI/daemon 入口同一
+      // 模块）；conflict 投影补 backupAvailable（由 kind 推导）。
+      state: rpc.selfSkill.state.handler(() => {
+        const status = selfSkillStatus();
+        return status.state === "conflict" || status.state === "kept"
+          ? {
+              ...status,
+              conflict: {
+                ...status.conflict,
+                backupAvailable: status.conflict.kind === "user-directory",
+              },
+            }
+          : status;
+      }),
+      resolve: rpc.selfSkill.resolve.handler(async ({ input }) => resolveSelfSkillConflict(input)),
+      keep: rpc.selfSkill.keep.handler(() => keepSelfSkillUserVersion()),
     },
     skillIntelligence: {
       analyze: rpc.skillIntelligence.analyze.handler(async ({ input }) =>

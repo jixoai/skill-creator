@@ -91,6 +91,12 @@ import {
 import { DaemonStatusSchema } from "./contracts/daemon.js";
 import { RpcErrorDefinitions } from "./contracts/errors.js";
 import {
+  SelfSkillKeepResultSchema,
+  SelfSkillResolveInputSchema,
+  SelfSkillResolveResultSchema,
+  SelfSkillStatusSchema,
+} from "./contracts/self-skill.js";
+import {
   AddUserSourceInputSchema,
   RemoveUserSourceInputSchema,
   RemoteRepoScanSchema,
@@ -334,6 +340,14 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
   daemon: {
     /** Read the live daemon and tray status. */
     status: oc.input(z.object({})).output(DaemonStatusSchema),
+  },
+  selfSkill: {
+    /** Live self-skill link state（conflict 折叠 kept；WebUI 首页 banner 数据源）。 */
+    state: oc.input(z.object({}).strict()).output(SelfSkillStatusSchema),
+    /** 覆盖安装产品版本（真目录可先备份到 skills-backup）。 */
+    resolve: oc.input(SelfSkillResolveInputSchema).output(SelfSkillResolveResultSchema),
+    /** 保留用户版本（fingerprint 记忆；条目变化后重新提醒）。 */
+    keep: oc.input(z.object({}).strict()).output(SelfSkillKeepResultSchema),
   },
   skillIntelligence: {
     /** Read-only multi-skill analysis locked to observed revisions. */

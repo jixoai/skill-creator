@@ -40,6 +40,7 @@
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconBoxes from "@lucide/svelte/icons/boxes";
   import IconWiki from "@lucide/svelte/icons/book-open";
+  import SelfSkillConflictBanner from "$lib/components/self-skill-conflict-banner.svelte";
   import type { ImportedWorkspace, Workspace, WorkspaceProvider } from "$lib/types";
 
   /** wiki 面板 detail 路径（Global id "~" 在 URL path 段编码为 %7E）。 */
@@ -174,6 +175,8 @@
       </Button>
     </div>
   </header>
+
+  <SelfSkillConflictBanner />
 
   <div class="mx-auto mt-5 w-full max-w-5xl space-y-6">
     <!-- 快速行动：回答「这个软件能帮我什么」——每个动作直达一个具体行为。 -->

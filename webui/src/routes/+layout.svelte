@@ -13,6 +13,7 @@
   import { goto } from "$app/navigation";
   import { registerApps } from "$lib/apps";
   import { connect, connectionState, disconnect, loadWorkspaces } from "$lib/store.svelte";
+  import { loadSelfSkillState } from "$lib/stores/self-skill.svelte";
   import { requestImportWorkspace } from "$lib/stores/import-workspace.svelte";
   import { captureTokenFromHash } from "$lib/rpc-client";
   import { appRegistry, resolveTabIdentity, setNavControllerAdapter } from "$lib/shell";
@@ -71,7 +72,11 @@
 
   let connected = $derived(connectionState.status === "connected");
   $effect(() => {
-    if (connected) void loadWorkspaces();
+    if (connected) {
+      void loadWorkspaces();
+      // self-skill 冲突提醒随连接重试（组件挂载时 rpc 可能尚未就绪）。
+      void loadSelfSkillState();
+    }
   });
 
   const apps = $derived(appRegistry.list());

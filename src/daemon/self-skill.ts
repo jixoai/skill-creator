@@ -1,307 +1,473 @@
 /**
- * 用户原始需求 [2026-09-30]：「在启动 skill creator 的时候会在 ~/.agents/skills/
- * skill-creator-v2 这个目录提供一个 `Skill Creator V2` 的技能，目的是让其他的
- * Agent 也知道怎么通过 skill creator 去管理和搜索技能。这是一个闭环……原本我们
- * 内置到内部提示词的东西，现在直接和普通流程一样，也去读取全局的 Skill Creator
- * V2 就行。」
+ * 用户原始需求 [2026-09-30]（symlink 方向修正）：「~/.agents/skills/skill-creator-v2
+ * 这个文件夹应该走 symlink……不论 npm 源还是 git 源码启动，这个 skill 本身存在于我们
+ * 的 git 仓库内，发布 npm 的时候一起带上。安装的时候将这个 skill 通过 symlink 存放到
+ * ~/.agents/skills/skill-creator-v2……如果发现已存在，检查它的来源，是不是
+ * npm:skill-creator 或者 git:skill-creator，属于我们的源就安心管理；realpath 和这次
+ * 启动的源对不上就删掉重建。反之源头不是 git/npm，意味着用户自己在维护，只能在 cli
+ * 或 webui 启动之后提醒用户存在 skill 冲突：覆盖安装我们自己的版本（可选备份原版到
+ * ~/.agents/skills-backup/skill-creator-v2-YYYY-MM-DD-hh-mm-ss）；坚持使用用户已有
+ * 的版本。」
  *
  * 正交意图：
- *   [1] 产品自描述技能文档内容（SKILL.md + references/tools.md 文本与版本常量）：
- *       对外行为面（CLI + MCP readonly 工具）的单一事实投影。
- *   [2] boot 自举语义 ensureSelfSkill：缺失→写入；产品旧版→整组升级；用户内容/
- *       同版本→不触碰；IO 故障→typed 失败，绝不阻塞启动。
- *   [3] 根目录隔离阀：SKILL_CREATOR_SELF_SKILL_ROOT env / 显式参数（测试与探针
- *       绝不写真实 ~/.agents/skills）。
- * 妥协声明：文档以 TS 常量内嵌（esbuild 自动入包，不引入资产拷贝构建步）；
- * 所有权标记放 frontmatter（ccski 与 Creator 契约均 passthrough，未知键安全）。
+ *   [1] 源定位与来源鉴定：按 import.meta.url 自定位产品安装内的技能源目录；
+ *       package.json name === "skill-creator" 作为 npm/git 安装的统一身份判据。
+ *   [2] ensure 状态机（每次生产启动执行，永不抛出）：link 缺失/悬空/指向旧安装 →
+ *       （重）建链；v1 legacy 拷贝 → 迁移换链；用户自维护条目 → 冲突不触碰。
+ *   [3] 冲突裁决（CLI 与 WebUI 共用）：resolve（可选备份，仅真目录）与 keep
+ *       （fingerprint 持久化，条目变化后重新提醒）。
+ *   [4] 根目录隔离阀：SKILL_CREATOR_SELF_SKILL_ROOT / 显式参数（测试与探针绝不
+ *       写真实 ~/.agents/skills）。
+ * 妥协声明：来源鉴定不区分 npm/git 安装形态（两者都有同名 package.json，行为同一）；
+ * 悬空链无法证明来源，但也不承载用户内容，按可替换处理。
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import { z } from "zod";
-import { safeParseExternal } from "../shared/external-input.js";
+import { safeParseExternal, safeParseJson } from "../shared/external-input.js";
+import { appDir } from "../shared/paths.js";
 import { atomicWriteUtf8 } from "./path-safety.js";
 
 /** 自举技能目录名（与 frontmatter name 一致，满足最严格的宿主校验）。 */
 export const SELF_SKILL_DIRECTORY_NAME = "skill-creator-v2";
-/** 所有权标记键值（frontmatter；区分产品内容与用户内容）。 */
-const MANAGED_MARKER_KEY = "x-managed-by";
-const MANAGED_MARKER_VALUE = "skill-creator";
-/** 文档内容版本（只随对外行为面变化 bump，不随每个 patch 版本强制重写）。 */
-export const SELF_SKILL_VERSION = "1";
+/** v1 拷贝式自举留下的所有权标记键（legacy 迁移判据）。 */
+const LEGACY_MARKER_KEY = "x-managed-by";
+const LEGACY_MARKER_VALUE = "skill-creator";
+/** 产品包身份（npm 包名 = 仓库名；来源鉴定的唯一判据）。 */
+const PACKAGE_NAME = "skill-creator";
 /** 测试/探针隔离阀：覆盖全局技能根（缺省 ~/.agents/skills）。 */
 export const SELF_SKILL_ROOT_ENV = "SKILL_CREATOR_SELF_SKILL_ROOT";
+/** keep 决定持久化文件（appDir 内，server-owned）。 */
+const KEEP_RECORD_FILE = "self-skill-keep.json";
 
-/** ensureSelfSkill 的闭合结果（typed；IO 故障不抛出）。 */
+/** 本次运行解析到的产品技能源（唯一事实源 = 安装内 skills/skill-creator-v2）。 */
+export interface SelfSkillSource {
+  /** 源技能目录绝对路径（symlink 目标）。 */
+  skillDir: string;
+  /** 安装包根（package.json 所在）。 */
+  packageRoot: string;
+  /** git checkout/开发仓（否则 npm 安装树）；仅用于状态报告。 */
+  viaGit: boolean;
+}
+
+/** 冲突条目（用户自维护；ensure 不触碰，等待显式裁决）。 */
+export interface SelfSkillConflict {
+  kind: "user-directory" | "foreign-link" | "foreign-entry";
+  /** 冲突条目自身路径（~/.agents/skills/skill-creator-v2）。 */
+  entryPath: string;
+  /** foreign-link 的目标绝对路径（其它 kind 缺省）。 */
+  targetPath?: string;
+  /** 条目 SKILL.md 内容摘要（keep 决定的指纹成分；缺失为 null）。 */
+  contentDigest: string | null;
+}
+
+/** 只读检查结果（CLI status / RPC state / ensure 共用）。 */
+export type SelfSkillInspect =
+  | { state: "linked"; source: string }
+  | { state: "stale-link"; source: string; target: string }
+  | { state: "dangling" }
+  | { state: "missing" }
+  | { state: "legacy-copy" }
+  | { state: "conflict"; conflict: SelfSkillConflict }
+  | { state: "failed"; reason: string };
+
+/** ensure（启动自举）结果；typed，永不抛出。 */
 export type SelfSkillEnsureResult =
-  | { kind: "installed" }
-  | { kind: "updated"; fromVersion: string }
   | { kind: "current" }
-  | { kind: "disabled" }
-  | { kind: "foreign" }
+  | { kind: "linked" }
+  | { kind: "relinked" }
+  | { kind: "migrated" }
+  | { kind: "kept" }
+  | { kind: "conflict"; conflict: SelfSkillConflict }
   | { kind: "failed"; reason: string };
 
-/** 现有文件 frontmatter 的标记字段收窄（外部输入：unknown → Zod；版本号容忍 YAML 数字）。 */
-const MarkerSchema = z
-  .object({
-    [MANAGED_MARKER_KEY]: z.string().optional(),
-    "x-managed-version": z.coerce.string().optional(),
-  })
-  .passthrough();
+/** 冲突裁决结果。 */
+export type SelfSkillResolveResult =
+  | { ok: true; backupPath?: string }
+  | { ok: false; reason: string };
 
-/** 解析现有 SKILL.md 文本的所有权标记；无 frontmatter / YAML 不可解析 → null（视为用户内容）。 */
-function parseMarker(source: string): { managedByUs: boolean; version: string | null } | null {
-  let document: ReturnType<typeof matter>;
+/** keep 决定的持久化形状（外部输入：unknown → strict Zod）。 */
+const KeepRecordSchema = z
+  .object({
+    version: z.literal(1),
+    kind: z.enum(["user-directory", "foreign-link", "foreign-entry"]),
+    targetPath: z.string().optional(),
+    contentDigest: z.string().nullable(),
+    decidedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+
+type KeepRecord = z.infer<typeof KeepRecordSchema>;
+
+/**
+ * 解析本次运行的技能源：anchor（缺省 = 本模块文件所在目录）向上找
+ * name === "skill-creator" 且携带 skills/skill-creator-v2 的包根。
+ * bundle 态 import.meta.url 指向 dist 内文件——开发仓的 dist/ 另有同名构建
+ * manifest 但不携带技能目录，命中它时继续上溯到真正携带 skills/ 的包根；
+ * 源码态从 src/daemon/ 上溯两层即仓根（带 skills/）。
+ */
+export function resolveSelfSkillSource(anchorDir?: string): SelfSkillSource | null {
+  let dir = path.resolve(anchorDir ?? path.dirname(fileURLToPath(import.meta.url)));
+  for (let depth = 0; depth < 8; depth += 1) {
+    const manifest = path.join(dir, "package.json");
+    if (fs.existsSync(manifest)) {
+      const identity = safeParseJson(manifestReader(manifest), z.object({ name: z.string() }));
+      if (identity?.name === PACKAGE_NAME) {
+        const skillDir = path.join(dir, "skills", SELF_SKILL_DIRECTORY_NAME);
+        let hasSkillDir = false;
+        try {
+          hasSkillDir = fs.statSync(skillDir).isDirectory();
+        } catch {
+          hasSkillDir = false;
+        }
+        if (hasSkillDir) {
+          return { skillDir, packageRoot: dir, viaGit: fs.existsSync(path.join(dir, ".git")) };
+        }
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
+
+function manifestReader(file: string): string {
+  return fs.readFileSync(file, "utf8");
+}
+
+/**
+ * 鉴定任意目录是否落在某个 skill-creator 安装内（npm/git 同一判据）。
+ */
+export function provenanceOurs(directory: string): boolean {
+  let dir = path.resolve(directory);
+  for (let depth = 0; depth < 4; depth += 1) {
+    const manifest = path.join(dir, "package.json");
+    if (fs.existsSync(manifest)) {
+      const identity = safeParseJson(manifestReader(manifest), z.object({ name: z.string() }));
+      if (identity?.name === PACKAGE_NAME) return true;
+      return false;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+  return false;
+}
+
+/**
+ * 全局技能根：显式参数 > env 隔离阀 > `~/.agents/skills`（社区标准全局根）。
+ * 备份目录与根同层（缺省 ~/.agents/skills-backup，valve 沙箱同理）。
+ */
+export function selfSkillRoot(explicitRoot?: string): string {
+  const root = explicitRoot ?? (process.env[SELF_SKILL_ROOT_ENV]?.trim() || "");
+  if (root) return path.resolve(root);
+  return path.join(os.homedir(), ".agents", "skills");
+}
+
+/** 冲突条目时间戳备份目录（本地时间；YYYY-MM-DD-HH-mm-ss）。 */
+export function selfSkillBackupDirectory(root?: string): string {
+  const now = new Date();
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  const stamp = [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds()),
+  ].join("-");
+  return path.join(
+    path.dirname(selfSkillRoot(root)),
+    "skills-backup",
+    `${SELF_SKILL_DIRECTORY_NAME}-${stamp}`,
+  );
+}
+
+function linkPathOf(root: string): string {
+  return path.join(root, SELF_SKILL_DIRECTORY_NAME);
+}
+
+function digestFile(file: string): string | null {
   try {
-    document = matter(source);
+    return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
   } catch {
     return null;
   }
-  const marker = safeParseExternal(MarkerSchema, document.data);
-  if (!marker) return null;
+}
+
+/**
+ * v1 legacy 拷贝判据：frontmatter 带产品标记，且文档字节与本次安装源一致。
+ * marker 是随包公开的约定（用户可自行写入），仅凭它就 rmSync 会误删仿冒目录
+ * （复核 P2 加固）：内容摘要不等 → 视为用户目录冲突。
+ */
+function legacyCopyOfOurs(directory: string, source: SelfSkillSource): boolean {
+  const sourceDigest = digestFile(path.join(source.skillDir, "SKILL.md"));
+  for (const name of ["SKILL.md", ".SKILL.md"]) {
+    try {
+      const document = matter(fs.readFileSync(path.join(directory, name), "utf8"));
+      const marker = safeParseExternal(
+        z.object({ [LEGACY_MARKER_KEY]: z.string().optional() }).passthrough(),
+        document.data,
+      );
+      if (
+        marker?.[LEGACY_MARKER_KEY] === LEGACY_MARKER_VALUE &&
+        digestFile(path.join(directory, name)) === sourceDigest
+      ) {
+        return true;
+      }
+    } catch {
+      // 缺失或不可解析 → 不是本文件的判据来源。
+    }
+  }
+  return false;
+}
+
+function createLink(root: string, source: SelfSkillSource): void {
+  fs.mkdirSync(root, { recursive: true });
+  fs.symlinkSync(
+    source.skillDir,
+    linkPathOf(root),
+    process.platform === "win32" ? "junction" : "dir",
+  );
+}
+
+function conflictOf(
+  kind: SelfSkillConflict["kind"],
+  entryPath: string,
+  target?: string,
+): SelfSkillConflict {
   return {
-    managedByUs: marker[MANAGED_MARKER_KEY] === MANAGED_MARKER_VALUE,
-    version: marker["x-managed-version"] ?? null,
+    kind,
+    entryPath,
+    ...(target === undefined ? {} : { targetPath: target }),
+    // foreign-entry 是文件条目：摘要条目文件本身（keep 指纹对内容变化敏感）。
+    contentDigest:
+      kind === "foreign-entry"
+        ? digestFile(entryPath)
+        : digestFile(path.join(entryPath, "SKILL.md")),
   };
 }
 
 /**
- * 自举技能的绝对目录：显式参数 > env 隔离阀 > `~/.agents/skills/skill-creator-v2`
- * （社区标准全局根；provider catalog 中 cline/dexto/kimi-code-cli/loaf/warp/zed
- * 等多个 Agent 的 globalPath 共享该根）。
+ * 只读检查全局条目状态（不做任何变更）。source 解析失败 → failed。
  */
-export function selfSkillDirectory(explicitRoot?: string): string {
-  const root = explicitRoot ?? (process.env[SELF_SKILL_ROOT_ENV]?.trim() || "");
-  if (root) return path.join(root, SELF_SKILL_DIRECTORY_NAME);
-  return path.join(os.homedir(), ".agents", "skills", SELF_SKILL_DIRECTORY_NAME);
+export function inspectSelfSkill(explicitRoot?: string): SelfSkillInspect {
+  const source = resolveSelfSkillSource();
+  if (!source) {
+    return { state: "failed", reason: "self-skill source not found in this installation" };
+  }
+  const root = selfSkillRoot(explicitRoot);
+  const linkPath = linkPathOf(root);
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(linkPath);
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code === "ENOENT") return { state: "missing" };
+    return { state: "failed", reason: describeIo("stat", linkPath, error) };
+  }
+  if (stats.isSymbolicLink()) {
+    let target: string;
+    try {
+      target = fs.realpathSync(linkPath);
+    } catch {
+      // 悬空链（目标安装被 npm 清理）：不承载用户内容，可替换。
+      return { state: "dangling" };
+    }
+    let current: string;
+    try {
+      current = fs.realpathSync(source.skillDir);
+    } catch {
+      current = source.skillDir;
+    }
+    if (target === current) return { state: "linked", source: current };
+    if (provenanceOurs(path.dirname(target))) {
+      return { state: "stale-link", source: current, target };
+    }
+    return { state: "conflict", conflict: conflictOf("foreign-link", linkPath, target) };
+  }
+  if (stats.isDirectory()) {
+    return legacyCopyOfOurs(linkPath, source)
+      ? { state: "legacy-copy" }
+      : { state: "conflict", conflict: conflictOf("user-directory", linkPath) };
+  }
+  return { state: "conflict", conflict: conflictOf("foreign-entry", linkPath) };
 }
 
 /**
- * 生产入口（main.ts）启动时调用：确保全局根下存在产品自描述技能。
- * 永不抛出——IO 故障收敛为 `{ kind: "failed" }` 由调用方记日志。
- *
- * 语义（design D2）：缺失 → 原子写入整组；产品旧版 → 整组升级；无标记 /
- * frontmatter 不可解析 / 同版本 → 不触碰（用户内容）；读/写 IO 硬错误 → failed。
+ * 生产入口（main.ts）启动时调用：确保全局根下的 symlink 指向本次安装的技能源。
+ * 永不抛出；冲突不触碰，交由 CLI/WebUI 裁决。
  */
 export function ensureSelfSkill(explicitRoot?: string): SelfSkillEnsureResult {
-  const directory = selfSkillDirectory(explicitRoot);
-  const skillFile = path.join(directory, "SKILL.md");
-  let existing: string;
-  try {
-    existing = fs.readFileSync(skillFile, "utf8");
-  } catch (error) {
-    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
-    if (code === "ENOENT") {
-      // 产品禁用语义 = SKILL.md rename 为 .SKILL.md（skill-service 同约定）：
-      // 禁用痕迹在场时不重装——静默重装会让技能复活并进入 toggle conflict
-      // 永久态（codex 复核 P1-1）。用户在 GUI 重新启用后恢复 current/upgrade 路径。
-      if (fs.existsSync(path.join(directory, ".SKILL.md"))) return { kind: "disabled" };
-      return writeSelfSkillSet(directory) ?? { kind: "installed" };
+  const source = resolveSelfSkillSource();
+  if (!source) {
+    return { kind: "failed", reason: "self-skill source not found in this installation" };
+  }
+  const inspect = inspectSelfSkill(explicitRoot);
+  const root = selfSkillRoot(explicitRoot);
+  switch (inspect.state) {
+    case "linked":
+      return { kind: "current" };
+    case "missing":
+    case "dangling":
+    case "stale-link":
+    case "legacy-copy": {
+      try {
+        if (inspect.state === "stale-link" || inspect.state === "dangling") {
+          fs.unlinkSync(linkPathOf(root));
+        } else if (inspect.state === "legacy-copy") {
+          fs.rmSync(linkPathOf(root), { recursive: true, force: true });
+        }
+        createLink(root, source);
+      } catch (error) {
+        return { kind: "failed", reason: describeIo("link", linkPathOf(root), error) };
+      }
+      return inspect.state === "missing"
+        ? { kind: "linked" }
+        : inspect.state === "legacy-copy"
+          ? { kind: "migrated" }
+          : { kind: "relinked" };
     }
-    return { kind: "failed", reason: describeIo("read", skillFile, error) };
+    case "conflict":
+      return keepRecordMatches(inspect.conflict)
+        ? { kind: "kept" }
+        : { kind: "conflict", conflict: inspect.conflict };
+    case "failed":
+      return { kind: "failed", reason: inspect.reason };
   }
-  const marker = parseMarker(existing);
-  if (!marker || !marker.managedByUs) return { kind: "foreign" };
-  if (marker.version === SELF_SKILL_VERSION) return { kind: "current" };
-  const fromVersion = marker.version ?? "";
-  return writeSelfSkillSet(directory) ?? { kind: "updated", fromVersion };
 }
 
-/** 原子写整组文档；失败返回 typed failed（null = 写入成功）。 */
-function writeSelfSkillSet(directory: string): SelfSkillEnsureResult | null {
+/**
+ * 冲突裁决：覆盖安装产品版本。真目录可选备份（同层 skills-backup 时间戳目录，
+ * rename 原子）；foreign-link/foreign-entry 只移除条目（用户内容在别处，无需备份）。
+ */
+export function resolveSelfSkillConflict(
+  input: { backup: boolean },
+  explicitRoot?: string,
+): SelfSkillResolveResult {
+  const inspect = inspectSelfSkill(explicitRoot);
+  const root = selfSkillRoot(explicitRoot);
+  const source = resolveSelfSkillSource();
+  if (!source) return { ok: false, reason: "self-skill source not found in this installation" };
+  if (inspect.state === "linked") return { ok: true };
+  if (inspect.state !== "conflict") {
+    return { ok: false, reason: `no conflict to resolve (state: ${inspect.state})` };
+  }
+  const entry = linkPathOf(root);
   try {
-    atomicWriteUtf8(path.join(directory, "SKILL.md"), selfSkillMarkdown());
-    atomicWriteUtf8(path.join(directory, "references", "tools.md"), selfSkillToolsReference());
-    return null;
+    if (inspect.conflict.kind === "user-directory") {
+      if (input.backup) {
+        const backupPath = selfSkillBackupDirectory(root);
+        fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+        fs.renameSync(entry, backupPath);
+        createLink(root, source);
+        return { ok: true, backupPath };
+      }
+      // 无备份 = 用户明确放弃该目录内容：递归移除（unlink 对目录恒 EPERM）。
+      fs.rmSync(entry, { recursive: true, force: true });
+      createLink(root, source);
+      return { ok: true };
+    }
+    // foreign-link / foreign-entry 都只是条目本身（链或文件）：unlink 即可，
+    // 用户内容分别在目标位置/别处，不受影响。
+    fs.unlinkSync(entry);
+    createLink(root, source);
   } catch (error) {
-    return { kind: "failed", reason: describeIo("write", directory, error) };
+    return { ok: false, reason: describeIo("resolve", entry, error) };
+  }
+  return { ok: true };
+}
+
+/**
+ * 冲突裁决：保留用户版本。fingerprint（kind + 目标 + 内容摘要）持久化到 appDir；
+ * 条目变化（指纹漂移）后 ensure 会重新提醒。
+ */
+export function keepSelfSkillUserVersion(explicitRoot?: string): SelfSkillResolveResult {
+  const inspect = inspectSelfSkill(explicitRoot);
+  if (inspect.state !== "conflict") {
+    return { ok: false, reason: `no conflict to keep (state: ${inspect.state})` };
+  }
+  const record: KeepRecord = {
+    version: 1,
+    kind: inspect.conflict.kind,
+    ...(inspect.conflict.targetPath === undefined
+      ? {}
+      : { targetPath: inspect.conflict.targetPath }),
+    contentDigest: inspect.conflict.contentDigest,
+    decidedAt: Date.now(),
+  };
+  try {
+    atomicWriteUtf8(path.join(appDir(), KEEP_RECORD_FILE), JSON.stringify(record, null, 2) + "\n");
+  } catch (error) {
+    return { ok: false, reason: describeIo("persist", KEEP_RECORD_FILE, error) };
+  }
+  return { ok: true };
+}
+
+/** RPC/CLI 状态聚合：inspect 透传 + keep 决定折叠（conflict × 记录匹配 → kept）。 */
+export function selfSkillStatus(
+  explicitRoot?: string,
+):
+  | { state: "linked"; linkPath: string; sourcePath: string; viaGit: boolean }
+  | { state: "missing" }
+  | { state: "stale-link" }
+  | { state: "dangling" }
+  | { state: "legacy-copy" }
+  | { state: "conflict"; conflict: SelfSkillConflict }
+  | { state: "kept"; conflict: SelfSkillConflict }
+  | { state: "failed"; reason: string } {
+  const inspect = inspectSelfSkill(explicitRoot);
+  const source = resolveSelfSkillSource();
+  switch (inspect.state) {
+    case "linked":
+      return {
+        state: "linked",
+        linkPath: linkPathOf(selfSkillRoot(explicitRoot)),
+        sourcePath: source?.skillDir ?? inspect.source,
+        viaGit: source?.viaGit ?? false,
+      };
+    case "missing":
+    case "dangling":
+    case "legacy-copy":
+      return { state: inspect.state };
+    case "stale-link":
+      return { state: "stale-link" };
+    case "conflict":
+      return keepRecordMatches(inspect.conflict)
+        ? { state: "kept", conflict: inspect.conflict }
+        : { state: "conflict", conflict: inspect.conflict };
+    case "failed":
+      return { state: "failed", reason: inspect.reason };
   }
 }
 
-function describeIo(phase: "read" | "write", target: string, error: unknown): string {
+function keepRecord(): KeepRecord | null {
+  try {
+    return safeParseJson(
+      fs.readFileSync(path.join(appDir(), KEEP_RECORD_FILE), "utf8"),
+      KeepRecordSchema,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function keepRecordMatches(conflict: SelfSkillConflict): boolean {
+  const record = keepRecord();
+  if (!record) return false;
+  return (
+    record.kind === conflict.kind &&
+    (record.targetPath ?? undefined) === conflict.targetPath &&
+    record.contentDigest === conflict.contentDigest
+  );
+}
+
+function describeIo(phase: string, target: string, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
-  return `self-skill bootstrap ${phase} failed at ${target}: ${detail}`;
-}
-
-/** frontmatter 所有权块（内容与 MarkerSchema 对齐）。 */
-function selfSkillFrontmatter(): string {
-  return [
-    "---",
-    `name: ${SELF_SKILL_DIRECTORY_NAME}`,
-    `description: ${SELF_SKILL_DESCRIPTION}`,
-    `${MANAGED_MARKER_KEY}: ${MANAGED_MARKER_VALUE}`,
-    `x-managed-version: "${SELF_SKILL_VERSION}"`,
-    "---",
-    "",
-  ].join("\n");
-}
-
-/** 技能 description（单行 YAML；触发词面向各宿主的技能路由与 BM25 召回）。 */
-const SELF_SKILL_DESCRIPTION =
-  "本机 Agent 技能工作台 Skill Creator (V2) 的使用指南。当需要搜索/查找本机已安装技能（find/search skills）、读取技能全文、管理技能（安装/更新/启停/校验/清理重复）、维护 skill wiki，或用户提到 skill-creator / skill creator / 技能管理器 / skills manager / SKILL.md 管理时使用。两条通路：CLI（skill-creator search / wiki / mcp …）与只读 MCP 工具面（skills_search / skills_info / wiki_read …）；变更类操作一律经 Skill Creator GUI 人工审批。";
-
-/** SKILL.md 正文（精炼决策面；完整目录在 references/tools.md）。 */
-export function selfSkillMarkdown(): string {
-  return `${selfSkillFrontmatter()}<!--
-文件意图：本文件由 Skill Creator 产品自举写入（daemon 生产入口启动时 ensure），
-是产品对外行为面（CLI + MCP readonly 工具）的文档投影；内容事实源在产品仓库
-src/daemon/self-skill.ts，产品升级按 x-managed-version 整组刷新，人工修改会在
-同版本内被保留（下个版本升级时覆盖）。
--->
-
-# Skill Creator V2 — 本机技能管理与检索入口
-
-Skill Creator 是本机的技能工作台：管理所有 Agent 的技能目录（发现 / 校验 / 启停 /
-安装 / 更新 / 修订历史），并提供本地 BM25 检索与技能 wiki。本机全部技能按
-Workspace（\`~\` = 全局聚合，或已导入的 ws_* 目录）→ Provider（claude-code / codex /
-cursor / zcode 等 Agent 的 skills root）两层作用域组织。
-
-## 通路选择
-
-\`\`\`text
-要做什么？
-├─ 找技能 / 搜本机已装技能 ──────────> CLI: skill-creator search <query>
-│                                      或 MCP: skills_search {query, limit?}
-├─ 读某个技能的全文 / 校验它 ─────────> MCP: skills_search 拿 {workspaceId,
-│                                      providerId, skillId} 三元组
-│                                      → skills_info / skills_validate
-├─ 列出本机有哪些 Workspace/Provider > MCP: workspace_list
-├─ 装新技能 / 更新 / 启停 / 编辑 ─────> 引导用户在 GUI 操作（skill-creator start）；
-│                                      读写面只读，mutation 需 GUI 人工审批
-├─ 技能经验 / 认知碎片 wiki ──────────> CLI: skill-creator wiki <子命令>
-│                                      或 MCP: wiki_scopes / wiki_list / wiki_read
-└─ 结构化批量消费（推荐常驻）─────────> 注册 MCP: skill-creator mcp（stdio，只读）
-\`\`\`
-
-## 硬规则
-
-- **只读面**：CLI/MCP 通路对技能数据只读；安装、更新、启停、编辑、删除都在
-  Skill Creator GUI 内完成（\`skill-creator start\` 启动）——先向用户说明要做什么、
-  影响哪些技能，再引导操作，不要声称"已修改"。
-- **opaque id**：skillId（\`sk_*\`）与三元组由服务端签发，不要手工拼路径或猜测；
-  永远先 \`skills_search\` / \`workspace_list\` 拿真 id。
-- **搜索不需要 daemon**：\`skill-creator search\` 进程内完成（首次建索引稍慢）。
-
-## 深入
-
-完整 MCP 工具目录（含每个工具的输入形状）、CLI 全参考、Workspace/Provider 概念
-与 MCP stdio 注册片段见 [references/tools.md](references/tools.md)。
-`;
-}
-
-/** references/tools.md（完整目录；事实源 = src/cli/cli.ts 与 capability 登记）。 */
-export function selfSkillToolsReference(): string {
-  return `# Skill Creator 工具参考
-
-事实源：CLI 帮助（\`skill-creator help\`）与产品 capability 登记表。工具名规则：
-capability 名点号→下划线（\`skills.search\` → \`skills_search\`）。
-
-## 概念模型
-
-\`\`\`text
-Workspace（作用域第一层）
-  |-- "~"      Global Workspace：聚合所有 Agent 的全局 skills roots（只读消费）
-  \`-- ws_*     Imported Workspace：已导入的本机目录（可写：创建/编辑/安装）
-Provider = 一个 Workspace 内的 Agent skills root（providerId ∈ 社区 catalog：
-  claude-code / codex / cursor / zcode / gemini-cli / warp / zed …）
-技能身份 = { workspaceId, providerId, skillId(sk_*) } 三元组（服务端 opaque 签发）
-\`\`\`
-
-- Global（\`~\`）可发现/查看/校验/启停既有技能，但创建与安装目标只能是 Imported
-  Workspace——装技能前先用 \`workspace_list\` 确认可写目标，没有就引导用户在 GUI
-  导入目录。
-- 同一技能可能出现在多个 provider root（内容重复）；\`skills_duplicates\` 给出
-  contentHash 分组，去重决策留给用户。
-
-## MCP 通路（结构化消费推荐）
-
-注册 stdio server（readonly 面，不需要 daemon 常驻）：
-
-\`\`\`json
-{
-  "mcpServers": {
-    "skill-creator": { "command": "skill-creator", "args": ["mcp"] }
-  }
-}
-\`\`\`
-
-（各宿主的 MCP 配置位置不同：Claude Code \`claude mcp add skill-creator -- skill-creator mcp\`；
-ZCode/Codex/其它宿主写各自 mcp 配置，命令同为 \`skill-creator mcp\`。）
-
-### 只读工具目录（stdio / daemon 内同构）
-
-| 工具 | 输入（JSON） | 用途 |
-| --- | --- | --- |
-| \`workspace_list\` | {} | 列 Workspace（含 provider roots 与计数） |
-| \`skills_list\` | {workspaceId, providerId, includeDisabled?} | 列一个 provider 的技能 |
-| \`skills_info\` | {workspaceId, providerId, skillId} | 读技能全文 + 元数据 |
-| \`skills_validate\` | {workspaceId, providerId, skillId} | 校验技能结构/frontmatter |
-| \`skills_search\` | {query, limit? (1-50, 默认 10)} | 跨全部 Workspace 的 BM25 检索 |
-| \`skills_duplicates\` | {} | 内容重复技能分组 |
-| \`skills_search_config_open\` | {} | 用系统编辑器打开检索排除配置 |
-| \`skills_update_check\` | {workspaceId, providerId, skillIds?} | 对照上游 lock hash 的过期检查 |
-| \`creator_load\` | {workspaceId, providerId, skillId} | 可编辑文档基线（含 revision） |
-| \`creator_revisions\` | {workspaceId, providerId, skillId, limit? ≤100} | 修订历史（含 diff） |
-| \`repository_scan\` | {source, ref?} | 浅克隆+钉 commit+扫描 Git 技能源 |
-| \`repository_sources_list\` | {} | 列 curated/user 发现源（https Git） |
-| \`wiki_scopes\` | {} | 列 wiki 作用域（global + 各 workspace） |
-| \`wiki_list\` | {scope} | 列一个作用域的 pattern 碎片 |
-| \`wiki_read\` | {scope, name} | 读一篇 pattern 全文 |
-| \`wiki_distill_start\` | {source, limit? ≤100} | 蒸馏 run（需产品 agent 内核；独立 stdio 形态下 start 正常返回 runId，run 立即 failed(kernel-unavailable)，经 wiki_distill_status 可见） |
-| \`wiki_distill_status\` | {runId} | 蒸馏 run 状态/提案台账 |
-| \`wiki_distill_cancel\` | {runId} | 取消蒸馏 run |
-
-变更类能力（安装/更新执行/启停/编辑/删除/写 wiki）在 MCP 面只有 \`*_propose\`
-提案变体且仅存在于产品 GUI 的内置会话——外部 Agent 一律引导用户在 GUI 完成。
-
-MCP resource 面：\`skill-creator://skill/{workspaceId}/{providerId}/{skillId}\`
-（技能文档只读资源）。
-
-## CLI 全参考
-
-\`\`\`text
-skill-creator start          Boot the daemon and open the tray window
-skill-creator open           Show/focus the tray window of a running daemon
-skill-creator openinbrowser  Open the running WebUI in the system browser
-skill-creator status         Check the running daemon
-skill-creator stop           Gracefully stop the daemon
-skill-creator search         Search local skills (BM25 + skill tokenizer)
-skill-creator wiki           Persistent agent-experience wiki
-                             (list/show/add/find/edit/remove/log/impact/scopes/distill)
-skill-creator mcp            Run the skill-creator MCP server over stdio (readonly face)
-skill-creator version        Print the version
-skill-creator help           Show this help
-\`\`\`
-
-### search 细节
-
-\`\`\`bash
-skill-creator search <query...> [--json] [--limit N]   # limit 1-50，默认 10
-\`\`\`
-
-- 进程内完成（不要求 daemon 在运行）；空 query 或 flag 解析失败 exit 1。
-- \`--json\` 输出 \`{ "results": [...] }\`（每项主要字段：name/description/
-  canonicalPath/score/installations/duplicates，另有 id/contentHash 等）；人读模式
-  含路径与重复项。
-- 中英混合 query 均可（tokenizer 含中文 bigram 与 Latin 标识符切分）。
-
-### wiki 细节
-
-\`skill-creator wiki <子命令>\` 进程内执行（\`distill\` 例外，走 daemon RPC）：
-list/show/add/find/edit/remove/log/impact/scopes/distill。\`--workspace\` 支持
-registry label/ws_id 或路径直传。wiki 目录 = \`<workspace>/.agents/skill-wiki/\`。
-
-## 技能更新模型
-
-skills-CLI（\`npx skills\`）安装的技能带 lock hash：\`skills_update_check\` 只读对比
-上游；过期技能的执行重装（apply）在 GUI 完成（Repository 安装管线 + 校验链）。
-手工放入的技能（投影为 installedVia: "unknown"、updatable: false）不参与 lock 对比。
-
-## 安全与边界
-
-- MCP/HTTP 面只监听 loopback；daemon WebUI token 不出本机。
-- 不要绕过工具面直接读写技能文件来做"管理"——启停状态、revision 校验、安装验证
-  都有服务端不变量，绕过会破坏它们。
-`;
+  return `self-skill ${phase} failed at ${target}: ${detail}`;
 }

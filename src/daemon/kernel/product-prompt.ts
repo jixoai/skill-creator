@@ -41,7 +41,7 @@ export const SKILL_CREATOR_PROMPT_SECTION_TEXT = `# Skill Creator best practices
   read or change skills in this product. There is no shell or filesystem access in
   this session; do not attempt to read or write files directly.
 - The usage guide is NOT inlined here. It lives in the global skill
-  \`skill-creator-v2\` (this product installs it at ~/.agents/skills/skill-creator-v2).
+  \`skill-creator-v2\` (this product links it at ~/.agents/skills/skill-creator-v2).
   Read it through the normal flow whenever you need to manage or search skills:
   call \`skills_search\` with \`{"query": "skill-creator"}\` to resolve the skill's
   \`{workspaceId, providerId, skillId}\` scope, then \`skills_info\` to read the

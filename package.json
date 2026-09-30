@@ -26,6 +26,7 @@
   },
   "files": [
     "dist",
+    "skills",
     "README.md",
     "README-zh.md",
     "LICENSE",

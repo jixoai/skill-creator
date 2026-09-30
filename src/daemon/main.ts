@@ -22,8 +22,18 @@ import { webModeFromEnv } from "../shared/web-mode.js";
 async function main(): Promise<void> {
   // ensureSelfSkill 永不抛出，失败只记日志，绝不阻塞启动（design D2）。
   const selfSkill = ensureSelfSkill();
-  if (selfSkill.kind === "installed" || selfSkill.kind === "updated") {
+  if (
+    selfSkill.kind === "linked" ||
+    selfSkill.kind === "relinked" ||
+    selfSkill.kind === "migrated"
+  ) {
     log(`self-skill bootstrap ${selfSkill.kind}`);
+  } else if (selfSkill.kind === "conflict") {
+    log(
+      `self-skill conflict (${selfSkill.conflict.kind}) at ${selfSkill.conflict.entryPath}` +
+        (selfSkill.conflict.targetPath ? ` -> ${selfSkill.conflict.targetPath}` : "") +
+        "; awaiting user decision (CLI notice / WebUI banner)",
+    );
   } else if (selfSkill.kind === "failed") {
     log(`self-skill bootstrap failed: ${selfSkill.reason}`);
   }

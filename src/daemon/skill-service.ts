@@ -15,12 +15,8 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import {
-  listSkills,
-  validateSkill as validateCcskiSkill,
-  type ListOptions,
-  type ValidateOptions,
-} from "ccski";
+import { validateSkill as validateCcskiSkill, type ListOptions, type ValidateOptions } from "ccski";
+import { listSkillsWithSymlinkedEntries } from "./ccski-symlink-entries.js";
 import { z } from "zod";
 import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import type {
@@ -142,7 +138,9 @@ export function createSkillService(
   workspaces: WorkspaceRegistry,
   options: SkillServiceOptions = {},
 ) {
-  const discoverSkills = options.discoverSkills ?? listSkills;
+  // 默认发现面带 symlink 条目增补（self-skill-symlink：ccski root 扫描跳过
+  // symlink 目录条目；注入桩语义不变）。
+  const discoverSkills = options.discoverSkills ?? listSkillsWithSymlinkedEntries;
   const validateSkill = options.validateSkill ?? validateCcskiSkill;
   const skillsCliProbe = options.skillsCliProbe;
 
@@ -185,7 +183,13 @@ export function createSkillService(
     skillFile,
     info: (target: WorkspaceProviderTarget, skillId: SkillId) => info(cachedList, target, skillId),
     toggle: (target: WorkspaceProviderTarget, skillIds: SkillId[], mode: "enable" | "disable") =>
-      toggle(cachedList, target, skillIds, mode).finally(() => invalidateTarget(target)),
+      toggle(
+        cachedList,
+        workspaces.resolve(target, true).directory,
+        target,
+        skillIds,
+        mode,
+      ).finally(() => invalidateTarget(target)),
     validate: (target: WorkspaceProviderTarget, skillId: SkillId) =>
       validate(cachedList, validateSkill, workspaces, target, skillId),
     /**
@@ -272,6 +276,7 @@ async function info(
 /** Enable or disable selected skills without overwriting file conflicts. */
 async function toggle(
   loadList: SkillListLoader,
+  providerRoot: string,
   target: WorkspaceProviderTarget,
   skillIds: SkillId[],
   mode: "enable" | "disable",
@@ -279,10 +284,40 @@ async function toggle(
   const discovered = new Map((await loadList(target, true)).map((skill) => [skill.id, skill]));
   const results: ToggleSummary["results"] = [];
 
+  // symlink 条目守卫（self-skill-symlink 复核 P1-3）：skill.path 已被 realpath
+  // 归并到链接目标内部（条目名可能随别名漂移，不能按 directoryName 探测），
+  // rename 会穿透链改写 server-owned root 之外的内容（产品安装内技能源/用户
+  // 自有目录）。按「顶层链接条目的 realpath 覆盖域」判定，命中即 typed conflict。
+  const linkedTargets: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(providerRoot, { withFileTypes: true })) {
+      if (!entry.isSymbolicLink()) continue;
+      try {
+        linkedTargets.push(fs.realpathSync(path.join(providerRoot, entry.name)));
+      } catch {
+        // 悬空链不覆盖任何现存技能。
+      }
+    }
+  } catch {
+    // root 不可读：守卫缺席，交给后续 rename 路径报 failed。
+  }
+  const isLinkedSkill = (skillPath: string): boolean =>
+    linkedTargets.some((target) => skillPath === target || skillPath.startsWith(target + path.sep));
+
   for (const skillId of skillIds) {
     const skill = discovered.get(skillId);
     if (!skill) {
       results.push({ skillId, name: skillId, status: "failed", error: "Skill not found." });
+      continue;
+    }
+    if (isLinkedSkill(skill.path)) {
+      results.push({
+        skillId,
+        name: skill.name,
+        status: "conflict",
+        error:
+          "This entry is a symlink; toggling would rename files inside its target. Manage the link itself instead.",
+      });
       continue;
     }
     const wantsDisabled = mode === "disable";
