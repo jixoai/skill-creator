@@ -17,15 +17,17 @@
       + daemon 路由接线（state 投影补 backupAvailable）
 - [x] 4.2 WebUI：self-skill store（connected-effect 驱动——mount 时 rpc 未就绪的
       静默失败实锤后改挂 layout）+ Workspaces 首页冲突 banner + toast 终态
-- [x] 5.1 测试：self-skill 22 项（七态 + dist-manifest 源解析 + legacy 迁移 + 备份
-      格式 + keep 指纹漂移 + IO failed + 文档不变量 + symlink 闭环检索召回）+
-      ccski 增补 3 项 + CLI/RPC 4 项；全量 1572/1572 绿
+- [x] 5.1 测试：self-skill 24 项（七态 + dist-manifest 源解析 + legacy 字节级迁移与
+      偏离冲突 + 无备份覆盖（EPERM 回归）+ foreign-entry 覆盖 + 备份格式 + keep 指纹
+      漂移 + IO failed + 文档不变量 + symlink 闭环检索召回）+ ccski 增补 3 项 +
+      CLI/RPC 4 项 + toggle symlink 守卫（skill-service）
 - [x] 5.2 WebUI 走查（隔离实例 + 沙箱冲突根）：桌面 1440 banner 呈现 → 覆盖安装
       （备份 toast + 磁盘 link + skills-backup 时间戳目录含用户原版）→ 保留版本
       （toast + keep 记录 + 重载静默）→ 指纹漂移重提醒；窄屏 680 换行无溢出；
       vision 判读双 PASS（0 P1）
-- [x] 6.1 全量门禁（test 1572 绿 / typecheck / webui check / fmt / build / pack 含
-      skills）+ 子代理复核 + 处置（见下）
+- [x] 6.1 全量门禁（test 全量绿 / typecheck / webui check / fmt / build / pack 含
+      skills）+ 子代理复核 6.5/10 → P1×3 与 P2 加固全部处置（见下），HEAD 独立
+      typecheck 复验（临时 worktree，剥离并行会话误卷入的 sourceRevision hunk）
 - [x] 6.2 AGENTS.md / i18n.zh.md 同步 + 归档 + 分段提交
 
 ## 复核与走查处置记录

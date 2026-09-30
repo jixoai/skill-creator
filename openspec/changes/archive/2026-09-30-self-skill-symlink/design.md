@@ -32,16 +32,20 @@ lstat ~/.agents/skills/skill-creator-v2        [root 隔离阀 SKILL_CREATOR_SEL
   |     `-- provenance 非 ours -------> 冲突 foreign-link（目标绝不触碰）
   |
   +-- 真目录
-  |     +-- SKILL.md/.SKILL.md frontmatter 带 x-managed-by: skill-creator
-  |     |     → v1 legacy 拷贝迁移：目录整个移除换 symlink（无备份——本就是我们的内容）→ migrated
+  |     +-- frontmatter 带 x-managed-by: skill-creator 且文档字节 === 本次源
+  |     |     → legacy 拷贝迁移：目录整个移除换 symlink（无备份——字节级产品产物）→ migrated
+  |     +-- 带 marker 但内容有偏离 ----> 冲突 user-directory（marker 可被仿冒，
+  |     |                                 偏离的一律走显式裁决——复核 P2 加固）
   |     `-- 其它 -----------------------> 冲突 user-directory（可备份对象）
   |
   +-- 冲突 × keep 记录指纹匹配 ------> kept（静默；指纹变化重新提醒）
   `-- IO 硬错误 ---------------------> typed failed，log，启动继续
 
 symlink 创建：posix 用 'dir'；win32 用 'junction'（目录联接无需管理员权限，绝对目标）。
-禁用语义：产品 toggle 改的是链接内部文件名（SKILL.md ⇄ .SKILL.md 的链接重命名），
-包源不受影响，其它 Agent 视角随链接文件名同步消失/恢复——v1 的 disabled 特判不再需要。
+禁用语义（复核 P1-3 裁决）：toggle 的 rename 会穿透 symlink 改写 server-owned root
+之外的目标（安装内技能源/用户自有目录）——skill-service 对「顶层链接条目 realpath
+覆盖域」内的技能 toggle 一律返回 typed conflict；链接条目的启停由链本身管理。
+（旧稿「禁用态活在链接内部文件名层」的断言错误，按实现纠正。）
 ```
 
 ## D3 冲突裁决（用户显式动作，双面同源）
@@ -50,8 +54,9 @@ symlink 创建：posix 用 'dir'；win32 用 'junction'（目录联接无需管�
 resolveSelfSkillConflict({backup})
   user-directory:  backup? move 目录 → ~/.agents/skills-backup/skill-creator-v2-YYYY-MM-DD-HH-mm-ss
                           （本地时间；rename 同卷原子；失败 → typed failed，不动原目录）
+                   backup=false → 递归移除（用户明确放弃；unlink 对目录恒 EPERM——复核 P1-2）
                    然后 symlink 创建 → linked
-  foreign-link:    仅删除链接（用户内容在别处，无需备份）→ symlink 创建 → linked
+  foreign-link / foreign-entry: 仅移除条目本身（unlink；用户内容在别处/链目标，不触碰）
 
 keepSelfSkillUserVersion()
   fingerprint = {kind, realpath, contentDigest(sha256 SKILL.md bytes)}
@@ -83,6 +88,10 @@ listSkillsWithSymlinkedEntries(options)（包装 ccski listSkills）
 
 - 形状来源：实测 ccski customDir 条目（location "user" / sourceKind "custom" /
   sourcePriority 500），逐字段镜像，下游 `projectMetadata` 的 Zod 收窄兜底。
+- 去重口径（复核 P2-2 对齐实现）：按「同 root 内同名真实目录已列出不重复补」；
+  真目录 + 指向它的别名链会让 registry 计数面计 2（skill-service 面经 canonicalDirectory
+  归并同 id 不受影响）——计数为观察值，接受；增补条目不参与 include/exclude 令牌过滤
+  （产品调用点不使用）。
 - 身份一致性：`canonicalDirectory` 在投影层自行 realpath，link path 与 real path
   归并到同一 canonical 技能 id，与 search 索引（scanner 本就跟进 symlink）对齐。
 - 接线点：`skill-service` 默认 discoverSkills、`workspace-registry` 默认 listCcskiSkills；

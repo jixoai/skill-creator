@@ -33,17 +33,18 @@ startup.
 #### Scenario: legacy v1 copy
 
 - **WHEN** a real directory exists whose managed frontmatter marker identifies the
-  v1 copy-based bootstrap
+  copy-based bootstrap AND its document bytes match the current install's source
 - **THEN** bootstrap replaces the directory with a link without a backup prompt
-  (the content was product-authored)
+  (byte-identical product output); a marked but diverged directory surfaces as a
+  `user-directory` conflict instead of being removed
 
 #### Scenario: user disabled the skill
 
-- **WHEN** the skill was disabled through the product (the SKILL.md link inside the
-  linked directory is renamed to `.SKILL.md`)
-- **THEN** the link itself stays untouched at startup (disable state lives at the
-  file-name level inside the link and survives restarts; the package source keeps
-  its SKILL.md)
+- **WHEN** the user attempts to disable the linked self skill through the product's
+  toggle
+- **THEN** the operation returns a typed conflict and the package source is never
+  modified (renaming through the link would write outside the server-owned root;
+  a linked entry's enable/disable is managed by the link itself)
 
 #### Scenario: bootstrap IO failure
 
@@ -67,7 +68,8 @@ symlinked directory entry.
   self skill
 - **THEN** the symlink entry is discovered (the ccski symlink-entry augmentation
   mirrors the customDir entry shape) and reported with the same scope metadata as a
-  real directory skill
+  real directory skill; toggling it returns a typed conflict (the rename would
+  pierce the link into the install's source tree)
 
 #### Scenario: search round trip
 
