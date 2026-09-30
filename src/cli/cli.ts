@@ -539,8 +539,10 @@ function printSearchResults(
 /**
  * `skill-creator setup [--backup]`（self-skill-symlink；Owner 命名裁决 [2026-09-30]
  * 「self-skill install 改成 setup」）：安装/修复全局自举技能链接——ensure 语义
- * （fresh 建链 / 悬空与旧安装重建 / legacy 迁移），冲突态进入显式覆盖裁决
+ * （fresh 建链 / 悬空旧链重建 / legacy 迁移），冲突态进入显式覆盖裁决
  * （user-directory 可先备份）。fs 直达，不依赖 daemon 常驻。
+ * agents-md-prompt-block：setup 同时注入/刷新 ~/.agents/AGENTS.md 引导块（失败
+ * 不影响链接结果——引导块是增强项）。
  */
 async function runSetup(): Promise<number> {
   const argv = hideBin(process.argv);
@@ -554,32 +556,60 @@ async function runSetup(): Promise<number> {
   // setup = 安装/修复语义：先 ensure（fresh 建链 / 悬空旧链重建 / legacy 迁移），
   // 冲突态才进入显式覆盖裁决（--backup 仅对 user-directory 冲突生效）。
   const ensured = selfSkill.ensureSelfSkill();
+  let code: number;
   switch (ensured.kind) {
     case "linked":
     case "relinked":
     case "migrated":
       console.log("self skill linked at the community global root.");
-      return 0;
+      code = 0;
+      break;
     case "current":
       console.log("self skill already linked and up to date.");
-      return 0;
+      code = 0;
+      break;
     case "kept":
       console.log("self skill conflict kept as yours; silent until it changes.");
-      return 0;
+      code = 0;
+      break;
     case "conflict": {
       const result = selfSkill.resolveSelfSkillConflict({ backup: rest.includes("--backup") });
       if (!result.ok) {
         console.error(result.reason);
-        return 1;
+        code = 1;
+        break;
       }
       console.log("self skill linked at the community global root.");
       if (result.backupPath) console.log(`previous version backed up to ${result.backupPath}`);
-      return 0;
+      code = 0;
+      break;
     }
     case "failed":
       console.error(ensured.reason);
-      return 1;
+      code = 1;
+      break;
   }
+  const agentsMd = await import("../daemon/agents-md-block.js");
+  const block = agentsMd.ensureAgentsMdPromptBlock();
+  switch (block.kind) {
+    case "injected":
+      console.log(`agents-md guidance block injected at ${agentsMd.agentsMdFilePath()}`);
+      break;
+    case "updated":
+      console.log("agents-md guidance block refreshed.");
+      break;
+    case "current":
+      break;
+    case "multiple":
+      console.log(
+        `agents-md has multiple guidance blocks; refreshed the first at ${block.file} — clean up the rest manually.`,
+      );
+      break;
+    case "failed":
+      console.error(block.reason);
+      break;
+  }
+  return code;
 }
 
 /**
@@ -605,6 +635,8 @@ async function runSelfSkill(): Promise<number> {
   if (action === "status") {
     const status = selfSkill.selfSkillStatus();
     describeSelfSkillStatus(status);
+    const agentsMd = await import("../daemon/agents-md-block.js");
+    console.log(`agents-md guidance block: ${agentsMd.agentsMdBlockState()}`);
     return status.state === "failed" ? 1 : 0;
   }
   const kept = selfSkill.keepSelfSkillUserVersion();
