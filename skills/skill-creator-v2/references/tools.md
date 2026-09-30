@@ -75,8 +75,11 @@ skill-creator stop           Gracefully stop the daemon
 skill-creator search         Search local skills (BM25 + skill tokenizer)
 skill-creator wiki           Persistent agent-experience wiki
                              (list/show/add/find/edit/remove/log/impact/scopes/distill)
+skill-creator skills         Manage skills (list/info/validate/toggle/duplicates/update)
+skill-creator model          Configure agent models (list/routes/use/route/key/test)
 skill-creator mcp            Run the skill-creator MCP server over stdio (readonly face)
-skill-creator setup          Install/repair the global self skill link (--backup when overwriting yours)
+skill-creator setup          Install/repair the global self skill link + agents-md block;
+                             --model <p>/<m> 配置模型段
 skill-creator self-skill     Inspect the global self skill link (status | keep)
 skill-creator version        Print the version
 skill-creator help           Show this help
@@ -99,6 +102,51 @@ skill-creator search <query...> [--json] [--limit N]   # limit 1-50，默认 10
 `skill-creator wiki <子命令>` 进程内执行（`distill` 例外，走 daemon RPC）：
 list/show/add/find/edit/remove/log/impact/scopes/distill。`--workspace` 支持
 registry label/ws_id 或路径直传。wiki 目录 = `<workspace>/.agents/skill-wiki/`。
+
+### skills 细节（与 WebUI 同源，进程内执行）
+
+```bash
+skill-creator skills list [<workspace>] [--provider <p>] [--all] [--json]
+skill-creator skills info <workspace> <provider> <skill> [--json]
+skill-creator skills validate <workspace> <provider> <skill>
+skill-creator skills toggle <workspace> <provider> <skill>... (--enable|--disable)
+skill-creator skills duplicates [--json]
+skill-creator skills update check <workspace> <provider> [--json]
+skill-creator skills update apply <workspace> <provider> <skillName>... [--json]
+```
+
+- 引用解析：workspace = `~`/路径/ws_* id/label 前缀；provider = id 或 label 前缀；
+  skill = name/directoryName/sk_ id。歧义或零匹配列出候选并 exit 2。
+- 退出码：0 成功；1 业务失败（validate 无效、toggle conflict、update failed）；
+  2 用法错误。
+- symlink 条目的启停按 conflict 投影（管理链接本身，不穿透改名）。
+
+### model 细节（与 WebUI 同源，进程内执行）
+
+```bash
+skill-creator model list [--json]        # 目录 provider + 路由/活动标注
+skill-creator model routes [--json]      # 路由表 + 活动模型 + key configured 状态
+skill-creator model use <provider> <model> [--effort <tier>]
+skill-creator model route add <provider> --base-url <url> [--api <protocol>] --model <id>...
+skill-creator model route remove <provider>
+skill-creator model key set <provider> <apiKey|->   # `-` 从 stdin 读，避免进 shell 历史
+skill-creator model key clear <provider>
+skill-creator model test [<provider> [<model>]]
+```
+
+- 与 WebUI 同一份持久化（`~/.skill-creator/steward-store/`）；key 明文永不回显。
+- `use` 对目录内 provider 自动补路由（api/baseURL/models 由目录推导）。
+
+### setup 模型段
+
+```bash
+skill-creator setup [--backup] [--model <provider>/<model>] [--effort <tier>] \
+                    [--base-url <url>] [--api <protocol>] [--api-key <key|none>]
+```
+
+- `--model` 是模型段开关；其余模型 flag 必须伴随它（否则 exit 2）。
+- 段内顺序：key set（`none` 跳过）→ route add（无路由且给 `--base-url` 时）→ use。
+- 模型段失败 exit 1，但不回滚已完成的技能链接与 agents-md 块。
 
 ## 技能更新模型
 

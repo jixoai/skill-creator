@@ -14,6 +14,9 @@
  * （TTY 交互三选 / 非 TTY 打印命令提示）。
  * 修订 [2026-09-30b]（Owner 命名裁决）：覆盖安装升级为顶层 `skill-creator setup
  * [--backup]`；self-skill 子命令收敛为 status | keep。
+ * 修订 [2026-09-30c]（cli-surface-parity）：`skills`/`model` 两个进程内命令族
+ * （实现物理隔离在 src/cli/cli-skills.ts 与 cli-model.ts）；setup 增模型配置
+ * 参数段（--model <p>/<m> 等，装配逻辑同源于 cli-model 的 applyModelSetupSection）。
  * 正交意图：
  * 1. 解析并路由公开 CLI 命令。
  * 2. 通过带版本、运行时校验的 IPC 协议调用 daemon。
@@ -34,7 +37,10 @@
  *   skill-creator search  -> in-process BM25 skill search (no daemon)
  *   skill-creator wiki    -> in-process skill-wiki kit subcommands (no daemon),
  *                            except `wiki distill` which drives the daemon RPC
- *   skill-creator setup    -> install/repair the global self skill link (no daemon)
+ *   skill-creator setup    -> install/repair the global self skill link + agents-md block
+ *                            + optional model config section (no daemon)
+ *   skill-creator skills   -> manage skills (list/info/validate/toggle/duplicates/update)
+ *   skill-creator model    -> configure agent models (list/routes/use/route/key/test)
  *   skill-creator self-skill -> inspect the global self skill link (status | keep, no daemon)
  *   skill-creator help    -> print command help
  *   skill-creator version -> print version
@@ -547,10 +553,38 @@ function printSearchResults(
 async function runSetup(): Promise<number> {
   const argv = hideBin(process.argv);
   const rest = argv.slice(argv.indexOf("setup") + 1);
-  const usage = "Usage: skill-creator setup [--backup]";
-  if (rest.some((flag) => flag !== "--backup")) {
+  const usage =
+    "Usage: skill-creator setup [--backup] [--model <provider>/<model>] [--effort <tier>] " +
+    "[--base-url <url>] [--api <protocol>] [--api-key <key|none>]";
+  const modelValueFlags = new Set(["model", "effort", "base-url", "api", "api-key"]);
+  const bools = new Set<string>();
+  const modelFlags = new Map<string, string>();
+  for (let i = 0; i < rest.length; i += 1) {
+    const token = rest[i];
+    if (token === "--backup") {
+      bools.add("backup");
+      continue;
+    }
+    if (token.startsWith("--")) {
+      const key = token.slice(2);
+      if (!modelValueFlags.has(key)) {
+        console.error(usage);
+        return 2;
+      }
+      const value = rest[++i];
+      if (value === undefined || value.startsWith("--")) {
+        console.error(`missing value for --${key}\n${usage}`);
+        return 2;
+      }
+      modelFlags.set(key, value);
+      continue;
+    }
     console.error(usage);
-    return 1;
+    return 2;
+  }
+  if (modelFlags.size > 0 && !modelFlags.has("model")) {
+    console.error(`--model <provider>/<model> is required when passing model flags\n${usage}`);
+    return 2;
   }
   const selfSkill = await import("../daemon/self-skill.js");
   // setup = 安装/修复语义：先 ensure（fresh 建链 / 悬空旧链重建 / legacy 迁移），
@@ -573,7 +607,7 @@ async function runSetup(): Promise<number> {
       code = 0;
       break;
     case "conflict": {
-      const result = selfSkill.resolveSelfSkillConflict({ backup: rest.includes("--backup") });
+      const result = selfSkill.resolveSelfSkillConflict({ backup: bools.has("backup") });
       if (!result.ok) {
         console.error(result.reason);
         code = 1;
@@ -608,6 +642,32 @@ async function runSetup(): Promise<number> {
     case "failed":
       console.error(block.reason);
       break;
+  }
+  if (code !== 0) return code;
+  if (modelFlags.has("model")) {
+    // 模型配置段（cli-surface-parity D5）：key → route → use；失败 exit 1，不回滚
+    // 已完成的 link/agents-md 结果（幂等——重跑 setup 即续配）。
+    const modelRef = modelFlags.get("model")!;
+    const separator = modelRef.indexOf("/");
+    if (separator <= 0 || separator === modelRef.length - 1) {
+      console.error(`--model expects <provider>/<model>\n${usage}`);
+      return 2;
+    }
+    const { createDaemonDomain } = await import("../daemon/domain.js");
+    const { applyModelSetupSection } = await import("./cli-model.js");
+    try {
+      await applyModelSetupSection(createDaemonDomain(undefined, { probeWarmup: false }), {
+        provider: modelRef.slice(0, separator),
+        model: modelRef.slice(separator + 1),
+        ...(modelFlags.has("effort") ? { effort: modelFlags.get("effort")! } : {}),
+        ...(modelFlags.has("base-url") ? { baseUrl: modelFlags.get("base-url")! } : {}),
+        ...(modelFlags.has("api") ? { api: modelFlags.get("api")! } : {}),
+        ...(modelFlags.has("api-key") ? { apiKey: modelFlags.get("api-key")! } : {}),
+      });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      return 1;
+    }
   }
   return code;
 }
@@ -1022,8 +1082,19 @@ const COMMANDS = {
     },
   },
   setup: {
-    description: "Install/repair the global self skill link (--backup when overwriting yours)",
+    description:
+      "Install/repair the global self skill link + agents-md block; --model <p>/<m> configures the agent model",
     run: () => runSetup(),
+  },
+  skills: {
+    description:
+      "Manage skills (list/info/validate/toggle/duplicates/update check|apply) — same face as the WebUI",
+    run: async () => (await import("./cli-skills.js")).runSkillsCli(),
+  },
+  model: {
+    description:
+      "Configure agent models (list/routes/use/route add|remove/key set|clear/test) — same face as the WebUI",
+    run: async () => (await import("./cli-model.js")).runModelCli(),
   },
   "self-skill": {
     description: "Inspect the global self skill link (status | keep)",

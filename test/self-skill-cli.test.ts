@@ -139,12 +139,13 @@ describe("CLI self-skill subcommand", () => {
     expect(fs.readFileSync(path.join(entryPath(), "SKILL.md"), "utf8")).toContain("my own copy");
   });
 
-  it("rejects usage errors with exit 1", async () => {
+  it("rejects usage errors with exit 1 (self-skill) / exit 2 (setup flags)", async () => {
     expect((await runCli(["self-skill", "bogus"])).code).toBe(1);
     expect((await runCli(["self-skill", "keep", "--backup"])).code).toBe(1);
     // install 已升级为顶层 setup：旧入口必须拒绝并指向新命令。
     expect((await runCli(["self-skill", "install"])).code).toBe(1);
-    expect((await runCli(["setup", "--bogus"])).code).toBe(1);
+    // setup 用法错误 exit 2（cli-surface-parity：与 skills/model 族一致）。
+    expect((await runCli(["setup", "--bogus"])).code).toBe(2);
   });
 
   it("setup on a clean root links without side effects", async () => {

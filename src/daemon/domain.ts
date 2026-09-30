@@ -133,6 +133,12 @@ export function createDaemonDomain(
      * 既有 seam（1.3）替换真实 kernel 驱动；缺省走 kernel handle（生产路径）。
      */
     distillSession?: DistillJobDeps["createSession"];
+    /**
+     * CLI 短命进程（cli-surface-parity D1）传 false：跳过构造期的 `npx skills
+     * list` 后台预热——进程退出不会留下 npx 孤儿；需要 provenance/update 的
+     * 路径仍按需惰性 probe。daemon 默认预热（perf-firstscreen B-5）。
+     */
+    probeWarmup?: boolean;
   } = {},
 ): DaemonDomain {
   const kernelHostRef: { handle: DshKernelHandle | null } = { handle: null };
@@ -146,8 +152,9 @@ export function createDaemonDomain(
   const skillsCliProbe = options.skillsCliProbe ?? createSkillsCliProbe();
   // npx probe 后台预热（perf-firstscreen B-5）：shell out 一次 `npx skills
   // list --json`（冷启动 0-15s），不让首个 skills.list 阻塞在它后面；探测
-  // 就绪前的列表 provenance 投影为缺省，就绪后自动补全。
-  void skillsCliProbe.probe().catch(() => undefined);
+  // 就绪前的列表 provenance 投影为缺省，就绪后自动补全。CLI 短命进程跳过
+  // （probeWarmup:false）——退出即收，不留 npx 孤儿。
+  if (options.probeWarmup !== false) void skillsCliProbe.probe().catch(() => undefined);
   const skills = createSkillService(workspaces, { skillsCliProbe });
   const agentSessions = createAgentSessionsService({
     kernel: () => kernelHostRef.handle,
