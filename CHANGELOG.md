@@ -1,5 +1,51 @@
 # Changelog
 
+## 2.4.0 (2026-09-30)
+
+The self skill becomes a live symlink into the install, setup injects a managed
+guidance block into `~/.agents/AGENTS.md`, and the CLI grows WebUI-parity
+families for skill management and model configuration.
+
+### Added
+
+- **Symlinked self skill (`skill-creator setup`)** — `~/.agents/skills/skill-creator-v2`
+  is now a symlink to the skill shipped inside the product install (npm and git
+  installs share one identity via the `skill-creator` package name), so the
+  self-describing skill stays fresh on every upgrade. Missing/dangling/stale
+  links and legacy copies are relinked automatically; a user-maintained entry
+  is never touched and surfaces as an explicit conflict with two resolutions —
+  overwrite (optional timestamped backup under `~/.agents/skills-backup/`) or
+  keep (fingerprinted, silent until it changes). The WebUI home carries the
+  same conflict banner. `skill-creator self-skill` narrows to `status | keep`.
+- **agents-md guidance block** — `skill-creator setup` injects or refreshes a
+  `<skill-creator-v2>…</skill-creator-v2>` block in `~/.agents/AGENTS.md` that
+  steers every convention-reading agent to manage, search, and iterate skills
+  through skill-creator (CLI/MCP) and to record experience in the skill wiki.
+  The block is whole-pair replaced; content outside the tags is preserved
+  byte-identically, unterminated tags are typed failures, and the daemon never
+  touches the file (setup-only).
+- **`skill-creator skills` family** — WebUI-parity skill management, in-process
+  with no daemon required: `list` (workspace/provider/skill references accept
+  `~`, paths, `ws_*` ids, or label prefixes), `info`, `validate`, `toggle`
+  (symlinked entries project as conflicts instead of renaming through links),
+  `duplicates` (content-hash groups), and `update check | apply` (lock-hash
+  comparison and reinstall behind an explicit scope).
+- **`skill-creator model` family + `setup --model`** — same-source model
+  configuration against the exact files the WebUI edits: `list`, `routes`,
+  `use` (auto-adds catalog routes), `route add | remove`, `key set | clear`
+  (stdin via `-`; plaintext keys are never echoed), and `test` (typed
+  connection probe). `skill-creator setup --model <provider>/<model>` runs the
+  same key→route→use pipeline after linking, failing visibly without rolling
+  back completed link results.
+- **`probeWarmup` domain option** — short-lived CLI processes skip the eager
+  `npx skills list` warm-up so they never leave npx orphans behind.
+
+### Changed
+
+- `self-skill install` moved to the top-level `skill-creator setup` (Owner
+  decision); usage errors across the setup/skills/model families exit `2`,
+  business failures exit `1`.
+
 ## 2.3.0 (2026-09-22)
 
 Wikis move in with their workspaces, a fourth top-level Wiki panel, a
