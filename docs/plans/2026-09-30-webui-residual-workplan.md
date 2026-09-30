@@ -10,15 +10,15 @@
 
 ## Changes 与唯一契约源
 
-| # | change | 契约源 | 状态 |
-|---|---|---|---|
-| Ch1 | steward-surface-closure | archive/2026-09-30-steward-surface-closure/ | ✅ 归档 e2eb536（codex r4 裁定边界关闭） |
-| Ch2 | creator-test-session | openspec/changes/creator-test-session/ | 实现 039e10f（store/面板/模板/元数据/8 例测试，含真实内核网关 1 例）；vision 走查待 WS4 |
-| Ch3 | evaluation-corpus | openspec/changes/evaluation-corpus/ | 契约冻结；实现未开始 |
-| Ch4 | intelligence-proposal-parity | openspec/changes/intelligence-proposal-parity/ | 契约冻结；实现未开始 |
-| Ch5 | creator-editor-polish | （未立；CodeMirror 懒加载 + 草稿校验） | 待立 |
-| Ch6 | shell-settings-ui | （未立；AppSidebar + General 偏好） | 待立 |
-| Ch7 | docs-archive-hygiene | archive/2026-09-30-docs-archive-hygiene/ | ✅ 归档 04e2a91（Purpose 三连 21/21 + stale 注释 + 归档债注记） |
+| #   | change                       | 契约源                                         | 状态                                                                                                                             |
+| --- | ---------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Ch1 | steward-surface-closure      | archive/2026-09-30-steward-surface-closure/    | ✅ 归档 e2eb536（codex r4 裁定边界关闭）                                                                                         |
+| Ch2 | creator-test-session         | openspec/changes/creator-test-session/         | 实现 039e10f（store/面板/模板/元数据/8 例测试，含真实内核网关 1 例）；vision 走查待 WS4                                          |
+| Ch3 | evaluation-corpus            | openspec/changes/evaluation-corpus/            | 实现完成（6312735 服务/runner/B7 适配 + dd9d319/9eb0e0b fixture 语料；真实网关 provider-model 实证）；webui 最小查看入口归后续批 |
+| Ch4 | intelligence-proposal-parity | openspec/changes/intelligence-proposal-parity/ | 实现完成（四 capability + 统一投影 + seed 发起；1648/1648 全绿）                                                                 |
+| Ch5 | creator-editor-polish        | （未立；CodeMirror 懒加载 + 草稿校验）         | 待立                                                                                                                             |
+| Ch6 | shell-settings-ui            | （未立；AppSidebar + General 偏好）            | 待立                                                                                                                             |
+| Ch7 | docs-archive-hygiene         | archive/2026-09-30-docs-archive-hygiene/       | ✅ 归档 04e2a91（Purpose 三连 21/21 + stale 注释 + 归档债注记）                                                                  |
 
 ## 序（codex r3/r4 裁定一致）
 
@@ -30,18 +30,18 @@
 
 ## 复核台账（codex 大地三 ws3-codex-review）
 
-| 轮 | 基线 | 分数 | 关键结论 |
-|---|---|---|---|
-| r1 | 盘点计划 r0 | 6.2 | 事实纠错 + 五 P1（引用接线/模板/评估 schema/双 store/退役边界） |
-| r2 | r3 计划 | 7.0 | Ch1 边界认可；wire 级缺口七项 |
-| r3 | r4 计划 | 7.2 | 方向关闭；A′/B′/C′ 补遗被要求（round 内评价「仍非判别联合」） |
-| r4 | 52301dc（不含实现 039e10f） | 6.8 | 契约多文档漂移是病根；expectTrigger 布尔映射错误等真缺口；**单一契约源 + 实现即证据** |
-| r5 | HEAD（含 Ch2 实现） | 待评 | —— |
+| 轮  | 基线                        | 分数 | 关键结论                                                                                       |
+| --- | --------------------------- | ---- | ---------------------------------------------------------------------------------------------- |
+| r1  | 盘点计划 r0                 | 6.2  | 事实纠错 + 五 P1（引用接线/模板/评估 schema/双 store/退役边界）                                |
+| r2  | r3 计划                     | 7.0  | Ch1 边界认可；wire 级缺口七项                                                                  |
+| r3  | r4 计划                     | 7.2  | 方向关闭；A′/B′/C′ 补遗被要求（round 内评价「仍非判别联合」）                                  |
+| r4  | 52301dc（不含实现 039e10f） | 6.8  | 契约多文档漂移是病根；expectTrigger 布尔映射错误等真缺口；**单一契约源 + 实现即证据**          |
+| r5  | HEAD 6d070da（含 Ch2 实现） | 7.3  | 实现独立核验通过（47/47 聚焦 + 网关 2/2 + typecheck）；pendingSeedMetadata 泄漏已修（744dd56） |
 
 ## r4 真缺口的处置（落对应 change docs，不回填本文）
 
 - Ch2：实现已含 `$token` 渲染修正（039e10f 测试实证）；A1 补 `ComposerReference →
-  ComposerReferenceInput` 的转换语义（uid 由 registry 生成、调用方构造其余字段）。
+ComposerReferenceInput` 的转换语义（uid 由 registry 生成、调用方构造其余字段）。
 - Ch3：expectTrigger 是**布尔**——断言映射改 `finding-triggered`（布尔触发断言，
   analyzer 语义：期望 finding 触发/不触发）；corpusDigest（语料域）与
   boundRevision（技能文档域）分字段；result Zod 判别联合含「error 不得携带

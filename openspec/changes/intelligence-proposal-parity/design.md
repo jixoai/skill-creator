@@ -6,20 +6,32 @@
 
 ```ts
 type IntelligenceProposeInput =
-  | { action: "edit" | "disable"; findingId: string;
-      target: SkillRef; observedRevision: string;
-      payload: ProposalPayloadSchema }        // 复用 skill-intelligence 既有载荷
-  | { action: "split"; findingId: string;
-      targets: SkillRef[];                    // 多源（被拆分技能 + 目标承载者）
-      observedRevisions: string[];            // 与 targets 一一对应
-      payload: ProposalPayloadSchema }
-  | { action: "merge"; findingId: string;
-      targets: SkillRef[]; observedRevisions: string[];
-      payload: ProposalPayloadSchema };
+  | {
+      action: "edit" | "disable";
+      findingId: string;
+      target: SkillRef;
+      observedRevision: string;
+      payload: ProposalPayloadSchema;
+    } // 复用 skill-intelligence 既有载荷
+  | {
+      action: "split";
+      findingId: string;
+      targets: SkillRef[]; // 多源（被拆分技能 + 目标承载者）
+      observedRevisions: string[]; // 与 targets 一一对应
+      payload: ProposalPayloadSchema;
+    }
+  | {
+      action: "merge";
+      findingId: string;
+      targets: SkillRef[];
+      observedRevisions: string[];
+      payload: ProposalPayloadSchema;
+    };
 // 输出统一 {proposalId}
 ```
 
-  authority=proposal（只产草案不写盘）。
+authority=proposal（只产草案不写盘）。
+
 - **C′1b 工具命名与投影模型（r5 实证修正）**：现状 = MCP 投影层只对
   **approved-mutation** authority 追加 `_propose` 后缀（skill-creator-mcp.ts
   的 authority 分支）；proposal authority 会落入普通工具分支。为避免
@@ -51,10 +63,11 @@ type IntelligenceProposeInput =
   result?: { applied: boolean; error?: string } }  // executed/failed 的执行结果
 ```
 
-  `agent.proposals.list` 返回该视图；approve/reject 决策输入不变（id + 决定），
-  **按前缀路由**（mcp:→McpProposalStore，si:→skillIntelligence 服务）；stale
-  草稿（observedRevision ≠ 当前技能 revision）→ rejected 且 `rejectCause:
+`agent.proposals.list` 返回该视图；approve/reject 决策输入不变（id + 决定），
+**按前缀路由**（mcp:→McpProposalStore，si:→skillIntelligence 服务）；stale
+草稿（observedRevision ≠ 当前技能 revision）→ rejected 且 `rejectCause:
   "stale"`；两 store 各自映射，不改存储，无审计信息丢失（五态 + result 保全）。
+
 - **C′3 finding-propose seed 的 metadata 统一**：AgentSessionSeedMetadata 的
   `finding-propose` 分支（agent.ts 契约已冻结）为唯一元数据形状；split/merge
   的多源 revisions 进 `metadata.skillId`（主目标）+ 模板正文（全量清单），
