@@ -32,4 +32,4 @@
       取消竞态）+ 导入器 4 例（期望矩阵迁移实证）
 - [x] 4.4 真实模型跑分证据（真内核×本地网关 12.4s 完成；版本三元组落档；
       gateway 集成 1 例，网关缺席自动 skip 并在台账注明未闭合）
-- [ ] 4.5 门禁：focused tests + typecheck + fmt + full build
+- [x] 4.5 门禁：全量 1637/1637（166 文件）+ typecheck + fmt + full build 全绿
