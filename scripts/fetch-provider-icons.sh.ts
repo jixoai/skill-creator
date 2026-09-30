@@ -6,12 +6,15 @@
  * 用户原始需求 [2026-09-12]：「缺少模型供应商的图标……你自己混合处理一下，
  * models.dev 这里有」+ 图标端点规律 `https://models.dev/logos/{provider}.svg`。
  * 用户裁决 [2026-09-25]：models.dev 仅作静态 logo 资产源（shufa-server 同
- * 口径）；模型目录数据源 = zcode Registry（extract-zcode-presets.sh.ts）。
+ * 口径）；模型目录数据源 = zcode Registry 生成物。
+ * 用户裁决 [2026-09-30]：目录数据源升级为 agent-models-config 标准生成物
+ * （extract-agent-models.sh.ts；provider 清单含 account:* 订阅型，图标按
+ * vendor slug 命中同族资产）。
  *
  * 正交意图：
- *   [1] 一次抓取：按 zcodePresets provider 列表（含 ALIASES 兜底）拉取 svg，
- *       内联为 dataURL 写 src/shared/provider-icons.generated.ts（产物入库，
- *       产品运行时零网络依赖；本脚本仅手动刷新）。
+ *   [1] 一次抓取：按 agentModelsConfig provider 列表（含 ALIASES 兜底）拉取
+ *       svg，内联为 dataURL 写 src/shared/provider-icons.generated.ts（产物
+ *       入库，产品运行时零网络依赖；本脚本仅手动刷新）。
  *   [2] 占位识别：该端点对未知 id 返回统一占位 svg（HTTP 200），以两个 bogus
  *       样本的内容哈希为基准，命中占位即视为无图标（UI 字母头像回退）。
  * 妥协声明：无图标 provider 回退字母头像（混合处理的另一半）。
@@ -42,12 +45,16 @@ const ALIASES: Record<string, string> = {
 async function ourProviders(): Promise<ReadonlyArray<{ provider: string; iconUrl?: string }>> {
   const { pathToFileURL } = await import("node:url");
   const mod = (await import(
-    pathToFileURL(path.resolve(import.meta.dirname, "../src/daemon/zcode-presets.ts")).href
+    pathToFileURL(path.resolve(import.meta.dirname, "../src/daemon/agent-models.generated.ts")).href
   )) as {
-    zcodePresets: ReadonlyArray<{ provider: string; iconUrl?: string }>;
+    agentModelsConfig: {
+      providers: ReadonlyArray<{ id: string; logoUrl?: string }>;
+    };
   };
   const seen = new Map<string, { provider: string; iconUrl?: string }>();
-  for (const p of mod.zcodePresets) seen.set(p.provider, p);
+  for (const p of mod.agentModelsConfig.providers) {
+    seen.set(p.id, { provider: p.id, iconUrl: p.logoUrl });
+  }
   return [...seen.values()];
 }
 

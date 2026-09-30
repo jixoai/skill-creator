@@ -321,6 +321,7 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       models: {
         catalog: rpc.agent.models.catalog.handler(() => ({
           providers: domain.modelCatalog.list(),
+          sourceRevision: domain.modelCatalog.sourceRevision(),
         })),
       },
       settings: {

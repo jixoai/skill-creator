@@ -470,11 +470,15 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
         .input(z.object({ mode: z.enum(["image", "file"]) }))
         .output(z.object({ paths: z.array(z.string().min(1)) })),
     },
-    /** zcode Registry 预设生成物投影：全量 provider 画廊（filter 在 UI）。 */
+    /** agent-models-config 标准生成物投影：全量 provider 画廊（filter 在 UI）。 */
     models: {
-      catalog: oc
-        .input(z.object({}))
-        .output(z.object({ providers: z.array(ModelProviderCatalogEntrySchema) })),
+      catalog: oc.input(z.object({})).output(
+        z.object({
+          providers: z.array(ModelProviderCatalogEntrySchema),
+          /** 目录数据上游修订号（agent-models-config 信封 revision；spec MUST 必携带）。 */
+          sourceRevision: z.number().int().nonnegative(),
+        }),
+      ),
     },
     /** model/preset/permission/approval 投影（原 dsh.settings 平移）。 */
     settings: {

@@ -243,10 +243,14 @@ export const ModelProviderCatalogEntrySchema = z.object({
         supportsReasoningEffort: z.boolean().optional(),
         /** 输入模态（pi-ai 目录 input 数组过滤到产品域 text/image/video/pdf；R10-3）。 */
         inputTypes: z.array(DshModelInputTypeSchema).optional(),
-        /** 最大输出 token（pi-ai 目录 maxTokens；R10-4）。 */
+        /** 最大输出 token（标准 maxOutputTokens.max；R10-4）。 */
         maxOutputTokens: z.number().int().positive().optional(),
-        /** thinking 档位键（pi-ai thinkingLevelMap 键，剔除 off；R10-5 补全源）。 */
+        /** thinking 档位键（标准 reasoning tiers 剔 toggle 档；R10-5 补全源）。 */
         effortTiers: z.array(z.string().min(1)).optional(),
+        /** 目录声明支持服务端 tool calling（标准 supportsToolCall；缺省未知）。 */
+        supportsToolCall: z.boolean().optional(),
+        /** 目录声明支持 JSON Schema 约束输出（标准 supportsJsonSchemaOutput；缺省未知）。 */
+        supportsJsonSchemaOutput: z.boolean().optional(),
       }),
     )
     .min(1),
