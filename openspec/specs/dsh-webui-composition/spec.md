@@ -2,7 +2,7 @@
 
 ## Purpose
 
-以官方 DSH Web profile 与 client plugin composition 作为 Agent 产品宿主：DSH 提供 Agent runtime/UI 基础设施（配置、模型/profile、session、stream、permission、approval），Skill Creator 以 Manager authority 提供 Workspace/Provider/Skill 身份、context snapshot、finding、proposal、revision-safe apply、rollback 与 audit，并在同一 daemon origin 以单一入口（DSH 鉴权握手桥）提供全部 Manager 面。
+以 headless DSH 内核组合承载 Agent 能力：DSH 提供 Agent runtime 服务（model/preset/session/stream/permission/approval，经 dsh-base rows），Skill Creator 以 Manager authority 提供 Workspace/Provider/Skill 身份、context snapshot、finding、proposal、revision-safe apply、rollback 与 audit。产品 UI 是 Skill Creator shell 内的 Agent 面板（2026-09-11 裁决后唯一 Agent 面），不经 DSH Web host 组合、无 island channel 与宿主握手桥。
 
 ## Requirements
 

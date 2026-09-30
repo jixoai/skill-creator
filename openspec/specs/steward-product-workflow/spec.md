@@ -2,7 +2,11 @@
 
 ## Purpose
 
-把技能管家做成可上线产品：在 DSH Web host 的 Manager island 中提供任务/scope/runtime 配置选择、事件与 tool call 证据链、finding、proposal diff、validation、approval、rollback 与失败恢复的完整工作流 UI；能力声明由实际 handler/restriction 决定，终态停止高频刷新，迟到响应不覆盖新 scope，窄窗口与真实 daemon 生命周期均有验收证据。
+技能管家（steward）作为 Manager-owned 的分析管线：snapshot → 证据 → finding →
+proposal → validation → 审批 → apply → audit → rollback 全链保留；产品面收敛为
+agent 内部面（capability/MCP 工具 + 内核 agent run）与 proposal 审批面——独立
+Steward 工作流 UI 已按 2026-09-11 用户裁决退役（Agent 面板是唯一 Agent 面；
+`steward.*` RPC 保留为 daemon 内部/诊断面，零 WebUI 消费）。
 
 ## Requirements
 
