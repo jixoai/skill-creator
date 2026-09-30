@@ -32,5 +32,5 @@
 ## Impact
 
 - 新域模块 `src/daemon/evaluation/`（存储/CRUD/runner/协议）+ rpc-contract 面
-  + contracts 文件；webui 侧仅最小查看入口（后续批任务）。
+  - contracts 文件；webui 侧仅最小查看入口（后续批任务）。
 - 不写技能目录（禁止 `_evaluation/`）；数据层不依赖 Ch2 UI（复用其 seed）。

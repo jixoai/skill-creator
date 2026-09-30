@@ -76,8 +76,7 @@
       bind:value={probeText}
       oninput={() => (probeDirty = true)}
       aria-label="Test run prompt"
-      spellcheck="false"
-    ></textarea>
+      spellcheck="false"></textarea>
     <div class="flex shrink-0 items-center justify-end gap-2">
       <Button size="sm" variant="secondary" onclick={() => (probeDirty = false)}>
         Reset probe
@@ -89,7 +88,9 @@
     </div>
   </div>
 {:else}
-  <div class="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+  <div
+    class="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground"
+  >
     <div class="space-y-2">
       <p class="font-medium text-foreground">Test run</p>
       <p>Save the skill first to test it — the run needs a stable skill identity.</p>

@@ -5,7 +5,7 @@
 - **B′1 result schema 级收紧（Zod 判别联合 + 互斥 refine）**：
   `outcome=error` → `failure.code ∈ {RUNNER_ERROR, ASSERTION_ERROR}`（执行族）；
   `outcome=unavailable` → `failure.code ∈ {MODEL_UNAVAILABLE, DSH_UNAVAILABLE,
-  PROVIDER_ROUTE_MISSING}`（依赖族）；`passed | failed | stale` → `failure`
+PROVIDER_ROUTE_MISSING}`（依赖族）；`passed | failed | stale` → `failure`
   缺席。**互斥**：error 不携带依赖族码、unavailable 不携带执行族码（refine）。
   `assertions.min(1)`——空断言集的 case 在 CRUD 校验即拒绝，passed 不可能来自
   空集合真值。
@@ -15,23 +15,22 @@
   不可变。**boundRevision 一律是技能文档 revision 域**；fixture 导入样本另带
   `corpusDigest`（语料域，sha256 of fixture 语料文件集）——两域分字段，不混用。
 - **B′4 run RPC 全集（八过程）与竞态胜者**：`run.start {target, caseIds,
-  runner} → {runId, status:"queued"}`；`run.status {runId} → {status:
-  queued|running|completed|cancelled, resultIds}`；`run.cancel {runId} →
-  {runId, status}`；竞态冻结——completed 后 cancel 幂等返 `{status:
-  "completed"}`；running 时 cancel → 内核会话 cancel（provider）或原子段收口
+runner} → {runId, status:"queued"}`；`run.status {runId} → {status:
+queued|running|completed|cancelled, resultIds}`；`run.cancel {runId} →
+{runId, status}`；竞态冻结——completed 后 cancel 幂等返 `{status:
+"completed"}`；running 时 cancel → 内核会话 cancel（provider）或原子段收口
   （analyzer），终态 `cancelled` 且已写结果保留；unknown runId → NOT_FOUND。
 - **B′5 fixture 映射（r4-codex 勘误：expectTrigger 是布尔）**：
   `expectTrigger: boolean` → 断言 `{kind:"finding-triggered", value:
-  <boolean>}`（**新增布尔断言**；analyzer 语义：该技能在语料上应/不应产生
+<boolean>}`（**新增布尔断言**；analyzer 语义：该技能在语料上应/不应产生
   finding）；`expectedKinds: string[]` → `expectedKinds.map(k => {kind:
-  "finding-kind", value:k})`。多技能 fixture → synthetic target = 首个技能；
+"finding-kind", value:k})`。多技能 fixture → synthetic target = 首个技能；
   boundRevision = 首个技能文档 revision（技能域）；corpusDigest = 语料 digest；
   source="builtin-fixture"。
 - **B′6 IO 纪律与错误面**：解析不兼容/JSON 损坏 → 空信封（集合读取丢弃）；
   权限拒绝(EACCES/EPERM)/磁盘 IO/原子写 rename 失败 → typed hard error
   （errors 词表 UNAVAILABLE 家族 + detail 含阶段与路径）；原子写失败后内存
   不提交 next state（对齐 workspaces.json 纪律）。
-
 
 ## B1 存储布局（冻结）
 
@@ -101,7 +100,7 @@ assertion 执行且通过**——unavailable/stale 结果的 assertions 恒空�
   `corpusDigest` = 语料目录全部文件内容拼接的 sha256（语料域，算法冻结为
   「相对路径排序 + 内容字节序拼接」）；断言集 =
   `[{kind:"finding-triggered", value: expectTrigger}] ∪
-  expectedKinds.map(k => {kind:"finding-kind", value:k})`；
+expectedKinds.map(k => {kind:"finding-kind", value:k})`；
   `source:"builtin-fixture"`；导入落 Imported Workspace（用户显式选择的目标
   workspace+provider；Global 只读不落）。
 - `provider-model`：B7 adapter 跑内核会话 → 断言跑在会话产出文本上；取消映射
@@ -126,8 +125,11 @@ runner **不依赖 webui store**——daemon 进程内经既有
 ```ts
 interface ProviderSessionAdapter {
   create(input: { cwd?: string; metadata?: AgentSessionSeedMetadata }): Promise<{ sessionId }>;
-  prompt(input: { sessionId: string; text: string;
-    references: Array<{kind:"skill"; workspaceId; providerId; skillId}> }): Promise<void>;
+  prompt(input: {
+    sessionId: string;
+    text: string;
+    references: Array<{ kind: "skill"; workspaceId; providerId; skillId }>;
+  }): Promise<void>;
   /** 轮询 stream 至终态：读到 turn-end（或 status 稳定 idle 且无 pending 轮）
    * 即终止；投影 = 依序拼接 user-text/assistant-text/tool-result 帧 text 字段。 */
   readTranscript(sessionId: string): Promise<string>;

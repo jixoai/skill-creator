@@ -3,7 +3,7 @@
 ## A′ wire 级补遗（r4；冲突处以本节为准；r4-codex 勘误已并入）
 
 - **A′1 registry 唯一写者（字段分工精确化）**：`addComposerReference(input:
-  ComposerReferenceInput)` 只内部生成 `uid`；**token/target/label/skill 由调用方
+ComposerReferenceInput)` 只内部生成 `uid`；**token/target/label/skill 由调用方
   构造**（ComposerReference = Input + uid）。seed 入口构造
   `{kind:"skill", token:"$"+name, target:skillId, label:name, skill:三元组}`
   后交给 registry——不自造并行 registry、不生成第二套 uid。CreatorTestSeed 的
@@ -24,12 +24,12 @@
 
 ```ts
 interface CreatorTestSeed {
-  text: string;                       // 探针模板正文（占位符已替换；用户可编辑）
+  text: string; // 探针模板正文（占位符已替换；用户可编辑）
   references: ComposerReferenceInput[]; // 恰 1 条 kind:"skill"（token/target/label/
-                                        // skill 由 seed 构造；uid 由 registry 生成）
+  // skill 由 seed 构造；uid 由 registry 生成）
   templateId: "probe-recall-v1";
   templateVersion: 1;
-  revision: string;                   // sha256:…（creator.load 同源）
+  revision: string; // sha256:…（creator.load 同源）
 }
 ```
 

@@ -1,5 +1,8 @@
 # oxfmt respects this by default; registry-locked files keep their verbatim
 # formatting so the jixoai-ui.lock hashes stay stable (unipty precedent).
+# Archived openspec changes are frozen history — reflowing their nested lists
+# or verbatim prompt blocks rewrites the record; dispositions go in new changes.
+openspec/changes/archive/
 www/src/lib/context-plugin.svelte.ts
 www/src/lib/defaults.svelte.ts
 www/src/lib/density.svelte.ts

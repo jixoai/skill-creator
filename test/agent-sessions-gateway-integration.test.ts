@@ -248,9 +248,8 @@ describe.skipIf(!gatewayReachable)(
       async () => {
         const { createEvaluationService } = await import("../src/daemon/evaluation/service.js");
         const { createEvaluationStore } = await import("../src/daemon/evaluation/store.js");
-        const { createProviderSessionAdapter } = await import(
-          "../src/daemon/evaluation/provider-adapter.js"
-        );
+        const { createProviderSessionAdapter } =
+          await import("../src/daemon/evaluation/provider-adapter.js");
         kernel = await bootDshKernel({ home: path.join(sandbox, "dsh-home") });
         const transcriptsRoot = path.join(sandbox, "transcripts");
         const sessions = createAgentSessionsService({
@@ -286,7 +285,12 @@ describe.skipIf(!gatewayReachable)(
           skills,
           store,
           providerAdapter: () =>
-            createProviderSessionAdapter({ sessions, cwd: sandbox, stepDelayMs: 1000, maxSteps: 120 }),
+            createProviderSessionAdapter({
+              sessions,
+              cwd: sandbox,
+              stepDelayMs: 1000,
+              maxSteps: 120,
+            }),
         });
         const caseId = ("ev_" + "1".repeat(24)) as never;
         store.saveCase(target, {
