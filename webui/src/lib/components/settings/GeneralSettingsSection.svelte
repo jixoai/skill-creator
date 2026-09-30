@@ -1,10 +1,21 @@
 <!--
-  设置面 General 分区（add-agent-settings-modes 迭代）。
+  设置面 General 分区（add-agent-settings-modes 迭代；2026-09-30
+  shell-settings-ui：新增 Appearance 偏好）。
   正交意图：
   1. daemon 连接状态投影（连接/断开/重连中可见；断开时给出恢复提示）。
+  2. Appearance（设备偏好，localStorage 单源）：主题三选（Light/Dark/System，
+     .dark 类立即生效）+ 侧栏默认折叠开关。
 -->
 <script lang="ts">
   import { connectionState } from "$lib/store.svelte";
+  import {
+    appearanceSidebarCollapsed,
+    appearanceTheme,
+    setAppearanceTheme,
+    toggleAppearanceSidebar,
+  } from "$lib/shell/appearance.svelte";
+  import { Button } from "$lib/components/ui/button";
+  import { Switch } from "$lib/components/ui/switch";
   import IconPlug from "@lucide/svelte/icons/plug-zap";
   import IconUnplug from "@lucide/svelte/icons/plug";
 
@@ -20,6 +31,15 @@
         return "Idle";
     }
   });
+
+  const theme = $derived(appearanceTheme());
+  const sidebarCollapsed = $derived(appearanceSidebarCollapsed());
+
+  const THEME_OPTIONS = [
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+    { value: "system", label: "System" },
+  ] as const;
 </script>
 
 <div class="space-y-4">
@@ -61,5 +81,55 @@
         > command.
       </p>
     {/if}
+  </section>
+
+  <section class="space-y-1.5" aria-label="Appearance">
+    <span class="text-[11px] font-medium text-muted-foreground">Appearance</span>
+
+    <div
+      class="flex items-center justify-between rounded-md border border-border bg-background/60 p-2.5"
+    >
+      <div>
+        <p class="text-xs font-medium">Theme</p>
+        <p class="text-[10px] text-muted-foreground">
+          System follows your OS color scheme; applies immediately.
+        </p>
+      </div>
+      <div
+        class="inline-flex overflow-hidden rounded-md border border-border"
+        role="group"
+        aria-label="Theme preference"
+      >
+        {#each THEME_OPTIONS as option (option.value)}
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 rounded-none px-2.5 text-xs {theme === option.value
+              ? 'bg-accent text-primary'
+              : 'text-muted-foreground'}"
+            aria-pressed={theme === option.value}
+            onclick={() => setAppearanceTheme(option.value)}
+          >
+            {option.label}
+          </Button>
+        {/each}
+      </div>
+    </div>
+
+    <div
+      class="flex items-center justify-between rounded-md border border-border bg-background/60 p-2.5"
+    >
+      <div>
+        <p class="text-xs font-medium">Collapse sidebar by default</p>
+        <p class="text-[10px] text-muted-foreground">
+          Icon-only rail; expand anytime from the sidebar's bottom toggle.
+        </p>
+      </div>
+      <Switch
+        checked={sidebarCollapsed}
+        onCheckedChange={() => toggleAppearanceSidebar()}
+        aria-label="Collapse sidebar by default"
+      />
+    </div>
   </section>
 </div>

@@ -2,9 +2,10 @@
   用户原始需求 [2026-07-27]：「三个导航意味着三个 ChromeTabs」「参考 gaubee.com AppShell 标准」。
   正交意图：
   1. 注册三个 App + 管理 daemon 连接生命周期。
-  2. 挂载 Shell（WindowDragRegion 顶部栏 + 左侧 App 导航 + 右侧 TabOutlet）。
+  2. 挂载 Shell（WindowDragRegion 顶部栏 + 左侧 AppSidebar + 右侧 TabOutlet）。
   3. 全局浮层（ImportWorkspaceDialog / CommandPalette / ToastContainer）。
-  妥协声明：左侧导航是 ChromeTabShell 简化版（三 App 图标 + 导入入口），AppSidebar 的完整功能后续迭代。
+  2026-09-30 shell-settings-ui：左侧导航抽为 AppSidebar 组件（展开/折叠双态
+  + 标签，偏好持久化 DevicePrefs）。
 -->
 <script lang="ts">
   import "./layout.css";
@@ -14,9 +15,9 @@
   import { registerApps } from "$lib/apps";
   import { connect, connectionState, disconnect, loadWorkspaces } from "$lib/store.svelte";
   import { loadSelfSkillState } from "$lib/stores/self-skill.svelte";
-  import { requestImportWorkspace } from "$lib/stores/import-workspace.svelte";
   import { captureTokenFromHash } from "$lib/rpc-client";
-  import { appRegistry, resolveTabIdentity, setNavControllerAdapter } from "$lib/shell";
+  import { setNavControllerAdapter } from "$lib/shell";
+  import AppSidebar from "$lib/components/shell/app-sidebar.svelte";
   import TabOutlet from "$lib/shell/TabOutlet.svelte";
   import WindowDragRegion from "$lib/components/window-drag-region.svelte";
   import ImportWorkspaceDialog from "$lib/components/import-workspace-dialog.svelte";
@@ -30,7 +31,6 @@
   } from "$lib/window-size";
   import IconCommand from "@lucide/svelte/icons/command";
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
-  import IconPlus from "@lucide/svelte/icons/folder-plus";
   import IconAgent from "@lucide/svelte/icons/message-square";
   import AgentPanel from "$lib/components/agent/AgentPanel.svelte";
   import { agentPanel, setAgentPanelOpen } from "$lib/stores/agent.svelte";
@@ -78,13 +78,6 @@
       void loadSelfSkillState();
     }
   });
-
-  const apps = $derived(appRegistry.list());
-  const activeAppId = $derived(resolveTabIdentity(page.url.pathname)?.app ?? null);
-
-  function switchApp(appId: string): void {
-    void goto(`/${appId}`);
-  }
 </script>
 
 <svelte:head>
@@ -146,41 +139,12 @@
       </div>
     {/if}
 
-    <!-- 主体：左侧 App 导航 + 右侧 TabOutlet -->
+    <!-- 主体：左侧 App 导航（AppSidebar 组件，shell-settings-ui Ch6）+ 右侧 TabOutlet -->
     <div class="flex min-h-0 flex-1">
-      <nav
-        class="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-muted/30 py-3"
-      >
-        {#each apps as app (app.id)}
-          {@const Icon = app.icon}
-          <button
-            class="flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-muted {activeAppId ===
-            app.id
-              ? 'bg-accent text-primary ring-1 ring-inset ring-primary/25'
-              : 'text-muted-foreground'}"
-            title={app.name}
-            aria-label={app.name}
-            aria-current={activeAppId === app.id ? "page" : undefined}
-            onclick={() => switchApp(app.id)}
-          >
-            <Icon class="h-5 w-5" />
-          </button>
-        {/each}
-
-        <!-- 分隔线 + 导入 workspace 入口 -->
-        <div class="my-1 h-px w-8 bg-border"></div>
-        <button
-          class="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          title="Import workspace"
-          aria-label="Import workspace"
-          onclick={() => requestImportWorkspace()}
-        >
-          <IconPlus class="h-5 w-5" />
-        </button>
-        <!-- Settings 入口 = settingsApp manifest 注册的主列表项（页面化裁决：
-             标准页面面板与其他 App 同列，不再保留底部 Dialog 时代的常驻齿轮——
-             vision 走查实证双齿轮无法区分）。 -->
-      </nav>
+      <AppSidebar />
+      <!-- Settings 入口 = settingsApp manifest 注册的主列表项（页面化裁决：
+           标准页面面板与其他 App 同列，不再保留底部 Dialog 时代的常驻齿轮——
+           vision 走查实证双齿轮无法区分）。 -->
 
       <!-- 右侧：Shell 内容区 + Agent 面板 drawer（shell 级、跨 tab 存活）。R17-C：
            常驻挂载——开关只是收起（宽屏 0 宽不占布局 / 窄屏 invisible 抽屉），
