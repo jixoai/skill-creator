@@ -158,6 +158,17 @@ import {
   DistillRunInputSchema,
 } from "./contracts/wiki-distill.js";
 import { PatternListItemSchema } from "skill-wiki/schema";
+import {
+  EvaluationCaseCreateInputSchema,
+  EvaluationCaseListInputSchema,
+  EvaluationCaseRemoveInputSchema,
+  EvaluationCaseSchema,
+  EvaluationCaseUpdateInputSchema,
+  EvaluationResultViewSchema,
+  EvaluationResultsListInputSchema,
+  EvaluationRunRefInputSchema,
+  EvaluationRunStartInputSchema,
+} from "./contracts/evaluation.js";
 
 const WorkspaceProviderReadInputSchema = z.object({
   ...WorkspaceProviderTargetSchema.shape,
@@ -348,6 +359,49 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     resolve: oc.input(SelfSkillResolveInputSchema).output(SelfSkillResolveResultSchema),
     /** 保留用户版本（fingerprint 记忆；条目变化后重新提醒）。 */
     keep: oc.input(z.object({}).strict()).output(SelfSkillKeepResultSchema),
+  },
+  evaluation: {
+    /** List cases for one skill scope（Imported 与 Global 均可读）. */
+    cases: {
+      list: oc
+        .input(EvaluationCaseListInputSchema)
+        .output(z.object({ cases: z.array(EvaluationCaseSchema) })),
+      create: oc
+        .input(EvaluationCaseCreateInputSchema)
+        .output(z.object({ case_: EvaluationCaseSchema })),
+      update: oc
+        .input(EvaluationCaseUpdateInputSchema)
+        .output(z.object({ case_: EvaluationCaseSchema })),
+      remove: oc.input(EvaluationCaseRemoveInputSchema).output(z.object({ removed: z.boolean() })),
+    },
+    run: {
+      /** Start a run（queued；竞态与终态语义见 spec）. */
+      start: oc
+        .input(EvaluationRunStartInputSchema)
+        .output(z.object({ runId: z.string().min(1), status: z.literal("queued") })),
+      status: oc
+        .input(EvaluationRunRefInputSchema)
+        .output(
+          z.object({
+            status: z.enum(["queued", "running", "completed", "cancelled"]),
+            resultIds: z.array(z.string()),
+          }),
+        ),
+      cancel: oc
+        .input(EvaluationRunRefInputSchema)
+        .output(
+          z.object({
+            runId: z.string().min(1),
+            status: z.enum(["queued", "running", "completed", "cancelled"]),
+          }),
+        ),
+    },
+    /** Result list with display-level stale projection（结果本体不可变）. */
+    results: {
+      list: oc
+        .input(EvaluationResultsListInputSchema)
+        .output(z.object({ results: z.array(EvaluationResultViewSchema) })),
+    },
   },
   skillIntelligence: {
     /** Read-only multi-skill analysis locked to observed revisions. */

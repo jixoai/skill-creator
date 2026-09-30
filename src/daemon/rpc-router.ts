@@ -176,6 +176,57 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       resolve: rpc.selfSkill.resolve.handler(async ({ input }) => resolveSelfSkillConflict(input)),
       keep: rpc.selfSkill.keep.handler(() => keepSelfSkillUserVersion()),
     },
+    evaluation: {
+      // evaluation-corpus（工作计划 Ch3）：Imported-only 写门在 store（Global →
+      // EvaluationStoreError → 错误边界 typed 拒绝）；读面 Imported/Global 均可。
+      cases: {
+        list: rpc.evaluation.cases.list.handler(async ({ input }) => ({
+          cases: await domain.evaluation.listCases(input.target),
+        })),
+        create: rpc.evaluation.cases.create.handler(async ({ input }) => ({
+          case_: domain.evaluation.createCase(input),
+        })),
+        update: rpc.evaluation.cases.update.handler(async ({ input }) => {
+          const { caseId, ...rest } = input;
+          return { case_: domain.evaluation.updateCase({ ...rest, caseId }) };
+        }),
+        remove: rpc.evaluation.cases.remove.handler(async ({ input }) => ({
+          removed: domain.evaluation.removeCase(input),
+        })),
+      },
+      run: {
+        start: rpc.evaluation.run.start.handler(async ({ input }) => {
+          // caseIds 前置校验：未知/禁用的 case 直接拒绝（不产生静默空 run）。
+          const known = new Set(
+            domain.evaluation
+              .listCases(input.target)
+              .filter((entry) => entry.enabled)
+              .map((entry) => entry.caseId),
+          );
+          const missing = input.caseIds.filter((caseId) => !known.has(caseId));
+          if (missing.length > 0) {
+            throw new ORPCError("NOT_FOUND", {
+              message: `unknown or disabled evaluation cases: ${missing.join(", ")}`,
+            });
+          }
+          return domain.evaluation.startRun(input);
+        }),
+        status: rpc.evaluation.run.status.handler(({ input }) => {
+          const status = domain.evaluation.runStatus(input.runId);
+          return { status: status.status, resultIds: status.resultIds };
+        }),
+        cancel: rpc.evaluation.run.cancel.handler(({ input }) =>
+          domain.evaluation.cancelRun(input.runId),
+        ),
+      },
+      results: {
+        list: rpc.evaluation.results.list.handler(async ({ input }) => ({
+          results: (await domain.evaluation.results(input.target)).filter(
+            (result) => input.caseId === undefined || result.caseId === input.caseId,
+          ),
+        })),
+      },
+    },
     skillIntelligence: {
       analyze: rpc.skillIntelligence.analyze.handler(async ({ input }) =>
         domain.skillIntelligence.analyze(input),

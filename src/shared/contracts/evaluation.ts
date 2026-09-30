@@ -195,3 +195,55 @@ export const EvaluationResultEnvelopeSchema = z.strictObject({
 export const EvaluationRunStatusSchema = z.enum(["queued", "running", "completed", "cancelled"]);
 /** run 状态。 */
 export type EvaluationRunStatus = z.infer<typeof EvaluationRunStatusSchema>;
+
+/** ---- RPC io（B5 八过程；evaluation-corpus）---- */
+
+export const EvaluationCaseCreateInputSchema = z.strictObject({
+  target: EvaluationTargetSchema,
+  input: z.strictObject({
+    prompt: z.string().min(1),
+    assertions: z.array(EvaluationAssertionSchema).min(1),
+  }),
+  boundRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  enabled: z.boolean().optional(),
+});
+export type EvaluationCaseCreateInput = z.infer<typeof EvaluationCaseCreateInputSchema>;
+
+export const EvaluationCaseUpdateInputSchema = EvaluationCaseCreateInputSchema.extend({
+  caseId: z.string().regex(/^ev_[a-f0-9]{24}$/),
+});
+export type EvaluationCaseUpdateInput = z.infer<typeof EvaluationCaseUpdateInputSchema>;
+
+export const EvaluationCaseRemoveInputSchema = z.strictObject({
+  target: EvaluationTargetSchema,
+  caseId: z.string().regex(/^ev_[a-f0-9]{24}$/),
+});
+
+export const EvaluationCaseListInputSchema = z.strictObject({
+  target: EvaluationTargetSchema,
+});
+
+export const EvaluationRunStartInputSchema = z.strictObject({
+  target: EvaluationTargetSchema,
+  caseIds: z.array(z.string().regex(/^ev_[a-f0-9]{24}$/)).min(1),
+  runner: z.enum(["analyzer", "provider-model"]),
+});
+
+export const EvaluationRunRefInputSchema = z.strictObject({
+  runId: z.string().regex(/^run_[a-f0-9]{24}$/),
+});
+
+export const EvaluationResultsListInputSchema = z.strictObject({
+  target: EvaluationTargetSchema,
+  caseId: z
+    .string()
+    .regex(/^ev_[a-f0-9]{24}$/)
+    .optional(),
+});
+
+/** 结果列表项（展示层 stale 投影；结果本体不可变）。 */
+export const EvaluationResultViewSchema = z.intersection(
+  EvaluationResultSchema,
+  z.strictObject({ stale: z.boolean() }),
+);
+export type EvaluationResultView = z.infer<typeof EvaluationResultViewSchema>;

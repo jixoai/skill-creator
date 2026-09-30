@@ -23,6 +23,8 @@ import { join } from "node:path";
 import { appDir } from "../shared/paths.js";
 
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
+import { createEvaluationService, type EvaluationService } from "./evaluation/service.js";
+import { createProviderSessionAdapter } from "./evaluation/provider-adapter.js";
 import { createWikiService, type WikiService } from "./wiki-service.js";
 import {
   createWikiDistillService,
@@ -116,6 +118,8 @@ export interface DaemonDomain {
   uiCards: UiCardRegistry;
   /** MCP mutation proposal 链（task 4.4；审批执行经 managerCapabilities）。 */
   mcpProposals: McpProposalStore;
+  /** 评估语料与跑分（evaluation-corpus；provider runner 经内核会话适配器）。 */
+  evaluation: EvaluationService;
 }
 
 /** Build one coherent daemon domain; an injected Registry is reserved for tests. */
@@ -231,6 +235,13 @@ export function createDaemonDomain(
       agentSessions.attach(handle);
     },
     uiCards: new UiCardRegistry(),
+    evaluation: createEvaluationService({
+      skills,
+      // B7 adapter：内核句柄注入后可用；降级期 provider-model run → typed
+      // unavailable（依赖族），不做静默回退。
+      providerAdapter: () =>
+        kernelHostRef.handle ? createProviderSessionAdapter({ sessions: agentSessions }) : null,
+    }),
   } as DaemonDomain;
   // manager 能力面先就绪（结构化子集依赖，不含自身），proposal 链随后注入其
   // 审批执行依赖——顺序即依赖方向。
