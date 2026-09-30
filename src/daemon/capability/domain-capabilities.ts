@@ -38,6 +38,14 @@ import {
   WorkspaceSetActiveInputSchema,
 } from "../../shared/rpc-contract.js";
 import {
+  DisableProposalPayloadSchema,
+  EditProposalPayloadSchema,
+  FindingIdSchema,
+  MergeProposalPayloadSchema,
+  SkillSelectionSchema,
+  SplitProposalPayloadSchema,
+} from "../../shared/contracts/skill-intelligence.js";
+import {
   SaveSkillInputSchema,
   CreatorRevisionsInputSchema,
 } from "../../shared/contracts/creator.js";
@@ -118,6 +126,7 @@ export type DomainCapabilityDeps = Pick<
   | "skillsUpdate"
   | "wiki"
   | "wikiDistill"
+  | "skillIntelligence"
 >;
 
 /**
@@ -446,5 +455,83 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
       // N：enqueue 并等待队列任务终态——不走 invoke 的 ok 包装（结果即闭合 result）。
       handler: (input) => domain.wikiDistill.apply(input),
     },
+    // intelligence-proposal-parity（工作计划 Ch4 / C′1）：四动作 proposal 一律经
+    // agent tool call 产生——kernel 工具行与 MCP 同名注册（authority=proposal，
+    // 名字本身即 propose 语义，无 mutation 变体后缀）。WebUI 直连创建路径退役。
+    ...[
+      ["edit", EditProposalPayloadSchema] as const,
+      ["disable", DisableProposalPayloadSchema] as const,
+    ].map(([action, payloadSchema]) => ({
+      name: `intelligence_propose_${action}`,
+      description: `Draft an ${action} proposal for the skill addressed in the finding (agent-originated; approval happens in the Skill Creator UI).`,
+      authority: "proposal" as const,
+      input: IntelligenceProposeSingleInputSchema(action, payloadSchema),
+      handler: (input: unknown) =>
+        invoke(async () => {
+          const parsed = IntelligenceProposeSingleInputSchema(action, payloadSchema).parse(input);
+          const { proposal } = await domain.skillIntelligence.propose({
+            payload: parsed.payload,
+            findingIds: [parsed.findingId],
+            rationale: parsed.rationale,
+          });
+          return { proposalId: proposal.id, observedRevisions: proposal.observedRevisions };
+        }),
+    })),
+    ...(["split", "merge"] as const).map((action) => ({
+      name: `intelligence_propose_${action}`,
+      description: `Draft a ${action} proposal across the addressed skills (agent-originated; multi-source revisions are validated against the payload).`,
+      authority: "proposal" as const,
+      input: IntelligenceProposeMultiInputSchema,
+      handler: (input: unknown) =>
+        invoke(async () => {
+          const parsed = IntelligenceProposeMultiInputSchema.parse(input);
+          if (parsed.action !== action) {
+            throw new DomainError(
+              "INVALID_OPERATION",
+              `payload kind ${action} required for this tool`,
+            );
+          }
+          const { proposal } = await domain.skillIntelligence.propose({
+            payload: parsed.payload,
+            findingIds: [parsed.findingId],
+            rationale: parsed.rationale,
+          });
+          return { proposalId: proposal.id, observedRevisions: proposal.observedRevisions };
+        }),
+    })),
   ];
 }
+
+/** 单源 propose 入参（edit/disable；action 与 payload.kind 一致性由判别支固化）。 */
+function IntelligenceProposeSingleInputSchema(
+  action: "edit" | "disable",
+  payloadSchema: typeof EditProposalPayloadSchema | typeof DisableProposalPayloadSchema,
+) {
+  return z.strictObject({
+    action: z.literal(action),
+    findingId: FindingIdSchema,
+    observedRevision: z.string().min(1),
+    rationale: z.string().min(1),
+    payload: payloadSchema,
+  });
+}
+
+/** 多源 propose 入参（split/merge：targets/observedRevisions 显式多源对齐）。 */
+const IntelligenceProposeMultiInputSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("split"),
+    findingId: FindingIdSchema,
+    targets: z.array(SkillSelectionSchema).min(1),
+    observedRevisions: z.array(z.string().min(1)).min(1),
+    rationale: z.string().min(1),
+    payload: SplitProposalPayloadSchema,
+  }),
+  z.strictObject({
+    action: z.literal("merge"),
+    findingId: FindingIdSchema,
+    targets: z.array(SkillSelectionSchema).min(1),
+    observedRevisions: z.array(z.string().min(1)).min(1),
+    rationale: z.string().min(1),
+    payload: MergeProposalPayloadSchema,
+  }),
+]);

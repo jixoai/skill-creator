@@ -143,6 +143,12 @@ const DOMAIN_AUTHORITY: Record<string, string> = {
   "wiki.distill_status": "readonly",
   "wiki.distill_cancel": "readonly",
   "wiki.distill_apply": "approved-mutation",
+  // intelligence-proposal-parity（工作计划 Ch4）：四动作 proposal 的 agent
+  // 工具向量——authority=proposal（kernel/MCP 同名注册，无 mutation 变体）。
+  intelligence_propose_edit: "proposal",
+  intelligence_propose_disable: "proposal",
+  intelligence_propose_split: "proposal",
+  intelligence_propose_merge: "proposal",
 };
 
 describe("manager domain capability registration (tasks 1.2)", () => {
@@ -192,6 +198,11 @@ describe("manager domain capability registration (tasks 1.2)", () => {
       "wiki.distill_status",
       "wiki.distill_cancel",
       "wiki.distill_apply",
+      // intelligence-proposal-parity：agent 工具向量（非 contract-map 过程）。
+      "intelligence_propose_edit",
+      "intelligence_propose_disable",
+      "intelligence_propose_split",
+      "intelligence_propose_merge",
     ];
     expect([...registry.names()].sort()).toEqual([...mapProcedures].sort());
   });

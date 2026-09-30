@@ -433,7 +433,11 @@ describe("wiki capability face (wiki-mcp-surface)", () => {
         body: "written only after human approval",
       });
       expect(proposed.kind).toBe("proposed");
-      const proposalId = (proposed as unknown as { proposalId: string }).proposalId;
+      // C′2：propose 结果带 mcp: 路由前缀——查表前剥掉。
+      const proposalId = (proposed as unknown as { proposalId: string }).proposalId.replace(
+        /^mcp:/,
+        "",
+      );
 
       // 提案未决：磁盘零写——文件系统快照（勿用 wiki.list：它会惰性 mkdir
       // patterns/，自己制造「写入」，codex r1 P2-3）。
@@ -577,8 +581,9 @@ describe("wiki distill capability face (skill-wiki-maintainer 1.4)", () => {
       });
       const proposedText =
         (proposed.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
-      const proposalId = (JSON.parse(proposedText) as { kind: string; proposalId?: string })
-        .proposalId;
+      const proposalId = (
+        (JSON.parse(proposedText) as { kind: string; proposalId?: string }).proposalId ?? ""
+      ).replace(/^mcp:/, "");
       expect(proposalId).toBeTruthy();
       const decision = await domain.mcpProposals.approve(proposalId as string);
       const parsedView = McpProposalViewSchema.parse(decision.view);

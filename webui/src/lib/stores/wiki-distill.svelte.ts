@@ -22,7 +22,7 @@
  */
 import { z } from "zod";
 import { ORPCError } from "@orpc/client";
-import type { AgentMcpProposalView } from "$shared/contracts/agent.js";
+import type { UnifiedProposalView } from "$shared/contracts/agent.js";
 import type {
   DistillCancelOutput,
   DistillCounters,
@@ -83,7 +83,7 @@ export const wikiDistillState = $state<{
 
 /** 决定面列表行：proposal view + 安全收窄出的 ordinal（ordinal 升序渲染）。 */
 export interface WikiDistillProposalRow {
-  view: AgentMcpProposalView;
+  view: UnifiedProposalView;
   ordinal: number;
 }
 
@@ -276,7 +276,7 @@ const DistillProposalInputSchema = z.strictObject({
 
 /**
  * 加载本 run 的决定面列表：agent.proposals.list 全量拉取后按
- * capability=wiki.distill_apply + input.runId 过滤，ordinal 升序。
+ * capability=wiki.distill_apply + payload.runId 过滤，ordinal 升序。
  * latest-request-wins；失败保留上一投影并记 error。
  */
 export async function loadWikiDistillProposals(): Promise<void> {
@@ -291,7 +291,7 @@ export async function loadWikiDistillProposals(): Promise<void> {
     const rows: WikiDistillProposalRow[] = [];
     for (const view of result.proposals) {
       if (view.capability !== "wiki.distill_apply") continue;
-      const input = DistillProposalInputSchema.safeParse(view.input);
+      const input = DistillProposalInputSchema.safeParse(view.payload);
       if (!input.success || input.data.runId !== runId) continue;
       rows.push({ view, ordinal: input.data.ordinal });
     }

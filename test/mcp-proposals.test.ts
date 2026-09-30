@@ -108,7 +108,9 @@ describe("mcp mutation proposal authority (task 4.4)", () => {
         arguments: { skillIds: ["sk_deadbeefdeadbeefdeadbeef"] },
       });
       const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+      // C′2：propose 结果带 mcp: 路由前缀——直接查表前剥掉。
       const parsed = JSON.parse(text) as { kind: string; proposalId: string; status: string };
+      parsed.proposalId = parsed.proposalId.replace(/^mcp:/, "");
       expect(parsed.kind).toBe("proposed");
       expect(parsed.status).toBe("pending");
 

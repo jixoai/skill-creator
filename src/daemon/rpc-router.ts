@@ -16,6 +16,11 @@
  * or weaken the single transport boundary.
  */
 import { implement, ORPCError } from "@orpc/server";
+import {
+  parseUnifiedProposalRef,
+  projectIntelligenceDraft,
+  projectMcpProposal,
+} from "./agent-proposals-projection.js";
 import { searchConfigPath } from "./skill-search/config.js";
 import { RpcErrorDefinitions } from "../shared/contracts/errors.js";
 import { rpcContract } from "../shared/rpc-contract.js";
@@ -239,9 +244,8 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       analyze: rpc.skillIntelligence.analyze.handler(async ({ input }) =>
         domain.skillIntelligence.analyze(input),
       ),
-      propose: rpc.skillIntelligence.propose.handler(async ({ input }) =>
-        domain.skillIntelligence.propose(input),
-      ),
+      // propose 直连面已退役（intelligence-proposal-parity）：创建向量唯一 =
+      // agent 会话中的 intelligence_propose_* 工具调用（capability 投影）。
       list: rpc.skillIntelligence.list.handler(() => domain.skillIntelligence.list()),
       reject: rpc.skillIntelligence.reject.handler(async ({ input }) =>
         domain.skillIntelligence.reject(input.proposalId),
@@ -293,19 +297,85 @@ export function createRpcRouter(deps: RpcRouterDeps) {
         })),
       },
       proposals: {
+        // intelligence-proposal-parity C′2：统一审批入口——mcp:|si: 双源合并投影；
+        // approve/reject 按前缀路由（McpProposalStore / skillIntelligence 服务）。
         list: rpc.agent.proposals.list.handler(() => ({
-          proposals: domain.mcpProposals.list(),
+          proposals: [
+            ...domain.mcpProposals.list().map(projectMcpProposal),
+            ...domain.skillIntelligence.list().proposals.map(projectIntelligenceDraft),
+          ],
         })),
-        approve: rpc.agent.proposals.approve.handler(async ({ input }) => ({
-          proposal: (await domain.mcpProposals.approve(input.proposalId)).view,
-        })),
+        approve: rpc.agent.proposals.approve.handler(async ({ input }) => {
+          const ref = parseUnifiedProposalRef(input.proposalId);
+          if (ref.source === "mcp") {
+            const result = await domain.mcpProposals.approve(ref.id);
+            return { proposal: projectMcpProposal(result.view) };
+          }
+          // si：approve 消费草稿（stale 停 conflict 保留草稿；逐项结果入投影）。
+          const result = await domain.skillIntelligence.approve({ proposalId: ref.id as never });
+          const draft = domain.skillIntelligence
+            .list()
+            .proposals.find((entry) => entry.id === ref.id);
+          const base = draft !== undefined ? projectIntelligenceDraft(draft) : null;
+          const failedEntry = result.results.find((entry) => entry.status === "failed");
+          return {
+            proposal:
+              base === null || result.applied > 0
+                ? {
+                    ...(base ?? {
+                      id: input.proposalId,
+                      source: "skill-intelligence",
+                      origin: "agent-tool" as const,
+                      capability: null,
+                      kind: "unknown",
+                      target: null,
+                      observedRevision: null,
+                      before: null,
+                      after: null,
+                      finding: null,
+                      validation: null,
+                      createdAt: new Date().toISOString(),
+                    }),
+                    status:
+                      failedEntry || result.failed > 0
+                        ? ("failed" as const)
+                        : ("executed" as const),
+                    result: {
+                      applied: result.applied > 0,
+                      ...(failedEntry?.error !== undefined ? { error: failedEntry.error } : {}),
+                    },
+                  }
+                : {
+                    ...base,
+                    validation: {
+                      success: false,
+                      errors: ["revision stale — refresh and re-propose"],
+                      warnings: [],
+                    },
+                  },
+          };
+        }),
         // reject 变 await 语义（N/U）：late reject → typed PROPOSAL_STALE（data =
         // CapabilityFailureDetail.currentView）；ledger 迁移 IO 失败 → DISTILL_IO。
         reject: rpc.agent.proposals.reject.handler(async ({ input }) => {
-          const rejected = await domain.mcpProposals.reject(input.proposalId);
-          if (!rejected)
-            throw new DomainError("NOT_FOUND", `proposal not found: ${input.proposalId}`);
-          return { proposal: rejected.view };
+          const ref = parseUnifiedProposalRef(input.proposalId);
+          if (ref.source === "mcp") {
+            const rejected = await domain.mcpProposals.reject(ref.id);
+            if (!rejected) throw new DomainError("NOT_FOUND", `proposal not found: ${ref.id}`);
+            return { proposal: projectMcpProposal(rejected.view) };
+          }
+          const drafts = domain.skillIntelligence.list().proposals;
+          const draft = drafts.find((entry) => entry.id === ref.id);
+          if (draft === undefined)
+            throw new DomainError("NOT_FOUND", `proposal not found: ${ref.id}`);
+          domain.skillIntelligence.reject(ref.id as never);
+          return {
+            proposal: {
+              ...projectIntelligenceDraft(draft),
+              status: "rejected" as const,
+              rejectCause: "user" as const,
+            },
+          };
         }),
       },
       sessions: {

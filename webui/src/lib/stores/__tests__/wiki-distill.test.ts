@@ -292,9 +292,19 @@ describe("wikiDistillProposals decision face", () => {
     status?: "pending" | "approved" | "rejected" | "executed" | "failed";
   }) {
     return {
-      proposalId: overrides.proposalId,
+      // 统一投影形状（C′2）：id = mcp:<原id>；payload 承载 distill 入参。
+      id: `mcp:${overrides.proposalId}`,
+      source: "mcp" as const,
+      origin: "agent-tool" as const,
       capability: overrides.capability ?? "wiki.distill_apply",
-      input: overrides.input ?? { runId: RUN_ID, ordinal: 0 },
+      payload: overrides.input ?? { runId: RUN_ID, ordinal: 0 },
+      kind: "wiki-distill-apply",
+      target: null,
+      observedRevision: null,
+      before: null,
+      after: null,
+      finding: null,
+      validation: null,
       status: overrides.status ?? "pending",
       createdAt: "2026-09-25T00:00:00.000Z",
     };
@@ -331,10 +341,10 @@ describe("wikiDistillProposals decision face", () => {
 
     expect(list).toHaveBeenCalledWith({});
     expect(wikiDistillProposals.open).toBe(true);
-    expect(wikiDistillProposals.proposals.map((row) => row.view.proposalId)).toEqual([
-      "p-first",
-      "p-decided",
-      "p-late",
+    expect(wikiDistillProposals.proposals.map((row) => row.view.id)).toEqual([
+      "mcp:p-first",
+      "mcp:p-decided",
+      "mcp:p-late",
     ]);
     expect(wikiDistillProposals.proposals.map((row) => row.ordinal)).toEqual([0, 1, 2]);
     expect(wikiDistillProposals.error).toBeNull();

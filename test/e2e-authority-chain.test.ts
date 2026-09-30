@@ -101,13 +101,15 @@ describe("end-to-end authority chain (task 6.1)", () => {
       });
       const text = (proposed.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
       if (proposed.isError) throw new Error(`propose failed: ${text}`);
+      // 统一投影（C′2）：propose 结果携带 mcp: 路由前缀——查表前剥掉。
       const parsed = JSON.parse(text) as { proposalId: string };
+      const rawId = parsed.proposalId.replace(/^mcp:/, "");
       expect(fs.existsSync(skillFile())).toBe(true); // 仍未写盘。
-      const pending = domain.mcpProposals.list().find((p) => p.proposalId === parsed.proposalId);
+      const pending = domain.mcpProposals.list().find((p) => p.proposalId === rawId);
       expect(pending?.status).toBe("pending");
 
       // 2. 审批执行 → 磁盘真实变化（disable = SKILL.md → .SKILL.md）。
-      const approved = await domain.mcpProposals.approve(parsed.proposalId);
+      const approved = await domain.mcpProposals.approve(rawId);
       expect(approved.view.status).toBe("executed");
       expect(fs.existsSync(skillFile())).toBe(false);
       expect(fs.existsSync(path.join(path.dirname(skillFile()), ".SKILL.md"))).toBe(true);
@@ -119,7 +121,10 @@ describe("end-to-end authority chain (task 6.1)", () => {
       });
       const reenableText =
         (reenable.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
-      const reenableId = (JSON.parse(reenableText) as { proposalId: string }).proposalId;
+      const reenableId = (JSON.parse(reenableText) as { proposalId: string }).proposalId.replace(
+        /^mcp:/,
+        "",
+      );
       await domain.mcpProposals.approve(reenableId);
       expect(fs.existsSync(skillFile())).toBe(true);
 
@@ -148,7 +153,8 @@ describe("end-to-end authority chain (task 6.1)", () => {
     });
     const text = (proposed.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
     if (proposed.isError) throw new Error(`propose failed: ${text}`);
-    const { proposalId } = JSON.parse(text) as { proposalId: string };
+    const { proposalId: unifiedId } = JSON.parse(text) as { proposalId: string };
+    const proposalId = unifiedId.replace(/^mcp:/, "");
     // reject 变 await 语义（skill-wiki-maintainer N/U：onRejected 接缝 + cause 二分）。
     const rejected = await domain.mcpProposals.reject(proposalId);
     expect(rejected?.view.status).toBe("rejected");

@@ -37,11 +37,16 @@ import {
   pollAgentStream,
   seedAgentTestRun,
   seedComposerPrompt,
+  seedFindingPropose,
   selectAgentSession,
   sendAgentPrompt,
   setAgentPanelOpen,
   setAgentSessionMode,
 } from "../stores/agent.svelte";
+import {
+  FINDING_PROPOSE_TEMPLATES,
+  type FindingProposeAction,
+} from "../apps/workspaces/finding-propose-templates";
 import {
   addComposerReference,
   agentComposer,
@@ -943,6 +948,160 @@ describe("creator-test-session seed (A5 store matrix)", () => {
       skillName: "code-review",
       revision,
       templateId: "probe-recall-v1",
+      templateVersion: 1,
+    });
+    agentPanel.seed = null;
+    seedComposerPrompt("帮我看下技能库");
+    expect(agentPanel.seed).toEqual({ text: "帮我看下技能库" });
+    await sendAgentPrompt("帮我看下技能库", [], [], "queue", []);
+    const createCall = rpc.agent.session.create.mock.calls[0][0];
+    expect("metadata" in createCall).toBe(false);
+  });
+});
+
+describe("finding-propose seed (intelligence-proposal-parity 3.1)", () => {
+  const skill = {
+    workspaceId: "ws_0123456789abcdef01234567" as WorkspaceProviderTarget["workspaceId"],
+    providerId: "claude-code" as WorkspaceProviderTarget["providerId"],
+    skillId: "sk_0123456789abcdef01234567" as SkillId,
+  };
+  const revision = `sha256:${"b".repeat(64)}`;
+  const actions: FindingProposeAction[] = ["edit", "disable", "split", "merge"];
+
+  function sessionRpc() {
+    return {
+      agent: {
+        session: {
+          create: vi.fn().mockResolvedValue({
+            session: {
+              sessionId: "agent-f1",
+              title: "",
+              status: "idle",
+              cwd: "/tmp",
+              createdAt: "2026-09-30T00:00:00.000Z",
+              mode: "free",
+            },
+          }),
+          prompt: vi.fn().mockResolvedValue({ accepted: true }),
+          stream: vi.fn().mockResolvedValue({ frames: [], status: "idle" }),
+        },
+        sessions: { list: vi.fn().mockResolvedValue({ sessions: [] }) },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    agentSession.pendingMode = "free";
+    resetAllComposerTracks();
+  });
+
+  it("freezes the four templates: id/version, action tool name, and context injection", () => {
+    for (const action of actions) {
+      const template = FINDING_PROPOSE_TEMPLATES[action];
+      expect(template.id).toBe(`finding-propose-${action}-v1`);
+      expect(template.version).toBe(1);
+      const text = template.render({
+        skillName: "code-review",
+        findingId: "f-42",
+        observedRevision: revision,
+      });
+      // $name token（芯片配对前提）+ finding/revision 上下文 + 同名工具指令。
+      expect(text).toContain("$code-review");
+      expect(text).toContain("f-42");
+      expect(text).toContain(revision);
+      expect(text).toContain(`intelligence_propose_${action}`);
+    }
+  });
+
+  it("seeds the panel with metadata + skill reference and does not auto-send", () => {
+    const rpc = sessionRpc();
+    connection.rpc = rpc;
+    const text = FINDING_PROPOSE_TEMPLATES.edit.render({
+      skillName: "code-review",
+      findingId: "f-42",
+      observedRevision: revision,
+    });
+    seedFindingPropose({
+      action: "edit",
+      text,
+      skill,
+      skillName: "code-review",
+      findingId: "f-42",
+      observedRevision: revision,
+      templateId: FINDING_PROPOSE_TEMPLATES.edit.id,
+      templateVersion: 1,
+    });
+    expect(agentPanel.open).toBe(true);
+    expect(agentPanel.seed?.text).toBe(text);
+    expect(agentPanel.seed?.reference).toMatchObject({
+      kind: "skill",
+      token: "$code-review",
+      target: skill.skillId,
+      skill,
+    });
+    expect(agentPanel.seed?.metadata).toMatchObject({
+      kind: "finding-propose",
+      action: "edit",
+      findingId: "f-42",
+      observedRevision: revision,
+      templateId: "finding-propose-edit-v1",
+      templateVersion: 1,
+      workspaceId: skill.workspaceId,
+      providerId: skill.providerId,
+      skillId: skill.skillId,
+    });
+    // 不自动发送：种子只填输入面，不触任何 RPC。
+    expect(rpc.agent.session.create).not.toHaveBeenCalled();
+    expect(rpc.agent.session.prompt).not.toHaveBeenCalled();
+    expect(agentSession.sessionId).toBeNull();
+  });
+
+  it("lazy create carries finding-propose metadata; wire prompt carries the opaque triple", async () => {
+    const rpc = sessionRpc();
+    connection.rpc = rpc;
+    const text = FINDING_PROPOSE_TEMPLATES.merge.render({
+      skillName: "code-review",
+      findingId: "f-42",
+      observedRevision: revision,
+    });
+    seedFindingPropose({
+      action: "merge",
+      text,
+      skill,
+      skillName: "code-review",
+      findingId: "f-42",
+      observedRevision: revision,
+      templateId: "finding-propose-merge-v1",
+      templateVersion: 1,
+    });
+    addComposerReference(agentPanel.seed!.reference!);
+    await sendAgentPrompt(text, [], [], "queue", agentComposer.references);
+    const createCall = rpc.agent.session.create.mock.calls[0][0];
+    expect(createCall.metadata).toMatchObject({
+      kind: "finding-propose",
+      action: "merge",
+      skillId: "sk_0123456789abcdef01234567",
+    });
+    const promptCall = rpc.agent.session.prompt.mock.calls[0][0];
+    expect(promptCall.references[0]).toEqual({
+      kind: "skill",
+      workspaceId: "ws_0123456789abcdef01234567",
+      providerId: "claude-code",
+      skillId: "sk_0123456789abcdef01234567",
+    });
+  });
+
+  it("generic seedComposerPrompt drops a stale pending finding-propose seed (r5 P1 同族)", async () => {
+    const rpc = sessionRpc();
+    connection.rpc = rpc;
+    seedFindingPropose({
+      action: "disable",
+      text: "disable draft",
+      skill,
+      skillName: "code-review",
+      findingId: "f-42",
+      observedRevision: revision,
+      templateId: "finding-propose-disable-v1",
       templateVersion: 1,
     });
     agentPanel.seed = null;

@@ -21,8 +21,12 @@
     approveProposal,
     loadProposals,
     rejectProposal,
-    submitProposal,
   } from "$lib/stores/intelligence.svelte";
+  import { seedFindingPropose } from "$lib/stores/agent.svelte";
+  import {
+    FINDING_PROPOSE_TEMPLATES,
+    type FindingProposeAction,
+  } from "$lib/apps/workspaces/finding-propose-templates.js";
   import { showToast } from "$lib/toast.svelte";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import type {
@@ -230,66 +234,30 @@
     }
   }
 
-  // ---- 从 finding 发起 proposal ----
-  async function proposeDisableFromFinding(finding: Finding): Promise<void> {
+  // ---- 从 finding 经 agent 发起 proposal（Ch4：直连表单退役；四动作一律
+  // intelligence_propose_* 工具调用产生，面板 seed 携带 finding 上下文）----
+  function seedFindingProposeAction(action: FindingProposeAction, finding: Finding): void {
     const target = providerTarget;
     if (!target || proposing) return;
-    proposing = true;
-    try {
-      const { proposal, error } = await submitProposal({
-        payload: {
-          kind: "disable",
-          selections: finding.skillIds.map((skillId) => ({ ...target, skillId })),
-          reason: finding.message,
-        },
-        findingIds: [finding.id],
-        rationale: `Address "${finding.kind}": ${finding.message}`,
-      });
-      if (error) showToast(error);
-      if (proposal) {
-        showToast("Disable proposal drafted for review.");
-        await refreshProposals();
-      }
-    } finally {
-      proposing = false;
-    }
-  }
-
-  async function proposeEditFromFinding(finding: Finding): Promise<void> {
-    const target = providerTarget;
-    if (!target || proposing || finding.skillIds.length !== 1) return;
-    proposing = true;
-    try {
-      const parsed = SkillIdSchema.safeParse(finding.skillIds[0]);
-      if (!parsed.success) return;
-      const info = await fetchSkillInfo(target, parsed.data);
-      const { frontmatter, body } = splitDocument(info.content);
-      const improved =
-        `${frontmatter.description ?? ""} Reviewed via skill intelligence (${finding.kind}).`.trim();
-      const { proposal, error } = await submitProposal({
-        payload: {
-          kind: "edit",
-          edits: [
-            {
-              selection: { ...target, skillId: parsed.data },
-              frontmatter: { ...frontmatter, name: info.name, description: improved },
-              body,
-            },
-          ],
-        },
-        findingIds: [finding.id],
-        rationale: `Address "${finding.kind}": ${finding.message}`,
-      });
-      if (error) showToast(error);
-      if (proposal) {
-        showToast("Edit proposal drafted for review.");
-        await refreshProposals();
-      }
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error));
-    } finally {
-      proposing = false;
-    }
+    const primaryId = SkillIdSchema.safeParse(finding.skillIds[0]);
+    if (!primaryId.success) return;
+    const observed = report?.snapshots.find((snapshot) => snapshot.skillId === primaryId.data);
+    if (!observed) return;
+    const template = FINDING_PROPOSE_TEMPLATES[action];
+    seedFindingPropose({
+      action,
+      text: template.render({
+        skillName: observed.name,
+        findingId: finding.id,
+        observedRevision: observed.revision,
+      }),
+      skill: { ...target, skillId: primaryId.data },
+      skillName: observed.name,
+      findingId: finding.id,
+      observedRevision: observed.revision,
+      templateId: template.id,
+      templateVersion: template.version,
+    });
   }
 
   /** 最小 frontmatter/body 切分（与 daemon 分析器同口径）。 */
@@ -561,9 +529,9 @@
                         size="sm"
                         class="h-7 gap-1 px-2 text-[11px]"
                         disabled={proposing}
-                        onclick={() => void proposeEditFromFinding(finding)}
+                        onclick={() => seedFindingProposeAction("edit", finding)}
                       >
-                        <IconSparkles class="h-3 w-3" /> Propose edit
+                        <IconSparkles class="h-3 w-3" /> Ask agent: edit
                       </Button>
                     {/if}
                     <Button
@@ -571,9 +539,27 @@
                       size="sm"
                       class="h-7 gap-1 px-2 text-[11px]"
                       disabled={proposing}
-                      onclick={() => void proposeDisableFromFinding(finding)}
+                      onclick={() => seedFindingProposeAction("split", finding)}
                     >
-                      <IconPowerOff class="h-3 w-3" /> Propose disable
+                      <IconSparkles class="h-3 w-3" /> Ask agent: split
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-7 gap-1 px-2 text-[11px]"
+                      disabled={proposing}
+                      onclick={() => seedFindingProposeAction("merge", finding)}
+                    >
+                      <IconSparkles class="h-3 w-3" /> Ask agent: merge
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-7 gap-1 px-2 text-[11px]"
+                      disabled={proposing}
+                      onclick={() => seedFindingProposeAction("disable", finding)}
+                    >
+                      <IconPowerOff class="h-3 w-3" /> Ask agent: disable
                     </Button>
                   </div>
                 </div>

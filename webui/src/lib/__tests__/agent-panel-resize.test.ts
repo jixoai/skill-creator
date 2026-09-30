@@ -109,7 +109,7 @@ beforeEach(() => {
   };
   connection.generation = 0;
   agentPanel.open = false;
-  agentPanel.seedPrompt = null;
+  agentPanel.seed = null;
   agentPanel.width = AGENT_PANEL_DEFAULT_WIDTH;
   agentRuntimeConfig.view = null;
   agentRuntimeConfig.loading = false;

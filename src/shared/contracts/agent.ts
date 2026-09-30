@@ -507,3 +507,60 @@ export {
   DshCredentialSetResultSchema as AgentCredentialSetResultSchema,
   DshCredentialClearInputSchema as AgentCredentialClearInputSchema,
 };
+
+/**
+ * 统一 proposal 审批视图（intelligence-proposal-parity C′2）：agent.proposals.*
+ * 的唯一审批入口——合并 MCP mutation proposal store（mcp: 前缀）与
+ * skill-intelligence 草稿库（si: 前缀），origin=agent-tool；approve/reject 按
+ * id 前缀路由。MCP store 五态保全（pending/approved/rejected/executed/failed），
+ * si 草稿 = pending（rejected 即删除；approve 消费草稿走 grant 链）。
+ */
+export const UnifiedProposalViewSchema = z.strictObject({
+  /** `mcp:<原proposalId>` | `si:<pr_ id>`——路由键。 */
+  id: z.string().min(1),
+  source: z.enum(["mcp", "skill-intelligence"]),
+  /** mcp: 原 capability 名（wiki.distill_apply 过滤等消费方依赖）；si: null。 */
+  capability: z.string().nullable(),
+  /** 底层载荷（mcp: proposal input；si: 草稿 payload）——审批 UI 的展开面。 */
+  payload: z.unknown().optional(),
+  origin: z.literal("agent-tool"),
+  /** si: edit/disable/split/merge；mcp: capability slug（dots→dashes，如 wiki-append）。 */
+  kind: z.string().min(1),
+  /** 主目标（无技能目标的 capability 面 → null）。 */
+  target: z
+    .strictObject({
+      workspaceId: WorkspaceIdSchema,
+      providerId: ProviderIdSchema,
+      skillId: SkillIdSchema,
+    })
+    .nullable(),
+  /** split/merge 多源（与 observedRevisions 对齐）。 */
+  targets: z
+    .array(
+      z.strictObject({
+        workspaceId: WorkspaceIdSchema,
+        providerId: ProviderIdSchema,
+        skillId: SkillIdSchema,
+      }),
+    )
+    .optional(),
+  observedRevision: z.string().nullable(),
+  observedRevisions: z.array(z.string()).optional(),
+  before: z.string().nullable(),
+  after: z.string().nullable(),
+  finding: z.strictObject({ id: z.string().min(1), summary: z.string() }).nullable(),
+  validation: z
+    .strictObject({
+      success: z.boolean(),
+      errors: z.array(z.string()),
+      warnings: z.array(z.string()),
+    })
+    .nullable(),
+  status: z.enum(["pending", "approved", "rejected", "executed", "failed"]),
+  rejectCause: z.enum(["user", "stale"]).optional(),
+  result: z.strictObject({ applied: z.boolean(), error: z.string().optional() }).optional(),
+  createdAt: z.string().min(1),
+  decidedAt: z.string().optional(),
+});
+/** 统一 proposal 视图。 */
+export type UnifiedProposalView = z.infer<typeof UnifiedProposalViewSchema>;

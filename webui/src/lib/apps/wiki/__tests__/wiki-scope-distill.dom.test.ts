@@ -177,24 +177,24 @@ describe("Distill click → progress → decision face", () => {
         return s;
       })(),
     );
-    list.mockResolvedValue({
-      proposals: [
-        {
-          proposalId: "p1",
-          capability: "wiki.distill_apply",
-          input: { runId: RUN_ID, ordinal: 1 },
-          status: "pending",
-          createdAt: "2026-09-25T00:00:00.000Z",
-        },
-        {
-          proposalId: "p0",
-          capability: "wiki.distill_apply",
-          input: { runId: RUN_ID, ordinal: 0 },
-          status: "pending",
-          createdAt: "2026-09-25T00:00:00.000Z",
-        },
-      ],
+    // 统一投影形状（C′2）：id 带 mcp: 前缀；payload 承载 distill 入参。
+    const unified = (pid: string, ordinal: number) => ({
+      id: `mcp:${pid}`,
+      source: "mcp" as const,
+      origin: "agent-tool" as const,
+      capability: "wiki.distill_apply",
+      payload: { runId: RUN_ID, ordinal },
+      kind: "wiki-distill-apply",
+      target: null,
+      observedRevision: null,
+      before: null,
+      after: null,
+      finding: null,
+      validation: null,
+      status: "pending" as const,
+      createdAt: "2026-09-25T00:00:00.000Z",
     });
+    list.mockResolvedValue({ proposals: [unified("p1", 1), unified("p0", 0)] });
 
     const root = mountView(WS_ID);
     click(findButton(root, "Distill to global") as HTMLButtonElement);
@@ -210,7 +210,10 @@ describe("Distill click → progress → decision face", () => {
     click(findButton(root, "View proposals") as HTMLButtonElement);
     await settle();
     const cards = [...root.querySelectorAll("[data-testid='proposal-card']")];
-    expect(cards.map((card) => card.getAttribute("data-proposal-id"))).toEqual(["p0", "p1"]);
+    expect(cards.map((card) => card.getAttribute("data-proposal-id"))).toEqual([
+      "mcp:p0",
+      "mcp:p1",
+    ]);
     expect(list).toHaveBeenCalledWith({});
   });
 

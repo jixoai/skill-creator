@@ -430,11 +430,11 @@
             {:else if wikiDistillProposals.proposals.length === 0}
               <p class="text-xs text-muted-foreground">No proposals found for this run.</p>
             {/if}
-            {#each wikiDistillProposals.proposals as row (row.view.proposalId)}
+            {#each wikiDistillProposals.proposals as row (row.view.id)}
               <AgentProposalCard
-                proposalId={row.view.proposalId}
-                capability={row.view.capability}
-                input={row.view.input}
+                proposalId={row.view.id}
+                capability={row.view.capability ?? row.view.kind}
+                input={row.view.payload}
                 status={row.view.status}
               />
             {/each}

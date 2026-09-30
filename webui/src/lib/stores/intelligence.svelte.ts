@@ -26,7 +26,6 @@ interface RequestGeneration {
  * 连接替换同样撤销；组件卸载即由结果无人接收自然丢弃。
  */
 const analyzeGate = createRequestGenerationGate(getConnectionGeneration);
-const proposeGate = createRequestGenerationGate(getConnectionGeneration);
 const listGate = createRequestGenerationGate(getConnectionGeneration);
 const rejectGate = createRequestGenerationGate(getConnectionGeneration);
 const approveGate = createRequestGenerationGate(getConnectionGeneration);
@@ -54,22 +53,6 @@ export async function analyzeSkills(selections: SkillSelection[]): Promise<{
 }
 
 /** 提交一份 proposal 草稿；结果交给调用方持有。 */
-export async function submitProposal(input: {
-  payload: ProposalDraft["payload"];
-  findingIds: ProposalDraft["findingIds"];
-  rationale: string;
-}): Promise<{ proposal: ProposalDraft | null; error: string | null }> {
-  const request = proposeGate.issue();
-  try {
-    const result = await requireRpc().skillIntelligence.propose(input);
-    return request.isCurrent()
-      ? { proposal: result.proposal, error: null }
-      : { proposal: null, error: null };
-  } catch (error) {
-    if (!request.isCurrent()) return { proposal: null, error: null };
-    return { proposal: null, error: error instanceof Error ? error.message : String(error) };
-  }
-}
 
 /** 拉取当前草稿列表；结果交给调用方持有。 */
 export async function loadProposals(): Promise<{

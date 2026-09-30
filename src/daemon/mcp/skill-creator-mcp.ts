@@ -132,7 +132,8 @@ export function createSkillCreatorMcpServer(deps: SkillCreatorMcpDeps): McpServe
             type: "text" as const,
             text: safeJson({
               kind: "proposed",
-              proposalId: view.proposalId,
+              // C′2：统一审批路由键（agent.proposals.approve 按 mcp: 前缀分发）。
+              proposalId: `mcp:${view.proposalId}`,
               capability: view.capability,
               status: view.status,
               note: "Awaiting human approval in the Skill Creator UI.",

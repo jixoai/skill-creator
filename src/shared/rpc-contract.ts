@@ -55,6 +55,7 @@ import {
   AgentSettingsUpdateResultSchema,
   AgentSettingsUpdateSchema,
   AgentSettingsViewSchema,
+  UnifiedProposalViewSchema,
 } from "./contracts/agent.js";
 import {
   StewardApproveResultSchema,
@@ -124,8 +125,6 @@ import {
   ApproveProposalInputSchema,
   ApproveResultSchema,
   ListProposalsResultSchema,
-  ProposeInputSchema,
-  ProposeResultSchema,
   RejectProposalInputSchema,
   RejectProposalResultSchema,
 } from "./contracts/skill-intelligence.js";
@@ -379,22 +378,18 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       start: oc
         .input(EvaluationRunStartInputSchema)
         .output(z.object({ runId: z.string().min(1), status: z.literal("queued") })),
-      status: oc
-        .input(EvaluationRunRefInputSchema)
-        .output(
-          z.object({
-            status: z.enum(["queued", "running", "completed", "cancelled"]),
-            resultIds: z.array(z.string()),
-          }),
-        ),
-      cancel: oc
-        .input(EvaluationRunRefInputSchema)
-        .output(
-          z.object({
-            runId: z.string().min(1),
-            status: z.enum(["queued", "running", "completed", "cancelled"]),
-          }),
-        ),
+      status: oc.input(EvaluationRunRefInputSchema).output(
+        z.object({
+          status: z.enum(["queued", "running", "completed", "cancelled"]),
+          resultIds: z.array(z.string()),
+        }),
+      ),
+      cancel: oc.input(EvaluationRunRefInputSchema).output(
+        z.object({
+          runId: z.string().min(1),
+          status: z.enum(["queued", "running", "completed", "cancelled"]),
+        }),
+      ),
     },
     /** Result list with display-level stale projection（结果本体不可变）. */
     results: {
@@ -406,8 +401,6 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
   skillIntelligence: {
     /** Read-only multi-skill analysis locked to observed revisions. */
     analyze: oc.input(AnalyzeInputSchema).output(AnalyzeResultSchema),
-    /** Store a Manager-owned proposal draft; never mutates Providers. */
-    propose: oc.input(ProposeInputSchema).output(ProposeResultSchema),
     /** List pending proposal drafts (newest first). */
     list: oc.input(z.object({})).output(ListProposalsResultSchema),
     /** Delete one proposal draft. */
@@ -460,13 +453,13 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     proposals: {
       list: oc
         .input(z.object({}))
-        .output(z.object({ proposals: z.array(AgentMcpProposalViewSchema) })),
+        .output(z.object({ proposals: z.array(UnifiedProposalViewSchema) })),
       approve: oc
         .input(AgentProposalDecisionInputSchema)
-        .output(z.object({ proposal: AgentMcpProposalViewSchema })),
+        .output(z.object({ proposal: UnifiedProposalViewSchema })),
       reject: oc
         .input(AgentProposalDecisionInputSchema)
-        .output(z.object({ proposal: AgentMcpProposalViewSchema })),
+        .output(z.object({ proposal: UnifiedProposalViewSchema })),
     },
     /** 面板会话：内核 agent 会话的生命周期投影（task 2.2；旧 dsh.* 收敛并入）。 */
     sessions: {

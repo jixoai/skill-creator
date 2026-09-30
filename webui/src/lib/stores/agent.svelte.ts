@@ -411,6 +411,49 @@ export function seedComposerPrompt(text: string | undefined): void {
 /** 显式新建/退出会话视图时，未消费的 seed 元数据一并作废（见 beginNewAgentSession）。 */
 
 /**
+ * finding-propose 种子（intelligence-proposal-parity C′3）：与 test-run 同族——
+ * 模板正文（四动作之一）+ 主技能引用芯片 + finding-propose 元数据；proposal 由
+ * agent 会话中的 intelligence_propose_* 工具调用产生（WebUI 无直连创建路径）。
+ */
+export function seedFindingPropose(seed: {
+  action: "edit" | "disable" | "split" | "merge";
+  text: string;
+  skill: { workspaceId: WorkspaceId; providerId: ProviderId; skillId: SkillId };
+  skillName: string;
+  findingId: string;
+  observedRevision: string;
+  templateId: string;
+  templateVersion: number;
+}): void {
+  beginNewAgentSession();
+  agentPanel.open = true;
+  const metadata: AgentSessionSeedMetadata = {
+    kind: "finding-propose",
+    action: seed.action,
+    findingId: seed.findingId,
+    observedRevision: seed.observedRevision,
+    workspaceId: seed.skill.workspaceId,
+    providerId: seed.skill.providerId,
+    skillId: seed.skill.skillId,
+    templateId: seed.templateId,
+    templateVersion: seed.templateVersion,
+  };
+  agentPanel.seed = {
+    text: seed.text,
+    reference: {
+      kind: "skill",
+      token: `$${seed.skillName}`,
+      target: seed.skill.skillId,
+      label: seed.skillName,
+      skill: seed.skill,
+    },
+    metadata,
+  };
+  pendingSeedMetadata = metadata;
+  agentSession.pendingMode = "free";
+}
+
+/**
  * test-run 种子（creator-test-session A1/A2）：模板正文 + 技能引用（完整三元
  * 组，经面板消费时的 addComposerReference 注册）+ seed 元数据（revision 与模
  * 板版本随惰性建会话透传进转录 meta）。不自动发送。
