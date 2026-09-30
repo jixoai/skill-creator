@@ -1,4 +1,27 @@
-# Design: evaluation-corpus（契约体 = 工作计划 r3 §冻结契约 B）
+# Design: evaluation-corpus（契约体 = 工作计划 r3 §B + r4 补遗 B′）
+
+## B′ wire 级补遗（r4；冲突处以本节为准）
+
+- **B′1 result schema 级收紧**：Zod discriminatedUnion——`outcome ∈ error |
+  unavailable` → `failure` 必填且 `code ∈ {MODEL_UNAVAILABLE, DSH_UNAVAILABLE,
+  PROVIDER_ROUTE_MISSING, RUNNER_ERROR}`；`passed | failed | stale` →
+  `failure` 缺席。
+- **B′2 severity 值域 = `info | warning | error`**（对齐 analyzer 产出词表）。
+- **B′3 run 后 stale 投影**：`evaluation.results.list` 每条附计算字段
+  `stale: boolean`（当前技能 revision ≠ observedEndRevision）；结果本体不可变。
+- **B′4 run RPC 全集**：`run.start {target, caseIds, runner} → {runId,
+  status:"queued"}`；`run.status {runId} → {status: queued|running|completed|
+  cancelled, resultIds}`；`run.cancel {runId}`（provider→内核会话 cancel；
+  analyzer→幂等返终态）。
+- **B′5 fixture 映射**：`{expectTrigger, expectedKinds}` → 断言集 =
+  `expectedKinds.map(k => {kind:"finding-kind", value:k})` ∪ `[{kind:
+  "contains", value: expectTrigger}]`；**新增 assertion kind `finding-kind`**
+  （analyzer runner：产出 findings 的 kind 集合含 value）；多技能 fixture →
+  synthetic target = 首个技能；boundRevision = 语料 digest；
+  source="builtin-fixture"。
+- **B′6 IO 纪律**：解析不兼容 → 空信封；权限/磁盘/原子写失败 → typed hard
+  error（对齐 workspaces.json 纪律，绝不静默空值）。
+
 
 ## B1 存储布局（冻结）
 
@@ -21,20 +44,24 @@ appDir()/evaluation/<workspaceId>/<providerId>/<skillId>/
     assertions: Array<
       | { kind: "contains"; value; description? }
       | { kind: "not-contains"; value; description? }
-      | { kind: "finding-severity"; value: "high"|"medium"|"low"; description? }>> }
+      | { kind: "finding-kind"; value; description? }              /* B′5 新增 */
+      | { kind: "finding-severity"; value: "info"|"warning"|"error"; description? }>> }
 ```
 
 ## B3 result schema（冻结；五态）
 
 ```ts
+// B′1：Zod discriminatedUnion 按 outcome 收紧（非注释约定）
 { resultId, runId, caseId, target: {workspaceId, providerId, skillId},
   expectedRevision, observedStartRevision, observedEndRevision,
   runner: { kind: "analyzer" | "provider-model"; version },
-    // analyzer: 模块冻结常量；provider-model:
+    // analyzer: 模块冻结常量; provider-model:
     // `${promptVersion}/${toolVersion}/${DSH version}`
   outcome: "passed" | "failed" | "error" | "unavailable" | "stale",
   assertions: Array<{ ref: number; outcome: "passed"|"failed"|"error" }>,
-  failure?: { code: string; detail: string },   // error/unavailable 必填
+  failure?: { code: "MODEL_UNAVAILABLE" | "DSH_UNAVAILABLE" |
+    "PROVIDER_ROUTE_MISSING" | "RUNNER_ERROR"; detail: string },
+    // error|unavailable 时必填；passed|failed|stale 时缺席（schema refine）
   startedAt, endedAt }
 ```
 
@@ -52,9 +79,12 @@ appDir()/evaluation/<workspaceId>/<providerId>/<skillId>/
   会话产出文本上；取消映射内核会话 cancel（有界）；重试 = 新 runId，旧结果
   保留；版本三元组如实写入 runner.version。
 
-## B5 RPC（冻结）
+## B5 RPC（冻结，含 B′4 run 全集）
 
 `evaluation.cases.list|create|update|remove`（Imported-only 写）；
-`evaluation.run.start`（入参 target + caseIds + runner kind）；
-`evaluation.results.list`（target + 可选 caseId）。错误走既有 errors 词表
-（NOT_FOUND/VALIDATION/UNAVAILABLE 家族），不新造传输形状。
+`evaluation.run.start {target, caseIds, runner} → {runId, status:"queued"}`；
+`evaluation.run.status {runId} → {status: queued|running|completed|cancelled,
+resultIds}`；`evaluation.run.cancel {runId}`；
+`evaluation.results.list`（target + 可选 caseId；每条附 B′3 计算字段
+`stale: boolean`）。错误走既有 errors 词表（NOT_FOUND/VALIDATION/
+UNAVAILABLE 家族），不新造传输形状。

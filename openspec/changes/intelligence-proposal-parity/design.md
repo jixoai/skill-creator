@@ -1,20 +1,50 @@
-# Design: intelligence-proposal-parity（契约体 = 工作计划 r3 §冻结契约 C）
+# Design: intelligence-proposal-parity（契约体 = 工作计划 r3 §C + r4 补遗 C′）
 
-## C1 创建向量（冻结）
+## C′ wire 级补遗（r4；冲突处以本节为准）
+
+- **C′1 四个新 capability（r4 实证：当前 capability 面 31 项无一 propose）**：
+  `intelligence.propose_edit` / `intelligence.propose_disable` /
+  `intelligence.propose_split` / `intelligence.propose_merge`——输入
+  `{findingId, observedRevision, target: {workspaceId, providerId, skillId},
+  payload}`，输出 `{proposalId}`，authority=proposal（只产草案不写盘；MCP 面
+  投影 `*_propose` 变体，与 wiki_append_propose 同模式）。
+- **C′2 统一投影 UnifiedProposalView（冻结）**：
+  `{id（前缀 `mcp:`|`si:`）, source: "mcp"|"skill-intelligence",
+  origin:"agent-tool", kind, target 三元组, observedRevision, before/after,
+  finding 摘要, validation 结果, status}`——`agent.proposals.list` 返回统一
+  视图；approve/reject 按 id 前缀路由（mcp:→McpProposalStore，si:→
+  skillIntelligence 服务）；stale 草稿 → rejected STALE；两 store 各自映射，
+  不改存储。
+
+## C1 创建向量（冻结；四模板正文逐字如下）
 
 ```text
-edit / disable / split / merge 四动作
-  -> IntelligenceView「经 agent 发起」按钮（四选一）
-  -> seedAgentTestRun 同族入口：Agent 面板 + finding 上下文 + propose 工具指令
-  -> 内核 agent 会话产出 tool call（capability/kernel 投影的 propose 工具）
-  -> proposal 进入审批面
-禁止：WebUI 直连 skillIntelligence.propose（RPC 从 WebUI 消费面退役并从
-rpc-contract 移除——破坏性更新，无兼容路径）
-```
+finding-propose-edit-v1（version 1）：
+  请针对引用的技能（${skillName}）执行 intelligence.propose_edit 工具调用：
+  finding ${findingId}（观察于 revision ${observedRevision}）。
+  依据 finding 证据起草编辑提案；先调用工具，再向我复述提案要点。
+占位符：${skillName} / ${findingId} / ${observedRevision}；替换：纯文本。
 
-- seed 的模板族：`finding-propose-edit-v1` / `-disable-v1` / `-split-v1` /
-  `-merge-v1`（与 probe-recall-v1 同协议：ID/版本/正文冻结、不自动发送）。
-- 用户在面板可编辑指令；proposal 仍由工具调用产生（不是文本解析）。
+finding-propose-disable-v1（version 1）：
+  请针对引用的技能（${skillName}）执行 intelligence.propose_disable 工具调用：
+  finding ${findingId}（观察于 revision ${observedRevision}）。
+  起草禁用提案并说明恢复路径；先调用工具，再向我复述提案要点。
+
+finding-propose-split-v1（version 1）：
+  请针对引用的技能（${skillName}）执行 intelligence.propose_split 工具调用：
+  finding ${findingId}（观察于 revision ${observedRevision}）。
+  按 finding 指出的职责混同起草拆分提案（目标边界逐条列出）；先调用工具，
+  再向我复述提案要点。
+
+finding-propose-merge-v1（version 1）：
+  请针对引用的技能（${skillName}）执行 intelligence.propose_merge 工具调用：
+  finding ${findingId}（观察于 revision ${observedRevision}）。
+  按 finding 指出的重复职责起草合并提案（保留主体与吸收项逐条列出）；先调用
+  工具，再向我复述提案要点。
+
+协议与 probe-recall-v1 同族：ID/版本冻结、不自动发送、用户可编辑最终指令、
+模板版本随会话落档（testRun 元数据块 kind 为 finding-propose）。
+```
 
 ## C2 审批统一投影（冻结）
 

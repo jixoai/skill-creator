@@ -1,14 +1,93 @@
-# WebUI 残留工作计划 r3（2026-09-30；r1 6.2 → r2 7.0，本轮冻结全部余留接口）
+# WebUI 残留工作计划 r4（2026-09-30；r1 6.2 → r2 7.0 → r3 7.2，本轮闭合全部 wire 级缺口）
 
 > 用户原始需求 [2026-09-30]：「webui 里面还有一些残留的未完成的工作，比如 skill
 > 测试与评估，你整理一份工作计划（可能是几个 changes），你和 codex 去讨论讨论。
 > 等全部做好了再让我来参与走查验收。切记，你让 vision 子代理自己去尝试走查验收
 > 确定使用体验没问题再来找我。」
 
-r2 复核裁决 7.0/10 NEEDS-WORK：事实纠错/Ch1 边界/C5 拆分通过，但 r2 判定
-「计划仍把关键接口与协议留给实现阶段选择」。r3 把 r2 七项阻塞**全部落为冻结契约**
-（不再有二选一）；Ch1 已同步归档（commit e2eb536，agent-internal requirement 已
-落主 spec）。
+r3 复核裁决 7.2/10：Ch1 关闭、方向与拆分认可；「不能接受的是把 Ch2 metadata、
+Ch3 wire/RPC、Ch4 unified proposal projection 标记为已冻结」。r4 逐项闭合 r3
+七项核对缺口 + 五项新问题，全部落为 wire 级（Zod 形状 / 工具名 / 字段枚举 /
+替换示例 / 路由算法）。§A/§B/§C 原文保持，本节为**冻结补遗**（冲突处以补遗为准）。
+
+## r4 冻结补遗 A′：Ch2 wire 级（闭 r3 项 1/2/3/7 + r3 新 1）
+
+- **A′1 ComposerReference 完整形状**：seed 复用既有 `addComposerReference`
+  （agent-composer.svelte.ts:113）作为**唯一** registry 写者——uid/token 由其
+  内部生成（不自造并行 registry/uid 机制），label=技能显示名；seed 只多带
+  模板元数据，不触碰 chip 内部字段。
+- **A′2 占位符语法统一为 `${skillName}`**（弃 `{skillName}` 写法）；替换示例
+  逐字：name=`code-review` → 正文首行「请阅读引用的技能文档（code-review 芯片）。」
+  ——芯片不来自文本解析，来自 references 通道（文本仅为可读性）。
+- **A′3 revision 进 seed + 透传通道**：`CreatorTestSeed` 增 `revision:
+  "sha256:…"`（creator.load 同源）；`SessionTranscriptMeta` 增可选 `testRun`
+  块（r3 A4 字段）；`agent.session.create` 契约增可选 `metadata` 输入
+  （破坏性 schema 变更，无兼容）；惰性建会话通道冻结：seed 把 pending
+  testRun meta 存 store，首次 prompt 触发 createAgentSession 时透传入
+  transcript 写入——不存在「seed 时无通道」问题。
+- **A′4 通用预填与 test-run 分流**：两个入口——`seedComposerPrompt(text)`
+  （通用，无模板无元数据；startAgentAction / WorkspacesHome 现行为不变）与
+  `seedAgentTestRun(seed)`（模板+引用+元数据）；普通行动永不标 test-run。
+
+## r4 冻结补遗 B′：Ch3 wire 级（闭 r3 项 4/6 + r3 新 4/6）
+
+- **B′1 result 判别联合收紧**（schema 级，非注释）：`outcome ∈ error |
+  unavailable` → `failure` **必填**且 `code ∈ {MODEL_UNAVAILABLE,
+  DSH_UNAVAILABLE, PROVIDER_ROUTE_MISSING, RUNNER_ERROR}`；`passed | failed |
+  stale` → `failure` 缺席（Zod discriminatedUnion + refine）。
+- **B′2 finding-severity 值域改 `info|warning|error`**（对齐 analyzer.ts:53
+  产出词表；弃 high/medium/low）。
+- **B′3 run 后 stale 的投影算法**：`evaluation.results.list` 每条附计算字段
+  `stale: boolean`（当前技能 revision ≠ observedEndRevision → true）；结果
+  本体不可变，stale 只在投影层。
+- **B′4 run RPC 完整面**：`run.start` → `{runId, status:"queued"}`；新增
+  `run.status {runId}` → `{status: queued|running|completed|cancelled,
+  resultIds}`；`run.cancel {runId}`（provider runner 映射内核会话 cancel；
+  analyzer 原子短跑 → cancel 幂等返终态）。
+- **B′5 fixture 映射冻结**：expectation.json `{expectTrigger, expectedKinds}`
+  → 断言集 = `expectedKinds.map(k => {kind:"finding-kind", value:k})` ∪
+  `[{kind:"contains", value: expectTrigger}]`；**新增 assertion kind
+  `finding-kind`**（analyzer runner 语义：产出 findings 的 kind 集合含
+  value）；多技能 fixture 目录 → synthetic target = 目录内首个技能，
+  boundRevision = fixture 语料 digest，source="builtin-fixture"。
+- **B′6 IO 纪律**（对齐 workspaces.json）：解析不兼容 → 空信封重建；权限/
+  磁盘/原子写失败 → typed hard error，绝不静默空值。
+
+## r4 冻结补遗 C′：Ch4 wire 级（闭 r3 项 5 + r3 新 2/3）
+
+- **C′1 工具事实修正（本轮实证）**：capability 面（kernel/MCP 投影，
+  domain-capabilities 31 项）**当前不存在任何 intelligence propose 工具**；
+  skillIntelligence.propose 仅存在于 WebUI oRPC 面。Ch4 必须**新增四个
+  proposal-authority capability**：`intelligence.propose_edit` /
+  `intelligence.propose_disable` / `intelligence.propose_split` /
+  `intelligence.propose_merge`——输入 `{findingId, observedRevision, target:
+  {workspaceId,providerId,skillId}, payload}`，输出 proposal id，
+  authority=proposal（只产草案不写盘；MCP 面按既有惯例投影 `*_propose`
+  变体，与 wiki_append_propose 同模式）。
+- **C′2 统一投影冻结**：新 shared schema `UnifiedProposalView = {id（前缀
+  `mcp:`|`si:`）, source: "mcp"|"skill-intelligence", origin:"agent-tool",
+  kind, target 三元组, observedRevision, before/after, finding 摘要,
+  validation 结果, status}`；`agent.proposals.list` 返回统一视图；approve/
+  reject 按 id 前缀路由（mcp: → McpProposalStore，si: → skillIntelligence
+  服务）；stale 草稿（observedRevision ≠ 当前）→ rejected STALE；
+  AgentMcpProposalView 与 ProposalDraft 的形状差异由统一视图吸收（两 store
+  各自映射，不改存储）。
+- **C′3 四模板正文逐字冻结**（intelligence-proposal-parity/design.md C1 全文）。
+
+## r4 序修正（闭 r3 新 5）与统计修正（闭 r3 新 6）
+
+```text
+[done] Ch1（e2eb536）
+  -> Ch2 实现（seed/metadata 通道先行）
+  -> Ch4 接线（依赖 Ch2 seed；四个 propose capability + 统一投影）
+  -> Ch3 实现（analyzer 数据层可与 Ch2 并行；provider runner 依赖 Ch2）
+  -> Ch5/Ch6/Ch7 清场
+```
+
+Ch7 统计修正：`openspec validate --all --strict` 当前 **18 passed / 3 failed /
+21 items**（失败仍为 @jixoai-search、gui-wiki、skill-wiki 的 Purpose 占位）。
+
+---
 
 ## 冻结契约 A：Ch2 `creator-test-session`（r2 项 1/2/6）
 
@@ -155,14 +234,14 @@ calls 形成方案」直接采信——四种 proposal 的创建**一律经内�
   proposal 存储作为其数据源之一并入投影（origin=agent-tool 元数据），单一
   审批入口；spec 冻结「不存在 finding-created 第三条创建路径」。
 
-## 序（r2 裁决采纳；Ch1 已完成并归档）
+## 序（r4 修正版——Ch2 实现先于 Ch4 接线；Ch1 已完成并归档）
 
 ```text
 [done] Ch1 steward-surface-closure（sync+archive：e2eb536）
-  -> Ch2/Ch3/Ch4 契约冻结（change docs 三份并行；本文 A/B/C 即冻结体）
-  -> Ch4 provenance 接线（seed 化四动作 + 投影统一）
-  -> Ch2 实现（seed 入口 + 模板 + 元数据 + 测试矩阵 A5）
-  -> Ch3 实现（存储/CRUD/双 runner/结果协议；数据层不依赖 Ch2 UI，复用其 seed）
+  -> [done] Ch2/Ch3/Ch4 契约冻结（change docs 三份；本文 A/B/C + A′/B′/C′ 即冻结体）
+  -> Ch2 实现（seed 入口 + 模板 + 元数据通道 + 测试矩阵 A5）
+  -> Ch4 接线（依赖 Ch2 seed；四 propose capability + 统一投影 C′2）
+  -> Ch3 实现（analyzer 数据层可与 Ch2 并行；provider runner 依赖 Ch2）
   -> Ch5 creator-editor-polish / Ch6 shell-settings-ui / Ch7 docs-archive-hygiene
 ```
 

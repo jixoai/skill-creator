@@ -1,34 +1,51 @@
-# Design: creator-test-session（契约体 = 工作计划 r3 §冻结契约 A）
+# Design: creator-test-session（契约体 = 工作计划 r3 §A + r4 补遗 A′）
 
-## A1 CreatorTestSeed（冻结）
+## A′ wire 级补遗（r4；冲突处以本节为准）
+
+- **A′1 registry 唯一写者**：seed 复用既有 `addComposerReference`
+  （agent-composer.svelte.ts:113）——uid/token 由其内部生成，label=技能显示名；
+  不自造并行 registry。
+- **A′2 占位符统一 `${skillName}`**；替换示例：name=`code-review` → 正文首行
+  「请阅读引用的技能文档（code-review 芯片）。」芯片来自 references 通道，
+  不来自文本解析。
+- **A′3 revision + 透传**：`CreatorTestSeed.revision: "sha256:…"`（creator.load
+  同源）；`SessionTranscriptMeta` 增可选 `testRun` 块；`agent.session.create`
+  契约增可选 `metadata` 输入（破坏性，无兼容）；seed 存 pending testRun meta，
+  首次 prompt 触发 createAgentSession 时透传写 transcript。
+- **A′4 分流**：`seedComposerPrompt(text)`（通用；startAgentAction/
+  WorkspacesHome 行为不变）与 `seedAgentTestRun(seed)`（模板+引用+元数据）
+  两入口；普通行动永不标 test-run。
+
+## A1 CreatorTestSeed（冻结，含 A′3 revision）
 
 ```ts
 interface CreatorTestSeed {
   text: string;                       // 探针模板正文（占位符已替换；用户可编辑）
-  references: ComposerReference[];    // 恰 1 条 kind:"skill" 完整三元组
+  references: ComposerReference[];    // 恰 1 条 kind:"skill" 完整三元组（A′1 经
+                                      // addComposerReference 注册，uid/token 内部生成）
   templateId: "probe-recall-v1";
   templateVersion: 1;
+  revision: string;                   // sha256:…（creator.load 同源）
 }
 ```
 
-## A2 统一 seed 入口（冻结）
+## A2 入口（冻结，A′4 分流后）
 
-`seedAgentTestRun(seed)` 是唯一同时写「文本 + ComposerReference + 模板元数据」
-的入口；startAgentAction（agent.svelte.ts:366）与 AgentPanel 预填
-（AgentPanel.svelte:61）改走它。行为：写文本、注册芯片、开面板、不自动发送。
-new 模式（无稳定 skillId）：Test tab 空态 + 保存引导，禁止临时 id。
+`seedAgentTestRun(seed)`：写文本 + 经 addComposerReference 注册芯片 + 存
+pending testRun 元数据 + 开面板 + 不自动发送。`seedComposerPrompt(text)`：通用
+预填（无模板/引用/元数据）。startAgentAction 字符串路径委托 seedComposerPrompt。
 
-## A3 探针模板协议（冻结，可复现）
+## A3 探针模板协议（冻结，A′2 语法）
 
 ```text
 templateId: probe-recall-v1  version: 1
-正文（逐字）：
+正文（逐字；占位符 ${skillName}）：
   请阅读引用的技能文档（${skillName} 芯片）。然后：
   1. 复述该技能的触发条件与适用场景；
   2. 列出它声明提供的工具与参考文件；
   3. 给出一个你会使用它的典型任务示例。
-占位符：{skillName}；替换：纯文本；编辑：用户改最终 prompt，模板版本仍落档；
-自动发送：false。
+替换示例：name="code-review" → 「请阅读引用的技能文档（code-review 芯片）。…」
+替换：纯文本；编辑：用户改最终 prompt，模板版本仍落档；自动发送：false。
 ```
 
 ## A4 test-run 元数据（冻结）
