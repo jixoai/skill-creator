@@ -135,12 +135,22 @@ Self Skill         = 产品自描述技能 skill-creator-v2（~/.agents/skills/s
                       name 判源，npm/git 同一身份），文档随包升级自动保鲜；链缺失/悬空/
                       指向旧安装/v1 legacy 拷贝 → （重）建链；用户自维护条目 → 冲突不
                       触碰，CLI（顶层 setup 命令 + self-skill status|keep + start 提醒）
-                      与 WebUI 首页 banner 双面
-                      裁决（覆盖[可选备份至 ~/.agents/skills-backup 时间戳目录] / 保留+
+                      与 WebUI 首页 banner 双面裁决（覆盖[可选备份至 ~/.agents/skills-backup 时间戳目录] / 保留+
                       指纹记忆）；ccski root 扫描跳过 symlink 条目 → 两个调用点
                       （skill-service/workspace-registry）经 ccski-symlink-entries 增补；
+                      setup 同时注入/刷新 ~/.agents/AGENTS.md 的
+                      <skill-creator-v2> 引导块（agents-md-block：标签对整块替换、
+                      块外逐字保留、残缺/多块 typed 拒绝；仅显式 setup 触发，daemon
+                      启动不碰）；setup --model <p>/<m> 参数段与 model 子命令族共用
+                      applyModelSetupSection（key→route→use；失败 exit 1 不回滚 link）；
                       产品提示词 v2 起不内嵌用法，经 skills_search→skills_info 指针读取
                       （dev daemon 不挂载、测试走 SKILL_CREATOR_SELF_SKILL_ROOT）
+CLI Manager Face   = WebUI 同源的进程内 CLI 命令族（cli-surface-parity 2026-09-30）：
+                      `skills list/info/validate/toggle/duplicates/update check|apply`
+                      与 `model list/routes/use/route add|remove/key set|clear/test`
+                      经 createDaemonDomain() 直连 domain 服务（probeWarmup:false 防
+                      npx 孤儿）；引用解析 = ~/路径/ws_* id/label 前缀，歧义列候选
+                      exit 2；key 明文永不回显；持久化与 WebUI 同一份 steward-store
 Agent Kernel       = headless DSH 内核：单 dsh-base bundle + 产品 preset（persona/ask-user）
                       + 工具面收窄（专注模式禁用通用行）+ mcp-client 行；mountDshKernelHost 挂载
 Agent Role         = 官方原生子代理的受控暴露：一条 dsh-tool-subagent 行 = 一个角色
