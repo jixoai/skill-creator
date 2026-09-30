@@ -9,9 +9,11 @@
  * 路径直传；含 scopes 扩展命令；进程内执行（无 daemon 依赖）。
  * 修订 [2026-09-25]（skill-wiki-maintainer tasks 1.5）：`wiki distill` 扩展命令经
  * daemon RPC（wiki.distill.start/status）驱动——蒸馏是 daemon 编排，不本地起服务。
- * 修订 [2026-09-30]（self-skill-symlink）：`skill-creator self-skill`（status |
- * install [--backup] | keep）进程内裁决全局自举技能冲突；`start` 就绪后存在未裁决
- * 冲突时给出提醒（TTY 交互三选 / 非 TTY 打印命令提示）。
+ * 修订 [2026-09-30]（self-skill-symlink）：`skill-creator self-skill`（status | keep）
+ * 进程内检查/保留裁决全局自举技能状态；`start` 就绪后存在未裁决冲突时给出提醒
+ * （TTY 交互三选 / 非 TTY 打印命令提示）。
+ * 修订 [2026-09-30b]（Owner 命名裁决）：覆盖安装升级为顶层 `skill-creator setup
+ * [--backup]`；self-skill 子命令收敛为 status | keep。
  * 正交意图：
  * 1. 解析并路由公开 CLI 命令。
  * 2. 通过带版本、运行时校验的 IPC 协议调用 daemon。
@@ -32,7 +34,8 @@
  *   skill-creator search  -> in-process BM25 skill search (no daemon)
  *   skill-creator wiki    -> in-process skill-wiki kit subcommands (no daemon),
  *                            except `wiki distill` which drives the daemon RPC
- *   skill-creator self-skill -> inspect/resolve the global self skill link (no daemon)
+ *   skill-creator setup    -> install/repair the global self skill link (no daemon)
+ *   skill-creator self-skill -> inspect the global self skill link (status | keep, no daemon)
  *   skill-creator help    -> print command help
  *   skill-creator version -> print version
  *
@@ -534,21 +537,67 @@ function printSearchResults(
 }
 
 /**
- * `skill-creator self-skill status | install [--backup] | keep`（self-skill-symlink）：
- * 进程内只读检查与冲突裁决（fs 直达，不依赖 daemon 常驻；与 daemon 生产入口共享
- * 同一 server-owned 逻辑与 keep 记录）。
+ * `skill-creator setup [--backup]`（self-skill-symlink；Owner 命名裁决 [2026-09-30]
+ * 「self-skill install 改成 setup」）：安装/修复全局自举技能链接——ensure 语义
+ * （fresh 建链 / 悬空与旧安装重建 / legacy 迁移），冲突态进入显式覆盖裁决
+ * （user-directory 可先备份）。fs 直达，不依赖 daemon 常驻。
+ */
+async function runSetup(): Promise<number> {
+  const argv = hideBin(process.argv);
+  const rest = argv.slice(argv.indexOf("setup") + 1);
+  const usage = "Usage: skill-creator setup [--backup]";
+  if (rest.some((flag) => flag !== "--backup")) {
+    console.error(usage);
+    return 1;
+  }
+  const selfSkill = await import("../daemon/self-skill.js");
+  // setup = 安装/修复语义：先 ensure（fresh 建链 / 悬空旧链重建 / legacy 迁移），
+  // 冲突态才进入显式覆盖裁决（--backup 仅对 user-directory 冲突生效）。
+  const ensured = selfSkill.ensureSelfSkill();
+  switch (ensured.kind) {
+    case "linked":
+    case "relinked":
+    case "migrated":
+      console.log("self skill linked at the community global root.");
+      return 0;
+    case "current":
+      console.log("self skill already linked and up to date.");
+      return 0;
+    case "kept":
+      console.log("self skill conflict kept as yours; silent until it changes.");
+      return 0;
+    case "conflict": {
+      const result = selfSkill.resolveSelfSkillConflict({ backup: rest.includes("--backup") });
+      if (!result.ok) {
+        console.error(result.reason);
+        return 1;
+      }
+      console.log("self skill linked at the community global root.");
+      if (result.backupPath) console.log(`previous version backed up to ${result.backupPath}`);
+      return 0;
+    }
+    case "failed":
+      console.error(ensured.reason);
+      return 1;
+  }
+}
+
+/**
+ * `skill-creator self-skill [status | keep]`（self-skill-symlink）：进程内只读检查
+ * 与「保留用户版本」裁决（覆盖安装走顶层 `setup`）。fs 直达，不依赖 daemon 常驻；
+ * 与 daemon 生产入口共享同一 server-owned 逻辑与 keep 记录。
  */
 async function runSelfSkill(): Promise<number> {
   const argv = hideBin(process.argv);
   const rest = argv.slice(argv.indexOf("self-skill") + 1);
   const action = rest[0] ?? "status";
-  const flags = rest.slice(1);
-  const usage = "Usage: skill-creator self-skill [status | install [--backup] | keep]";
-  if (action !== "status" && action !== "install" && action !== "keep") {
+  const usage =
+    "Usage: skill-creator self-skill [status | keep]  (install moved to: skill-creator setup)";
+  if (action !== "status" && action !== "keep") {
     console.error(usage);
     return 1;
   }
-  if (flags.some((flag) => flag !== "--backup") || (action !== "install" && flags.length > 0)) {
+  if (rest.length > 1) {
     console.error(usage);
     return 1;
   }
@@ -557,16 +606,6 @@ async function runSelfSkill(): Promise<number> {
     const status = selfSkill.selfSkillStatus();
     describeSelfSkillStatus(status);
     return status.state === "failed" ? 1 : 0;
-  }
-  if (action === "install") {
-    const result = selfSkill.resolveSelfSkillConflict({ backup: flags.includes("--backup") });
-    if (!result.ok) {
-      console.error(result.reason);
-      return 1;
-    }
-    console.log("self skill linked at the community global root.");
-    if (result.backupPath) console.log(`previous version backed up to ${result.backupPath}`);
-    return 0;
   }
   const kept = selfSkill.keepSelfSkillUserVersion();
   if (!kept.ok) {
@@ -601,7 +640,7 @@ function describeSelfSkillStatus(
         `self skill CONFLICT (${status.conflict.kind}) at ${status.conflict.entryPath}` +
           (status.conflict.targetPath ? ` -> ${status.conflict.targetPath}` : ""),
       );
-      console.log("resolve with: skill-creator self-skill install [--backup] | keep");
+      console.log("resolve with: skill-creator setup [--backup] | skill-creator self-skill keep");
       return;
     case "kept":
       console.log(
@@ -629,11 +668,9 @@ async function notifySelfSkillConflict(): Promise<void> {
   );
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.log("Resolve it with one of:");
-    console.log("  skill-creator self-skill install --backup   # use ours, back up yours first");
-    console.log("  skill-creator self-skill install            # use ours, drop yours (no backup)");
-    console.log(
-      "  skill-creator self-skill keep               # keep yours (silent until it changes)",
-    );
+    console.log("  skill-creator setup --backup      # use ours, back up yours first");
+    console.log("  skill-creator setup               # use ours, drop yours (no backup)");
+    console.log("  skill-creator self-skill keep     # keep yours (silent until it changes)");
     console.log("The Skill Creator home page shows the same choices.");
     return;
   }
@@ -661,7 +698,9 @@ async function notifySelfSkillConflict(): Promise<void> {
       const kept = selfSkill.keepSelfSkillUserVersion();
       console.log(kept.ok ? "kept your version." : kept.reason);
     } else {
-      console.log("Skipped. Resolve later with: skill-creator self-skill <install|keep>");
+      console.log(
+        "Skipped. Resolve later with: skill-creator setup | skill-creator self-skill keep",
+      );
     }
   } finally {
     rl.close();
@@ -950,9 +989,12 @@ const COMMANDS = {
       return 0;
     },
   },
+  setup: {
+    description: "Install/repair the global self skill link (--backup when overwriting yours)",
+    run: () => runSetup(),
+  },
   "self-skill": {
-    description:
-      "Inspect or resolve the global self skill link (status | install [--backup] | keep)",
+    description: "Inspect the global self skill link (status | keep)",
     run: () => runSelfSkill(),
   },
   version: {

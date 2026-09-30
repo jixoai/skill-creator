@@ -134,7 +134,8 @@ Self Skill         = 产品自描述技能 skill-creator-v2（~/.agents/skills/s
                       2026-09-30 symlink 化）：技能源随 npm/git 安装分发（package.json
                       name 判源，npm/git 同一身份），文档随包升级自动保鲜；链缺失/悬空/
                       指向旧安装/v1 legacy 拷贝 → （重）建链；用户自维护条目 → 冲突不
-                      触碰，CLI（self-skill 子命令 + start 提醒）与 WebUI 首页 banner 双面
+                      触碰，CLI（顶层 setup 命令 + self-skill status|keep + start 提醒）
+                      与 WebUI 首页 banner 双面
                       裁决（覆盖[可选备份至 ~/.agents/skills-backup 时间戳目录] / 保留+
                       指纹记忆）；ccski root 扫描跳过 symlink 条目 → 两个调用点
                       （skill-service/workspace-registry）经 ccski-symlink-entries 增补；

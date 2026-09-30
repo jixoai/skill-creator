@@ -330,6 +330,8 @@ describe("shipped document invariants (design D4/D5)", () => {
       "skill-creator search",
       "skill-creator wiki",
       "skill-creator mcp",
+      "skill-creator setup",
+      "skill-creator self-skill",
     ]) {
       expect(reference).toContain(command);
     }

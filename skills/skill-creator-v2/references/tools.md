@@ -76,6 +76,8 @@ skill-creator search         Search local skills (BM25 + skill tokenizer)
 skill-creator wiki           Persistent agent-experience wiki
                              (list/show/add/find/edit/remove/log/impact/scopes/distill)
 skill-creator mcp            Run the skill-creator MCP server over stdio (readonly face)
+skill-creator setup          Install/repair the global self skill link (--backup when overwriting yours)
+skill-creator self-skill     Inspect the global self skill link (status | keep)
 skill-creator version        Print the version
 skill-creator help           Show this help
 ```
