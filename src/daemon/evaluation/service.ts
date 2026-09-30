@@ -23,6 +23,7 @@ import type {
 } from "../../shared/contracts/evaluation.js";
 import { createEvaluationStore, newEvaluationId, type EvaluationStore } from "./store.js";
 import { analyzeDocuments, type AnalyzerFinding } from "../skill-intelligence/analyzer.js";
+import { fixtureCorpusDocuments } from "./fixture-import.js";
 
 /** analyzer 路径的冻结版本常量（B3：结构化三元组；analyzer 不触内核）。 */
 const ANALYZER_VERSION = {
@@ -188,6 +189,8 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
       caseId: string;
       input: { prompt: string; assertions: EvaluationAssertion[] };
       boundRevision: string;
+      source: "user" | "builtin-fixture";
+      corpusDigest?: string;
     },
     runner: EvaluationRunner,
   ): Promise<EvaluationResult> => {
@@ -201,14 +204,52 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
       startedAt,
     );
     try {
+      const isFixture = runCase.source === "builtin-fixture" && runCase.corpusDigest !== undefined;
+      // fixture × analyzer：确定性回归分支先行——不触活技能加载（目标技能可能
+      // 已被移动/删除，fixture 闸在 fixture 域自洽）。
+      if (isFixture && runner.kind === "analyzer") {
+        const fixtureDocs = fixtureCorpusDocuments(runCase.corpusDigest!);
+        if (fixtureDocs === null) {
+          return { ...base, outcome: "stale", assertions: [] };
+        }
+        const { findings } = analyzeDocuments(fixtureDocs);
+        const primary = fixtureDocs[0];
+        const mine = findings.filter((finding) => finding.skillIds.includes(primary.skillId));
+        const assertions = runCase.input.assertions.map((assertion, index) => ({
+          ref: index,
+          outcome: judgeAssertion(assertion, { text: primary.content, findings: mine }),
+        }));
+        const allPassed = assertions.every((item) => item.outcome === "passed");
+        return {
+          ...base,
+          observedStartRevision: runCase.boundRevision,
+          observedEndRevision: runCase.boundRevision,
+          outcome: allPassed ? "passed" : "failed",
+          assertions,
+        };
+      }
       const current = await loadSkill(target);
-      // revision 闸（run 前）：实测 ≠ bound → stale，不执行。
-      if (current.revision !== runCase.boundRevision) {
+      // 活技能域的 revision 前闸只约束 user case（fixture case 的闸在 fixture 域）。
+      if (!isFixture && current.revision !== runCase.boundRevision) {
         return {
           ...base,
           observedStartRevision: current.revision,
           outcome: "stale",
           assertions: [],
+        };
+      }
+      if (isFixture) {
+        // fixture × provider-model：依赖不匹配（fixture 是 analyzer 域回归样本）
+        // ——依赖族 unavailable，不伪装通过；run.start 侧另有前置拒绝。
+        return {
+          ...base,
+          observedStartRevision: runCase.boundRevision,
+          outcome: "unavailable",
+          assertions: [],
+          failure: {
+            code: "DSH_UNAVAILABLE",
+            detail: "provider-model runner does not support builtin-fixture cases",
+          },
         };
       }
       if (runner.kind === "analyzer") {

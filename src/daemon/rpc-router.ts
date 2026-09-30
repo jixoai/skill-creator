@@ -196,17 +196,25 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       },
       run: {
         start: rpc.evaluation.run.start.handler(async ({ input }) => {
-          // caseIds 前置校验：未知/禁用的 case 直接拒绝（不产生静默空 run）。
-          const known = new Set(
-            domain.evaluation
-              .listCases(input.target)
-              .filter((entry) => entry.enabled)
-              .map((entry) => entry.caseId),
+          // caseIds 前置校验：未知/禁用的 case 直接拒绝（不产生静默空 run）；
+          // fixture case × provider-model 组合同样前置拒绝（analyzer 域样本）。
+          const cases = domain.evaluation
+            .listCases(input.target)
+            .filter((entry) => entry.enabled && input.caseIds.includes(entry.caseId));
+          const missing = input.caseIds.filter(
+            (caseId) => !cases.some((entry) => entry.caseId === caseId),
           );
-          const missing = input.caseIds.filter((caseId) => !known.has(caseId));
           if (missing.length > 0) {
             throw new ORPCError("NOT_FOUND", {
               message: `unknown or disabled evaluation cases: ${missing.join(", ")}`,
+            });
+          }
+          if (
+            input.runner === "provider-model" &&
+            cases.some((entry) => entry.source === "builtin-fixture")
+          ) {
+            throw new ORPCError("NOT_FOUND", {
+              message: "builtin-fixture cases are analyzer-domain samples; use the analyzer runner",
             });
           }
           return domain.evaluation.startRun(input);

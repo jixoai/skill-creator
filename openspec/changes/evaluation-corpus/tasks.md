@@ -2,26 +2,27 @@
 
 ## 1. 契约与存储
 
-- [ ] 1.1 `src/shared/contracts/evaluation.ts`（case/result Zod 冻结 + 失败码枚举）
-- [ ] 1.2 `src/daemon/evaluation/store.ts`（B1 布局；原子写；safeParse 空信封；
-      Imported-only 写门；results 有界 20/case）
-- [ ] 1.3 rpc-contract `evaluation.*` 八过程（cases×4 + run.start/status/cancel +
-      results.list）+ errors 词表对齐
+- [x] 1.1 `src/shared/contracts/evaluation.ts`（case/result Zod 判别联合冻结 + 失败码全枚举互斥 + RPC io 八过程 + 结构化版本三元组）
+- [x] 1.2 `src/daemon/evaluation/store.ts`（B1 布局；原子写；空信封重建；
+      Imported-only 写门；results 有界 20/case + resultId 幂等；IO hard error）
+- [x] 1.3 rpc-contract `evaluation.*` 八过程 + router handlers（caseIds 前置校验；
+      fixture×provider 组合前置拒绝；errors 词表对齐）
 
 ## 2. runner
 
-- [ ] 2.1 analyzer runner（analyzeDocuments 路径 + 模块版本常量）
-- [ ] 2.2 builtin-fixture 导入器（B4 细则：caseId/prompt/synthetic target/
-      boundRevision=SKILL.md sha256/corpusDigest=语料拼接 sha256/finding-triggered
-      布尔断言 + finding-kind；导入落用户选择的 Imported 目标）
-- [ ] 2.3 provider-model runner（B7 adapter：create/prompt+references/
-      readTranscript 至 turn-end 终态/cancel 竞态胜者/结构化版本三元组）
+- [x] 2.1 analyzer runner（user case 活语料全量分析 + fixture case digest 定位
+      确定性回归分支 + 模块版本常量）
+- [x] 2.2 builtin-fixture 导入器（十条例矩阵全参数落契 + corpusDigest 幂等；
+      4 例测试含期望矩阵迁移实证 duplicate-name passed）
+- [x] 2.3 provider-model runner + B7 adapter（create/prompt+references/
+      readTranscript turn-end 终态/cancel 竞态胜者/结构化版本三元组；
+      缺适配器 → 依赖族 unavailable）
 
 ## 3. 协议执行
 
-- [ ] 3.1 revision 闸：run 前/run 中 stale 转移；run 后展示级 stale
-- [ ] 3.2 五态判定：passed 仅全 assertion 通过；error/unavailable 可区分
-      （failure.code 枚举）；unavailable 永不 passed
+- [x] 3.1 revision 闸：run 前/run 中 stale 转移；run 后展示级 stale（服务测试实证）
+- [x] 3.2 五态判定：passed 仅全 assertion 通过；error/unavailable 族互斥
+      （schema refine + 测试）；unavailable 断言恒空
 
 ## 4. 测试与门禁
 
