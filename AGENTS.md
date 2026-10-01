@@ -86,7 +86,26 @@ Global Workspace (~)       = catalog 解析的 Agent 全局 roots 聚合
 Imported Workspace         = daemon 已 canonicalize 并注册的目录
 Provider                   = 一个 Workspace 内的 Agent skills root
 Workspace Provider Target  = { workspaceId, providerId }
-Creator            = create + revision-checked edit/delete + change log
+Creator            = create + revision-checked edit/delete + change log；File 子视图
+                      正文 = CodeMirror 6 懒加载（textarea 底座回退）；Test 子视图
+                      （creator-test-session）：probe 模板 seed → Agent 面板试跑
+                      （不自动发送；seed 元数据随惰性建会话落转录 meta）
+Skill Evaluation   = server-owned 测试与评估语料（evaluation-corpus）：
+                      appDir()/evaluation/<ws>/<p>/<skill>/{cases,results}.json；
+                      五断言（contains/not-contains/finding-kind/finding-triggered/
+                      finding-severity）× 五态结果（error/unavailable 家族互斥）；
+                      provider-model runner 经 B7 适配真实内核会话（版本三元组）；
+                      fixture 语料按 corpusDigest 绑定 boundRevision（不触线上技能）；
+                      Global Workspace 写入闸门；webui 最小查看入口归后续批任务
+Unified Proposals  = agent.proposals.* 唯一审批面（intelligence-proposal-parity）：
+                      mcp:|si: 前缀双源投影（MCP 五态 + skill-intelligence 草稿，
+                      投影不改存储）；四 intelligence_propose_* capability
+                      （authority=proposal 同名注册）= proposal 唯一创建路径
+                      （agent tool call），WebUI 直连创建退役（源扫描断言钉死）；
+                      finding-propose 模板 seed（四动作，面板消费不自动发送）
+Appearance Prefs   = DevicePrefs（theme/sidebarCollapsed）的 appearance store 消费：
+                      .dark 类挂 documentElement + system 跟随 matchMedia；
+                      AppSidebar 展开（标签）/折叠（图标）双态；General 设置分区
 Repository         = clone + pin commit + scan + preview + install
 Source             = Discover feed 的 curated 或 user Git 源（sources.json）
 Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply）
@@ -530,6 +549,12 @@ src/
 |   |-- rpc-router.ts ---------- [5] skill+update / workspace+creator / repository+sources / agent+card+proposals / status+acp / error boundary
 |   |-- skill-service.ts ------- [3] discovery+identity / document read / toggle+validate
 |   |-- wiki-service.ts ------- [3] 双级 wiki（skill-wiki 委派 + 目录映射标准解析 + scope 闸；scopes 只读摘要零写副作用）
+|   |-- evaluation/ ----------- [3] 测试与评估语料域：store（空信封重建/IO hard
+|   |                              error/Global 写闸）+ service（run 生命周期/五断言/
+|   |                              fixture×analyzer 前置分支）+ provider-adapter（B7
+|   |                              会话适配）+ fixture-import（corpusDigest 幂等）
+|   |-- agent-proposals-projection.ts [2] 统一审批面双源投影（mcp:|si: 前缀路由 +
+|   |                              origin 标注；投影不改存储）
 |   |-- skill-search/
 |   |   |-- tokenizer.ts -------- [3] 冻结规则分词器（已下沉 @jixoai/search；此处 re-export 过渡；版本化+探针降级）
 |   |   |-- scanner.ts ---------- [2] provider roots 扫描（symlink 入口层跟进 / 递归≤2 / broken 跳过）
