@@ -9,18 +9,21 @@
   懒加载组件）；new 模式校验改 validateNewDraft 字段级错误 + Save 禁用联动。
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import {
     useCreatorEditor,
     draftToFrontmatter,
+    cacheCreatorDraft,
     creatorDraftKey,
     dropCachedCreatorDraft,
     isDraftHydrated,
     markDraftHydrated,
     resetDraftHydration,
+    snapshotCreatorDraft,
   } from "$lib/stores/creator-editor.svelte";
   import { hasNewDraftErrors, validateNewDraft } from "$lib/stores/creator-draft";
   import MarkdownEditor from "$lib/components/creator/markdown-editor.svelte";
-  import { loadSkillDoc, removeSkill, saveSkill } from "$lib/store.svelte";
+  import { connectionState, loadSkillDoc, removeSkill, saveSkill } from "$lib/store.svelte";
   import { showToast } from "$lib/toast.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import { goto } from "$app/navigation";
@@ -52,6 +55,29 @@
     const key = creatorDraftKey(draft.target, "edit", draft.skillId);
     if (key !== null && isDraftHydrated(key)) return;
     void loadDocument(draft.target, draft.skillId);
+  });
+
+  // 挂载竞态补救（走查 r6#2）：硬刷新时首轮 load 可能因 WS 未就绪失败（error
+  // 态 + Test tab 门槛停留）；连接转 ready 即重发一次。cache 命中/已 hydrate
+  // 的身份不在此路径（上方 effect 已短路，loadError 恒 null）。
+  let lastConnectionStatus = $state(connectionState.status);
+  $effect(() => {
+    const status = connectionState.status;
+    const was = untrack(() => lastConnectionStatus);
+    lastConnectionStatus = status;
+    if (was === "connected" || status !== "connected") return;
+    const retrySkillId = untrack(() => draft.skillId);
+    if (
+      untrack(() => loadError) === null ||
+      untrack(() => draft.mode) !== "edit" ||
+      retrySkillId === null
+    ) {
+      return;
+    }
+    void loadDocument(
+      untrack(() => draft.target),
+      retrySkillId,
+    );
   });
 
   async function loadDocument(
@@ -138,9 +164,14 @@
       });
       // 新建成功后切换到 edit 语义（后续保存走 update）。
       editor.hydrateFromDocument(result.document);
-      // 文档刚由服务器返回：标记新身份已 hydrate，避免 FileBrowser 立即重拉。
+      // WS4 复走查 N1：显式写入跨卸载缓存 + 水合标记——旧实例的卸载清理与新
+      // 实例的恢复读取顺序不保证，仅靠 cleanup 交接会竞态出「缓存未命中 +
+      // 已标记 hydrate」的永久空白编辑器。
       const createdKey = creatorDraftKey(draft.target, "edit", result.document.skillId);
-      if (createdKey !== null) markDraftHydrated(createdKey);
+      if (createdKey !== null) {
+        cacheCreatorDraft(createdKey, snapshotCreatorDraft(draft));
+        markDraftHydrated(createdKey);
+      }
       showToast("Skill created.");
       // WS4 走查 B2：就地转编辑态路由（标题/draftKey 与 Test tab 门槛随身份
       // 对齐；草稿经卸载缓存以 edit 身份恢复，不重拉不丢内容）。

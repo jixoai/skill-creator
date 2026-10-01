@@ -139,6 +139,18 @@
     ) {
       void loadSkills(skillsState.target);
     }
+    // 详情同族补救（走查 r4#1/r6#2）：硬刷新时详情 info 首轮可能因 WS 未就绪
+    // 失败，error 态此前只能手动 Retry——重连即重发。
+    const retryTarget = untrack(() => providerTarget);
+    const retrySkillId = untrack(() => selectedSkillId);
+    if (
+      retryTarget !== null &&
+      retrySkillId !== undefined &&
+      untrack(() => detailError) !== null &&
+      untrack(() => detail) === null
+    ) {
+      void loadDetail(retryTarget, retrySkillId);
+    }
   });
 
   // 离开本视图时回收全局检索态（命令面板等消费方各持自己的检索生命周期）。
