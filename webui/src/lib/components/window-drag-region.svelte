@@ -1,8 +1,10 @@
 <script lang="ts">
   /**
    * 原始需求 [2026-07-14]：「opentray 的一些适配没不好，好好学习 pnpm-pub」。
+   * 用户原始需求 [2026-10-01]：「双击最大化……属于 js 的工作」（后裁决：JS 属平台
+   * 注入层，经 bindWindowRegion 声明式提供；本组件只声明区域）。
    * 正交意图：
-   * 1. 将 pointer 事件转发为原生窗口拖拽。
+   * 1. 把顶栏声明为窗口区域（bindWindowRegion 'auto'：拖拽 + 双击缩放）。
    * 2. 根据系统窗口控件几何计算标题栏安全区。
    * 3. 在普通浏览器中提供无副作用降级。
    */
@@ -23,21 +25,18 @@
 
   let safeLeft = $state(8);
   let safeRight = $state(8);
+  let strip: HTMLDivElement | undefined = $state();
 
   const CONTROL_MARGIN = 4;
 
-  const ot = () => navigator.opentrayWindow ?? navigator.opentray?.window ?? undefined;
-
-  function onPointerDown(e: PointerEvent) {
-    const win = ot();
-    try {
-      win
-        ?.startAppRegionDrag?.({ x: e.clientX, y: e.clientY, pointerId: e.pointerId })
-        ?.catch?.(() => {});
-    } catch {
-      /* drag is a nicety — never throw */
-    }
-  }
+  onMount(() => {
+    // 原生宿主：声明式窗口区域（拖拽/双击最大化由平台注入 JS 承载）。
+    // 普通浏览器：API 缺失则无操作，保持既有降级语义。
+    const region = strip;
+    if (!region) return;
+    const handle = navigator.opentrayWindow?.bindWindowRegion?.(region, "auto");
+    return () => handle?.unbind?.();
+  });
 
   function applyRect(rect: OpentrayRect): void {
     const inner = globalThis.innerWidth;
@@ -48,7 +47,7 @@
   }
 
   onMount(() => {
-    const overlay = ot()?.overlay;
+    const overlay = navigator.opentrayWindow?.overlay ?? navigator.opentray?.window?.overlay;
     if (!overlay) return;
     let unsub: (() => void) | null = null;
     void (async () => {
@@ -72,9 +71,9 @@
 </script>
 
 <div
+  bind:this={strip}
   class="drag-strip no-drag shrink-0"
   style="padding-left: {safeLeft}px; padding-right: {safeRight}px"
-  onpointerdown={onPointerDown}
   role="banner"
   aria-label="window titlebar"
 >

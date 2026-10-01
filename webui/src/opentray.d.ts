@@ -43,6 +43,20 @@ declare global {
     /** 启动原生窗口拖拽（pointer 事件坐标）。 */
     startAppRegionDrag?(opts: { x: number; y: number; pointerId: number }): Promise<void> | void;
     stopAppRegionDrag?(opts: { pointerId: number }): Promise<void> | void;
+    /**
+     * 声明式窗口区域：把元素绑定为原生窗口行为（'auto' = move + 双击缩放；
+     * 'none' 暂停；'move'/'zoom' 单选；`resize-<edge>` 为 frameless resize 手柄，
+     * 平台不支持时绑定抛 TypeError）。严格 target 匹配——只有按压恰好落在绑定
+     * 元素上才触发；子元素需独立绑定。selector 匹配为绑定即快照；同元素重绑
+     * 以后者胜。
+     */
+    bindWindowRegion?(
+      target: HTMLElement | HTMLElement[] | string | { root?: ParentNode; selector: string },
+      options?:
+        | OpentrayWindowRegionBehavior
+        | OpentrayWindowRegionBehavior[]
+        | { behavior?: OpentrayWindowRegionBehavior | OpentrayWindowRegionBehavior[] },
+    ): OpentrayWindowRegionHandle;
     /** 调整原生窗口尺寸。 */
     resizeTo?(width: number, height: number): Promise<void> | void;
     /** 读取原生窗口的逻辑桌面像素 bounds。 */
@@ -72,6 +86,28 @@ declare global {
   /** 兼容 OpenTray namespace 形态的窗口入口。 */
   interface OpentrayNamespace {
     window?: OpentrayWindowBridge;
+  }
+
+  /** 窗口区域行为：'auto' = 平台标题栏语义（当前 move + zoom）。 */
+  type OpentrayWindowRegionBehavior =
+    | "auto"
+    | "none"
+    | "move"
+    | "zoom"
+    | "resize-top"
+    | "resize-right"
+    | "resize-bottom"
+    | "resize-left"
+    | "resize-top-left"
+    | "resize-top-right"
+    | "resize-bottom-left"
+    | "resize-bottom-right";
+
+  /** bindWindowRegion 返回的活绑定。 */
+  interface OpentrayWindowRegionHandle {
+    unbind(): void;
+    setBehavior(behavior: OpentrayWindowRegionBehavior | OpentrayWindowRegionBehavior[]): void;
+    readonly behavior: OpentrayWindowRegionBehavior | OpentrayWindowRegionBehavior[];
   }
 
   /** OpenTray 注入到浏览器 Navigator 的可选能力。 */

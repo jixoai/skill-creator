@@ -278,6 +278,10 @@ async function mountWindowedTray(opts: MountTrayOptions): Promise<{
       // 系统绘制 caption 按钮并投影 titlebar-area 几何（macOS NSWindow overlay /
       // win32 AppWindow ExtendsContentIntoTitlebar）。frameless 保持 false——
       // 边框/阴影/resize 与 caption 所有权仍归系统（§2 约束 7）。
+      // 2026-10-01 win32 带区输入回流：opentray 清除了 udk 默认整条 caption 命中
+      // （SetDragRects 退化 rect），带区点击直达页面；区域行为（拖拽 + 双击最大化/
+      // 还原）由平台注入 JS 的 bindWindowRegion 声明式承载，webui WindowDragRegion
+      // 仅声明区域。
       windowControlsOverlay,
       // win32 窗口身份（WM_SETICON：任务栏/alt-tab）；与 overlay 正交，降级重试仍生效。
       ...(windowIcon === null ? {} : { icon: windowIcon }),

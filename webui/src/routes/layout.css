@@ -16,6 +16,9 @@
 @plugin 'tailwind-scrollbar';
 
 :root {
+  /* 滚动条/表单控件的原生渲染方案跟随 color-scheme；缺省时 Chromium 按
+     light 画，暗色主题下滚动条就会发亮。 */
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -51,6 +54,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -145,7 +149,8 @@
     width: 100%;
     overflow: hidden;
   }
-  /* no-drag：交互子控件防误触窗口拖拽（双保险，原生拖拽靠 startAppRegionDrag）。 */
+  /* no-drag：历史防线（区域行为已由平台 bindWindowRegion 严格 target 匹配承载，
+     按钮自带可点性；保留作为宿主 CSS 语义的双保险）。 */
   .no-drag {
     -webkit-app-region: no-drag;
     app-region: no-drag;

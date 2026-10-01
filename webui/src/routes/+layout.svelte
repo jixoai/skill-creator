@@ -97,7 +97,6 @@
       {#snippet right()}
         <button
           class="no-drag flex h-6 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground max-[720px]:h-11 max-[720px]:w-11"
-          onpointerdown={(e) => e.stopPropagation()}
           aria-label="Open command palette"
           aria-keyshortcuts="Meta+K"
           title="Command palette (Cmd+K)"
@@ -108,7 +107,6 @@
         </button>
         <button
           class="no-drag flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground max-[720px]:h-11 max-[720px]:w-11"
-          onpointerdown={(e) => e.stopPropagation()}
           aria-label="Reload app"
           title="Reload"
           onclick={() => globalThis.location.reload()}
@@ -119,7 +117,6 @@
           class="no-drag flex h-6 w-6 items-center justify-center rounded transition-colors {agentPanel.open
             ? 'bg-primary/10 text-primary'
             : 'text-muted-foreground hover:text-foreground'} max-[720px]:h-11 max-[720px]:w-11"
-          onpointerdown={(e) => e.stopPropagation()}
           aria-label="Toggle agent panel"
           title="Agent panel"
           aria-pressed={agentPanel.open}
