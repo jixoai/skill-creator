@@ -23,10 +23,12 @@
     emptyDraft,
     cacheCreatorDraft,
     creatorDraftKey,
+    isDraftHydrated,
     markDraftHydrated,
     takeCachedCreatorDraft,
     type CreatorDraft,
   } from "$lib/stores/creator-editor.svelte";
+  import { loadSkillDoc } from "$lib/store.svelte";
   import { TEMPLATES } from "$lib/templates";
   import type { WorkspaceProviderTarget } from "$lib/types";
   import type { SkillId } from "$lib/types";
@@ -98,6 +100,24 @@
     if (restored !== null && key !== null) {
       markDraftHydrated(key);
     }
+  });
+
+  // WS4 r7 minor：深链非 file 子视图（如 ?subview=test 直开）时 FileBrowser 未
+  // 挂载，文档加载无人执行——Test 门槛（revision）永久停留。由路由属主兜底
+  // 加载；file 子视图仍由 FileBrowser 负责，isDraftHydrated 双闸幂等。
+  $effect(() => {
+    if (subview === "file") return;
+    if (mode !== "edit" || skillId === undefined || target === null) return;
+    const key = creatorDraftKey(target, "edit", skillId);
+    if (key !== null && isDraftHydrated(key)) return;
+    void loadSkillDoc(target, skillId)
+      .then((document) => {
+        editor.hydrateFromDocument(document);
+        if (key !== null) markDraftHydrated(key);
+      })
+      .catch(() => {
+        // 兜底加载静默失败：错误面由 File 子视图的 loadError 承担。
+      });
   });
 
   // 3.1c：卸载快照——tab 关闭 / island 关闭（与官方 session 往返）时保留当前草稿。
