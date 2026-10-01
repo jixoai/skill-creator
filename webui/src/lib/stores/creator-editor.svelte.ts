@@ -37,6 +37,10 @@ export function provideCreatorEditor(initial: CreatorDraft): CreatorEditorContex
       return draft;
     },
     hydrateFromDocument(document) {
+      // WS4 走查 B2：新建成功 hydrate 时同步切 edit 语义——否则 Test tab 的
+      // saved 门槛（mode==="edit" && skillId && revision）永远无法满足，且
+      // 后续保存会因 revision!==null 与 new 模式矛盾而静默禁用。
+      draft.mode = "edit";
       draft.skillId = document.skillId;
       draft.name = String(document.frontmatter.name ?? "");
       draft.description = String(document.frontmatter.description ?? "");

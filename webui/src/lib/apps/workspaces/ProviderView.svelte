@@ -55,6 +55,7 @@
   import IconFile from "@lucide/svelte/icons/file-text";
   import IconGraph from "@lucide/svelte/icons/network";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
+  import IconPen from "@lucide/svelte/icons/file-pen-line";
   import IconPower from "@lucide/svelte/icons/power";
   import IconShield from "@lucide/svelte/icons/shield-check";
   import IconSearch from "@lucide/svelte/icons/search";
@@ -928,6 +929,26 @@
                 {/if}
                 {detail.disabled ? "Enable" : "Disable"}
               </Button>
+              {#if editable && selectedSkillId}
+                <!-- WS4 走查 B1：既有技能进 Creator 编辑态的唯一入口（Test tab /
+                     change log 等子视图都在 Creator 实例路由下）。 -->
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-8 gap-1.5"
+                  title="Open this skill in the Creator editor"
+                  onclick={() =>
+                    goById("creator.workspace.skill", {
+                      mode: "edit",
+                      wsId: wsId!,
+                      providerId: providerId!,
+                      skillId: selectedSkillId!,
+                    })}
+                >
+                  <IconPen class="h-3.5 w-3.5" />
+                  Edit in Creator
+                </Button>
+              {/if}
             </div>
           </div>
           <div class="mt-2 flex flex-wrap gap-1.5">

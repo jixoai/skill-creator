@@ -54,6 +54,9 @@
           extensions: [
             basicSetup,
             markdown(),
+            // WS4 走查 #11：SKILL.md 是散文型 markdown——软换行，长行不横向
+            // 溢出（无横滚条裁切短行）。
+            EditorView.lineWrapping,
             EditorView.updateListener.of((update) => {
               if (!update.docChanged) return;
               selfUpdate = true;

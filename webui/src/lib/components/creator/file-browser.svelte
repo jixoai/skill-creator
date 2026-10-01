@@ -24,6 +24,7 @@
   import { showToast } from "$lib/toast.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import { goto } from "$app/navigation";
+  import { goById } from "$lib/shell";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import { getConnectionGeneration } from "$lib/store.svelte";
   import { ORPCError } from "@orpc/client";
@@ -141,6 +142,18 @@
       const createdKey = creatorDraftKey(draft.target, "edit", result.document.skillId);
       if (createdKey !== null) markDraftHydrated(createdKey);
       showToast("Skill created.");
+      // WS4 走查 B2：就地转编辑态路由（标题/draftKey 与 Test tab 门槛随身份
+      // 对齐；草稿经卸载缓存以 edit 身份恢复，不重拉不丢内容）。
+      goById(
+        "creator.workspace.skill",
+        {
+          mode: "edit",
+          wsId: draft.target.workspaceId,
+          providerId: draft.target.providerId,
+          skillId: result.document.skillId,
+        },
+        { subview: "file" },
+      );
     } catch (error) {
       handleSaveError(error);
     } finally {
@@ -150,6 +163,11 @@
 
   function handleSaveError(error: unknown): void {
     if (error instanceof ORPCError && error.code === "CONFLICT") {
+      if (draft.mode === "new") {
+        // create 的 CONFLICT = 目录已存在（WS4 走查：不得误报 changed elsewhere）。
+        showToast("A skill with this directory name already exists.");
+        return;
+      }
       showToast("This skill changed elsewhere. Reload to view the latest.", {
         label: "Reload",
         run: reloadCurrent,

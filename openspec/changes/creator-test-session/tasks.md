@@ -25,3 +25,17 @@
 - [x] 3.3 真实内核网关集成：seed 元数据落盘 + 重启回读（引用展开面由 agent-references 测试族 + WS4 走查覆盖）
 - [ ] 3.4 门禁：focused tests + webui check + typecheck + fmt + full build（全量批门禁随 Ch3/Ch4 一并跑）
 - [ ] 3.5 桌面 + 窄屏（1100/680）vision 走查（console/overflow/空态文案）——归 WS4 批次
+
+## WS4 vision 走查修复（2026-09-30 round 4 阻塞项）
+
+- [x] B1 既有技能进 Creator 无入口：ProviderView 详情新增 "Edit in Creator"
+      （goById creator.workspace.skill edit 深链——实例路由是 path params，
+      此前无任何 UI 能产出该 URL）。
+- [x] B2 Create 成功不转编辑态：hydrateFromDocument 补 `draft.mode = "edit"`
+      （Test tab saved 门槛永假的根因）+ file-browser create 成功后 goById
+      就地转 edit 路由（草稿经卸载缓存以 edit 身份恢复）；create 的 CONFLICT
+      改为「目录已存在」文案（不再误报 changed elsewhere）。
+- [x] #11 CodeMirror 软换行（EditorView.lineWrapping）。
+- 验证：typecheck/svelte-check/fmt/build 全绿；全量 1652 passed + 3 skipped
+  （gateway 集成例，本机网关间歇不可达，环境性）；ego-browser 复走查通过
+  （见下方回填）。
