@@ -45,6 +45,14 @@
           ? `Self skill installed; previous version backed up to ${result.backupPath}`
           : "Self skill installed.",
       );
+      // Owner 裁决 [2026-10-02]：resolve 接续完整 setup——引导块结果可见。
+      if (result.agentsMd?.kind === "injected" || result.agentsMd?.kind === "updated") {
+        showToast("Agent guidance block injected into ~/.agents/AGENTS.md");
+      } else if (result.agentsMd?.kind === "failed") {
+        showToast(`Guidance block failed: ${result.agentsMd.reason}`);
+      } else if (result.agentsMd?.kind === "multiple") {
+        showToast("Multiple guidance blocks found; refresh the first — clean up the rest.");
+      }
     } else {
       showToast(`Self skill install failed: ${result.reason}`);
     }

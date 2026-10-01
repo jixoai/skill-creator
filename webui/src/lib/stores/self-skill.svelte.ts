@@ -11,6 +11,7 @@
 import type { SelfSkillStatus } from "$shared/contracts/self-skill.js";
 import { getConnectionGeneration, getRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
+import type { SelfSkillAgentsMdResult } from "$shared/contracts/self-skill.js";
 
 const stateRequests = createRequestGenerationGate(getConnectionGeneration);
 const decisionRequests = createRequestGenerationGate(getConnectionGeneration);
@@ -42,10 +43,13 @@ export async function loadSelfSkillState(): Promise<void> {
   }
 }
 
-/** 覆盖安装产品版本；成功返回备份路径（可选备份仅对真目录冲突生效）。 */
+/** 覆盖安装产品版本；成功返回备份路径与引导块接续结果（仅真目录冲突可备份）。 */
 export async function resolveSelfSkillConflict(
   backup: boolean,
-): Promise<{ ok: true; backupPath?: string } | { ok: false; reason: string }> {
+): Promise<
+  | { ok: true; backupPath?: string; agentsMd?: SelfSkillAgentsMdResult }
+  | { ok: false; reason: string }
+> {
   const request = decisionRequests.issue();
   const rpc = getRpc();
   if (!rpc) return { ok: false, reason: "Not connected to the daemon." };

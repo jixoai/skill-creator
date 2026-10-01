@@ -27,6 +27,7 @@ import { rpcContract } from "../shared/rpc-contract.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
 import type { DaemonDomain } from "./domain.js";
 import { DomainError } from "./domain-error.js";
+import { ensureAgentsMdPromptBlock } from "./agents-md-block.js";
 import {
   keepSelfSkillUserVersion,
   resolveSelfSkillConflict,
@@ -178,7 +179,22 @@ export function createRpcRouter(deps: RpcRouterDeps) {
             }
           : status;
       }),
-      resolve: rpc.selfSkill.resolve.handler(async ({ input }) => resolveSelfSkillConflict(input)),
+      resolve: rpc.selfSkill.resolve.handler(async ({ input }) => {
+        const result = resolveSelfSkillConflict(input);
+        if (!result.ok) return result;
+        // Owner 裁决 [2026-10-02]「处理完 setup 前置冲突应走完整 setup」：
+        // 冲突解决成功即接续引导块注入（banner 与 CLI setup 同语义；注入失败
+        // 不回滚已完成的链接——增强项语义与 CLI 一致）。
+        const block = ensureAgentsMdPromptBlock();
+        return {
+          ...result,
+          agentsMd: {
+            kind: block.kind,
+            ...(block.kind === "multiple" ? { file: block.file } : {}),
+            ...(block.kind === "failed" ? { reason: block.reason } : {}),
+          },
+        };
+      }),
       keep: rpc.selfSkill.keep.handler(() => keepSelfSkillUserVersion()),
     },
     evaluation: {

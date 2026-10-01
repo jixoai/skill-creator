@@ -384,3 +384,68 @@ describe("closed loop: the linked self skill is discoverable by the product", ()
     expect(path.dirname(path.dirname(backup))).toBe(path.dirname(path.resolve(root)));
   });
 });
+
+// ---- Owner 裁决 [2026-10-02]：banner resolve 接续完整 setup ----
+
+import { createRouterClient } from "@orpc/server";
+import { createDaemonDomain, type DaemonDomain } from "../src/daemon/domain.js";
+import { createRpcRouter } from "../src/daemon/rpc-router.js";
+import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
+
+describe("resolve RPC continues into agents-md injection (banner = full setup)", () => {
+  let domain: DaemonDomain;
+
+  beforeEach(() => {
+    domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
+  });
+
+  afterEach(() => {
+    void domain.repository.dispose();
+    void domain.steward.dispose();
+  });
+
+  function client() {
+    return createRouterClient(
+      createRpcRouter({
+        status: () => ({
+          active: true,
+          pid: process.pid,
+          version: "test",
+          port: 0,
+          startedAt: 0,
+          tray: "headless",
+        }),
+        domain,
+      }),
+    );
+  }
+
+  it("injects the guidance block after resolving a user-directory conflict with backup", async () => {
+    const root = freshRoot();
+    process.env[SELF_SKILL_ROOT_ENV] = root;
+    writeUserDirectory(root);
+    expect(selfSkillStatus(root).state).toBe("conflict");
+
+    const result = await client().selfSkill.resolve({ backup: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.backupPath).toContain("skills-backup");
+    // 完整 setup 接续：引导块随 resolve 注入（此前 banner 只做冲突处理）。
+    expect(result.agentsMd?.kind).toBe("injected");
+    const agentsMd = fs.readFileSync(path.join(path.dirname(root), "AGENTS.md"), "utf8");
+    expect(agentsMd).toContain("<skill-creator-v2>");
+    expect(agentsMd).toContain("Skill 管理与沉淀走 skill-creator");
+    // 链接已建立：再次 resolve 幂等，agentsMd 走 current 分支。
+    const again = await client().selfSkill.resolve({ backup: true });
+    expect(again.ok && again.agentsMd?.kind).toBe("current");
+  });
+
+  it("reports a typed failure without touching the entry when no conflict exists", async () => {
+    const root = freshRoot();
+    process.env[SELF_SKILL_ROOT_ENV] = root;
+    fs.mkdirSync(root, { recursive: true });
+    const result = await client().selfSkill.resolve({ backup: true });
+    expect(result).toMatchObject({ ok: false });
+    expect(result.ok === false && result.reason).toContain("no conflict");
+  });
+});

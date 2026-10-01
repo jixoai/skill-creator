@@ -53,9 +53,24 @@ export const SelfSkillResolveInputSchema = z
   })
   .strict();
 
-/** resolve 输出（typed 失败；不走 RpcError 词表）。 */
+/**
+ * resolve 输出（typed 失败；不走 RpcError 词表）。
+ * Owner 裁决 [2026-10-02]：banner 裁决处理完前置冲突即接续完整 setup——
+ * 引导块注入结果随 resolve 返回（与 CLI setup 同语义；模型段仍归显式配置）。
+ */
+export const SelfSkillAgentsMdResultSchema = z.object({
+  kind: z.enum(["injected", "updated", "current", "multiple", "failed"]),
+  file: z.string().optional(),
+  reason: z.string().optional(),
+});
+export type SelfSkillAgentsMdResult = z.infer<typeof SelfSkillAgentsMdResultSchema>;
+
 export const SelfSkillResolveResultSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), backupPath: z.string().optional() }),
+  z.object({
+    ok: z.literal(true),
+    backupPath: z.string().optional(),
+    agentsMd: SelfSkillAgentsMdResultSchema.optional(),
+  }),
   z.object({ ok: z.literal(false), reason: z.string() }),
 ]);
 
