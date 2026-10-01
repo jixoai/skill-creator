@@ -55,3 +55,17 @@ ComposerReferenceInput` 的转换语义（uid 由 registry 生成、调用方构
   前缀与既有 id 的映射规则；daemon 侧 provider-model 会话 adapter 接口冻结
   （create/prompt/references 展开/transcript 读/cancel/version——Ch3 runner 消费，
   不依赖 webui store）。
+
+## WS4 走查遗留（非阻塞，后续批次候选）
+
+三轮 ego-browser 走查（r4/r6/r7，真实 daemon + 真实模型）全 pass 后仍记录在案：
+
+- ProviderView 详情 description 显示 YAML 折叠标量原文（`>-`），列表行正常（frontmatter
+  解析路径不一致）。
+- `text-muted-foreground` 12px 辅助文本对比度 ≈3.6:1（低于 4.5:1）。
+- Agent 面板个别图标按钮命中区 16–18px（建议 ≥24px）。
+- Agent 面板开启（1100 宽）时 Settings Theme 分段控件 System 段被 drawer 遮挡；
+  System 未选中态有常驻底色，与选中态易混淆。
+- Repository 内置源描述中文混杂（整体 UI 英文）；源卡片 "Home" 按钮语义不明。
+- Intelligence graph 密集区（54 节点）标签重叠。
+- Workspace 卡片默认落点为第一个 provider（可能 0 skills），需自行找目标 provider。
