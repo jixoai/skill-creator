@@ -151,7 +151,7 @@ async function mountWebTray(opts: MountTrayOptions): Promise<{
     const icon: Icon | undefined = iconPath
       ? {
           "darwin-icon-only": { type: "file", path: iconPath, isTemplate: true },
-          "win32-icon-only": { type: "file", path: iconPath },
+          "win32-icon-only": { type: "file", path: iconPath, isTemplate: true },
           "linux-icon-only": { type: "file", path: iconPath },
         }
       : undefined;
@@ -238,9 +238,10 @@ async function mountWindowedTray(opts: MountTrayOptions): Promise<{
     const windowIcon = resolveWindowIcon(opts.webuiDir);
     const icon: Icon | undefined = iconPath
       ? {
-          // macOS template icon：透明背景单色图，系统按深浅色自适应反相。
+          // macOS template icon：透明背景单色图，系统按深浅色自适应反相；
+          // win32 同一张单色图声明 isTemplate，由 daemon 侧按任务栏主题着色。
           "darwin-icon-only": { type: "file", path: iconPath, isTemplate: true },
-          "win32-icon-only": { type: "file", path: iconPath },
+          "win32-icon-only": { type: "file", path: iconPath, isTemplate: true },
           "linux-icon-only": { type: "file", path: iconPath },
         }
       : undefined;
