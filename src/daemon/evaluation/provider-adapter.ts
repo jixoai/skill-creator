@@ -21,6 +21,22 @@ export const EVALUATION_PROMPT_VERSION = "evaluation-provider-run-v1";
 /** 工具面版本（内核工具行投影的冻结标记）。 */
 export const EVALUATION_TOOL_VERSION = "kernel-tools-v1";
 
+/**
+ * r7 P1-4 收口：transcript 未达终态的 typed 超时（service 捕获 → error 态
+ * RUNNER_ERROR；半截文本不得进入断言判定）。
+ */
+export class ProviderTranscriptTimeout extends Error {
+  constructor(
+    public readonly sessionId: string,
+    public readonly steps: number,
+  ) {
+    super(
+      `provider transcript did not reach turn-end within ${steps} steps (sessionId=${sessionId})`,
+    );
+    this.name = "ProviderTranscriptTimeout";
+  }
+}
+
 export interface ProviderAdapterDeps {
   sessions: AgentSessionsService;
   cwd?: string;
@@ -82,9 +98,7 @@ export function createProviderSessionAdapter(deps: ProviderAdapterDeps): Provide
       // 抛 typed 超时（service 捕获 → error 态 RUNNER_ERROR）并回收会话。
       if (!terminal) {
         deps.sessions.cancel(sessionId);
-        throw new Error(
-          `provider transcript did not reach turn-end within ${maxSteps} steps (sessionId=${sessionId})`,
-        );
+        throw new ProviderTranscriptTimeout(sessionId, maxSteps);
       }
       // 投影：依序拼接 user-text/assistant-text/tool-result 的 text 字段。
       const full = deps.sessions.stream(sessionId, 0, 5000);

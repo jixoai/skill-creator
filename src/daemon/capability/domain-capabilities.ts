@@ -542,6 +542,9 @@ function assertTargetsAligned(
   const affectedKeys = new Set(affected.map(key));
   const targetKeys = new Set(targets.map(key));
   if (
+    // r7 补强：targets 自身重复（长度 ≠ 集合大小）同样拒绝——重复项会让
+    // observedRevisions 的逐项配对失去唯一性。
+    targets.length !== targetKeys.size ||
     affectedKeys.size !== targetKeys.size ||
     [...affectedKeys].some((entry) => !targetKeys.has(entry))
   ) {

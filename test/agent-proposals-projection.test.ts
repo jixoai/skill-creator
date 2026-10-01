@@ -151,6 +151,7 @@ beforeEach(() => {
   for (const [directory, description] of [
     ["demo-skill", "unified projection fixture"],
     ["wire-second", "second fixture for alignment tests"],
+    ["wire-third", "third fixture for set-misalignment tests"],
   ] as const) {
     domain.creator.save({
       mode: "create",
@@ -313,6 +314,44 @@ describe("intelligence propose capability wire (r6 P1-1/P1-2)", () => {
       },
     });
     expect(unequal.kind).toBe("failed");
+  });
+
+  it("rejects multi-source inputs whose targets duplicate or misalign at equal length (r7)", async () => {
+    const target = { workspaceId, providerId: "openclaw" };
+    const skills = (await domain.skills.list(target, true)).slice(0, 3);
+    if (skills.length < 3) throw new Error("fixture skills insufficient");
+    const info = await domain.skills.info(target, skills[0]!.id);
+    const mergePayload = (sources: typeof skills) => ({
+      kind: "merge" as const,
+      sources: sources.map((entry) => ({ ...target, skillId: entry.id })),
+      target: {
+        directoryName: "merged-out",
+        frontmatter: { name: "merged-out", description: "d" },
+        body: "b",
+      },
+    });
+
+    // 等长但集合错位：payload 影响 {A,B}，targets={A,C}。
+    const misaligned = await callTool("intelligence_propose_merge", {
+      action: "merge",
+      findingId: `fn_${"a".repeat(16)}`,
+      targets: [skills[0]!, skills[2]!].map((entry) => ({ ...target, skillId: entry.id })),
+      observedRevisions: [info.revision, info.revision],
+      rationale: "misaligned set",
+      payload: mergePayload([skills[0]!, skills[1]!]),
+    });
+    expect(misaligned.kind).toBe("failed");
+
+    // targets 自身重复：[A,A] 配等长 revisions，payload 影响 {A,B}。
+    const duplicated = await callTool("intelligence_propose_merge", {
+      action: "merge",
+      findingId: `fn_${"a".repeat(16)}`,
+      targets: [skills[0]!, skills[0]!].map((entry) => ({ ...target, skillId: entry.id })),
+      observedRevisions: [info.revision, info.revision],
+      rationale: "duplicate targets",
+      payload: mergePayload([skills[0]!, skills[1]!]),
+    });
+    expect(duplicated.kind).toBe("failed");
   });
 
   it("projects a stale si approve as rejected + rejectCause:stale (real router)", async () => {

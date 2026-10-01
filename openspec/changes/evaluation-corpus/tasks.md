@@ -32,4 +32,12 @@
       取消竞态）+ 导入器 4 例（期望矩阵迁移实证）
 - [x] 4.4 真实模型跑分证据（真内核×本地网关 12.4s 完成；版本三元组落档；
       gateway 集成 1 例，网关缺席自动 skip 并在台账注明未闭合）
-- [x] 4.5 门禁：全量 1637/1637（166 文件）+ typecheck + fmt + full build 全绿
+- [x] 4.5 门禁：全量 1637/1637（166 文件）→ r6/r7 处置后终值 1664/1664
+      （170 files，本轮提交）+ typecheck + fmt + full build 全绿
+
+## r6/r7 复核处置（evaluation 侧）
+
+- [x] appendResult 补 Imported-only 写门（Global 负例）。
+- [x] provider adapter 未见 turn-end → ProviderTranscriptTimeout typed 超时 + cancel；服务级验收（error/RUNNER_ERROR/断言恒空）。
+- [x] run 前 stale 的 observedEndRevision 改记当前实际观察值（字段级回归）。
+- [x] finding-severity 服务级测试（按 caseId 断言 analyzer severity）。

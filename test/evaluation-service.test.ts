@@ -262,26 +262,67 @@ describe("evaluation provider adapter terminal gate (r6 P1-4)", () => {
 });
 
 describe("finding-severity assertion (service level)", () => {
-  it("judges finding-severity against the analyzer's corpus findings", async () => {
-    // 语料同名 alpha ×2 → duplicate-name finding，severity 由分析器判定。
+  it("judges finding-severity against the analyzer's corpus findings (r7: by caseId, deterministic)", async () => {
+    // 语料同名 alpha ×2 → duplicate-name finding，analyzer 判定 severity = error。
     const pass = seedCase({
+      prompt: "p",
+      assertions: [{ kind: "finding-severity", value: "error" }],
+    });
+    const mismatch = seedCase({
       prompt: "p",
       assertions: [{ kind: "finding-severity", value: "warning" }],
     });
     const service = serviceWith();
-    await runToCompletion(service, [pass.caseId]);
-    const [passed] = await service.results(target);
-    // 语料 duplicate-name 的 severity 即断言基准——先证「与实际 severity 一致则过」。
-    expect(passed.outcome).toBe(passed.assertions[0].outcome === "passed" ? "passed" : "failed");
+    await runToCompletion(service, [pass.caseId, mismatch.caseId]);
+    const results = await service.results(target);
+    const byCase = new Map(results.map((entry) => [entry.caseId, entry]));
+    expect(byCase.get(pass.caseId)?.outcome).toBe("passed");
+    expect(byCase.get(mismatch.caseId)?.outcome).toBe("failed");
+  });
+});
 
-    const mismatch = seedCase({
+describe("provider timeout surfaces as error result (r7 P1-4 service level)", () => {
+  it("maps a transcript timeout to outcome=error / RUNNER_ERROR with zero assertions", async () => {
+    const { ProviderTranscriptTimeout } =
+      await import("../src/daemon/evaluation/provider-adapter.js");
+    const entry = seedCase({
       prompt: "p",
-      assertions: [{ kind: "finding-severity", value: "error" }],
+      assertions: [{ kind: "contains", value: "never judged" }],
     });
-    await runToCompletion(service, [mismatch.caseId]);
-    const [failed] = await service.results(target);
-    // error ≠ 实际 severity → 两例至少一例给出确定性裁决（非 error/unavailable）。
-    expect(["passed", "failed"]).toContain(failed.outcome);
-    expect(passed.outcome).not.toBe(failed.outcome);
+    const service = serviceWith(() => ({
+      create: async () => ({ sessionId: "agent-timeout" }),
+      prompt: async () => undefined,
+      readTranscript: async () => {
+        throw new ProviderTranscriptTimeout("agent-timeout", 3);
+      },
+      cancel: () => undefined,
+      versions: () => ({ promptVersion: "p", toolVersion: "t", dshVersion: "d" }),
+    }));
+    // runToCompletion 固定 analyzer——此处显式走 provider-model 跑到终态。
+    const start = service.startRun({ target, caseIds: [entry.caseId], runner: "provider-model" });
+    for (let i = 0; i < 50; i += 1) {
+      const status = service.runStatus(start.runId);
+      if (status.status === "completed" || status.status === "cancelled") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const [result] = await service.results(target);
+    expect(result.outcome).toBe("error");
+    expect(result.failure?.code).toBe("RUNNER_ERROR");
+    // 半截文本不进入断言：assertions 恒空。
+    expect(result.assertions).toEqual([]);
+  });
+});
+
+describe("pre-run stale observes the actual current revision (r7 blocker)", () => {
+  it("records observedStart=observedEnd=current on the revision gate", async () => {
+    const entry = seedCase({ prompt: "p", assertions: [{ kind: "contains", value: "body" }] });
+    revisionNow = drifted;
+    const service = serviceWith();
+    await runToCompletion(service, [entry.caseId]);
+    const [result] = await service.results(target);
+    expect(result.outcome).toBe("stale");
+    expect(result.expectedRevision).toBe(revision);
+    expect(result.observedStartRevision).toBe(drifted);
+    expect(result.observedEndRevision).toBe(drifted);
   });
 });

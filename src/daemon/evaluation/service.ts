@@ -231,9 +231,12 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
       const current = await loadSkill(target);
       // 活技能域的 revision 前闸只约束 user case（fixture case 的闸在 fixture 域）。
       if (!isFixture && current.revision !== runCase.boundRevision) {
+        // r7 阻塞修复：end 观察值 = 当前实际读到的 revision（base 模板回填的
+        // bound 值会把「回滚后仍 stale」的展示语义弄丢）。
         return {
           ...base,
           observedStartRevision: current.revision,
+          observedEndRevision: current.revision,
           outcome: "stale",
           assertions: [],
         };
