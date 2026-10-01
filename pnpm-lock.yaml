@@ -197,14 +197,14 @@ importers:
         specifier: 2.0.0
         version: 2.0.0
       '@opentray/ext-dialog':
-        specifier: 0.33.6
-        version: 0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))
+        specifier: 0.33.7
+        version: 0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))
       '@opentray/ext-webview':
-        specifier: 0.33.6
-        version: 0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))
+        specifier: 0.33.7
+        version: 0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))
       '@opentray/vite-plugin':
-        specifier: 0.33.6
-        version: 0.33.6(@gaubee/util@0.35.2)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
+        specifier: 0.33.7
+        version: 0.33.7(@gaubee/util@0.35.2)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))
       '@orpc/contract':
         specifier: 1.14.6
         version: 1.14.6(@opentelemetry/api@1.9.1)
@@ -224,8 +224,8 @@ importers:
         specifier: ^4.0.3
         version: 4.0.3
       opentray:
-        specifier: 0.33.6
-        version: 0.33.6(@gaubee/util@0.35.2)
+        specifier: 0.33.7
+        version: 0.33.7(@gaubee/util@0.35.2)
       smol-toml:
         specifier: ^1.8.0
         version: 1.8.0
@@ -300,6 +300,12 @@ importers:
         specifier: ^2.0.8
         version: 2.0.8(svelte@5.57.0)
     devDependencies:
+      '@codemirror/lang-markdown':
+        specifier: ^6.5.2
+        version: 6.5.2
+      '@codemirror/view':
+        specifier: ^6.43.13
+        version: 6.43.13
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
@@ -345,6 +351,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      codemirror:
+        specifier: ^6.0.2
+        version: 6.0.2
       execa:
         specifier: ^9.6.1
         version: 9.6.1
@@ -530,6 +539,39 @@ packages:
   '@bramus/specificity@2.4.2':
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
+
+  '@codemirror/autocomplete@6.20.3':
+    resolution: {integrity: sha512-tlosUqb+3BbxCxZdu4tKeRghPFC+QM7q4X5YhKV2eCmPG+1r2F3f4AaSz5sCrFqUtX4Jh20VFTKecl16MgiV9g==}
+
+  '@codemirror/commands@6.11.1':
+    resolution: {integrity: sha512-O/4hG3SC1YwcmQ0d2UVNDs+AsaNWd1iHVxbTeEBuqH+6bExAiPK3iS/BvpY6rZGURALv4ZD3sIgcCmRvw3ehBg==}
+
+  '@codemirror/lang-css@6.3.1':
+    resolution: {integrity: sha512-kr5fwBGiGtmz6l0LSJIbno9QrifNMUusivHbnA1H6Dmqy4HZFte3UAICix1VuKo0lMPKQr2rqB+0BkKi/S3Ejg==}
+
+  '@codemirror/lang-html@6.4.12':
+    resolution: {integrity: sha512-pw2ReWKUqSkbvh76RAT4NYxiogRu+PWkR2ukAwO9uOgrm8uipkzjtKKtNpyeAQwHOqxEeSvAXZ6vr3AfyB9y/w==}
+
+  '@codemirror/lang-javascript@6.2.5':
+    resolution: {integrity: sha512-zD4e5mS+50htS7F+TYjBPsiIFGanfVqg4HyUz6WNFikgOPf2BgKlx+TQedI1w6n/IqRBVBbBWmGFdLB/7uxO4A==}
+
+  '@codemirror/lang-markdown@6.5.2':
+    resolution: {integrity: sha512-AwBOdkWYuA//WcM0xO5PfHPUcmz/O2i5o0Nsg1U69SII/loCJlFI1Romd9xp2HYb1kYJRGZotyqRghuHH5n8Kw==}
+
+  '@codemirror/language@6.12.4':
+    resolution: {integrity: sha512-1q4PaT+o6PbgpkJt4Q8Fv5XJxTy4FUZ4MWETtyiDw3J0Pyr9E2vqcKL+k9wcvjNTIsauxvE7OfmWj3FRPHQ76A==}
+
+  '@codemirror/lint@6.9.7':
+    resolution: {integrity: sha512-28/+iWLYxKxsvGYhSYL7zaCZqLz5+FFFDq9tVsvGv9kv8RY4fFAchJ5WX9M3YrrRlTIsECjsXPqeNgnSmNP2dg==}
+
+  '@codemirror/search@6.7.2':
+    resolution: {integrity: sha512-gUYkYhT2+n/+VGZ+8EzE5WFkYZUZYm1VOKDudIsNqh42uRVQJ0a6Yss9sdKT3MeOYfuL1N6AZA57oza0Oyr0LA==}
+
+  '@codemirror/state@6.7.6':
+    resolution: {integrity: sha512-kAz+AncRtKuIknedxT1bq4XwXv4UowhbkHU1myPrtVb/jZtImWuV5BXzv5vK6i3kYACsdiZiQKFQQ5Mq7elW8w==}
+
+  '@codemirror/view@6.43.13':
+    resolution: {integrity: sha512-sihaFrUzAsYBQsL9J2t69y8nfMQGwcYmggAZsk+kjPbjYZMyuf2hU8tUNTZ+P+isb6XRr8JE22TZlJxBoVdH1A==}
 
   '@csstools/color-helpers@6.1.1':
     resolution: {integrity: sha512-gLNsunvwf3mCi5u5o46/Z/JcJMnhbHSaZ69rkgPzNM3J4s8hWwpPUQB6/tt0EDFyCiWzxANlx+2LJwpYj4zS1w==}
@@ -2413,10 +2455,34 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@lezer/common@1.5.3':
+    resolution: {integrity: sha512-H0iErY4e43LpXbYDyBci5W4v/RwTgGV3YzYOlJPiGZ8RY8w51kVE+xLn1tg3Z6UmSfyETvtsUK3r7YsgDQEI7Q==}
+
+  '@lezer/css@1.3.8':
+    resolution: {integrity: sha512-EJn1zcL9qoDptief6ipWKZKLiOpXkxSe0+t8CH9oiMVcZlq7NBWrjCqnc/41EIjeo/ITj1gFFiATdTkaJDL+Og==}
+
+  '@lezer/highlight@1.2.5':
+    resolution: {integrity: sha512-O1GMVKgtf5YspFaRzpmqkVgMtIk2HG9uMAbH6wdAIdNh3TVzCsch/+cRi+6l2//UGDKe6NB9BW3cvuR5ezMQ0w==}
+
+  '@lezer/html@1.3.13':
+    resolution: {integrity: sha512-oI7n6NJml729m7pjm9lvLvmXbdoMoi2f+1pwSDJkl9d68zGr7a9Btz8NdHTGQZtW2DA25ybeuv/SyDb9D5tseg==}
+
+  '@lezer/javascript@1.5.5':
+    resolution: {integrity: sha512-sWg4yX1J6XW67AaAynVt0iwF0M5c+np36TEu+P2ifAJ8haRYvHnWDV28r1jdwnJehWCwXECutAUy56K4RBZIyg==}
+
+  '@lezer/lr@1.4.10':
+    resolution: {integrity: sha512-rnCpTIBafOx4mRp43xOxDJbFipJm/c0cia/V5TiGlhmMa+wsSdoGmUN3w5Bqrks/09Q/D4tNAmWaT8p6NRi77A==}
+
+  '@lezer/markdown@1.7.2':
+    resolution: {integrity: sha512-iTkYvoVcKt3WkeL7qUDyXHONZEwLio4wj8KTNi2dnjQEXBZKMV63BpQrPqfsM+OkvuRbiSTAcycYAsQzLhRNoQ==}
+
   '@lucide/svelte@1.41.0':
     resolution: {integrity: sha512-N5dInvHWGxNcnu3VJvbO2zOJA832Uy4he6qGwcqd8i3m8iYGlLoebp+e+X8NfncXXLnXkYvru5BnkUVdNdo1xg==}
     peerDependencies:
       svelte: ^5
+
+  '@marijn/find-cluster-break@1.0.4':
+    resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
 
   '@mixmark-io/domino@2.2.0':
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
@@ -2525,88 +2591,81 @@ packages:
     resolution: {integrity: sha512-eSYWTm620tTk45EKSedaUL8MFYI8hW164hIXsgIHyxu3VobUB3fFCu5t0hQby6OoWRPsG1KkKUG2M5UadiLiVg==}
     engines: {node: '>=14'}
 
-  '@opentray/darwin-arm64@0.33.6':
-    resolution: {integrity: sha512-OLcXwU/EKYoyJcAmT6KR0aEne181w4P3DfpNklTGbSV83V63y3H+HULCXoYkw1lyTA3YYE20odeds8xvFMvCPw==}
+  '@opentray/darwin-arm64@0.33.7':
+    resolution: {integrity: sha512-DAZ8APU1gPfd3hRTVDA932gkVy7HHTz640yb9skW5CLMPWZtEwD1fOOUV90RC47b805O6ugXDCWxgWCQe4ZKrA==}
     cpu: [arm64]
     os: [darwin]
 
-  '@opentray/darwin-x64@0.33.6':
-    resolution: {integrity: sha512-pLG5Y69z9WDMfo59SpUqnQ+nRYgMYzP6z/yAiQ6elHVapj0+kNN6/ZPrz1x2ofdHb0zpojbf5X/DIIVKKh4ejA==}
+  '@opentray/darwin-x64@0.33.7':
+    resolution: {integrity: sha512-SiEnJDks44h6i2a1xtbxTKMxPzCopKnPfHTR9E+TnJyYSjdE9L2zjEEl0PVhtqcMJcPpR/miGZDIsS2rYYp7TA==}
     cpu: [x64]
     os: [darwin]
 
-  '@opentray/ext-dialog@0.33.6':
-    resolution: {integrity: sha512-v9KzWBdVrvQjOLL9vxXzlJCAqbzhRQPFqmZBf80peVpJIhTvRxnpXBYIGrOJbO7CkBeoZfySbHRry9Lj2I7g+g==}
+  '@opentray/ext-dialog@0.33.7':
+    resolution: {integrity: sha512-mZ//W70bBhBCUPawPi2lNoEC5+iznN7m/qc3DNK2gFlHwzzzYIFqcCNq4kpv7BUlUKTap6k2UeFr17NQ2bWNpA==}
     peerDependencies:
       opentray: '>=0.0.0'
 
-  '@opentray/ext-webview-darwin-arm64@0.33.6':
-    resolution: {integrity: sha512-uPrfhS/FIF0hoGwv49SFqFMDGnN1YbXlS5iyf3bzB64WB1tpB/6Tg4406BiHeVQT2zHvfmul4tZt4U84k5FpmA==}
+  '@opentray/ext-webview-darwin-arm64@0.33.7':
+    resolution: {integrity: sha512-h2bKPfcwOo5jb68f0QRNVpvPxObptIdeplUXFDSEwxk8i1Qq2MYXG/PhyzRqcObfL7roQ3gYTqLmyuCrJEvm7w==}
     cpu: [arm64]
     os: [darwin]
     peerDependencies:
       opentray: '>=0.1.0'
 
-  '@opentray/ext-webview-darwin-x64@0.33.6':
-    resolution: {integrity: sha512-OTNS17egVgoedojT4+/8YsYXXP/9r7YTS6XrIak6lZDsVS4JMSJYo80V14lWzDA0k4mtRnzzyna+EvZQ7X0sUg==}
-    cpu: [x64]
-    os: [darwin]
-    peerDependencies:
-      opentray: '>=0.1.0'
-
-  '@opentray/ext-webview-windows-arm64@0.33.6':
-    resolution: {integrity: sha512-ZuENLQYFMT1ybCMOntZfpKyuASVHyaUc/Kk78eRvpqmziemfKmS+WOB1oIVioayy9AZGca1MZIzGhulK06suAw==}
+  '@opentray/ext-webview-windows-arm64@0.33.7':
+    resolution: {integrity: sha512-W62wy/Glq1EmcwS3GYjLbK4WwVZdhlxDNbKT4hRW75nXxzfzb5r2kCkxekQNrTGLHUsZKL5uHaNNaC8AVhlpPQ==}
     cpu: [arm64]
     os: [win32]
     peerDependencies:
       opentray: '>=0.1.0'
 
-  '@opentray/ext-webview-windows-x64@0.33.6':
-    resolution: {integrity: sha512-SoNAG1X50Dkc4JhrhQGbG1YJMo5XN3EEwOArvEuebpc/eV2cEy1OAeIuk03n0ZVu0saaWS1GaJ6JCH0mag9h2A==}
+  '@opentray/ext-webview-windows-x64@0.33.7':
+    resolution: {integrity: sha512-bIDg5fhFvao+xtvuiSUJA8IC7oqj0blHYClX5fmTg0bATkDhqWygEa+zspT2CTMUYhwl61YGrBRvPq/R4BMumQ==}
     cpu: [x64]
     os: [win32]
     peerDependencies:
       opentray: '>=0.1.0'
 
-  '@opentray/ext-webview@0.33.6':
-    resolution: {integrity: sha512-HsKk6FEtNxNfB7UtrIFnXVUWbRWcYjhn0o5tkKXovP/4Sm9sPVB47tPQVJmgJecU3wqP4PbdTTzk3396Hhn7eQ==}
+  '@opentray/ext-webview@0.33.7':
+    resolution: {integrity: sha512-A5feViD/B/aMZ9EOQ9Zu+q0KtyQ7KA182VdH2rFe9jqbQU4d5HX4p3SobXhEFmc01q+9R0mmF83GZND5Pd1UZQ==}
     peerDependencies:
       opentray: '>=0.0.0'
 
-  '@opentray/icon@0.33.6':
-    resolution: {integrity: sha512-6Z61D9uUsC3MYAHJ2acW4oOCnwhVRsgV5eB7iIjYb1OUl2z8egt80sV/tFGbWw5AdKvEGJou8L/B1vZNEs5LEg==}
+  '@opentray/icon@0.33.7':
+    resolution: {integrity: sha512-amNkn3fd3hV5wUXfIcnDDICkIlz/YdxjgVTX6yWcyEaO6KX6lsDt/hK86dx6rCkLPyMTRE7mGpB4awSGAWh04Q==}
 
-  '@opentray/linux-arm64@0.33.6':
-    resolution: {integrity: sha512-2dSEUUUtj6n0pUdCF8M77g0GSFP7S5on/slJakeQ8Jr3akIZAYoSrMMFaGKLeeymRC3AAG5PP1DGkGGMuzs9GA==}
+  '@opentray/linux-arm64@0.33.7':
+    resolution: {integrity: sha512-JfEk5y61pnFdiXUOcCAEIA4CSeoO0+qaMPZj9aK01hA1qn2f7qZeSeCTIL6qmtCq2n8bwUD7l/JjnHuUS7s+GQ==}
     cpu: [arm64]
     os: [linux]
 
-  '@opentray/linux-x64@0.33.6':
-    resolution: {integrity: sha512-ICH61IQy/naAjUJFHU1Q2SqxTzB5xpPhHxexJrZgnP96sspAvseH4fsNY8GSKlIcyNivKWSCFu7WMzTJi6BOXw==}
+  '@opentray/linux-x64@0.33.7':
+    resolution: {integrity: sha512-FBSGwDLqHQW8EPz6VaHfE3G9w0pegigh1kboMIYymWNv7vMFZC0SiMcY+QdaJZXDcrriQSrWMY7Fxg+WWAvw7w==}
     cpu: [x64]
     os: [linux]
 
-  '@opentray/packaging@0.33.6':
-    resolution: {integrity: sha512-ye2HMGYM7Yd52QVuv3ZML1QF0o+p+mBVsSJZsFna8eZB6BPPuKFJEqGKUOaw8//krofDNmITk6Jtb0fdrXX+PQ==}
+  '@opentray/packaging@0.33.7':
+    resolution: {integrity: sha512-TM/OcpyG0kyZR8kYfq1aWWH6vgIRrjxatrseaZTdiFiqDGvPgA5yqY3Awf9r64fjsYzaaCaNBDpU1WJqGfEqOA==}
 
-  '@opentray/spec@0.33.6':
-    resolution: {integrity: sha512-FQuBtUTkoKSiLTVFLqQPRgeMqkRyTcPKpQH0p0GUNAnJBYMcTJQfRm7JzfXUmJlKqinAlQkkwt7hkG63dQ5l3Q==}
+  '@opentray/spec@0.33.7':
+    resolution: {integrity: sha512-hrta2VP9SoDl1a3jaoxEkUSwWAX1bgRBqWjaXZWI+oB0KuND2z6Q8JcprymialNBh3hpzLRNypQuzW3KUM50sw==}
 
-  '@opentray/vite-plugin@0.33.6':
-    resolution: {integrity: sha512-WQ4yyLhfmBSKA2446K7fAPz7izUOVNgE3k3jXe3bFssaV0wCx5XWrEPoh+DJCntBsq967+EN7TkE36+arVEaLA==}
+  '@opentray/vite-plugin@0.33.7':
+    resolution: {integrity: sha512-zr4g0XAV1fJWZ+5fTZTJU+5YX3erG5UMDoWAkpE0+fw14kNpjDRHz/DSjFY6uqOMeHsJJeC1/iW+Lufh1rpkOA==}
     peerDependencies:
       vite: '>=5'
     peerDependenciesMeta:
       vite:
         optional: true
 
-  '@opentray/windows-arm64@0.33.6':
-    resolution: {integrity: sha512-BCsfULkwlvcAsA1pPpCbFboMDSGl8KuPe54uOZwQfjGblj5u4NuuC4I+1uQ/KTvrKu3sf9vkCHfM8mZ0bWS5sQ==}
+  '@opentray/windows-arm64@0.33.7':
+    resolution: {integrity: sha512-FiLY976EYWPRjTF2WIsx46iA5KgvyeKQ7sNM1KVFJm1hODipisGK8EvwLcJ0fR4o5vad9UcmnjJtKv07QIFkOQ==}
     cpu: [arm64]
     os: [win32]
 
-  '@opentray/windows-x64@0.33.6':
-    resolution: {integrity: sha512-jR9M1H7wY6x11nhB3EKrGOhLOUOjLQM1/IkWlm0pZ0bI1BSlBXBBT++zfqi83VNp2hfgDavY3O9IjlpRmdxWEg==}
+  '@opentray/windows-x64@0.33.7':
+    resolution: {integrity: sha512-x6/QU+UVoLPuVqsvE3k9j+uf9utILm05updJFkcyiFyggsV1VKdz7BjBV8SHUZyyAX9g/XmOVlm7dU/WjuBKqg==}
     cpu: [x64]
     os: [win32]
 
@@ -3894,6 +3953,9 @@ packages:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
     engines: {node: '>=6'}
 
+  codemirror@6.0.2:
+    resolution: {integrity: sha512-VhydHotNW5w1UGK0Qj96BwSk/Zqbp9WbnyK2W/eVMv4QyF41INRGpjUhFJY7/uDNuudSc33a/PKr4iDqRduvHw==}
+
   commander@14.0.3:
     resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
     engines: {node: '>=20'}
@@ -3932,6 +3994,9 @@ packages:
   cors@2.8.6:
     resolution: {integrity: sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==}
     engines: {node: '>= 0.10'}
+
+  crelt@1.0.7:
+    resolution: {integrity: sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -4722,8 +4787,8 @@ packages:
   openapi-types@12.1.3:
     resolution: {integrity: sha512-N4YtSYJqghVu4iek2ZUvcN/0aqH1kRDuNqzcycDxhOUpg7GdvLa2F3DgS6yBNhInhv2r/6I0Flkn7CqL8+nIcw==}
 
-  opentray@0.33.6:
-    resolution: {integrity: sha512-/2MbjfYPXWGzUgom45jCYDA+WZoR2j0FeCsFuPSWx4tfMeG4ahCX9l0p+Qf1JIzmaPu8rg5eEb2+Brpe0j6w7A==}
+  opentray@0.33.7:
+    resolution: {integrity: sha512-PjeuXQqMyfpr7ji5iEe8VLZ8vAuFXANiBYWnCw6WuyR0PLBH7OJL0SJYgvM8cAEP2PXEqgkTlcUwEH5hE+hwrA==}
     hasBin: true
 
   oxfmt@0.62.0:
@@ -5038,6 +5103,9 @@ packages:
     resolution: {integrity: sha512-aulFJcD6YK8V1G7iRB5tigAP4TsHBZZrOV8pjV++zdUwmeV8uzbY7yn6h9MswN62adStNZFuCIx4haBnRuMDaw==}
     engines: {node: '>=18'}
 
+  style-mod@4.1.4:
+    resolution: {integrity: sha512-XXWIQt633/EpAFx8aZDOTjBzrCaGmhvEQlQo6MVPfa2OzO2cWo+4hV9h+6UkHYlXGfy+ODXKUdP7Pthmcu5ATw==}
+
   style-to-object@1.0.14:
     resolution: {integrity: sha512-LIN7rULI0jBscWQYaSswptyderlarFkjQ+t79nzty8tcIAceVomEVlLzH5VP4Cmsv6MtKhs7qaAiwlcp+Mgaxw==}
 
@@ -5348,6 +5416,9 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  w3c-keyname@2.2.8:
+    resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
 
   w3c-xmlserializer@5.0.0:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
@@ -5695,6 +5766,92 @@ snapshots:
   '@bramus/specificity@2.4.2':
     dependencies:
       css-tree: 3.2.1
+
+  '@codemirror/autocomplete@6.20.3':
+    dependencies:
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+      '@lezer/common': 1.5.3
+
+  '@codemirror/commands@6.11.1':
+    dependencies:
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+      '@lezer/common': 1.5.3
+
+  '@codemirror/lang-css@6.3.1':
+    dependencies:
+      '@codemirror/autocomplete': 6.20.3
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.6
+      '@lezer/common': 1.5.3
+      '@lezer/css': 1.3.8
+
+  '@codemirror/lang-html@6.4.12':
+    dependencies:
+      '@codemirror/autocomplete': 6.20.3
+      '@codemirror/lang-css': 6.3.1
+      '@codemirror/lang-javascript': 6.2.5
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+      '@lezer/common': 1.5.3
+      '@lezer/css': 1.3.8
+      '@lezer/html': 1.3.13
+
+  '@codemirror/lang-javascript@6.2.5':
+    dependencies:
+      '@codemirror/autocomplete': 6.20.3
+      '@codemirror/language': 6.12.4
+      '@codemirror/lint': 6.9.7
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+      '@lezer/common': 1.5.3
+      '@lezer/javascript': 1.5.5
+
+  '@codemirror/lang-markdown@6.5.2':
+    dependencies:
+      '@codemirror/autocomplete': 6.20.3
+      '@codemirror/lang-html': 6.4.12
+      '@codemirror/language': 6.12.4
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+      '@lezer/common': 1.5.3
+      '@lezer/markdown': 1.7.2
+
+  '@codemirror/language@6.12.4':
+    dependencies:
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+      '@lezer/common': 1.5.3
+      '@lezer/highlight': 1.2.5
+      '@lezer/lr': 1.4.10
+      style-mod: 4.1.4
+
+  '@codemirror/lint@6.9.7':
+    dependencies:
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+      crelt: 1.0.7
+
+  '@codemirror/search@6.7.2':
+    dependencies:
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+      crelt: 1.0.7
+
+  '@codemirror/state@6.7.6':
+    dependencies:
+      '@marijn/find-cluster-break': 1.0.4
+
+  '@codemirror/view@6.43.13':
+    dependencies:
+      '@codemirror/state': 6.7.6
+      crelt: 1.0.7
+      style-mod: 4.1.4
+      w3c-keyname: 2.2.8
 
   '@csstools/color-helpers@6.1.1': {}
 
@@ -7579,9 +7736,44 @@ snapshots:
   '@koromix/koffi-win32-x64@3.2.1':
     optional: true
 
+  '@lezer/common@1.5.3': {}
+
+  '@lezer/css@1.3.8':
+    dependencies:
+      '@lezer/common': 1.5.3
+      '@lezer/highlight': 1.2.5
+      '@lezer/lr': 1.4.10
+
+  '@lezer/highlight@1.2.5':
+    dependencies:
+      '@lezer/common': 1.5.3
+
+  '@lezer/html@1.3.13':
+    dependencies:
+      '@lezer/common': 1.5.3
+      '@lezer/highlight': 1.2.5
+      '@lezer/lr': 1.4.10
+
+  '@lezer/javascript@1.5.5':
+    dependencies:
+      '@lezer/common': 1.5.3
+      '@lezer/highlight': 1.2.5
+      '@lezer/lr': 1.4.10
+
+  '@lezer/lr@1.4.10':
+    dependencies:
+      '@lezer/common': 1.5.3
+
+  '@lezer/markdown@1.7.2':
+    dependencies:
+      '@lezer/common': 1.5.3
+      '@lezer/highlight': 1.2.5
+
   '@lucide/svelte@1.41.0(svelte@5.57.0)':
     dependencies:
       svelte: 5.57.0
+
+  '@marijn/find-cluster-break@1.0.4': {}
 
   '@mixmark-io/domino@2.2.0': {}
 
@@ -7710,88 +7902,82 @@ snapshots:
 
   '@opentelemetry/semantic-conventions@1.43.0': {}
 
-  '@opentray/darwin-arm64@0.33.6':
+  '@opentray/darwin-arm64@0.33.7':
     optional: true
 
-  '@opentray/darwin-x64@0.33.6':
+  '@opentray/darwin-x64@0.33.7':
     optional: true
 
-  '@opentray/ext-dialog@0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))':
+  '@opentray/ext-dialog@0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.33.6(@gaubee/util@0.35.2)
+      opentray: 0.33.7(@gaubee/util@0.35.2)
 
-  '@opentray/ext-webview-darwin-arm64@0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))':
+  '@opentray/ext-webview-darwin-arm64@0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.33.6(@gaubee/util@0.35.2)
+      opentray: 0.33.7(@gaubee/util@0.35.2)
     optional: true
 
-  '@opentray/ext-webview-darwin-x64@0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))':
+  '@opentray/ext-webview-windows-arm64@0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.33.6(@gaubee/util@0.35.2)
+      opentray: 0.33.7(@gaubee/util@0.35.2)
     optional: true
 
-  '@opentray/ext-webview-windows-arm64@0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))':
+  '@opentray/ext-webview-windows-x64@0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.33.6(@gaubee/util@0.35.2)
+      opentray: 0.33.7(@gaubee/util@0.35.2)
     optional: true
 
-  '@opentray/ext-webview-windows-x64@0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))':
+  '@opentray/ext-webview@0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.33.6(@gaubee/util@0.35.2)
-    optional: true
-
-  '@opentray/ext-webview@0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))':
-    dependencies:
-      opentray: 0.33.6(@gaubee/util@0.35.2)
+      opentray: 0.33.7(@gaubee/util@0.35.2)
     optionalDependencies:
-      '@opentray/ext-webview-darwin-arm64': 0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))
-      '@opentray/ext-webview-darwin-x64': 0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))
-      '@opentray/ext-webview-windows-arm64': 0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))
-      '@opentray/ext-webview-windows-x64': 0.33.6(opentray@0.33.6(@gaubee/util@0.35.2))
+      '@opentray/ext-webview-darwin-arm64': 0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))
+      '@opentray/ext-webview-windows-arm64': 0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))
+      '@opentray/ext-webview-windows-x64': 0.33.7(opentray@0.33.7(@gaubee/util@0.35.2))
 
-  '@opentray/icon@0.33.6':
+  '@opentray/icon@0.33.7':
     dependencies:
       '@jsquash/avif': 2.1.1
       '@jsquash/jpeg': 1.6.0
       '@jsquash/png': 3.1.1
       '@jsquash/resize': 2.1.1
       '@jsquash/webp': 1.5.0
-      '@opentray/spec': 0.33.6
+      '@opentray/spec': 0.33.7
       '@resvg/resvg-wasm': 2.6.2
       '@shockpkg/icon-encoder': 3.2.3
       exifr: 7.1.3
       figma-squircle: 1.1.0
 
-  '@opentray/linux-arm64@0.33.6':
+  '@opentray/linux-arm64@0.33.7':
     optional: true
 
-  '@opentray/linux-x64@0.33.6':
+  '@opentray/linux-x64@0.33.7':
     optional: true
 
-  '@opentray/packaging@0.33.6(@gaubee/util@0.35.2)':
+  '@opentray/packaging@0.33.7(@gaubee/util@0.35.2)':
     dependencies:
       '@gaubee/node': 0.4.0(@gaubee/util@0.35.2)
-      '@opentray/spec': 0.33.6
+      '@opentray/spec': 0.33.7
       plist: 5.0.0
     transitivePeerDependencies:
       - '@gaubee/util'
 
-  '@opentray/spec@0.33.6': {}
+  '@opentray/spec@0.33.7': {}
 
-  '@opentray/vite-plugin@0.33.6(@gaubee/util@0.35.2)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))':
+  '@opentray/vite-plugin@0.33.7(@gaubee/util@0.35.2)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))':
     dependencies:
-      '@opentray/icon': 0.33.6
-      '@opentray/packaging': 0.33.6(@gaubee/util@0.35.2)
-      '@opentray/spec': 0.33.6
+      '@opentray/icon': 0.33.7
+      '@opentray/packaging': 0.33.7(@gaubee/util@0.35.2)
+      '@opentray/spec': 0.33.7
     optionalDependencies:
       vite: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@gaubee/util'
 
-  '@opentray/windows-arm64@0.33.6':
+  '@opentray/windows-arm64@0.33.7':
     optional: true
 
-  '@opentray/windows-x64@0.33.6':
+  '@opentray/windows-x64@0.33.7':
     optional: true
 
   '@orpc/client@1.14.6(@opentelemetry/api@1.9.1)':
@@ -8781,6 +8967,16 @@ snapshots:
 
   clsx@2.1.1: {}
 
+  codemirror@6.0.2:
+    dependencies:
+      '@codemirror/autocomplete': 6.20.3
+      '@codemirror/commands': 6.11.1
+      '@codemirror/language': 6.12.4
+      '@codemirror/lint': 6.9.7
+      '@codemirror/search': 6.7.2
+      '@codemirror/state': 6.7.6
+      '@codemirror/view': 6.43.13
+
   commander@14.0.3: {}
 
   content-disposition@1.1.0:
@@ -8809,6 +9005,8 @@ snapshots:
       object-assign: 4.1.1
       vary: 1.1.2
     optional: true
+
+  crelt@1.0.7: {}
 
   cross-spawn@7.0.6:
     dependencies:
@@ -9591,18 +9789,18 @@ snapshots:
 
   openapi-types@12.1.3: {}
 
-  opentray@0.33.6(@gaubee/util@0.35.2):
+  opentray@0.33.7(@gaubee/util@0.35.2):
     dependencies:
-      '@opentray/icon': 0.33.6
-      '@opentray/packaging': 0.33.6(@gaubee/util@0.35.2)
-      '@opentray/spec': 0.33.6
+      '@opentray/icon': 0.33.7
+      '@opentray/packaging': 0.33.7(@gaubee/util@0.35.2)
+      '@opentray/spec': 0.33.7
     optionalDependencies:
-      '@opentray/darwin-arm64': 0.33.6
-      '@opentray/darwin-x64': 0.33.6
-      '@opentray/linux-arm64': 0.33.6
-      '@opentray/linux-x64': 0.33.6
-      '@opentray/windows-arm64': 0.33.6
-      '@opentray/windows-x64': 0.33.6
+      '@opentray/darwin-arm64': 0.33.7
+      '@opentray/darwin-x64': 0.33.7
+      '@opentray/linux-arm64': 0.33.7
+      '@opentray/linux-x64': 0.33.7
+      '@opentray/windows-arm64': 0.33.7
+      '@opentray/windows-x64': 0.33.7
     transitivePeerDependencies:
       - '@gaubee/util'
 
@@ -10010,6 +10208,8 @@ snapshots:
 
   strip-final-newline@4.0.0: {}
 
+  style-mod@4.1.4: {}
+
   style-to-object@1.0.14:
     dependencies:
       inline-style-parser: 0.2.7
@@ -10297,6 +10497,8 @@ snapshots:
       jsdom: 30.0.1
     transitivePeerDependencies:
       - msw
+
+  w3c-keyname@2.2.8: {}
 
   w3c-xmlserializer@5.0.0:
     dependencies:
