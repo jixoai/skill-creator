@@ -145,6 +145,8 @@ describe("evaluation store (task 4.2)", () => {
   it("rejects writes on the global workspace and removes existing cases", () => {
     const store = createEvaluationStore(sandbox);
     expect(() => store.saveCase(globalTarget, makeCase())).toThrow(EvaluationStoreError);
+    // r6 P1-3：结果写入同门——Global 运行只读，不得创建 results.json。
+    expect(() => store.appendResult(globalTarget, makeResult())).toThrow(EvaluationStoreError);
     store.saveCase(target, makeCase());
     expect(store.removeCase(target, newEvaluationId("ev_"))).toBe(false);
     const [entry] = store.listCases(target);

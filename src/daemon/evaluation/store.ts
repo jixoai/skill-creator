@@ -171,6 +171,9 @@ export function createEvaluationStore(home?: string): EvaluationStore {
       return true;
     },
     appendResult(target, result) {
+      // r6 P1-3：结果写入与 case 写入同一 Imported-only 写门——Global 运行只读
+      // （codex 实证 "~" 曾可创建 results.json）。
+      assertWritable(target);
       const envelope = readEnvelope(
         resultsFile(target),
         EvaluationResultEnvelopeSchema,

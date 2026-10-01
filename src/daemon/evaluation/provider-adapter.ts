@@ -62,14 +62,29 @@ export function createProviderSessionAdapter(deps: ProviderAdapterDeps): Provide
       // B7 终止条件：读到 turn-end（或 status 稳定 idle 且本轮无新帧）。
       // cursor = 已见最大 seq + 1（stream 返回形状不带游标）。
       let cursor = 0;
+      let terminal = false;
       for (let step = 0; step < maxSteps; step += 1) {
         const stream = deps.sessions.stream(sessionId, cursor, 400);
         for (const frame of stream.frames) {
           cursor = Math.max(cursor, frame.seq + 1);
         }
-        if (stream.frames.some((frame) => frame.kind === "turn-end")) break;
-        if (stream.status === "idle" && stream.frames.length === 0) break;
+        if (stream.frames.some((frame) => frame.kind === "turn-end")) {
+          terminal = true;
+          break;
+        }
+        if (stream.status === "idle" && stream.frames.length === 0) {
+          terminal = true;
+          break;
+        }
         await sleep(stepDelay);
+      }
+      // r6 P1-4：未见终态 = transcript 不完整——半截回复不得进入断言判定。
+      // 抛 typed 超时（service 捕获 → error 态 RUNNER_ERROR）并回收会话。
+      if (!terminal) {
+        deps.sessions.cancel(sessionId);
+        throw new Error(
+          `provider transcript did not reach turn-end within ${maxSteps} steps (sessionId=${sessionId})`,
+        );
       }
       // 投影：依序拼接 user-text/assistant-text/tool-result 的 text 字段。
       const full = deps.sessions.stream(sessionId, 0, 5000);

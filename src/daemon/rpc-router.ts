@@ -311,12 +311,22 @@ export function createRpcRouter(deps: RpcRouterDeps) {
             const result = await domain.mcpProposals.approve(ref.id);
             return { proposal: projectMcpProposal(result.view) };
           }
-          // si：approve 消费草稿（stale 停 conflict 保留草稿；逐项结果入投影）。
+          // si：approve 消费草稿（r6 P1-2：stale → rejected + rejectCause:"stale"
+          // （design C′2 冻结），草稿保留待重提案；正常路径逐项结果入投影）。
           const result = await domain.skillIntelligence.approve({ proposalId: ref.id as never });
           const draft = domain.skillIntelligence
             .list()
             .proposals.find((entry) => entry.id === ref.id);
           const base = draft !== undefined ? projectIntelligenceDraft(draft) : null;
+          if (base !== null && result.conflicts > 0 && result.applied === 0) {
+            return {
+              proposal: {
+                ...base,
+                status: "rejected" as const,
+                rejectCause: "stale" as const,
+              },
+            };
+          }
           const failedEntry = result.results.find((entry) => entry.status === "failed");
           return {
             proposal:

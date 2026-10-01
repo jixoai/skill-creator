@@ -36,3 +36,18 @@
 - 3.4：pnpm test 1648/1648（168 files）；typecheck / webui check / vp fmt
   --check / git diff --check / pnpm build 全绿（archive 树入 .prettierignore，
   冻结历史不被 reflow）。
+
+## r6 复核处置（2026-10-01，8.0 → 四 P1 全闭）
+
+- [x] P1-1 capability 观察锁接线：单源 schema 补 target（C′1a 冻结形状），
+      多源 targets/observedRevisions 等长 refine；assertSingle/TargetsAligned
+      与 payload 受影响集严格对齐；propose 服务优先锁调用方 revision（存在性
+      仍服务端复核；错位/缺项 typed 拒绝不静默回落）；输出收敛 {proposalId}。
+- [x] P1-2 si stale approve → rejected + rejectCause:"stale"（草稿保留语义
+      已注 design C′2）。
+- [x] P1-3 evaluation appendResult 补 Imported-only 写门（Global 负例测试）。
+- [x] P1-4 provider adapter 未见 turn-end → typed 超时 + cancel（半截回复
+      不得进入断言判定；回归测试）。
+- 回归：agent-proposals-projection 10/10（含观察锁/错位/等长/stale 四新例）、
+  evaluation-service 9/9（adapter 终态闸 + finding-severity 服务级）、
+  evaluation-store 7/7；全量 1661/1661（170 files）。

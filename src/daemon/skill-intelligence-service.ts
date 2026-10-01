@@ -18,6 +18,8 @@ import type {
   ProposalDraft,
   ProposalId,
 } from "../shared/contracts/skill-intelligence.js";
+import type { SkillId } from "../shared/contracts/skills.js";
+import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import {
   FindingIdSchema,
   IntelligenceReportSchema,
@@ -128,10 +130,47 @@ export function createSkillIntelligenceService(skills: SkillService, creator: Cr
     payload: ProposalDraft["payload"];
     findingIds: FindingId[];
     rationale: string;
+    /**
+     * agent 调用方（intelligence_propose_* capability）传入的观察锁
+     * （r6 P1-1：proposal 锁定调用方观察到的 revision——期间内容变化由 approve
+     * 的 stale 复核捕获；缺省 = 服务端现读，内部调用方沿用）。
+     */
+    observedRevisions?: Array<
+      { skillId: SkillId } & WorkspaceProviderTarget & { revision: string }
+    >;
   }): Promise<{ proposal: ProposalDraft }> {
     const selections = affectedSelections(input.payload);
-    // 先全部复核存在性并观察 revision，再入草稿库；部分失败不产生草稿。
-    const observed = await observeRevisions(selections);
+    // 先全部复核存在性再入草稿库；部分失败不产生草稿。提供 observedRevisions 时
+    // 严格对齐：覆盖全部受影响技能且无多余项（r6 P1-1——错位/缺项 typed 拒绝，
+    // 不静默回落现读，否则观察锁可被绕过）；存在性仍以服务端 info 为准。
+    const selectionKey = (entry: {
+      workspaceId: string;
+      providerId: string;
+      skillId: string;
+    }): string => `${entry.workspaceId}/${entry.providerId}/${entry.skillId}`;
+    const callerRevisions = new Map(
+      (input.observedRevisions ?? []).map((entry) => [selectionKey(entry), entry.revision]),
+    );
+    if (
+      input.observedRevisions !== undefined &&
+      (callerRevisions.size !== input.observedRevisions.length ||
+        callerRevisions.size !== selections.length ||
+        selections.some((selection) => !callerRevisions.has(selectionKey(selection))))
+    ) {
+      throw new DomainError(
+        "INVALID_OPERATION",
+        "observed revisions must cover exactly the payload's affected skills",
+      );
+    }
+    const observed: ProposalDraft["observedRevisions"] = [];
+    for (const selection of selections) {
+      const info = await skills.info(selection, selection.skillId);
+      const callerRevision = callerRevisions.get(selectionKey(selection));
+      observed.push({
+        ...selection,
+        revision: callerRevision !== undefined ? callerRevision : info.revision,
+      });
+    }
     const id = ProposalIdSchema.parse(`pr_${randomBytes(12).toString("hex")}`);
     const proposal: ProposalDraft = {
       id,

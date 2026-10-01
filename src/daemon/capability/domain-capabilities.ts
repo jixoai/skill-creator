@@ -43,6 +43,7 @@ import {
   FindingIdSchema,
   MergeProposalPayloadSchema,
   SkillSelectionSchema,
+  type SkillSelection,
   SplitProposalPayloadSchema,
 } from "../../shared/contracts/skill-intelligence.js";
 import {
@@ -458,6 +459,8 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
     // intelligence-proposal-parity（工作计划 Ch4 / C′1）：四动作 proposal 一律经
     // agent tool call 产生——kernel 工具行与 MCP 同名注册（authority=proposal，
     // 名字本身即 propose 语义，无 mutation 变体后缀）。WebUI 直连创建路径退役。
+    // r6 P1-1：target/targets 与 observedRevision(s) 是 wire 冻结字段——观察锁
+    // 取调用方传入值（approve 期 stale 复核），与 payload 受影响集严格对齐。
     ...[
       ["edit", EditProposalPayloadSchema] as const,
       ["disable", DisableProposalPayloadSchema] as const,
@@ -469,12 +472,14 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
       handler: (input: unknown) =>
         invoke(async () => {
           const parsed = IntelligenceProposeSingleInputSchema(action, payloadSchema).parse(input);
+          assertSingleTargetAligned(parsed.payload, parsed.target);
           const { proposal } = await domain.skillIntelligence.propose({
             payload: parsed.payload,
             findingIds: [parsed.findingId],
             rationale: parsed.rationale,
+            observedRevisions: [{ ...parsed.target, revision: parsed.observedRevision }],
           });
-          return { proposalId: proposal.id, observedRevisions: proposal.observedRevisions };
+          return { proposalId: proposal.id };
         }),
     })),
     ...(["split", "merge"] as const).map((action) => ({
@@ -491,15 +496,60 @@ export function createDomainCapabilities(domain: DomainCapabilityDeps): Capabili
               `payload kind ${action} required for this tool`,
             );
           }
+          assertTargetsAligned(parsed.payload, parsed.targets);
           const { proposal } = await domain.skillIntelligence.propose({
             payload: parsed.payload,
             findingIds: [parsed.findingId],
             rationale: parsed.rationale,
+            observedRevisions: parsed.targets.map((selection, index) => ({
+              ...selection,
+              revision: parsed.observedRevisions[index] as string,
+            })),
           });
-          return { proposalId: proposal.id, observedRevisions: proposal.observedRevisions };
+          return { proposalId: proposal.id };
         }),
     })),
   ];
+}
+
+/** 单源对齐：payload 的全部受影响 selection 必须恰为 target 一个技能。 */
+function assertSingleTargetAligned(
+  payload: z.infer<typeof EditProposalPayloadSchema> | z.infer<typeof DisableProposalPayloadSchema>,
+  target: SkillSelection,
+): void {
+  const affected =
+    payload.kind === "edit" ? payload.edits.map((edit) => edit.selection) : payload.selections;
+  const sameTarget = (selection: SkillSelection): boolean =>
+    selection.workspaceId === target.workspaceId &&
+    selection.providerId === target.providerId &&
+    selection.skillId === target.skillId;
+  if (affected.length !== 1 || !sameTarget(affected[0]!)) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      "payload must affect exactly the addressed target skill",
+    );
+  }
+}
+
+/** 多源对齐：payload 受影响集与 targets 集合一致（顺序无关）。 */
+function assertTargetsAligned(
+  payload: z.infer<typeof SplitProposalPayloadSchema> | z.infer<typeof MergeProposalPayloadSchema>,
+  targets: SkillSelection[],
+): void {
+  const affected = payload.kind === "split" ? [payload.source] : payload.sources;
+  const key = (entry: SkillSelection): string =>
+    `${entry.workspaceId}/${entry.providerId}/${entry.skillId}`;
+  const affectedKeys = new Set(affected.map(key));
+  const targetKeys = new Set(targets.map(key));
+  if (
+    affectedKeys.size !== targetKeys.size ||
+    [...affectedKeys].some((entry) => !targetKeys.has(entry))
+  ) {
+    throw new DomainError(
+      "INVALID_OPERATION",
+      "targets must match the payload's affected skills exactly",
+    );
+  }
 }
 
 /** 单源 propose 入参（edit/disable；action 与 payload.kind 一致性由判别支固化）。 */
@@ -510,28 +560,37 @@ function IntelligenceProposeSingleInputSchema(
   return z.strictObject({
     action: z.literal(action),
     findingId: FindingIdSchema,
+    target: SkillSelectionSchema,
     observedRevision: z.string().min(1),
     rationale: z.string().min(1),
     payload: payloadSchema,
   });
 }
 
-/** 多源 propose 入参（split/merge：targets/observedRevisions 显式多源对齐）。 */
+/** 多源 propose 入参（split/merge：targets/observedRevisions 等长逐项对应）。 */
 const IntelligenceProposeMultiInputSchema = z.discriminatedUnion("action", [
-  z.strictObject({
-    action: z.literal("split"),
-    findingId: FindingIdSchema,
-    targets: z.array(SkillSelectionSchema).min(1),
-    observedRevisions: z.array(z.string().min(1)).min(1),
-    rationale: z.string().min(1),
-    payload: SplitProposalPayloadSchema,
-  }),
-  z.strictObject({
-    action: z.literal("merge"),
-    findingId: FindingIdSchema,
-    targets: z.array(SkillSelectionSchema).min(1),
-    observedRevisions: z.array(z.string().min(1)).min(1),
-    rationale: z.string().min(1),
-    payload: MergeProposalPayloadSchema,
-  }),
+  z
+    .strictObject({
+      action: z.literal("split"),
+      findingId: FindingIdSchema,
+      targets: z.array(SkillSelectionSchema).min(1),
+      observedRevisions: z.array(z.string().min(1)).min(1),
+      rationale: z.string().min(1),
+      payload: SplitProposalPayloadSchema,
+    })
+    .refine((entry) => entry.targets.length === entry.observedRevisions.length, {
+      message: "observedRevisions must align one-to-one with targets",
+    }),
+  z
+    .strictObject({
+      action: z.literal("merge"),
+      findingId: FindingIdSchema,
+      targets: z.array(SkillSelectionSchema).min(1),
+      observedRevisions: z.array(z.string().min(1)).min(1),
+      rationale: z.string().min(1),
+      payload: MergeProposalPayloadSchema,
+    })
+    .refine((entry) => entry.targets.length === entry.observedRevisions.length, {
+      message: "observedRevisions must align one-to-one with targets",
+    }),
 ]);

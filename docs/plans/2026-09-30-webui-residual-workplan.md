@@ -13,11 +13,11 @@
 | #   | change                       | 契约源                                         | 状态                                                                                                                             |
 | --- | ---------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Ch1 | steward-surface-closure      | archive/2026-09-30-steward-surface-closure/    | ✅ 归档 e2eb536（codex r4 裁定边界关闭）                                                                                         |
-| Ch2 | creator-test-session         | openspec/changes/creator-test-session/         | 实现 039e10f（store/面板/模板/元数据/8 例测试，含真实内核网关 1 例）；vision 走查待 WS4                                          |
+| Ch2 | creator-test-session         | openspec/changes/creator-test-session/         | 实现完成 + WS4 走查通过（Ch2 主链端到端，收据 docs/reviews/2026-10-01-ws4-ego-browser-walkthrough.md）                           |
 | Ch3 | evaluation-corpus            | openspec/changes/evaluation-corpus/            | 实现完成（6312735 服务/runner/B7 适配 + dd9d319/9eb0e0b fixture 语料；真实网关 provider-model 实证）；webui 最小查看入口归后续批 |
 | Ch4 | intelligence-proposal-parity | openspec/changes/intelligence-proposal-parity/ | 实现完成（四 capability + 统一投影 + seed 发起；1648/1648 全绿）                                                                 |
-| Ch5 | creator-editor-polish        | （未立；CodeMirror 懒加载 + 草稿校验）         | 待立                                                                                                                             |
-| Ch6 | shell-settings-ui            | （未立；AppSidebar + General 偏好）            | 待立                                                                                                                             |
+| Ch5 | creator-editor-polish        | openspec/changes/creator-editor-polish/        | 实现完成 2289988（CodeMirror 独立 chunk + validateNewDraft 字段级校验）                                                          |
+| Ch6 | shell-settings-ui            | openspec/changes/shell-settings-ui/            | 实现完成 799d33c（AppSidebar 双态 + 主题生效 + Appearance 分区）                                                                 |
 | Ch7 | docs-archive-hygiene         | archive/2026-09-30-docs-archive-hygiene/       | ✅ 归档 04e2a91（Purpose 三连 21/21 + stale 注释 + 归档债注记）                                                                  |
 
 ## 序（codex r3/r4 裁定一致）
@@ -30,13 +30,14 @@
 
 ## 复核台账（codex 大地三 ws3-codex-review）
 
-| 轮  | 基线                        | 分数 | 关键结论                                                                                       |
-| --- | --------------------------- | ---- | ---------------------------------------------------------------------------------------------- |
-| r1  | 盘点计划 r0                 | 6.2  | 事实纠错 + 五 P1（引用接线/模板/评估 schema/双 store/退役边界）                                |
-| r2  | r3 计划                     | 7.0  | Ch1 边界认可；wire 级缺口七项                                                                  |
-| r3  | r4 计划                     | 7.2  | 方向关闭；A′/B′/C′ 补遗被要求（round 内评价「仍非判别联合」）                                  |
-| r4  | 52301dc（不含实现 039e10f） | 6.8  | 契约多文档漂移是病根；expectTrigger 布尔映射错误等真缺口；**单一契约源 + 实现即证据**          |
-| r5  | HEAD 6d070da（含 Ch2 实现） | 7.3  | 实现独立核验通过（47/47 聚焦 + 网关 2/2 + typecheck）；pendingSeedMetadata 泄漏已修（744dd56） |
+| 轮  | 基线                           | 分数 | 关键结论                                                                                                                       |
+| --- | ------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------ |
+| r1  | 盘点计划 r0                    | 6.2  | 事实纠错 + 五 P1（引用接线/模板/评估 schema/双 store/退役边界）                                                                |
+| r2  | r3 计划                        | 7.0  | Ch1 边界认可；wire 级缺口七项                                                                                                  |
+| r3  | r4 计划                        | 7.2  | 方向关闭；A′/B′/C′ 补遗被要求（round 内评价「仍非判别联合」）                                                                  |
+| r4  | 52301dc（不含实现 039e10f）    | 6.8  | 契约多文档漂移是病根；expectTrigger 布尔映射错误等真缺口；**单一契约源 + 实现即证据**                                          |
+| r5  | HEAD 6d070da（含 Ch2 实现）    | 7.3  | 实现独立核验通过（47/47 聚焦 + 网关 2/2 + typecheck）；pendingSeedMetadata 泄漏已修（744dd56）                                 |
+| r6  | HEAD f85acbd（含 Ch3–Ch6+WS4） | 8.0  | 四 P1（capability 观察锁未接线 / si stale 投影 / Global 结果写闸 / adapter 超时半截回复）已处置 + 回归；计划索引与走查收据收口 |
 
 ## r4 真缺口的处置（落对应 change docs，不回填本文）
 

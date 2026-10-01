@@ -148,14 +148,19 @@ beforeEach(() => {
   domain = createDaemonDomain(undefined, { skillsCliProbe: deterministicSkillsCliProbe() });
   const imported = domain.workspaces.import(workspaceDir, "unified-ws");
   workspaceId = imported.id;
-  domain.creator.save({
-    mode: "create",
-    workspaceId: imported.id,
-    providerId: "openclaw",
-    directoryName: "demo-skill",
-    frontmatter: { name: "demo-skill", description: "unified projection fixture" },
-    body: "Body.\n",
-  });
+  for (const [directory, description] of [
+    ["demo-skill", "unified projection fixture"],
+    ["wire-second", "second fixture for alignment tests"],
+  ] as const) {
+    domain.creator.save({
+      mode: "create",
+      workspaceId: imported.id,
+      providerId: "openclaw",
+      directoryName: directory,
+      frontmatter: { name: directory, description },
+      body: "Body.\n",
+    });
+  }
   routerClient = makeClient(domain);
 });
 
@@ -184,6 +189,7 @@ describe("unified proposals RPC (3.2 dual-source merge + decision paths)", () =>
       {
         action: "disable",
         findingId: `fn_${"a".repeat(16)}`,
+        target: { ...target, skillId: skill.id },
         observedRevision: skillInfo.revision,
         rationale: "duplicate names confuse invocation",
         payload: {
@@ -233,5 +239,103 @@ describe("unified proposals RPC (3.2 dual-source merge + decision paths)", () =>
 
   it("rejects unprefixed ids with a typed error instead of guessing a store", async () => {
     await expect(routerClient.agent.proposals.approve({ proposalId: "prop_1" })).rejects.toThrow();
+  });
+});
+
+describe("intelligence propose capability wire (r6 P1-1/P1-2)", () => {
+  const callTool = (name: string, input: unknown) =>
+    domain.managerCapabilities.call(name, input, "agent");
+
+  it("locks the caller-observed revision into the draft and returns {proposalId} only", async () => {
+    const target = { workspaceId, providerId: "openclaw" };
+    const skill = (await domain.skills.list(target, true))[0]!;
+    const forged = `sha256:${"f".repeat(64)}`;
+    const result = await callTool("intelligence_propose_disable", {
+      action: "disable",
+      findingId: `fn_${"a".repeat(16)}`,
+      target: { ...target, skillId: skill.id },
+      observedRevision: forged,
+      rationale: "wire check",
+      payload: {
+        kind: "disable",
+        selections: [{ ...target, skillId: skill.id }],
+        reason: "wire check",
+      },
+    });
+    expect(result.kind).toBe("ok");
+    // 输出收敛：仅 proposalId（不再回显 observedRevisions）。
+    expect(Object.keys((result as { value: object }).value)).toEqual(["proposalId"]);
+    const proposalId = (result as { value: { proposalId: string } }).value.proposalId;
+    const draft = domain.skillIntelligence.list().proposals.find((p) => p.id === proposalId);
+    // 观察锁 = 调用方传入值（不得静默回落现读——r6 P1-1 核心）。
+    expect(draft?.observedRevisions[0]?.revision).toBe(forged);
+  });
+
+  it("rejects a single-source payload whose affected skill differs from target", async () => {
+    const target = { workspaceId, providerId: "openclaw" };
+    const [first, second] = (await domain.skills.list(target, true)).slice(0, 2);
+    const info = await domain.skills.info(target, second.id);
+    const result = await callTool("intelligence_propose_disable", {
+      action: "disable",
+      findingId: `fn_${"a".repeat(16)}`,
+      target: { ...target, skillId: first.id },
+      observedRevision: info.revision,
+      rationale: "misaligned",
+      payload: {
+        kind: "disable",
+        selections: [{ ...target, skillId: second.id }],
+        reason: "misaligned",
+      },
+    });
+    expect(result.kind).toBe("failed");
+    expect(JSON.stringify(result)).toContain("exactly the addressed target");
+  });
+
+  it("rejects multi-source inputs whose observedRevisions do not align with targets", async () => {
+    const target = { workspaceId, providerId: "openclaw" };
+    const skills = await domain.skills.list(target, true);
+    const info = await domain.skills.info(target, skills[0]!.id);
+    // 长度不等（targets 2 vs revisions 1）→ schema 层拒绝。
+    const unequal = await callTool("intelligence_propose_merge", {
+      action: "merge",
+      findingId: `fn_${"a".repeat(16)}`,
+      targets: skills.slice(0, 2).map((s) => ({ ...target, skillId: s.id })),
+      observedRevisions: [info.revision],
+      rationale: "unequal",
+      payload: {
+        kind: "merge",
+        sources: skills.slice(0, 2).map((s) => ({ ...target, skillId: s.id })),
+        target: {
+          directoryName: "merged-out",
+          frontmatter: { name: "merged-out", description: "d" },
+          body: "b",
+        },
+      },
+    });
+    expect(unequal.kind).toBe("failed");
+  });
+
+  it("projects a stale si approve as rejected + rejectCause:stale (real router)", async () => {
+    const target = { workspaceId, providerId: "openclaw" };
+    const skill = (await domain.skills.list(target, true))[0]!;
+    const forged = `sha256:${"e".repeat(64)}`;
+    const result = await callTool("intelligence_propose_disable", {
+      action: "disable",
+      findingId: `fn_${"a".repeat(16)}`,
+      target: { ...target, skillId: skill.id },
+      observedRevision: forged,
+      rationale: "stale path",
+      payload: {
+        kind: "disable",
+        selections: [{ ...target, skillId: skill.id }],
+        reason: "stale path",
+      },
+    });
+    const proposalId = (result as { value: { proposalId: string } }).value.proposalId;
+    const decision = await routerClient.agent.proposals.approve({ proposalId: `si:${proposalId}` });
+    expect(decision.proposal).toMatchObject({ status: "rejected", rejectCause: "stale" });
+    // conflict 语义保留草稿供对照：列表仍可见。
+    const stillListed = await routerClient.agent.proposals.list({});
+    expect(stillListed.proposals.some((entry) => entry.id === `si:${proposalId}`)).toBe(true);
   });
 });

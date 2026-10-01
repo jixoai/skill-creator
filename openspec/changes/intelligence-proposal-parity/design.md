@@ -67,6 +67,9 @@ authority=proposal（只产草案不写盘）。
 **按前缀路由**（mcp:→McpProposalStore，si:→skillIntelligence 服务）；stale
 草稿（observedRevision ≠ 当前技能 revision）→ rejected 且 `rejectCause:
   "stale"`；两 store 各自映射，不改存储，无审计信息丢失（五态 + result 保全）。
+（r6 处置注：si stale 的 approve 响应即 rejected+stale 决策收据；草稿本体按
+skill-intelligence 既有语义保留——conflict 供重新分析后对照，显式 reject 才
+删除。）
 
 - **C′3 finding-propose seed 的 metadata 统一**：AgentSessionSeedMetadata 的
   `finding-propose` 分支（agent.ts 契约已冻结）为唯一元数据形状；split/merge

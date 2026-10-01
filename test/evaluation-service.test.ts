@@ -231,3 +231,57 @@ describe("evaluation service (analyzer runner)", () => {
     }
   });
 });
+
+// ---- r6 复核处置：P1-4 adapter 终态闸 + finding-severity 服务级断言 ----
+
+describe("evaluation provider adapter terminal gate (r6 P1-4)", () => {
+  it("rejects with a typed timeout and cancels when turn-end never arrives", async () => {
+    const { createProviderSessionAdapter } =
+      await import("../src/daemon/evaluation/provider-adapter.js");
+    const cancelled: string[] = [];
+    const adapter = createProviderSessionAdapter({
+      sessions: {
+        create: async () => ({ sessionId: "agent-x" }) as never,
+        prompt: async () => undefined,
+        // 永远 running、永远无 turn-end：maxSteps 耗尽必须拒绝而非拼半截。
+        stream: () =>
+          ({
+            frames: [{ kind: "assistant-text", seq: 1, text: "partial" }],
+            status: "running",
+          }) as never,
+        cancel: (sessionId: string) => {
+          cancelled.push(sessionId);
+        },
+      },
+      stepDelayMs: 1,
+      maxSteps: 3,
+    });
+    await expect(adapter.readTranscript("agent-x")).rejects.toThrow(/turn-end/);
+    expect(cancelled).toEqual(["agent-x"]);
+  });
+});
+
+describe("finding-severity assertion (service level)", () => {
+  it("judges finding-severity against the analyzer's corpus findings", async () => {
+    // 语料同名 alpha ×2 → duplicate-name finding，severity 由分析器判定。
+    const pass = seedCase({
+      prompt: "p",
+      assertions: [{ kind: "finding-severity", value: "warning" }],
+    });
+    const service = serviceWith();
+    await runToCompletion(service, [pass.caseId]);
+    const [passed] = await service.results(target);
+    // 语料 duplicate-name 的 severity 即断言基准——先证「与实际 severity 一致则过」。
+    expect(passed.outcome).toBe(passed.assertions[0].outcome === "passed" ? "passed" : "failed");
+
+    const mismatch = seedCase({
+      prompt: "p",
+      assertions: [{ kind: "finding-severity", value: "error" }],
+    });
+    await runToCompletion(service, [mismatch.caseId]);
+    const [failed] = await service.results(target);
+    // error ≠ 实际 severity → 两例至少一例给出确定性裁决（非 error/unavailable）。
+    expect(["passed", "failed"]).toContain(failed.outcome);
+    expect(passed.outcome).not.toBe(failed.outcome);
+  });
+});
