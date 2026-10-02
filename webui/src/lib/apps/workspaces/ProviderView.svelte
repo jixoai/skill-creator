@@ -990,24 +990,31 @@
           {/if}
 
           {#if split}
+            {@const fmEntries = Object.entries(split.frontmatter).filter(
+              ([key]) => !(editable && (key === "name" || key === "description")),
+            )}
             <section class="mb-4">
               <h3 class="mb-2 text-xs font-medium text-muted-foreground">Frontmatter</h3>
-              <dl class="overflow-x-auto rounded-md border border-border">
-                {#each Object.entries(split.frontmatter) as [key, value], i}
-                  <div
-                    class="grid grid-cols-[120px_minmax(0,1fr)] {i > 0
-                      ? 'border-t border-border'
-                      : ''}"
-                  >
-                    <dt class="bg-muted/40 px-2 py-1 text-xs font-medium text-muted-foreground">
-                      {key}
-                    </dt>
-                    <dd class="break-words px-2 py-1 text-xs">
-                      {value === null ? "null" : String(value)}
-                    </dd>
-                  </div>
-                {/each}
-              </dl>
+              <!-- 编辑态去重（design-critique R1 Gap 6）：name/description 已由头部
+                   Input/textarea 承载，表格不再重复列出；其余键全量保留。 -->
+              {#if fmEntries.length > 0}
+                <dl class="overflow-x-auto rounded-md border border-border">
+                  {#each fmEntries as [key, value], i}
+                    <div
+                      class="grid grid-cols-[120px_minmax(0,1fr)] {i > 0
+                        ? 'border-t border-border'
+                        : ''}"
+                    >
+                      <dt class="bg-muted/40 px-2 py-1 text-xs font-medium text-muted-foreground">
+                        {key}
+                      </dt>
+                      <dd class="break-words px-2 py-1 text-xs">
+                        {value === null ? "null" : String(value)}
+                      </dd>
+                    </div>
+                  {/each}
+                </dl>
+              {/if}
             </section>
           {/if}
 

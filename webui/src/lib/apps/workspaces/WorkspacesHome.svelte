@@ -2,10 +2,14 @@
   用户原始需求 [2026-09-05]：「用户可以导入 Workspace，浏览 Provider 和 Skill……Remove 只删除 registry entry，不删除目录。」
   修订 [2026-09-18]（用户走查）：删除「同内容技能」整屏区块——同源信息改为
   ProviderView 技能行上的小角标（symlink 式标识），不再占据首页版面。
+  修订 [2026-10-02]（design-critique R1 Gap 3/5）：删除首页 2×2 引导卡组——
+  Create/Browse/Explore 各自的常驻入口在侧栏与区块本身；Health check 是该
+  agent 审计向量的唯一入口，降级为页头单行文字链。列表即首屏主角。
   正交意图：
   1. Skill locations 索引：Global（~）与 Imported Workspace 分组、availability、skill count、Provider 入口。
   2. 导入（共享全局对话框）与移除（仅 registry entry，confirm + busy 锁 + toast 终态）。
   3. 加载 / 空 / 更新中 / 失败四态可区分。
+  4. Health check 文字链（manage 模式 agent 审计的唯一入口；种子 prompt 进 composer）。
 -->
 <script lang="ts">
   import {
@@ -21,9 +25,7 @@
     setAgentPanelOpen,
     startAgentAction,
   } from "$lib/stores/agent.svelte";
-  import IconPen from "@lucide/svelte/icons/pen-line";
   import IconHeart from "@lucide/svelte/icons/heart-pulse";
-  import IconCompass from "@lucide/svelte/icons/compass";
   import IconMessage from "@lucide/svelte/icons/message-square";
   import { requestImportWorkspace } from "$lib/stores/import-workspace.svelte";
   import { showToast } from "$lib/toast.svelte";
@@ -38,7 +40,6 @@
   import IconTrash from "@lucide/svelte/icons/trash-2";
   import IconAlert from "@lucide/svelte/icons/triangle-alert";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
-  import IconBoxes from "@lucide/svelte/icons/boxes";
   import IconWiki from "@lucide/svelte/icons/book-open";
   import SelfSkillConflictBanner from "$lib/components/self-skill-conflict-banner.svelte";
   import type { ImportedWorkspace, Workspace, WorkspaceProvider } from "$lib/types";
@@ -69,23 +70,6 @@
   $effect(() => {
     // 首屏 Continue 区需要会话列表（面板未打开时也要有数据）。
     if (!agentSessionsList.loaded && !agentSessionsList.loading) void loadAgentSessions();
-  });
-
-  /** 库快照：跨全部 workspace 的技能/位置/导入目录总数。 */
-  const librarySnapshot = $derived.by(() => {
-    let skills = 0;
-    let providers = 0;
-    for (const ws of workspaceState.workspaces) {
-      for (const provider of ws.providers) {
-        providers += 1;
-        skills += provider.skillCount ?? 0;
-      }
-    }
-    return {
-      skills,
-      providers,
-      imported: workspaceState.workspaces.filter((ws) => ws.kind === "directory").length,
-    };
   });
 
   /** 最近会话（取最新 3 个；点击即回面板续聊）。 */
@@ -147,11 +131,23 @@
 
 <div class="flex h-full flex-col overflow-y-auto p-5">
   <header class="flex shrink-0 items-start justify-between gap-3 border-b border-border pb-4">
-    <div>
+    <div class="min-w-0">
       <h1 class="text-lg font-semibold">Workspaces</h1>
       <p class="mt-0.5 text-xs text-muted-foreground">
-        Your skill library, agent sessions, and quick ways to put both to work.
+        Your skill library across agent locations and imported workspaces.
       </p>
+      <!-- Health check（manage 模式 agent 审计）唯一入口：降级为单行文字链。 -->
+      <button
+        class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+        onclick={() =>
+          startAgentAction(
+            "manage",
+            "Audit my skill library: find duplicates, vague descriptions, and stale skills, then propose concrete fixes.",
+          )}
+      >
+        <IconHeart class="h-3 w-3 shrink-0" />
+        Health check my library — duplicates, vague descriptions, stale skills
+      </button>
     </div>
     <div class="flex shrink-0 items-center gap-1.5">
       <Button
@@ -179,64 +175,6 @@
   <SelfSkillConflictBanner />
 
   <div class="mx-auto mt-5 w-full max-w-5xl space-y-6">
-    <!-- 快速行动：回答「这个软件能帮我什么」——每个动作直达一个具体行为。 -->
-    <section aria-label="Quick actions" class="grid grid-cols-1 gap-2 min-[560px]:grid-cols-2">
-      <button
-        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
-        onclick={() =>
-          startAgentAction("create", "I want to create a new skill. It should help me ")}
-      >
-        <IconPen class="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
-        <span class="min-w-0">
-          <span class="block text-sm font-medium">Create a skill</span>
-          <span class="block text-xs text-muted-foreground">
-            Describe the task; the agent drafts the SKILL.md with best practices.
-          </span>
-        </span>
-      </button>
-      <button
-        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
-        onclick={() =>
-          startAgentAction(
-            "manage",
-            "Audit my skill library: find duplicates, vague descriptions, and stale skills, then propose concrete fixes.",
-          )}
-      >
-        <IconHeart class="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
-        <span class="min-w-0">
-          <span class="block text-sm font-medium">Health check my library</span>
-          <span class="block text-xs text-muted-foreground">
-            Duplicates, vague descriptions, stale skills — with proposed fixes.
-          </span>
-        </span>
-      </button>
-      <button
-        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
-        onclick={() => void goto("/repository")}
-      >
-        <IconCompass class="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
-        <span class="min-w-0">
-          <span class="block text-sm font-medium">Explore skill sources</span>
-          <span class="block text-xs text-muted-foreground">
-            Discover curated Git sources and analyze candidate skills.
-          </span>
-        </span>
-      </button>
-      <button
-        class="flex items-start gap-2.5 rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
-        onclick={() =>
-          document.getElementById("library-index")?.scrollIntoView({ behavior: "smooth" })}
-      >
-        <IconBoxes class="mt-0.5 h-4 w-4 shrink-0 text-foreground/70" />
-        <span class="min-w-0">
-          <span class="block text-sm font-medium">Browse the library</span>
-          <span class="block text-xs text-muted-foreground">
-            {librarySnapshot.skills} skills across {librarySnapshot.providers} agent locations.
-          </span>
-        </span>
-      </button>
-    </section>
-
     <!-- Continue：最近 agent 会话一键续聊。 -->
     {#if recentSessions.length > 0}
       <section aria-label="Recent agent sessions" class="space-y-1.5">
@@ -329,8 +267,11 @@
             <ul class="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
               {#each ws.providers as provider (provider.id)}
                 <li>
+                  <!-- 有技能/零技能同一行样式（R1 Gap 5）：不可用行不降透明度，
+                       面色统一，「Not found on disk」文字即唯一空态播报；计数徽标
+                       为零时不渲染（避免同一空态双重播报）。 -->
                   <button
-                    class="flex min-h-11 w-full items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70 disabled:pointer-events-none disabled:opacity-50"
+                    class="flex min-h-11 w-full items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70 disabled:pointer-events-none"
                     disabled={!target || !provider.available}
                     title={provider.path ?? provider.label}
                     onclick={() => target && void goto(providerPath(ws, provider))}
@@ -345,9 +286,11 @@
                         </span>
                       {/if}
                     </span>
-                    <Badge variant="secondary" class="shrink-0 tabular-nums">
-                      {provider.skillCount}
-                    </Badge>
+                    {#if provider.skillCount > 0}
+                      <Badge variant="secondary" class="shrink-0 tabular-nums">
+                        {provider.skillCount}
+                      </Badge>
+                    {/if}
                   </button>
                 </li>
               {/each}
@@ -392,9 +335,11 @@
                           {ws.path}
                         </span>
                       </span>
-                      <Badge variant="secondary" class="shrink-0 tabular-nums">
-                        {ws.skillCount}
-                      </Badge>
+                      {#if ws.skillCount > 0}
+                        <Badge variant="secondary" class="shrink-0 tabular-nums">
+                          {ws.skillCount}
+                        </Badge>
+                      {/if}
                     </button>
                     {#if removable}
                       <Button
@@ -433,9 +378,11 @@
                             onclick={() => ws.available && void goto(providerPath(ws, provider))}
                           >
                             {provider.label}
-                            <span class="tabular-nums text-muted-foreground">
-                              {provider.skillCount}
-                            </span>
+                            {#if provider.skillCount > 0}
+                              <span class="tabular-nums text-muted-foreground">
+                                {provider.skillCount}
+                              </span>
+                            {/if}
                           </button>
                         </li>
                       {/each}

@@ -78,6 +78,15 @@
     return hex.slice(0, 14);
   }
 
+  /**
+   * bound 双显合并（design-critique R1 Gap 1）：结果已绑定同一 revision 时左侧
+   * bound 不再重复播报（右侧 `rev` 即同一 hash）；revision 漂移（语料绑定旧版）
+   * 才保留双列对照。
+   */
+  function showBoundRevision(row: EvaluationRow): boolean {
+    return !row.latest || row.latest.observedEndRevision !== row.boundRevision;
+  }
+
   function reload(): void {
     if (draft.mode === "edit" && draft.skillId !== null) {
       void loadEvaluationView({
@@ -162,7 +171,11 @@
                 >
                   <span>{row.enabled ? "enabled" : "disabled"}</span>
                   <span>{row.assertionCount} assertion{row.assertionCount === 1 ? "" : "s"}</span>
-                  <span title={row.boundRevision}>bound {shortRevision(row.boundRevision)}…</span>
+                  {#if showBoundRevision(row)}
+                    <span title={row.boundRevision}>
+                      bound {shortRevision(row.boundRevision)}…
+                    </span>
+                  {/if}
                 </p>
               </div>
               <div class="flex shrink-0 flex-col items-end gap-1">

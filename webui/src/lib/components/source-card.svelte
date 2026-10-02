@@ -80,10 +80,12 @@
   </dl>
 
   <footer class="flex shrink-0 items-center gap-2">
+    <!-- 多卡并列时降为 outline 次要级（design-critique R1 Gap 10）：绿色实底
+         Scan 一屏重复多次稀释层级；primary 描边保留「本卡主操作」读法。 -->
     <button
       type="button"
       onclick={onscan}
-      class="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+      class="inline-flex h-7 items-center rounded-md border border-primary/40 px-2.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10"
     >
       Scan
     </button>

@@ -2,6 +2,8 @@
   用户原始需求 [2026-07-27]：「Creator 编辑 tab 左右分栏，左侧 ACP 对话，右侧子视图」
   → [2026-09-07]（openspec dsh-webui-composition 3.2）：移除 generic ACP 对话面板，
   Agent 会话由 DSH host 唯一承载；Creator 回归单列编辑器。
+  修订 [2026-10-02]（design-critique R1 Gap 1）：页头主标题 = 技能名（draft.name），
+  sk_/ws_ hash 降级为小号 muted 可复制次要行，不再作标题。
   正交意图：
   1. 单列编辑器布局（子视图区占满），子视图通过 sub-view-tabs 切换，激活子视图编码到 URL search param。
   2. 通过 Svelte context 下发共享编辑草稿（File 写入 / Preview / Log / Validate 读取）。
@@ -30,6 +32,7 @@
     type CreatorDraft,
   } from "$lib/stores/creator-editor.svelte";
   import { connectionState, loadSkillDoc } from "$lib/store.svelte";
+  import { showToast } from "$lib/toast.svelte";
   import { TEMPLATES } from "$lib/templates";
   import type { WorkspaceProviderTarget } from "$lib/types";
   import type { SkillId } from "$lib/types";
@@ -138,15 +141,56 @@
       }
     };
   });
+
+  // 页头主标题（R1 Gap 1）：技能名优先（人语汇），空名回退 "Skill"。
+  const headerTitle = $derived.by(() => {
+    if (mode === "new") return "New skill";
+    const name = editor.draft.name.trim();
+    return name.length > 0 ? name : "Skill";
+  });
+
+  /** 次要行 hash 点击复制（clipboard 不可用时 toast 提示，不静默失败）。 */
+  async function copyId(label: string, value: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast(`${label} copied.`);
+    } catch {
+      showToast("Copy failed — clipboard unavailable.");
+    }
+  }
 </script>
 
 <div class="flex h-full flex-col overflow-hidden">
-  <!-- 标题栏 -->
-  <header class="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-    <span class="text-sm font-medium">
-      {mode === "new" ? "New skill" : skillId ? `Edit: ${skillId.slice(0, 12)}…` : "Editor"}
-    </span>
-    <span class="text-xs text-muted-foreground">{wsId} / {providerId}</span>
+  <!-- 标题栏：主标题 = 技能名；opaque id 降级为小号 muted 可复制次要行。 -->
+  <header class="flex shrink-0 flex-col gap-0.5 border-b border-border px-4 py-2">
+    <span class="truncate text-sm font-medium">{headerTitle}</span>
+    {#if wsId && providerId}
+      <div
+        class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground"
+      >
+        <button
+          type="button"
+          class="max-w-40 truncate font-mono underline-offset-2 hover:underline"
+          title={`Copy workspace id: ${wsId}`}
+          onclick={() => void copyId("Workspace id", wsId)}
+        >
+          {wsId}
+        </button>
+        <span aria-hidden="true" class="text-border">/</span>
+        <span class="truncate">{providerId}</span>
+        {#if skillId}
+          <span aria-hidden="true" class="text-border">/</span>
+          <button
+            type="button"
+            class="max-w-40 truncate font-mono underline-offset-2 hover:underline"
+            title={`Copy skill id: ${skillId}`}
+            onclick={() => void copyId("Skill id", skillId)}
+          >
+            {skillId}
+          </button>
+        {/if}
+      </div>
+    {/if}
   </header>
 
   <!-- 主体：单列子视图区（3.2：generic ACP 对话面板移除，Agent 会话归 DSH host） -->

@@ -3,7 +3,8 @@
   版 → 2026-09-30 shell-settings-ui Ch6 组件化：展开/折叠双态 + 标签）。
   正交意图：
   1. App 导航轨：registry 列表（含 settings 页）+ 导入 workspace 入口；
-     active 态按当前 tab 身份投影。
+     active 态按当前 tab 身份投影（dark 下 --accent 与 --muted 同值，激活项
+     改 primary/15 底 + primary/40 ring，与 light 同语义——design-critique R1 Gap 10）。
   2. 双态：折叠（图标 w-14，title 提示）/展开（标签 w-44）；偏好持久化
      DevicePrefs.sidebarCollapsed（appearance store）。
   妥协声明：无。
@@ -42,7 +43,7 @@
       class="flex h-10 items-center rounded-lg transition-colors hover:bg-muted {collapsed
         ? 'w-10 justify-center'
         : 'w-[10.5rem] gap-2.5 px-3'} {activeAppId === app.id
-        ? 'bg-accent text-primary ring-1 ring-inset ring-primary/25'
+        ? 'bg-accent text-primary ring-1 ring-inset ring-primary/25 dark:bg-primary/15 dark:ring-primary/40'
         : 'text-muted-foreground'}"
       title={app.name}
       aria-label={app.name}

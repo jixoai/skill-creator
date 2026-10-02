@@ -301,7 +301,10 @@
       {/if}
     </div>
   {:else}
-    <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+    <!-- 编辑器主导版面（design-critique R1 Gap 9）：容器改 flex-col——Body 标签
+         的 flex-1 才真正吃到剩余高度（原 block 容器里 flex-1 断链，编辑器
+         ~300px 即止）；内容超出时整栏滚动（Body 有 min-h 兜底，小屏仍可用）。 -->
+    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
       {#if draft.mode === "new"}
         <label class="block space-y-1">
           <span class="text-[11px] font-medium text-muted-foreground">Directory name</span>
@@ -338,7 +341,7 @@
         {/if}
       </label>
 
-      <label class="block flex min-h-0 flex-1 flex-col space-y-1">
+      <label class="flex min-h-64 flex-1 flex-col gap-1">
         <span class="text-[11px] font-medium text-muted-foreground">Body (Markdown)</span>
         <MarkdownEditor
           bind:value={draft.body}

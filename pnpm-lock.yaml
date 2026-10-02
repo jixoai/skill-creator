@@ -293,6 +293,9 @@ importers:
 
   webui:
     dependencies:
+      '@codemirror/language':
+        specifier: ^6.12.4
+        version: 6.12.4
       marked:
         specifier: ^18.0.7
         version: 18.0.11

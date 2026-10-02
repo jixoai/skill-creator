@@ -2,13 +2,16 @@
   用户原始需求 [2026-09-08]：「我们可以简单理解成，我们在 skill creator 的右侧
   嵌入了一个聊天对话框。」——2026-09-12 redesign §3.2/§3.3：转录流行渲染器集合
   从 AgentPanel 机械拆出（行为零变化），AgentPanel 收敛为容器。
+  修订 [2026-10-02]（design-critique R1 Gap 3/8）：空态模式选择卡删除——模式
+  选择唯一入口收敛到 composer 模式 chip（同一数据源 pendingMode，双向同步
+  语义不变）；空态只留一句提示。
   正交意图：
   1. 转录流（§3.2 DisclosureRow 语法，原子类在 agent-flow.css）：TurnDivider /
      TurnEnd 药丸 / UserMessage（附件上·气泡·hover 操作行下）/ AssistantMessage
      （全宽无气泡 markstream，htmlPolicy=escape 不变）/ ThinkingRow（流式自动
      展开+末行摘要扫光，定稿收起+首行摘要）/ ToolRow（AgentToolRow）/ 审批卡 /
-     ModeRow / TurnStatus（Working 扫光 + 15s 计时）；空会话态 = 模式选择卡
-     （R12-B 6/8：选择 pendingMode，不 eager 建会话）。
+     ModeRow / TurnStatus（Working 扫光 + 15s 计时）；空会话态 = 单句提示
+     （不 eager 建会话）。
   2. 滚动跟随（增高前贴底判定 + ResizeObserver）与 back-to-bottom FAB（>200px）；
      copy → check 1s 反馈；edit 回填 / resend（append-only 语义，§4.3）。
   妥协声明：katex/mermaid/stream-diffs 为可选 peer，未安装时回退纯文本块；
@@ -174,31 +177,18 @@
     }}
   >
     {#if !agentSession.sessionId}
-      <!-- 空态 = 模式选择卡（R12-B 6/8）：点击只改 pendingMode 选择（与 composer
-           模式 chip 同一数据源，双向同步，默认 General）；会话由首条消息惰性创建。 -->
-      <div class="flex h-full flex-col items-center justify-center gap-3 text-center">
+      <!-- 空态提示（R1 减法后）：模式选择唯一入口 = composer 模式 chip（同一
+           pendingMode 数据源）；会话由首条消息惰性创建，不 eager 建会话。 -->
+      <div
+        class="flex h-full flex-col items-center justify-center gap-2 px-4 text-center"
+        data-empty-state="new-session"
+      >
         <p class="max-w-[280px] text-xs text-muted-foreground">
-          Pick a way to work with your skill library:
+          Send a message to start a session.
         </p>
-        <div class="w-full max-w-[300px] space-y-1.5">
-          {#each DSH_AGENT_MODES as entry (entry.id)}
-            <button
-              type="button"
-              class="w-full rounded-md border p-2 text-left transition-colors {agentSession.pendingMode ===
-              entry.id
-                ? 'border-primary/60 bg-primary/5'
-                : 'border-border hover:border-primary/50 hover:bg-primary/5'}"
-              aria-pressed={agentSession.pendingMode === entry.id}
-              disabled={agentSession.sending}
-              onclick={() => (agentSession.pendingMode = entry.id)}
-            >
-              <span class="flex items-center gap-1 text-xs font-medium">{entry.label}</span>
-              <span class="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
-                {entry.description}
-              </span>
-            </button>
-          {/each}
-        </div>
+        <p class="max-w-[280px] text-xs text-muted-foreground">
+          Pick how the agent works with the mode selector below.
+        </p>
       </div>
     {:else}
       {#each agentSession.items as item (item.seq)}

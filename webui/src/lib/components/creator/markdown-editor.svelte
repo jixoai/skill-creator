@@ -1,13 +1,17 @@
 <!--
   用户原始需求 [2026-07-27]：「右侧『文件』子视图：SKILL.md 编辑器」（2026-09-30
   creator-editor-polish：正文升级 CodeMirror 6，懒加载 + textarea 底座）。
+  修订 [2026-10-02]（design-critique R1 Gap 4/9）：dark 面色经 token 覆写统一
+  （透明底 + 去 active line 全宽高亮带）；heading 去下划线（重组 default
+  highlight specs——默认给 heading 的 underline 读作超链接）。
   正交意图：
   1. 懒加载：CodeMirror 全部经动态 import() code-split（类型导入编译期擦除）；
      模块未就绪/加载失败期间 textarea 底座保持可编辑（SSR 与弱网不阻塞）。
   2. 值同步：CM → 外部经 updateListener 回写 bind:value；外部 → CM 仅在值
      真正变化且非本次回写时 dispatch（防回环）。
-  妥协声明：主题用 CM 默认 + 最小 CSS 变量适配；不做 dark 主题联动（后续按
-  需求迭代）。
+  3. 面色适配：dark 由 .dark 祖先类 + 设计 token CSS 覆写（无 CM dark 主题
+     注册）；light 走 CM 默认。
+  妥协声明：不做 dark 主题联动（.dark 祖先覆写已覆盖编辑面；后续按需求迭代）。
 -->
 <script lang="ts" module>
   import type { EditorView } from "@codemirror/view";
@@ -45,14 +49,31 @@
     if (!el) return;
     void (async () => {
       try {
-        const [{ basicSetup, EditorView }, { markdown }] = await Promise.all([
+        const [
+          { basicSetup, EditorView },
+          { markdown },
+          { HighlightStyle, defaultHighlightStyle, syntaxHighlighting },
+        ] = await Promise.all([
           loadCodemirror(),
           import("@codemirror/lang-markdown"),
+          import("@codemirror/language"),
         ]);
+        // R1 Gap 9：defaultHighlightStyle 给 heading 同时加了 underline + bold
+        // （underline + bold 的组合在默认 specs 中唯一），underline 让标题读作
+        // 超链接——重组 specs 去掉，bold 保留；link 的 underline 语义正确不动。
+        // basicSetup 的 default 是 fallback:true，注册本 style 后整体接管。
+        const headingStyle = HighlightStyle.define(
+          defaultHighlightStyle.specs.map((spec) =>
+            spec.textDecoration === "underline" && spec.fontWeight === "bold"
+              ? { ...spec, textDecoration: undefined }
+              : spec,
+          ),
+        );
         const view = new EditorView({
           doc: value,
           extensions: [
             basicSetup,
+            syntaxHighlighting(headingStyle),
             markdown(),
             // WS4 走查 #11：SKILL.md 是散文型 markdown——软换行，长行不横向
             // 溢出（无横滚条裁切短行）。
@@ -120,6 +141,29 @@
       font-family: var(--font-mono, ui-monospace, monospace);
       line-height: 1.4;
     }
+  }
+  /* Dark 面色统一（R1 Gap 4，token 制、不写死色值）：CM 以 light 基线渲染
+     （未注册 dark 主题），gutters #f5f5f5 底与 active line #cceeff44 全宽高亮带
+     在 near-black 页面里成块——编辑区/行号槽透明融入页面，active line 高亮
+     去除，光标/选区/行号色走设计 token。light 走 CM 默认，不动。 */
+  :global(.dark) .cm-host :global(.cm-editor) {
+    background: transparent;
+  }
+  :global(.dark) .cm-host :global(.cm-gutters) {
+    background: transparent;
+    border-right: 1px solid var(--border);
+    color: var(--muted-foreground);
+  }
+  :global(.dark) .cm-host :global(.cm-activeLine),
+  :global(.dark) .cm-host :global(.cm-activeLineGutter) {
+    background: transparent;
+  }
+  :global(.dark) .cm-host :global(.cm-cursor) {
+    border-left-color: var(--foreground);
+  }
+  :global(.dark) .cm-host :global(.cm-selectionBackground),
+  :global(.dark) .cm-host :global(.cm-focused .cm-selectionBackground) {
+    background: color-mix(in oklab, var(--primary) 30%, transparent);
   }
   .cm-hidden {
     display: none;

@@ -8,8 +8,9 @@
   修订 [2026-09-12]（codex R2）：模式 chip 由原生 select 改为同族 DropdownMenu
   （design §3.4 `General ▾` 规格）；SlashMenu 落地（§3.4 末段，defer 解除）。
   修订 [2026-09-12]（R12-B 6/8）：New Session 态的显示模式 = agentSession.pendingMode
-  （与空态模式卡同一数据源，双向同步，默认 General）；chip 在无会话时只改选择，
-  不再 eager 建会话——首条消息发出时才创建（textarea/附件/发送在空态可用）。
+  （空态模式选择的唯一入口——2026-10-02 R1 减法后即本 chip；默认 General）；
+  chip 在无会话时只改选择，不再 eager 建会话——首条消息发出时才创建
+  （textarea/附件/发送在空态可用）。
   修订 [2026-09-12]（R14-B 3/4/5）：textarea focus 轮廓显式 reset（UA :focus
   outline 穿透，agent-flow.css `.msg-body` 作者源规则兜底）；附件按钮语义化
   （image/file-up 图标 + 语义 tooltip/aria-label，替代 paperclip/file 混淆）。
@@ -213,7 +214,7 @@
   });
 
   /** 显示态模式（R12-B 6）：会话内 = agentSession.mode；New Session 态 =
-   * pendingMode——空态模式卡与 chip 双向同步的唯一数据源。 */
+   * pendingMode——空态模式选择的唯一数据源（本 chip 即其唯一入口）。 */
   const activeMode = $derived(
     agentSession.sessionId ? agentSession.mode : agentSession.pendingMode,
   );
@@ -796,10 +797,14 @@
           class="flex h-7 max-w-[150px] items-center gap-1.5 rounded-full border px-2.5 text-[11px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 {modelChip.dangling
             ? 'border-amber-500/60 text-amber-700 dark:text-amber-300'
             : 'border-border text-muted-foreground hover:text-foreground'}"
-          title={running
-            ? "Switch after the current turn ends"
-            : "Switch the active model — route configuration lives in Settings → Model"}
-          aria-label="Switch active model"
+          title={modelChip.dangling
+            ? `${modelChip.label} — active model is outside your configured Model Routes (amber). Pick a routed model here or manage routes in Settings → Model`
+            : running
+              ? "Switch after the current turn ends"
+              : "Switch the active model — route configuration lives in Settings → Model"}
+          aria-label={modelChip.dangling
+            ? `Switch active model — current model ${modelChip.label} is outside your configured Model Routes`
+            : "Switch active model"}
           disabled={running}
           onkeydown={(event) => {
             // 同模式 chip：Esc 在 trigger（target 层）先占，不冒泡收起整个面板。

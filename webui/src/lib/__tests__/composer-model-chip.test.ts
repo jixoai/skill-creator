@@ -146,10 +146,10 @@ function mountComposer() {
   return {
     target,
     trigger: () =>
-      document.querySelector<HTMLButtonElement>('button[aria-label="Switch active model"]'),
+      document.querySelector<HTMLButtonElement>('button[aria-label^="Switch active model"]'),
     openMenu: async () => {
       const trigger = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="Switch active model"]',
+        'button[aria-label^="Switch active model"]',
       );
       if (!trigger) throw new Error("model chip trigger not rendered");
       trigger.click();
@@ -271,6 +271,9 @@ describe("ComposerCard model chip dropdown (B2)", () => {
 
     const trigger = ctx.trigger();
     expect(trigger?.className).toContain("border-amber-500/60");
+    // R1 Gap 8：琥珀 chip 必须自带解释（dangling = 活动模型在 Routes 之外）。
+    expect(trigger?.title).toContain("outside your configured Model Routes");
+    expect(trigger?.getAttribute("aria-label")).toContain("outside your configured Model Routes");
     await ctx.openMenu();
 
     const dangling = ctx.content()?.querySelector("[data-dangling='true']");

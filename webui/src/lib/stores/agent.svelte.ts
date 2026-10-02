@@ -17,8 +17,9 @@
  *   [2] 轮询生命周期：running 或有待答审批时 1.2s 轮询；idle 且无待答时停轮询
  *       （终态停轮询语义平移），prompt/answer/手动刷新重启。
  *   [3] 配置投影：model/preset/approval policy 的 load/patch（agent.settings.*）。
- *   [4] New Session 态（R12-B 6/8）：pendingMode 是空态模式卡与 composer 模式
- *       chip 的唯一数据源（默认 free/General）；会话创建是惰性的——只发生在
+ *   [4] New Session 态（R12-B 6/8）：pendingMode 是空态模式选择的唯一数据源
+ *       （composer 模式 chip 即唯一入口，2026-10-02 R1 减法后空态卡已删；
+ *       默认 free/General）；会话创建是惰性的——只发生在
  *       首条消息发出时（sendAgentPrompt 无会话先建），header 的 + 只回到空态。
  * 修订 [2026-09-13]（R17-A）：composer 草稿按 sessionId 分轨，本模块是草稿生命
  *       周期的挂接点——beginNewAgentSession 清 "__new__" 桶、resetSessionView
