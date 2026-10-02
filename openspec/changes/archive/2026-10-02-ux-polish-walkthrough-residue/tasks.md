@@ -42,3 +42,15 @@
       workspace-entry-landing 5 + workbench-focused 9 + curated-sources 5）；
       触碰文件逐一 `pnpm exec vp fmt`；openspec strict 校验（validate
       ux-polish-walkthrough-residue --strict）valid
+
+## codex WS5 复核记录（8.5/10，可归档；P2 处置 956a9f5）
+
+- 已修（956a9f5）：折叠标量连续空行 N 换行（标准 yaml 实证 + 前导空行同类偏差）；
+  AgentCard $effect 裸调 requireRpc 同族逃逸（连接闸 + 就绪重发 + 回归）；
+  evaluation comparator 相等键返 0。
+- **只记录不修（后续批候选）**：`text-muted-foreground/80`、`/70` 透明度用法实测
+  ≈4.33:1 / 3.45:1 低于 WCAG AA 4.5:1——需独立 change 全量专项清理（统一降透明档
+  或改实色 token）；evaluation 结果 `endedAt` 建议 schema 层约束 ISO 8601（当前
+  普通 string，排序语义靠约定）。
+- vision 复验：深链 eval 10/10 真实冷加载零报错；非零 errors 红分支留待有真实
+  finding 语料顺带抽查。

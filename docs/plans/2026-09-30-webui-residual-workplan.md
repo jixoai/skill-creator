@@ -72,3 +72,18 @@ ComposerReferenceInput` 的转换语义（uid 由 registry 生成、调用方构
 - Repository 内置源描述中文混杂（整体 UI 英文）；源卡片 "Home" 按钮语义不明。
 - Intelligence graph 密集区（54 节点）标签重叠。
 - Workspace 卡片默认落点为第一个 provider（可能 0 skills），需自行找目标 provider。
+
+## WS5 敏捷批（2026-10-02，子代理并行 + Remix）
+
+| change                        | 状态                                                             |
+| ----------------------------- | ---------------------------------------------------------------- |
+| ux-polish-walkthrough-residue | ✅ 归档（七项打磨 + 深链冻结根因修复 741eb3d + P2 处置 956a9f5） |
+| evaluation-webui-view         | ✅ 归档（Creator Eval 只读子视图；delta 已同步主 spec）          |
+| proposal-view-assertion       | ✅ 归档（approved 投影断言）                                     |
+
+- codex WS5：8.5/10，无 P0/P1，一轮定裁归档；深链根因（Svelte 5 batch discard
+  僵尸分支）独立确认，同族扫描残留 AgentCard 一处已修。
+- vision 走查：七项 + Eval 全 pass；深链 10/10 冷加载复验零报错。
+- v2.6.0 经 CI（OIDC trusted publishing）自动发布；本批后续提交待下次发版。
+- 后续批候选：muted-foreground 透明度 AA 专项清理、endedAt ISO 约束、
+  非零 errors 红 chip 真实语料抽查。
