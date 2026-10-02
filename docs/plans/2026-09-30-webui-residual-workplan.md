@@ -87,3 +87,28 @@ ComposerReferenceInput` 的转换语义（uid 由 registry 生成、调用方构
 - v2.6.0 经 CI（OIDC trusted publishing）自动发布；本批后续提交待下次发版。
 - 后续批候选：muted-foreground 透明度 AA 专项清理、endedAt ISO 约束、
   非零 errors 红 chip 真实语料抽查。
+
+## 设计批评环（world-class-designer T3，2026-10-02 收口）
+
+三轮新鲜批评者：R1 5.5/10（ac023f0 回执）→ R2 4.5/10（500b882）→ R3 3.0/10（99af041）。
+修复逐轮落地且零复现（R1 卡片/hash/dark、R2 十项机械、R3 两项修正 7e1a9eb/d76d941）；
+分数下行 = 批评深入结构层而非回归。触发停止条件，循环收口。
+
+**Owner 待拍板（两位以上批评者共识的品味决策）**：
+
+1. 全局密度哲学：是否整体压密（基础字号 13-14px、行高/行距收紧、tabular-nums 数字列）
+   ——repository 下半 55% 空、settings 单屏两设置项、四屏稀疏是当前最大扣分源；
+   维持现状的「留白优先」也是合法选择，但需 Owner 明示。
+2. 绿色语义拆分：品牌（logo/激活态）+ 主操作（Import/Save/Scan/send）+ 状态
+   （Connected/passed）三义混用一绿；Linear 惯例 = 动作中性色、绿色只留状态。
+
+**后续批次清单（结构级，超出机械修复）**：
+
+- skill-detail 改纯只读投影（去头部输入框/Save，编辑单一真相源 = Creator）
+- composer 底排控件分组 + 模型胶囊根治截断
+- 首页跨 provider duplicates 面（novice「确认没装重复」目前无对应面）
+- repository 空态承载内容（最近扫描/已装清单/Add source 内联）
+- 功能项：批量校验/多选、⌘K 内容、装后去向引导
+
+附带：R2 轮发现并修复 web-mode 冒烟锚点误删（c062db3）；R3 轮发现并修正 eval
+结果侧 rev 列去重（R2 修错列）与 light active-line 主题一致性（d76d941）。
