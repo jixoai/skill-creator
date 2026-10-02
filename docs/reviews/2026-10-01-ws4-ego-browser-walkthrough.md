@@ -56,3 +56,32 @@ skills_info 工具 chip、turn 统计 ↑27.9k·↓1.6k·58.8s）。0 console er
 | 硬刷新首轮连接竞态      | r4/r6 | 连接就绪自动重试（detail/doc）            | 2d2d422    |
 | 深链 Test 陈旧空态      | r6/r7 | CreatorWorkspace 兜底加载                 | 37f3e01    |
 | CodeMirror 无软换行     | r4    | EditorView.lineWrapping                   | d60e794    |
+
+## Round 8（2026-10-02：蒸馏 FAIL 复验——真网关全链路闭环）
+
+r3 FAIL 项（蒸馏生产路径无 provider/model）修复后（1883cbd：modelSelection
+seam 同源注入 + 失败内层摘要有界进 daemon.log）由编排者真机复验：
+
+- **路由**：local-gw 缺 key 被客户端拒发（产品面路由必须配 key——goal 的
+  KEY=NONE 需配占位 key）；切 e2e 既有 glmgw（anthropic-messages →
+  localhost:20002/anthropic，model test 2.1s 连通）后蒸馏 turn 成功。
+- **可观测性实证**：local-gw 失败轮 daemon.log 现在有内层摘要
+  （`DISTILL_TURN_FAILED: turn ended with reason: error`）——修复前该错误
+  完全丢失。
+- **蒸馏产出**：wd_d55bc97d 真实 LLM 输出 2 条 create 提案（2 pattern 语料
+  → 2 精炼 pattern 标题+正文），状态 awaiting-approval，提案 ID mcp: 前缀。
+- **统一审批面 e2e（ego-browser 真浏览器）**：IntelligenceView 提案区列出
+  2 条 wiki-distill-apply；Approve 第一条 → executed + "Proposal applied."
+  toast → 全局 wiki 落盘 pattern（create 动作按设计写 global scope）；
+  Reject 第二条 → rejected；run 收敛 completed（applied=1/rejected=1，
+  logs.md 记 run converged）。
+- **走查新发现（已修）**：提案区原嵌在「有报告」分支内，无分析报告时统一
+  审批面不可见——提升为无条件区段（76321a1）。
+
+### 隔离事故与清理（操作者失误，非产品缺陷）
+
+沙箱 daemon 手动启动漏设 `SKILL_WIKI_HOME`（测试套件有此约定，
+test/skill-creator-wiki-cli.test.ts:63）→ 蒸馏 create 写入真实
+`~/.agents/skill-wiki/`（目录由本次写入新建，仅含该 pattern + 单条索引）。
+已整体移除恢复原状。教训固化：任何手动起 daemon 的 wiki 蒸馏/写入验证必须
+同时导出 `SKILL_WIKI_HOME=<sandbox>`。
