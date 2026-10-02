@@ -217,4 +217,20 @@ describe("eval view bound/rev display merge (design-critique R1 Gap 1)", () => {
     expect(summary?.textContent).toContain("1/2 assertion failed");
     ctx.cleanup();
   });
+
+  it("shows the result rev once per consecutive same-revision group (R3 column fix)", () => {
+    // bound===observed 的合并态下逐行重复的是 rev 列（R2 只去重了 bound 列）：
+    // 三行同 revision 仅组首播报 rev，后续行留空。
+    evaluationViewState.rows = [
+      row(`ev_${"1".repeat(24)}`, passedResult(`ev_${"1".repeat(24)}`, REV_A, "1")),
+      row(`ev_${"2".repeat(24)}`, passedResult(`ev_${"2".repeat(24)}`, REV_A, "2")),
+      row(`ev_${"3".repeat(24)}`, passedResult(`ev_${"3".repeat(24)}`, REV_A, "3")),
+    ];
+    flushSync();
+    const ctx = mountHost();
+
+    const revCount = target.textContent!.split(`rev ${shortRev(REV_A)}…`).length - 1;
+    expect(revCount).toBe(1);
+    ctx.cleanup();
+  });
 });

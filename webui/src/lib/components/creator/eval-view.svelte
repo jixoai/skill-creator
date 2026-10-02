@@ -224,7 +224,11 @@
                         stale
                       </span>
                     {/if}
-                    rev {shortRevision(row.latest.observedEndRevision)}…
+                    <!-- R3：结果侧 rev 与 bound 列同法组首去重——bound===rev 合并后
+                         逐行重复的正是本列（R2 只去重了 bound 列，修错了列）。 -->
+                    {#if rows?.[index - 1]?.latest?.observedEndRevision !== row.latest.observedEndRevision}
+                      rev {shortRevision(row.latest.observedEndRevision)}…
+                    {/if}
                   </span>
                 {:else}
                   <span

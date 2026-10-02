@@ -167,6 +167,12 @@
   :global(.dark) .cm-host :global(.cm-activeLineGutter) {
     background: transparent;
   }
+  /* R3：light 同去 active-line 高亮带——R1 只去了 dark，同一文档状态两主题
+     渲染不一致（批评 gap）；编辑器语义靠光标/选区，不靠整行底色。 */
+  .cm-host :global(.cm-activeLine),
+  .cm-host :global(.cm-activeLineGutter) {
+    background: transparent;
+  }
   :global(.dark) .cm-host :global(.cm-cursor) {
     border-left-color: var(--foreground);
   }
