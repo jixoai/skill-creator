@@ -1,16 +1,19 @@
 /**
  * 用户原始需求 [2026-09-06]（openspec skill-intelligence）：
  * 「所有优化只产生 Manager-owned draft/patch，必须经过 validation、revision check 和显式 approval。」
+ * 修订 [2026-10-02]（e2e 审批面缺口）：proposal 列表/决定切到统一审批面
+ * agent.proposals.*——mcp:（外部 MCP client 造的 mutation proposal）与 si:
+ * （agent tool call 草稿）双源合并；直连 skillIntelligence.* 决定面退役（该面
+ * 只见 si: 草稿，外部 proposal 在 WebUI 无浏览面）。
  * 正交意图：
  *   [1] 按连接所有权与最新请求代次投影只读分析报告（per-call gate，组件持结果）。
- *   [2] proposal 草稿的提交/审批/拒绝按同一代次门管理，失效结果投影为无结果。
+ *   [2] proposal 的列表/审批/拒绝经统一面（mcp:|si: 前缀路由）按同一代次门
+ *       管理，失效结果投影为无结果。
  */
+import type { UnifiedProposalView } from "$shared/contracts/agent.js";
 import type {
   AnalyzeFailure,
-  ApproveResult,
   IntelligenceReport,
-  ProposalDraft,
-  ProposalId,
   SkillSelection,
 } from "$shared/contracts/skill-intelligence.js";
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
@@ -52,16 +55,17 @@ export async function analyzeSkills(selections: SkillSelection[]): Promise<{
   }
 }
 
-/** 提交一份 proposal 草稿；结果交给调用方持有。 */
-
-/** 拉取当前草稿列表；结果交给调用方持有。 */
+/**
+ * 拉取统一审批面列表（agent.proposals.list：mcp: + si: 双源合并，含决定态）；
+ * 结果交给调用方持有。
+ */
 export async function loadProposals(): Promise<{
-  proposals: ProposalDraft[] | null;
+  proposals: UnifiedProposalView[] | null;
   error: string | null;
 }> {
   const request = listGate.issue();
   try {
-    const result = await requireRpc().skillIntelligence.list({});
+    const result = await requireRpc().agent.proposals.list({});
     return request.isCurrent()
       ? { proposals: result.proposals, error: null }
       : { proposals: null, error: null };
@@ -71,13 +75,13 @@ export async function loadProposals(): Promise<{
   }
 }
 
-/** 拒绝并删除草稿；结果交给调用方持有。 */
+/** 经统一审批面拒绝（id 携带 mcp:|si: 前缀，daemon 按前缀路由）；结果交给调用方持有。 */
 export async function rejectProposal(
-  proposalId: ProposalId,
+  proposalId: string,
 ): Promise<{ rejected: boolean; error: string | null }> {
   const request = rejectGate.issue();
   try {
-    await requireRpc().skillIntelligence.reject({ proposalId });
+    await requireRpc().agent.proposals.reject({ proposalId });
     return request.isCurrent() ? { rejected: true, error: null } : { rejected: false, error: null };
   } catch (error) {
     if (!request.isCurrent()) return { rejected: false, error: null };
@@ -85,16 +89,22 @@ export async function rejectProposal(
   }
 }
 
-/** 审批草稿（daemon 侧复核 revision）；逐项结果交给调用方持有。 */
+/**
+ * 经统一审批面审批（id 携带 mcp:|si: 前缀）：mcp 面阻塞到执行终态；si 面
+ * 消费草稿走 grant 链。决定后的统一视图交给调用方持有（stale → rejected +
+ * rejectCause:"stale"，草稿保留待重提案）。
+ */
 export async function approveProposal(
-  proposalId: ProposalId,
-): Promise<{ result: ApproveResult | null; error: string | null }> {
+  proposalId: string,
+): Promise<{ proposal: UnifiedProposalView | null; error: string | null }> {
   const request = approveGate.issue();
   try {
-    const result = await requireRpc().skillIntelligence.approve({ proposalId });
-    return request.isCurrent() ? { result, error: null } : { result: null, error: null };
+    const result = await requireRpc().agent.proposals.approve({ proposalId });
+    return request.isCurrent()
+      ? { proposal: result.proposal, error: null }
+      : { proposal: null, error: null };
   } catch (error) {
-    if (!request.isCurrent()) return { result: null, error: null };
-    return { result: null, error: error instanceof Error ? error.message : String(error) };
+    if (!request.isCurrent()) return { proposal: null, error: null };
+    return { proposal: null, error: error instanceof Error ? error.message : String(error) };
   }
 }

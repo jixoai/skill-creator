@@ -21,6 +21,7 @@ import { createSourceRegistry, type SourceRegistry } from "./source-registry.js"
 import { createSkillsCliProbe, type SkillsCliProbe } from "./skills-cli-probe.js";
 import { join } from "node:path";
 import { appDir } from "../shared/paths.js";
+import { log as daemonLog } from "./log.js";
 
 import { createSkillsUpdateService, type SkillsUpdateService } from "./skills-update-service.js";
 import { createEvaluationService, type EvaluationService } from "./evaluation/service.js";
@@ -205,6 +206,12 @@ export function createDaemonDomain(
     workspaces,
     kernel: () => kernelHostRef.handle,
     proposals: () => proposalsRef.store,
+    // e2e 修复（2026-10-02）：生产装配必须与面板会话同源注入 settings
+    // modelSelection——缺省 createSession 不传 agentOptions，ephemeral 蒸馏
+    // agent 无 provider/model，内核 turn 直接 error（run failed(kernel-unavailable)）。
+    modelSelection: async () => (await dshSettings.getView()).settings.model,
+    // 可观测性：蒸馏失败原因进 daemon.log（缺省 console.warn 在 detached 进程丢失）。
+    log: (message) => daemonLog(`[wiki-distill] ${message}`),
     ...(options.distillSession ? { createSession: options.distillSession } : {}),
   });
   const domain: DaemonDomain = {

@@ -484,6 +484,41 @@ describe("default workspace (./, directory mapping standard)", () => {
       fs.rmSync(workspace, { recursive: true, force: true });
     }
   });
+
+  it("records the workspace directory absolute path as origin for workspace writes, '~' only for global (e2e fix)", async () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "skill-wiki-origin-"));
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(project);
+      // process.cwd() 解析符号链接（macOS /var → /private/var）——与 CLI 的
+      // path.resolve("./") 同口径，作为期望的 workspace 根。
+      const workspaceRoot = process.cwd();
+      await runRaw(["add", "--title", "Project origin"], "project body\n");
+      const defaultRaw = fs.readFileSync(
+        path.join(workspaceRoot, ".agents", "skill-wiki", "patterns", "project-origin.md"),
+        "utf8",
+      );
+      // 目录映射标准：workspace 写入的 origin = workspace 目录绝对路径（曾误记 "~"）。
+      expect(defaultRaw).toContain(`origin: ${workspaceRoot}`);
+      expect(defaultRaw).not.toContain("origin: ~\n");
+
+      // 显式 --workspace ./ 与缺省同语义。
+      await runRaw(["add", "--title", "Explicit dot origin", "--workspace", "./"], "b\n");
+      const explicitRaw = fs.readFileSync(
+        path.join(workspaceRoot, ".agents", "skill-wiki", "patterns", "explicit-dot-origin.md"),
+        "utf8",
+      );
+      expect(explicitRaw).toContain(`origin: ${workspaceRoot}`);
+
+      // global（SKILL_WIKI_HOME 隔离根）保持 "~"。
+      await runRaw(["add", "--title", "Global origin", "--workspace", "~"], "g\n");
+      const globalRaw = fs.readFileSync(path.join(root, "patterns", "global-origin.md"), "utf8");
+      expect(globalRaw).toContain("origin: ~");
+    } finally {
+      process.chdir(previousCwd);
+      fs.rmSync(project, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("child-process smoke (tsx)", () => {

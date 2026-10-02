@@ -57,6 +57,7 @@ import {
   EphemeralSessionError,
   type EphemeralSession,
 } from "../src/daemon/kernel/ephemeral-session.js";
+import type { DshKernelHandle } from "../src/daemon/kernel/dsh-kernel.js";
 
 const WORKSPACE_ID = "ws_a1b2c3d4e5f6a7b8c9d0e1f2";
 const WS_DIR_NAME = "ws-a";
@@ -1106,5 +1107,149 @@ describe("apply crash protocol + dual IO budgets (task 1.3, design H/N/R)", () =
       .filter((name) => DistillRunIdSchema.safeParse(name).success);
     expect(survivors.length).toBeLessThanOrEqual(20 + 1); // 20 健康 + 1 pinned
     expect(logs.some((entry) => entry.includes("LRU evicted"))).toBe(true);
+  });
+});
+
+describe("production assembly path (e2e fix 2026-10-02: modelSelection → agentOptions)", () => {
+  /** 记录 createEphemeralSession 入参的 fake 内核句柄（生产 createSession 缺省路径）。 */
+  function fakeKernelHandle(behavior: { rejectWith?: Error } = {}): {
+    handle: DshKernelHandle;
+    created: Array<Record<string, unknown>>;
+  } {
+    const created: Array<Record<string, unknown>> = [];
+    const handle = {
+      ctx: {},
+      record: { entries: [], activationOrder: [] },
+      globalToolNames: () => [],
+      createEphemeralSession: async (options: Record<string, unknown>) => {
+        if (behavior.rejectWith) throw behavior.rejectWith;
+        created.push(options);
+        return fakeSession({ disposed: 0, text: "[]" });
+      },
+      dispose: async () => undefined,
+    } as unknown as DshKernelHandle;
+    return { handle, created };
+  }
+
+  /** 生产装配形状的服务（不注入 createSession——走 kernel handle 缺省路径）。 */
+  function makeProductionService(
+    handle: DshKernelHandle,
+    logs: string[],
+    modelSelection?: () => Promise<{ provider: string; model: string; reasoningEffort?: string }>,
+  ): { service: DistillJobService; baseDir: string } {
+    const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-distill-prod-"));
+    sandboxes.push(sandbox);
+    const baseDir = path.join(sandbox, "runs");
+    const service = createWikiDistillService({
+      workspaces: {
+        lookup: (id: string) =>
+          id === WORKSPACE_ID
+            ? { id: WORKSPACE_ID, label: "ws", path: path.join(sandbox, WS_DIR_NAME) }
+            : null,
+      },
+      globalWikiDirectory: () => path.join(sandbox, "global-wiki"),
+      baseDir,
+      proposals: () => null,
+      kernel: () => handle,
+      ...(modelSelection ? { modelSelection } : {}),
+      buildCorpus: async () => ({
+        clusters: [],
+        candidates: [],
+        retrieval: { query: "fixture", limit: 5 },
+        evidenceThreshold: DISTILL_EVIDENCE_THRESHOLD,
+        budgets: { patternsIncluded: 0, totalBodyChars: 0 },
+        scoreVersion: DISTILL_SCORE_VERSION,
+        corpusDigest: "b".repeat(64),
+      }),
+      log: (message) => logs.push(message),
+    });
+    return { service, baseDir };
+  }
+
+  it("forwards non-empty agentOptions from the settings modelSelection through the default createSession", async () => {
+    const { handle, created } = fakeKernelHandle();
+    const { service } = makeProductionService(handle, [], async () => ({
+      provider: "prov-x",
+      model: "model-y",
+      reasoningEffort: "high",
+    }));
+    const { runId } = await service.start(WORKSPACE_ID);
+    expect(created).toHaveLength(1);
+    expect(created[0]?.systemPrompt).toBeTruthy();
+    expect(created[0]?.toolAllowlist).toEqual([
+      "mcp__skill-creator__wiki_list",
+      "mcp__skill-creator__wiki_read",
+      "mcp__skill-creator__wiki_scopes",
+    ]);
+    // e2e 回归钉：生产路径必须携带非空 agentOptions（provider/model 来自 settings）。
+    expect(created[0]?.agentOptions).toEqual({
+      provider: "prov-x",
+      model: "model-y",
+      reasoningEffort: "high",
+    });
+    expect((await service.status(runId)).reason).toBe("no-valid-proposals");
+  });
+
+  it("omits agentOptions entirely when no modelSelection seam is injected", async () => {
+    const { handle, created } = fakeKernelHandle();
+    const { service } = makeProductionService(handle, []);
+    await service.start(WORKSPACE_ID);
+    expect(created).toHaveLength(1);
+    expect(created[0]).not.toHaveProperty("agentOptions");
+  });
+
+  it("maps a modelSelection seam failure to failed(kernel-unavailable) with the inner cause logged", async () => {
+    const { handle } = fakeKernelHandle();
+    const logs: string[] = [];
+    const { service } = makeProductionService(handle, logs, async () => {
+      throw new Error("steward settings unreadable");
+    });
+    const { runId } = await service.start(WORKSPACE_ID);
+    const status = await service.status(runId);
+    expect(status.state).toBe("failed");
+    expect(status.reason).toBe("kernel-unavailable");
+    expect(logs.some((entry) => entry.includes("steward settings unreadable"))).toBe(true);
+  });
+
+  it("records the bounded inner cause in run logs.md and the daemon log on creation failure", async () => {
+    const { handle } = fakeKernelHandle({
+      rejectWith: new Error(
+        `agent "distill-x" has no provider/model: ${"y".repeat(600)} — set AgentOptions.provider and AgentOptions.model`,
+      ),
+    });
+    const logs: string[] = [];
+    const { service, baseDir } = makeProductionService(handle, logs);
+    const { runId } = await service.start(WORKSPACE_ID);
+    const status = await service.status(runId);
+    expect(status.reason).toBe("kernel-unavailable");
+    // daemon 日志（生产装配注入 daemonLog；此处为注入的 log 收集器）带内层摘要。
+    const causeLine = logs.find((entry) => entry.includes("ephemeral session creation failed"));
+    expect(causeLine).toBeTruthy();
+    expect(causeLine).toContain("no provider/model");
+    // 有界截断：600 字符的内层消息不得整段进日志。
+    expect(causeLine!.length).toBeLessThan(600);
+    // run 人读日志（logs.md）同样携带摘要（run.json 的 reason 枚举冻结不受影响）。
+    const runLogs = fs.readFileSync(path.join(baseDir, runId, "logs.md"), "utf8");
+    expect(runLogs).toContain("kernel phase failed: kernel-unavailable");
+    expect(runLogs).toContain("no provider/model");
+    expect(runLogs.length).toBeLessThan(2_000);
+  });
+
+  it("wires the production assembly in domain.ts: same-source modelSelection + daemon log (source pin)", async () => {
+    // 24/24 仍漏 bug 的根因是只测纯 fake 路径——生产装配无人传 modelSelection。
+    // 此处钉死 domain.ts 的装配面：与 agentSessions 同源的 settings.model 注入 +
+    // daemon.log 注入（缺省 console.warn 在 detached 进程丢失）。
+    const source = fs.readFileSync(
+      path.resolve(import.meta.dirname, "../src/daemon/domain.ts"),
+      "utf8",
+    );
+    const assembly = source.slice(
+      source.indexOf("createWikiDistillService({"),
+      source.indexOf("createWikiDistillService({") + 1_200,
+    );
+    expect(assembly).toContain(
+      "modelSelection: async () => (await dshSettings.getView()).settings.model",
+    );
+    expect(assembly).toContain("log: (message) => daemonLog(");
   });
 });

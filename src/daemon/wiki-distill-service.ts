@@ -308,6 +308,16 @@ function appendLogFileLine(directory: string, message: string): void {
   }
 }
 
+/**
+ * 内层错误摘要（人读日志面）：压平空白 + 有界截断——异常消息可能携带整段
+ * 内核输出，无界写入会淹没 run 日志与 daemon.log。
+ */
+function boundedCause(error: unknown, cap = 400): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const flat = message.replace(/\s+/g, " ").trim();
+  return flat.length <= cap ? flat : `${flat.slice(0, cap)}…`;
+}
+
 /** 剥 ``` 代码围栏（模型常见包裹；确定性前后处理）。 */
 function stripCodeFences(text: string): string {
   const trimmed = text.trim();
@@ -490,6 +500,18 @@ export interface DistillJobDeps {
   baseDir?: string;
   /** kernel 句柄访问子（daemon index boot 后注入；null → failed(kernel-unavailable)）。 */
   kernel?: () => DshKernelHandle | null;
+  /**
+   * agent 模型路由 seam（e2e 修复 2026-10-02）：生产装配注入与面板会话同源的
+   * settings modelSelection（domain.ts → dshSettings.getView().settings.model）；
+   * 缺省 createSession 路径读它透传 agentOptions。不注入则不传 agentOptions
+   * （走内核默认路由）——曾导致 ephemeral agent 无 provider/model，内核 turn
+   * 直接 error（run reason=kernel-unavailable 且无内层线索）。
+   */
+  modelSelection?: () => Promise<{
+    provider: string;
+    model: string;
+    reasoningEffort?: string;
+  }>;
   /** proposal store 访问子（domain 装配晚绑定——解 capability ↔ store 环）。 */
   proposals: () => McpProposalStore | null;
   /** ephemeral 会话工厂 seam（测试注入 fake；缺省经 kernel handle 创建只读面会话）。 */
@@ -554,7 +576,7 @@ interface RunEntry {
 
 type KernelOutcome =
   | { kind: "ok"; text: string }
-  | { kind: "failed"; reason: "timeout" | "kernel-unavailable" }
+  | { kind: "failed"; reason: "timeout" | "kernel-unavailable"; detail?: string }
   | { kind: "cancelled" };
 
 export function createWikiDistillService(deps: DistillJobDeps): DistillJobService {
@@ -1031,32 +1053,45 @@ export function createWikiDistillService(deps: DistillJobDeps): DistillJobServic
     const controller = new AbortController();
     const createSession =
       deps.createSession ??
-      ((options: { systemPrompt: string }) => {
+      (async (options: { systemPrompt: string }) => {
         const handle = deps.kernel?.();
         if (!handle) {
-          return Promise.reject(
-            new EphemeralSessionError(
-              "DISTILL_KERNEL_CREATE_FAILED",
-              "distill kernel host unavailable (daemon booted without a kernel)",
-            ),
+          throw new EphemeralSessionError(
+            "DISTILL_KERNEL_CREATE_FAILED",
+            "distill kernel host unavailable (daemon booted without a kernel)",
           );
         }
+        // e2e 修复（2026-10-02）：settings modelSelection → agentOptions——与面板
+        // 会话同源（agent-sessions 的 provider/model 桥）；未注入 seam 时不传，
+        // 走内核默认路由。seam 自身失败（settings 不可读）按创建失败上抛——
+        // 不静默降级到无 provider/model 的必败 turn。
+        const selection =
+          deps.modelSelection === undefined ? undefined : await deps.modelSelection();
         return handle.createEphemeralSession({
           systemPrompt: options.systemPrompt,
           toolAllowlist: DISTILL_READONLY_TOOL_NAMES,
+          ...(selection === undefined
+            ? {}
+            : {
+                agentOptions: {
+                  provider: selection.provider,
+                  model: selection.model,
+                  ...(selection.reasoningEffort === undefined
+                    ? {}
+                    : { reasoningEffort: selection.reasoningEffort }),
+                },
+              }),
         });
       });
     let session: EphemeralSession;
     try {
       session = await createSession({ systemPrompt: DISTILL_SYSTEM_PROMPT });
     } catch (error) {
-      // 创建即失败（bridge/注册名/内核面缺失）→ kernel-unavailable（U：kernel-local 码不跨面）。
-      log(
-        `ephemeral session creation failed for ${entry.runId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      return { kind: "failed", reason: "kernel-unavailable" };
+      // 创建即失败（bridge/注册名/内核面/modelSelection 缺失）→ kernel-unavailable
+      // （U：kernel-local 码不跨面）；内层摘要随 detail 进 run logs + daemon 日志。
+      const detail = boundedCause(error);
+      log(`ephemeral session creation failed for ${entry.runId}: ${detail}`);
+      return { kind: "failed", reason: "kernel-unavailable", detail };
     }
     entry.kernel = { session, controller };
     try {
@@ -1075,9 +1110,13 @@ export function createWikiDistillService(deps: DistillJobDeps): DistillJobServic
       if (error instanceof EphemeralSessionError) {
         if (error.code === "DISTILL_TIMEOUT") return { kind: "failed", reason: "timeout" };
         if (error.code === "DISTILL_CANCELLED") return { kind: "cancelled" };
-        return { kind: "failed", reason: "kernel-unavailable" };
+        const detail = boundedCause(error);
+        log(`ephemeral prompt failed for ${entry.runId} (${error.code}): ${detail}`);
+        return { kind: "failed", reason: "kernel-unavailable", detail };
       }
-      return { kind: "failed", reason: "kernel-unavailable" };
+      const detail = boundedCause(error);
+      log(`ephemeral prompt failed for ${entry.runId}: ${detail}`);
+      return { kind: "failed", reason: "kernel-unavailable", detail };
     } finally {
       entry.kernel = undefined;
       await session.dispose().catch(() => undefined);
@@ -1096,7 +1135,14 @@ export function createWikiDistillService(deps: DistillJobDeps): DistillJobServic
       entry.file.state = "failed";
       entry.file.reason = outcome.reason;
       persistRun(entry);
-      appendLogFileLine(entry.directory, `kernel phase failed: ${outcome.reason}`);
+      // run 失败原因带内层错误摘要（有界截断；run.json 的 reason 枚举冻结，
+      // 摘要只进人读日志面）。
+      appendLogFileLine(
+        entry.directory,
+        `kernel phase failed: ${outcome.reason}${
+          outcome.detail === undefined ? "" : ` (${outcome.detail})`
+        }`,
+      );
       return false;
     }
     let plan: ReturnType<typeof planDistillation>;

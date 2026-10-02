@@ -79,6 +79,18 @@ export function resolveWikiDirectory(workspace: string): string {
 }
 
 /**
+ * 写入目标 wiki 目录 → origin 足迹（目录映射标准）：global（目标 ===
+ * globalWikiDirectory()）为 `"~"`；workspace wiki 目录（`<workspace>/.agents/
+ * skill-wiki`）为 workspace 目录绝对路径。CLI add 的缺省 origin 由此推导——
+ * `--workspace ./` 写入 workspace wiki 时不得记 `"~"`（e2e 补测 2026-10-02）。
+ */
+export function wikiOriginOf(wikiDirectory: string): string {
+  const absolute = path.resolve(wikiDirectory);
+  if (absolute === path.resolve(globalWikiDirectory())) return "~";
+  return path.dirname(path.dirname(absolute));
+}
+
+/**
  * 去重判据：正文的规范化 SHA-256——行尾统一 + 去尾部空白后哈希。写路径保证
  * 文件以换行结尾（md 卫生），规范化让该卫生字节不参与判据，追加侧输入与
  * 读取侧落盘回读产生同一 hash。

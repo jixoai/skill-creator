@@ -3,11 +3,16 @@
   「提供 dependency/overlap/conflict graph 和可读的 finding 列表；每个 finding 绑定 Skill ID 与 observed revision。」
   修订 [2026-10-02]（ux-polish-walkthrough-residue #6）：密集图（>24 节点）标签
   互叠——默认只渲染 hover 节点的标签，稀疏图照旧全显。
+  修订 [2026-10-02]（e2e 审批面缺口）：Proposals 区数据源切到统一审批面
+  agent.proposals.list——mcp:（外部 MCP client 的 mutation proposal）与 si:
+  草稿双源同列；approve/reject 经 agent.proposals.*（前缀路由），外部 proposal
+  不再只靠 agent 面板卡片审批。
   正交意图：
   1. 触发只读分析并持有报告（severity 过滤 + 证据展示 + 跳转 Skill detail）。
   2. 渲染技能关系图（圆布局 SVG；窄屏横向滚动，不遮挡恢复操作）。
-  3. proposal 审查：before/after、affected skills、observed revisions、approve/reject；
-     stale 结果只能重新分析。
+  3. proposal 审查（统一面）：来源/能力角标 + 状态、before/after、affected
+     skills、observed revisions、approve/reject（前缀路由）；stale 结果只能
+     重新分析。
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -33,11 +38,13 @@
   import { showToast } from "$lib/toast.svelte";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import type {
-    ApproveResult,
+    AnalyzeFailure,
     Finding,
     IntelligenceReport,
-    ProposalDraft,
+    ProposalPayload,
   } from "$shared/contracts/skill-intelligence.js";
+  import { ProposalPayloadSchema } from "$shared/contracts/skill-intelligence.js";
+  import type { UnifiedProposalView } from "$shared/contracts/agent.js";
   import { SkillIdSchema, type SkillInfo } from "$shared/contracts/skills.js";
   import { WorkspaceIdSchema, ProviderIdSchema } from "$shared/contracts/workspaces.js";
   import { Badge } from "$lib/components/ui/badge";
@@ -166,17 +173,58 @@
     goById("workspaces.provider", { wsId, providerId }, { skill: skillId, view: "detail" });
   }
 
-  // ---- proposal 草稿（审查 + 审批） ----
-  let proposals = $state<ProposalDraft[]>([]);
+  // ---- proposal 审查（统一审批面：mcp: + si: 双源） ----
+  let proposals = $state<UnifiedProposalView[]>([]);
   let proposalsLoading = $state(false);
   let proposalsError = $state<string | null>(null);
   let proposing = $state(false);
   let approvingId = $state<string | null>(null);
   let rejectingId = $state<string | null>(null);
-  let approveOutcome = $state<{ proposalId: string; result: ApproveResult } | null>(null);
+  let approveOutcome = $state<{ proposalId: string; view: UnifiedProposalView } | null>(null);
   /** 展开审查时懒加载的 before 文档（edit proposal 的 before/after 对照）。 */
   let beforeDocs = $state<Record<string, SkillInfo>>({});
   let expandedId = $state<string | null>(null);
+
+  /**
+   * si 草稿的 payload 收窄（外部输入法则：统一面 payload 是 unknown——mcp 行
+   * 是 capability input，只有 skill-intelligence 源可按四类 payload 判别联合
+   * safeParse；解析失败按无 si 详情渲染，绝不含 payload 直读）。
+   */
+  function siPayloadOf(proposal: UnifiedProposalView): ProposalPayload | null {
+    if (proposal.source !== "skill-intelligence") return null;
+    const parsed = ProposalPayloadSchema.safeParse(proposal.payload);
+    return parsed.success ? parsed.data : null;
+  }
+
+  /** 受影响技能（targets 多源优先；单源回落 target）。 */
+  function affectedOf(
+    proposal: UnifiedProposalView,
+  ): Array<{ workspaceId: string; providerId: string; skillId: string }> {
+    if (proposal.targets !== undefined) return proposal.targets;
+    return proposal.target === null ? [] : [proposal.target];
+  }
+
+  /** 与受影响技能对齐的 observed revisions。 */
+  function revisionsOf(proposal: UnifiedProposalView): string[] {
+    if (proposal.observedRevisions !== undefined) return proposal.observedRevisions;
+    return proposal.observedRevision === null ? [] : [proposal.observedRevision];
+  }
+
+  /** mcp 行的载荷预览（不可信文本只经插值转义，不入模板）。 */
+  function payloadPreview(proposal: UnifiedProposalView): string {
+    try {
+      return JSON.stringify(proposal.payload, null, 2) ?? "—";
+    } catch {
+      return String(proposal.payload);
+    }
+  }
+
+  /** 行标题：si 草稿 = rationale 摘要（finding.summary）；mcp = capability 名。 */
+  function titleOf(proposal: UnifiedProposalView): string {
+    return proposal.source === "skill-intelligence"
+      ? (proposal.finding?.summary ?? "skill-intelligence draft")
+      : (proposal.capability ?? proposal.kind);
+  }
 
   $effect(() => {
     void refreshProposals();
@@ -197,12 +245,13 @@
     }
   }
 
-  async function expandProposal(proposal: ProposalDraft): Promise<void> {
+  async function expandProposal(proposal: UnifiedProposalView): Promise<void> {
     expandedId = expandedId === proposal.id ? null : proposal.id;
     if (expandedId !== proposal.id) return;
     // edit proposal：拉取受影响技能当前文档作为 before。
-    if (proposal.payload.kind === "edit") {
-      for (const edit of proposal.payload.edits) {
+    const siPayload = siPayloadOf(proposal);
+    if (siPayload?.kind === "edit") {
+      for (const edit of siPayload.edits) {
         const parsed = SkillIdSchema.safeParse(edit.selection.skillId);
         if (!parsed.success) continue;
         try {
@@ -215,29 +264,28 @@
     }
   }
 
-  async function handleApprove(proposal: ProposalDraft): Promise<void> {
-    if (approvingId) return;
+  async function handleApprove(proposal: UnifiedProposalView): Promise<void> {
+    if (approvingId || proposal.status !== "pending") return;
     approvingId = proposal.id;
     try {
-      const { result, error } = await approveProposal(proposal.id);
+      const { proposal: decided, error } = await approveProposal(proposal.id);
       if (error) {
         showToast(error);
         return;
       }
-      if (!result) return; // 请求已被取代
-      approveOutcome = { proposalId: proposal.id, result };
-      if (result.conflicts > 0) {
-        showToast(
-          `${result.conflicts} conflict(s): skill changed after the proposal. Re-analyze.`,
-          {
-            label: "Re-analyze",
-            run: () => void runAnalysis(),
-          },
-        );
-      } else if (result.failed > 0) {
-        showToast(`Applied with ${result.failed} failure(s).`);
+      if (!decided) return; // 请求已被取代
+      approveOutcome = { proposalId: proposal.id, view: decided };
+      if (decided.status === "rejected" && decided.rejectCause === "stale") {
+        showToast("This proposal is stale. Re-analyze, then create a fresh proposal.", {
+          label: "Re-analyze",
+          run: () => void runAnalysis(),
+        });
+      } else if (decided.status === "failed") {
+        showToast(`Proposal failed${decided.result?.error ? `: ${decided.result.error}` : "."}`);
+      } else if (decided.status === "executed") {
+        showToast("Proposal applied.");
       } else {
-        showToast(`Applied ${result.applied} change(s).`);
+        showToast(`Proposal decided: ${decided.status}.`);
       }
       await refreshProposals();
       await loadSkillsRefresh();
@@ -251,8 +299,8 @@
     if (target) await loadSkills(target);
   }
 
-  async function handleReject(proposal: ProposalDraft): Promise<void> {
-    if (rejectingId) return;
+  async function handleReject(proposal: UnifiedProposalView): Promise<void> {
+    if (rejectingId || proposal.status !== "pending") return;
     rejectingId = proposal.id;
     try {
       const { error } = await rejectProposal(proposal.id);
@@ -593,7 +641,7 @@
         {/if}
       </section>
 
-      <!-- proposals 审查 -->
+      <!-- proposals 审查（统一审批面：mcp: + si: 双源） -->
       <section class="mt-6" aria-label="Proposal review">
         <div class="mb-2 flex items-center gap-2">
           <h2 class="text-xs font-medium text-muted-foreground">Proposals</h2>
@@ -612,37 +660,55 @@
         </div>
         {#if proposals.length === 0}
           <p class="py-4 text-xs text-muted-foreground">
-            No pending proposals. Propose a fix from any finding above; nothing is applied until you
-            approve it here.
+            No proposals yet. Propose a fix from any finding above or via an agent tool call;
+            nothing is applied until you approve it here.
           </p>
         {:else}
           <ul class="space-y-2">
             {#each proposals as proposal (proposal.id)}
+              {@const siPayload = siPayloadOf(proposal)}
               {@const outcome =
-                approveOutcome?.proposalId === proposal.id ? approveOutcome.result : null}
+                approveOutcome?.proposalId === proposal.id ? approveOutcome.view : null}
+              {@const pending = proposal.status === "pending"}
               <li class="rounded-md border border-border">
                 <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
-                  {#if proposal.payload.kind === "edit"}
+                  {#if siPayload?.kind === "edit"}
                     <IconSparkles class="h-4 w-4 shrink-0 text-primary" />
-                  {:else if proposal.payload.kind === "disable"}
+                  {:else if siPayload?.kind === "disable"}
                     <IconPowerOff class="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  {:else if proposal.payload.kind === "split"}
+                  {:else if siPayload?.kind === "split"}
                     <IconScissors class="h-4 w-4 shrink-0 text-primary" />
-                  {:else}
+                  {:else if siPayload?.kind === "merge"}
                     <IconGitMerge class="h-4 w-4 shrink-0 text-primary" />
+                  {:else}
+                    <IconShield class="h-4 w-4 shrink-0 text-muted-foreground" />
                   {/if}
                   <button
                     type="button"
                     class="min-w-0 flex-1 truncate text-left text-xs font-medium"
                     onclick={() => void expandProposal(proposal)}
                   >
-                    {proposal.payload.kind} · {proposal.rationale}
+                    {proposal.kind} · {titleOf(proposal)}
                   </button>
+                  <!-- 来源角标：mcp 行显示 capability；si 行显示草稿来源。 -->
+                  <Badge
+                    variant={proposal.source === "mcp" ? "secondary" : "outline"}
+                    class="text-[10px]"
+                  >
+                    {proposal.source === "mcp"
+                      ? (proposal.capability ?? proposal.kind)
+                      : "si draft"}
+                  </Badge>
+                  {#if !pending}
+                    <Badge variant="outline" class="text-[10px]">
+                      {proposal.status}{proposal.rejectCause === "stale" ? " · stale" : ""}
+                    </Badge>
+                  {/if}
                   <Button
                     variant="outline"
                     size="sm"
                     class="h-7 px-2 text-[11px]"
-                    disabled={rejectingId === proposal.id}
+                    disabled={!pending || rejectingId === proposal.id}
                     onclick={() => void handleReject(proposal)}
                   >
                     {#if rejectingId === proposal.id}<IconLoader
@@ -653,8 +719,7 @@
                   <Button
                     size="sm"
                     class="h-7 px-2 text-[11px]"
-                    disabled={approvingId === proposal.id ||
-                      (outcome !== null && outcome.conflicts > 0)}
+                    disabled={!pending || approvingId === proposal.id}
                     onclick={() => void handleApprove(proposal)}
                   >
                     {#if approvingId === proposal.id}<IconLoader
@@ -666,20 +731,16 @@
 
                 {#if outcome}
                   <div class="border-b border-border/60 px-3 py-2 text-[11px]">
-                    {#each outcome.results as entry (entry.skillId)}
-                      <p
-                        class={entry.status === "applied"
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : entry.status === "conflict"
-                            ? "text-destructive"
-                            : "text-muted-foreground"}
-                      >
-                        {snapshotName(entry.skillId)} — {entry.status}{entry.error
-                          ? `: ${entry.error}`
-                          : ""}
-                      </p>
-                    {/each}
-                    {#if outcome.conflicts > 0}
+                    <p
+                      class={outcome.status === "executed"
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : outcome.status === "failed"
+                          ? "text-destructive"
+                          : "text-muted-foreground"}
+                    >
+                      {outcome.status}{outcome.result?.error ? `: ${outcome.result.error}` : ""}
+                    </p>
+                    {#if outcome.status === "rejected" && outcome.rejectCause === "stale"}
                       <p class="mt-1 text-destructive">
                         This proposal is stale. Re-analyze, then create a fresh proposal.
                       </p>
@@ -689,77 +750,94 @@
 
                 {#if expandedId === proposal.id}
                   <div class="space-y-2 px-3 py-2 text-[11px]">
-                    <p class="text-muted-foreground">{proposal.rationale}</p>
+                    <p class="text-muted-foreground">{titleOf(proposal)}</p>
                     <p class="text-muted-foreground">
-                      Created {new Date(proposal.createdAt).toLocaleString()} · affects
-                      {proposal.observedRevisions.length} skill(s).
+                      Created {new Date(proposal.createdAt).toLocaleString()} · origin
+                      {proposal.origin}.
                     </p>
-                    <ul class="space-y-1">
-                      {#each proposal.observedRevisions as observed (observed.skillId)}
-                        <li class="flex flex-wrap items-baseline gap-1">
-                          <button
-                            type="button"
-                            class="text-primary underline-offset-2 hover:underline"
-                            onclick={() => openSkillDetail(observed.skillId)}
-                          >
-                            {snapshotName(observed.skillId)}
-                          </button>
-                          <code class="break-all text-[10px] text-muted-foreground"
-                            >{observed.revision.slice(0, 19)}…</code
-                          >
-                        </li>
-                      {/each}
-                    </ul>
-
-                    {#if proposal.payload.kind === "edit"}
-                      {@const first = proposal.payload.edits[0]}
-                      {@const before = beforeDocs[first.selection.skillId]}
-                      <div class="grid gap-2 md:grid-cols-2">
-                        <div class="rounded border border-border bg-muted/20 p-2">
-                          <p class="mb-1 font-medium">Before</p>
-                          {#if before}
-                            <p class="leading-4 text-muted-foreground">{before.description}</p>
-                          {:else}
-                            <p class="text-muted-foreground">Loading current document…</p>
-                          {/if}
-                        </div>
-                        <div class="rounded border border-border bg-muted/20 p-2">
-                          <p class="mb-1 font-medium">After (proposal)</p>
-                          <p class="leading-4 text-muted-foreground">
-                            {first.frontmatter.description}
-                          </p>
-                        </div>
-                      </div>
-                      <details>
-                        <summary class="cursor-pointer text-muted-foreground">Preview body</summary>
-                        <pre
-                          class="mt-1 max-h-48 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">{first.body}</pre>
-                      </details>
-                    {:else if proposal.payload.kind === "disable"}
-                      <p class="rounded border border-border bg-muted/20 p-2 leading-4">
-                        Reason: {proposal.payload.reason}
-                      </p>
-                    {:else if proposal.payload.kind === "split"}
+                    {#if siPayload !== null}
+                      {@const affected = affectedOf(proposal)}
+                      {@const revisions = revisionsOf(proposal)}
+                      <p class="text-muted-foreground">Affects {affected.length} skill(s).</p>
                       <ul class="space-y-1">
-                        {#each proposal.payload.targets as target (target.directoryName)}
-                          <li>
-                            <span class="font-medium">{target.directoryName}</span>
-                            <span class="text-muted-foreground">
-                              — {target.frontmatter.description}</span
+                        {#each affected as selection, index (selection.skillId)}
+                          <li class="flex flex-wrap items-baseline gap-1">
+                            <button
+                              type="button"
+                              class="text-primary underline-offset-2 hover:underline"
+                              onclick={() => openSkillDetail(selection.skillId)}
                             >
+                              {snapshotName(selection.skillId)}
+                            </button>
+                            {#if revisions[index] !== undefined}
+                              <code class="break-all text-[10px] text-muted-foreground"
+                                >{revisions[index]!.slice(0, 19)}…</code
+                              >
+                            {/if}
                           </li>
                         {/each}
                       </ul>
-                    {:else if proposal.payload.kind === "merge"}
-                      <p>
-                        <span class="font-medium">{proposal.payload.target.directoryName}</span>
-                        <span class="text-muted-foreground">
-                          — {proposal.payload.target.frontmatter.description}</span
-                        >
-                      </p>
-                      <p class="text-muted-foreground">
-                        Merges {proposal.payload.sources.length} sources; approving removes them revision-safely.
-                      </p>
+
+                      {#if siPayload.kind === "edit"}
+                        {@const first = siPayload.edits[0]}
+                        {@const before = first ? beforeDocs[first.selection.skillId] : undefined}
+                        <div class="grid gap-2 md:grid-cols-2">
+                          <div class="rounded border border-border bg-muted/20 p-2">
+                            <p class="mb-1 font-medium">Before</p>
+                            {#if before}
+                              <p class="leading-4 text-muted-foreground">{before.description}</p>
+                            {:else}
+                              <p class="text-muted-foreground">Loading current document…</p>
+                            {/if}
+                          </div>
+                          <div class="rounded border border-border bg-muted/20 p-2">
+                            <p class="mb-1 font-medium">After (proposal)</p>
+                            <p class="leading-4 text-muted-foreground">
+                              {first?.frontmatter.description}
+                            </p>
+                          </div>
+                        </div>
+                        {#if first}
+                          <details>
+                            <summary class="cursor-pointer text-muted-foreground"
+                              >Preview body</summary
+                            >
+                            <pre
+                              class="mt-1 max-h-48 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">{first.body}</pre>
+                          </details>
+                        {/if}
+                      {:else if siPayload.kind === "disable"}
+                        <p class="rounded border border-border bg-muted/20 p-2 leading-4">
+                          Reason: {siPayload.reason}
+                        </p>
+                      {:else if siPayload.kind === "split"}
+                        <ul class="space-y-1">
+                          {#each siPayload.targets as target (target.directoryName)}
+                            <li>
+                              <span class="font-medium">{target.directoryName}</span>
+                              <span class="text-muted-foreground">
+                                — {target.frontmatter.description}</span
+                              >
+                            </li>
+                          {/each}
+                        </ul>
+                      {:else if siPayload.kind === "merge"}
+                        <p>
+                          <span class="font-medium">{siPayload.target.directoryName}</span>
+                          <span class="text-muted-foreground">
+                            — {siPayload.target.frontmatter.description}</span
+                          >
+                        </p>
+                        <p class="text-muted-foreground">
+                          Merges {siPayload.sources.length} sources; approving removes them revision-safely.
+                        </p>
+                      {/if}
+                    {:else}
+                      <!-- mcp 行：capability input 的只读预览（不可信文本只经插值转义）。 -->
+                      <pre
+                        class="max-h-48 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">{payloadPreview(
+                          proposal,
+                        )}</pre>
                     {/if}
                   </div>
                 {/if}

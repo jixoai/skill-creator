@@ -1,6 +1,8 @@
 /**
  * 用户原始需求 [2026-09-06]（openspec skill-intelligence）：
  * 「所有优化只产生 Manager-owned draft/patch，必须经过 validation、revision check 和显式 approval。」
+ * 修订 [2026-10-02]（e2e 审批面缺口）：approve 面切到统一审批面
+ * agent.proposals.approve（si:|mcp: 前缀路由）；本文件同步迁移决定面用例。
  * 正交意图：[1] 分析与审批的 stale 响应不投影；[2] 请求失败按结构化 error 返回。
  * 说明：daemon 侧只读保证、revision stale、split/merge 路径安全由
  * test/skill-intelligence.test.ts 覆盖；本文件覆盖 WebUI store 层不变量。
@@ -71,22 +73,23 @@ describe("intelligence store stale projection", () => {
     const pending = new Promise<unknown>((resolve) => {
       approveRelease.run = resolve;
     });
+    const approve = vi.fn().mockImplementationOnce(() => pending);
     rpcClient = {
-      skillIntelligence: {
-        approve: vi.fn().mockImplementationOnce(() => pending),
+      agent: {
+        proposals: { approve },
       },
     };
-    const inFlight = approveProposal("pr_111111111111111111111111" as never);
+    const inFlight = approveProposal("si:pr_111111111111111111111111");
     connectionGeneration += 1; // 断线重连替换了 client 所有权。
     approveRelease.run?.({
-      results: [],
-      applied: 1,
-      conflicts: 0,
-      failed: 0,
-      skipped: 0,
+      proposal: {
+        id: "si:pr_111111111111111111111111",
+        source: "skill-intelligence",
+        status: "executed",
+      },
     });
     const result = await inFlight;
-    expect(result.result).toBeNull();
+    expect(result.proposal).toBeNull();
     expect(result.error).toBeNull();
   });
 

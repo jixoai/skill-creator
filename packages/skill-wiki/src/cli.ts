@@ -31,7 +31,12 @@ import { z } from "zod";
 import { SearchError, type SearchIndex } from "@jixoai/search";
 import { SkillWikiError } from "./schema.js";
 import type { WikiEdit } from "./patch.js";
-import { openWikiWorkspace, resolveWikiDirectory, type WikiWorkspace } from "./workspace.js";
+import {
+  openWikiWorkspace,
+  resolveWikiDirectory,
+  wikiOriginOf,
+  type WikiWorkspace,
+} from "./workspace.js";
 import {
   findSimilarPatterns,
   patternSearchDoc,
@@ -311,7 +316,14 @@ async function cmdAdd(ctx: WikiCliContext): Promise<number> {
   }
   const { wiki, wikiDirectory } = await ctx.openWiki();
   const json = ctx.options.has("json");
-  const { item, deduplicated } = wiki.appendPattern({ title, body });
+  // origin 足迹（目录映射标准，e2e 补测 2026-10-02）：global 写入记 "~"，workspace
+  // 写入记 workspace 目录绝对路径——`--workspace ./` 曾误记 "~"（appendPattern
+  // 的库级缺省），与 daemon append 面（wiki-service 已传 workspace 目录）漂移。
+  const { item, deduplicated } = wiki.appendPattern({
+    title,
+    body,
+    origin: wikiOriginOf(wikiDirectory),
+  });
 
   let similar: SimilarPattern[] = [];
   if (!ctx.options.has("no-similarity")) {
