@@ -2,9 +2,12 @@
   用户原始需求 [2026-09-30]（evaluation-corpus Ch3 后续批 / evaluation-webui-view）：
   「webui 里面还有一些残留的未完成的工作，比如 skill 测试与评估」——Eval 子视图 =
   评估语料的最小只读查看入口。
+  修订 [2026-10-02]（design-critique R2）：行改 grid（提示词 1fr + 胶囊 auto，
+  列距收紧）；连续同 boundRevision 的行只在首行显示 bound（组内去重）；
+  failed/error/unavailable 行下补失败摘要（断言计数 / failure.detail 120 字符）。
   正交意图：
   1. edit 模式：只读列出当前技能的评估 case 与每案最新结果（五态 outcome 徽标 +
-     observedEndRevision 短显 + 展示层 stale 角标）；不提供任何创建/运行入口。
+     observedEndRevision 短显 + 展示层 stale 角标 + 失败摘要行）；不提供任何创建/运行入口。
   2. new 模式：无稳定 skillId——「先保存」空态（与 Test 子视图同族），不发 RPC。
   视图状态：行数据 → evaluation-view store（latest-request-wins 代次门）；
   草稿身份 → 共享 creator-editor context。
@@ -87,6 +90,25 @@
     return !row.latest || row.latest.observedEndRevision !== row.boundRevision;
   }
 
+  /**
+   * 失败面摘要（design-critique R2）：failed 结果无 error/message 字段，其失败面
+   * = 未通过断言计数；error/unavailable 走 failure.detail（有界截断 120 字符）。
+   */
+  function failureSummary(row: EvaluationRow): string | null {
+    const latest = row.latest;
+    if (!latest) return null;
+    if (latest.outcome === "failed") {
+      const failedCount = latest.assertions.filter((entry) => entry.outcome !== "passed").length;
+      if (failedCount === 0) return null;
+      return `${failedCount}/${latest.assertions.length} assertion${failedCount === 1 ? "" : "s"} failed`;
+    }
+    if (latest.outcome === "error" || latest.outcome === "unavailable") {
+      const detail = latest.failure.detail;
+      return detail.length > 120 ? `${detail.slice(0, 120)}…` : detail;
+    }
+    return null;
+  }
+
   function reload(): void {
     if (draft.mode === "edit" && draft.skillId !== null) {
       void loadEvaluationView({
@@ -160,18 +182,22 @@
     </div>
   {:else if rows !== null}
     <div class="min-h-0 flex-1 overflow-y-auto p-3">
-      <ul class="space-y-1.5">
-        {#each rows as row (row.caseId)}
-          <li class="rounded-md border border-border px-3 py-2">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0 flex-1">
+      <ul class="space-y-1">
+        {#each rows as row, index (row.caseId)}
+          {@const summary = failureSummary(row)}
+          <!-- R2 #4：行改 grid（提示词 1fr + 胶囊 auto，列距收紧消除死区）。 -->
+          <li class="rounded-md border border-border px-3 py-1.5">
+            <div class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2">
+              <div class="min-w-0">
                 <p class="truncate text-xs">{promptSummary(row)}</p>
                 <p
                   class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
                 >
                   <span>{row.enabled ? "enabled" : "disabled"}</span>
                   <span>{row.assertionCount} assertion{row.assertionCount === 1 ? "" : "s"}</span>
-                  {#if showBoundRevision(row)}
+                  <!-- R2 #4：连续行同 boundRevision 时仅组首行显示（index 0 或前行
+                       不同值时才播报），三行同 hash 重复的截断串不再逐行出现。 -->
+                  {#if showBoundRevision(row) && rows?.[index - 1]?.boundRevision !== row.boundRevision}
                     <span title={row.boundRevision}>
                       bound {shortRevision(row.boundRevision)}…
                     </span>
@@ -209,6 +235,11 @@
                 {/if}
               </div>
             </div>
+            {#if summary !== null}
+              <p class="mt-1 text-xs text-muted-foreground" data-testid="eval-failure-summary">
+                {summary}
+              </p>
+            {/if}
           </li>
         {/each}
       </ul>

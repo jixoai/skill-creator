@@ -12,6 +12,9 @@
  *   [2] 对照钉：revision 漂移（语料绑定旧版、结果观察新版）时 bound/rev 双列
  *       保留，读作「跑的是旧版」。
  *   [3] 未跑钉：latest=null 时 bound 保留（唯一 revision 信息源，不能丢）。
+ *   [4] 组内去重钉（R2）：连续行同 boundRevision 时仅组首行播报 bound。
+ *   [5] 失败面钉（R2）：failed 行播报未通过断言计数；error/unavailable 行
+ *       播报 failure.detail（有界截断）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -105,6 +108,32 @@ function row(caseId: string, latest: EvaluationResultView | null): EvaluationRow
   };
 }
 
+/** 最小合法 failed 结果（R2 失败面钉：1/2 断言未通过）。 */
+function failedResult(caseId: string, observedEndRevision: string): EvaluationResultView {
+  return {
+    schemaVersion: 1,
+    resultId: `evr_${"f".repeat(24)}`,
+    runId: `run_${"1".repeat(24)}`,
+    caseId,
+    target: { workspaceId: WS, providerId: PROVIDER, skillId: SK },
+    expectedRevision: observedEndRevision,
+    observedStartRevision: observedEndRevision,
+    observedEndRevision,
+    runner: {
+      kind: "analyzer",
+      version: { promptVersion: "1", toolVersion: "1", dshVersion: "n/a" },
+    },
+    startedAt: "2026-10-02T00:00:00.000Z",
+    endedAt: "2026-10-02T00:00:01.000Z",
+    outcome: "failed",
+    assertions: [
+      { ref: 0, outcome: "passed" },
+      { ref: 1, outcome: "failed" },
+    ],
+    stale: false,
+  };
+}
+
 let target: HTMLElement;
 
 function mountHost(): { cleanup: () => void } {
@@ -159,6 +188,33 @@ describe("eval view bound/rev display merge (design-critique R1 Gap 1)", () => {
 
     expect(target.textContent).toContain(`bound ${shortRev(REV_A)}…`);
     expect(target.textContent).toContain("not run");
+    ctx.cleanup();
+  });
+
+  it("shows bound once per consecutive same-revision group (R2 merge)", () => {
+    // 三行同 boundRevision（均漂移对照态）：仅首行播报 bound，后续行留空。
+    evaluationViewState.rows = [
+      row(`ev_${"d".repeat(24)}`, passedResult(`ev_${"d".repeat(24)}`, REV_B, "3")),
+      row(`ev_${"e".repeat(24)}`, passedResult(`ev_${"e".repeat(24)}`, REV_B, "4")),
+      row(`ev_${"f".repeat(24)}`, null),
+    ];
+    flushSync();
+    const ctx = mountHost();
+
+    const boundCount = target.textContent!.split(`bound ${shortRev(REV_A)}…`).length - 1;
+    expect(boundCount).toBe(1);
+    ctx.cleanup();
+  });
+
+  it("renders a failure summary line for failed rows (R2 failure face)", () => {
+    evaluationViewState.rows = [
+      row(`ev_${"a".repeat(24)}`, failedResult(`ev_${"a".repeat(24)}`, REV_B)),
+    ];
+    flushSync();
+    const ctx = mountHost();
+
+    const summary = target.querySelector('[data-testid="eval-failure-summary"]');
+    expect(summary?.textContent).toContain("1/2 assertion failed");
     ctx.cleanup();
   });
 });

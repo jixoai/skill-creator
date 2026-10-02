@@ -261,7 +261,9 @@ describe("ComposerCard model chip dropdown (B2)", () => {
     flushSync();
     const trigger = ctx.trigger();
     expect(trigger?.disabled).toBe(true);
-    expect(trigger?.title).toBe("Switch after the current turn ends");
+    // R2：running 态 title 仍携带完整标签（截断后悬停见全名）+ 原禁用语义。
+    expect(trigger?.title).toContain("zai · glm-4.7");
+    expect(trigger?.title).toContain("switch after the current turn ends");
     ctx.cleanup();
   });
 

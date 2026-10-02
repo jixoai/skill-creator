@@ -7,6 +7,8 @@
   视图状态：草稿 → 共享 creator-editor context（$state）；正文 → daemon RPC。
   2026-09-30 creator-editor-polish：正文编辑器升级 CodeMirror 6（markdown-editor
   懒加载组件）；new 模式校验改 validateNewDraft 字段级错误 + Save 禁用联动。
+  2026-10-02 design-critique R2：工具栏危险操作隔离——Reload/Save 为常规组，
+  Delete 经分隔线推到右端（confirm 链路与配色不动）。
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -250,11 +252,11 @@
 </script>
 
 <div class="flex h-full flex-col">
-  <div class="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
+  <div class="flex shrink-0 items-center border-b border-border px-4 py-2">
     <span class="text-xs font-medium">
       {draft.mode === "new" ? "New SKILL.md" : "SKILL.md"}
     </span>
-    <div class="flex items-center gap-1.5">
+    <div class="ml-auto flex items-center gap-1.5">
       {#if draft.mode === "edit" && draft.skillId}
         <Button
           variant="outline"
@@ -267,7 +269,15 @@
           Reload
         </Button>
       {/if}
+      <Button size="sm" class="h-7 gap-1.5" onclick={handleSave} disabled={!canSave}>
+        {#if saving}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconSave
+            class="h-3.5 w-3.5"
+          />{/if}
+        {draft.mode === "new" ? "Create" : "Save"}
+      </Button>
       {#if draft.mode === "edit"}
+        <!-- R2 #3：危险操作隔离——分隔线后右置 Delete（confirm 链路不动）。 -->
+        <span class="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden="true"></span>
         <Button
           variant="ghost"
           size="sm"
@@ -280,12 +290,6 @@
           <span class="hidden sm:inline">Delete</span>
         </Button>
       {/if}
-      <Button size="sm" class="h-7 gap-1.5" onclick={handleSave} disabled={!canSave}>
-        {#if saving}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconSave
-            class="h-3.5 w-3.5"
-          />{/if}
-        {draft.mode === "new" ? "Create" : "Save"}
-      </Button>
     </div>
   </div>
 

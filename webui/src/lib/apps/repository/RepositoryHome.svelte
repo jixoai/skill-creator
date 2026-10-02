@@ -1,5 +1,8 @@
 <!--
   用户原始需求 [2026-07-27]：「Repository home Tab 呈现 Discover 体验：搜索 + 精选源卡片 + 用户源 + 最近扫描。」
+  修订 [2026-10-02]（design-critique R2）：页面对齐导航命名——h1 改「Repository」，
+  「Discover skills」降为源卡区分组标题；源卡网格在卡片数 <3 时封顶 2 列
+  （3 列网格摆 2 卡不再留锯齿空位）。
   正交意图：
     1. 卡片数据来自 repository.sources.list RPC（不缓存跨渲染周期、不写 localStorage）。
     2. 搜索纯客户端过滤；未提交文本是组件局部 $state，提交后走 URL search ?q=。
@@ -175,7 +178,7 @@
 <div class="flex h-full flex-col overflow-y-auto p-5">
   <header class="flex shrink-0 items-center gap-3 border-b border-border pb-4">
     <div class="min-w-0 flex-1">
-      <h1 class="text-lg font-semibold">Discover skills</h1>
+      <h1 class="text-lg font-semibold">Repository</h1>
       <p class="mt-0.5 text-xs text-muted-foreground">
         Browse curated and custom skill repositories, then scan to install.
       </p>
@@ -190,45 +193,57 @@
   </header>
 
   <div class="mx-auto mt-4 w-full max-w-4xl flex-1 space-y-4">
-    <div class="flex items-center gap-2">
-      <input
-        type="search"
-        bind:value={draft}
-        oninput={() => commitQuery(draft)}
-        onkeydown={(event) => {
-          if (event.key === "Enter") submitQuery();
-        }}
-        placeholder="Filter sources by name or description…"
-        class="h-9 w-full rounded-md border border-border bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label="Filter sources"
-      />
-    </div>
-
-    {#if repositorySourcesState.loading}
-      <p class="py-8 text-center text-xs text-muted-foreground">Loading sources…</p>
-    {:else if repositorySourcesState.error}
-      <p class="py-8 text-center text-xs text-destructive">{repositorySourcesState.error}</p>
-    {:else if filteredSources.length === 0}
-      <p class="py-8 text-center text-xs text-muted-foreground">
-        No sources match “{committedQuery}”.
-      </p>
-    {:else}
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {#each filteredSources as source (source.id)}
-          <SourceCard
-            label={source.label}
-            description={source.description}
-            gitUrl={source.gitUrl}
-            homepage={source.homepage}
-            builtIn={source.builtIn}
-            scanSummary={getScanSummary(source.id)}
-            stale={isScanSummaryStale(getScanSummary(source.id))}
-            onscan={() => openScan(source.id)}
-            onremove={source.builtIn ? undefined : () => requestRemove(source.id, source.label)}
-          />
-        {/each}
+    <!-- R2 #6：导航叫 Repository，标题也叫 Repository；原「Discover skills」
+         降为源卡 feed 的分组标题（文案不删，层级对调）。 -->
+    <section class="space-y-3" aria-label="Discover skills">
+      <h2 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Discover skills
+      </h2>
+      <div class="flex items-center gap-2">
+        <input
+          type="search"
+          bind:value={draft}
+          oninput={() => commitQuery(draft)}
+          onkeydown={(event) => {
+            if (event.key === "Enter") submitQuery();
+          }}
+          placeholder="Filter sources by name or description…"
+          class="h-9 w-full rounded-md border border-border bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Filter sources"
+        />
       </div>
-    {/if}
+
+      {#if repositorySourcesState.loading}
+        <p class="py-8 text-center text-xs text-muted-foreground">Loading sources…</p>
+      {:else if repositorySourcesState.error}
+        <p class="py-8 text-center text-xs text-destructive">{repositorySourcesState.error}</p>
+      {:else if filteredSources.length === 0}
+        <p class="py-8 text-center text-xs text-muted-foreground">
+          No sources match “{committedQuery}”.
+        </p>
+      {:else}
+        <!-- R2 #5：卡片数少于 3 时封顶 2 列（lg 3 列只摆 2 卡会留锯齿空位）。 -->
+        <div
+          class="grid grid-cols-1 gap-3 sm:grid-cols-2 {filteredSources.length >= 3
+            ? 'lg:grid-cols-3'
+            : ''}"
+        >
+          {#each filteredSources as source (source.id)}
+            <SourceCard
+              label={source.label}
+              description={source.description}
+              gitUrl={source.gitUrl}
+              homepage={source.homepage}
+              builtIn={source.builtIn}
+              scanSummary={getScanSummary(source.id)}
+              stale={isScanSummaryStale(getScanSummary(source.id))}
+              onscan={() => openScan(source.id)}
+              onremove={source.builtIn ? undefined : () => requestRemove(source.id, source.label)}
+            />
+          {/each}
+        </div>
+      {/if}
+    </section>
 
     {#if recentScans.length > 0}
       <section class="rounded-lg border border-border bg-muted/20 p-3">

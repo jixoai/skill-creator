@@ -204,7 +204,8 @@ describe("SessionsSettingsSection (R14-C)", () => {
 
   it("renders the empty state when no sessions exist", () => {
     const ctx = mountSection(baseView(), []);
-    expect(ctx.text()).toContain("No sessions yet");
+    // R2 文案压缩：空态压一行（原双句首句 "No sessions yet." 已删）。
+    expect(ctx.text()).toContain("Sessions started from the agent panel appear here");
     expect(ctx.deleteButtons()).toHaveLength(0);
     ctx.cleanup();
   });

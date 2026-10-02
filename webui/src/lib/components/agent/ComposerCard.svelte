@@ -22,6 +22,9 @@
   修订 [2026-09-14]（R18 用户裁决）：附件按钮唤醒 **native** file-picker——
   daemon 子进程 @xmorse/rfd sync pickFiles（真实路径直返，无 web 弹层）；
   粘贴/drop 的本地 File 通道保留（无真实路径，base64 wire）。
+  修订 [2026-10-02]（design-critique R2）：model chip 的 title 在所有态都携带
+  完整 `provider · model` 标签——胶囊 max-w 截断后悬停仍见全名（截断本身
+  R1 已有 max-w + truncate）。
   正交意图：
   1. 输入卡：附件条（图片缩略/文件 chip，与 UserMessage 附件同视觉语言）、
      自动长高 textarea（1 行 44px → 4 行 160px 封顶内滚；Enter 发送 /
@@ -793,6 +796,7 @@
     <!-- 右簇：model chip + ContextMeter + 主按钮 -->
     {#if modelChip}
       <DropdownMenu.DropdownMenu bind:open={modelMenuOpen}>
+        <!-- R2：所有态 title 前置完整标签——max-w 截断后悬停仍见全名。 -->
         <DropdownMenu.Trigger
           class="flex h-7 max-w-[150px] items-center gap-1.5 rounded-full border px-2.5 text-[11px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 {modelChip.dangling
             ? 'border-amber-500/60 text-amber-700 dark:text-amber-300'
@@ -800,8 +804,8 @@
           title={modelChip.dangling
             ? `${modelChip.label} — active model is outside your configured Model Routes (amber). Pick a routed model here or manage routes in Settings → Model`
             : running
-              ? "Switch after the current turn ends"
-              : "Switch the active model — route configuration lives in Settings → Model"}
+              ? `${modelChip.label} — switch after the current turn ends`
+              : `${modelChip.label} — switch the active model (route configuration lives in Settings → Model)`}
           aria-label={modelChip.dangling
             ? `Switch active model — current model ${modelChip.label} is outside your configured Model Routes`
             : "Switch active model"}

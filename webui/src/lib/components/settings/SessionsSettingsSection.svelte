@@ -2,6 +2,8 @@
   设置面 Sessions 分区（R14-C 2026-09-12）：专门的 Session 管理页。
   用户原始需求 [2026-09-12]：「要有专门的 Session 管理页面，并且要默认支持
   清理 30 天以外的 Session（可配置）。」
+  修订 [2026-10-02]（design-critique R2）：helper 散文压缩——清理策略与空态
+  各压一行（清理后果与 kernel 边界语义保留）。
   正交意图：
   1. 会话列表：按日期倒序分组的持久/live 会话（标题/日期/模式/状态），逐行
      删除（ConfirmDialog；running 禁用）。
@@ -198,8 +200,7 @@
       </Button>
     </div>
     <p class="text-[10px] text-muted-foreground">
-      Sessions older than this are cleaned automatically when the daemon starts (default 30 days).
-      Kernel-side session logs are not touched.
+      Auto-cleaned at daemon startup (default 30 days); kernel-side session logs are untouched.
     </p>
     {#if daysError}
       <p class="text-[10px] text-destructive" role="alert">{daysError}</p>
@@ -234,8 +235,7 @@
       </div>
     {:else if groups.length === 0}
       <p class="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
-        No sessions yet. Sessions you start from the agent panel are listed here and can be reviewed
-        or removed individually.
+        Sessions started from the agent panel appear here for review or individual removal.
       </p>
     {:else}
       {#each groups as [day, sessions] (day)}

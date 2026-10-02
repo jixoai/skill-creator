@@ -4,6 +4,9 @@
   修订 [2026-10-02]（design-critique R1 Gap 4/9）：dark 面色经 token 覆写统一
   （透明底 + 去 active line 全宽高亮带）；heading 去下划线（重组 default
   highlight specs——默认给 heading 的 underline 读作超链接）。
+  修订 [2026-10-02]（design-critique R2）：dark 编辑面提一档亮度分层——透明底
+  在 near-black 页面上无明度差（代码体与页面糊成一片、gutter 刻度难辨），
+  host 落 --muted 底色（既有 token，不引入新变量）；light 走 CM 默认不动。
   正交意图：
   1. 懒加载：CodeMirror 全部经动态 import() code-split（类型导入编译期擦除）；
      模块未就绪/加载失败期间 textarea 底座保持可编辑（SSR 与弱网不阻塞）。
@@ -146,6 +149,12 @@
      （未注册 dark 主题），gutters #f5f5f5 底与 active line #cceeff44 全宽高亮带
      在 near-black 页面里成块——编辑区/行号槽透明融入页面，active line 高亮
      去除，光标/选区/行号色走设计 token。light 走 CM 默认，不动。 */
+  /* R2 分层（Gap：透明底无明度差）：编辑面提一档既有 token（--muted），代码体
+     与页面背景分层、gutter 刻度（--muted-foreground）随之可辨；host 圆角裁切。 */
+  :global(.dark) .cm-host {
+    background: var(--muted);
+    border-radius: 0.375rem;
+  }
   :global(.dark) .cm-host :global(.cm-editor) {
     background: transparent;
   }

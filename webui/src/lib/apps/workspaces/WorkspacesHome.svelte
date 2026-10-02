@@ -5,11 +5,15 @@
   修订 [2026-10-02]（design-critique R1 Gap 3/5）：删除首页 2×2 引导卡组——
   Create/Browse/Explore 各自的常驻入口在侧栏与区块本身；Health check 是该
   agent 审计向量的唯一入口，降级为页头单行文字链。列表即首屏主角。
+  修订 [2026-10-02]（design-critique R2）：全局卡内不可用 provider 折叠为
+  默认收起的 disclosure（死条目不再打断扫描动线；展开后同款式行零功能丢失）；
+  Health check 文字链升格为安静的次级 ghost 小按钮（完整语义在 title）。
   正交意图：
-  1. Skill locations 索引：Global（~）与 Imported Workspace 分组、availability、skill count、Provider 入口。
+  1. Skill locations 索引：Global（~）与 Imported Workspace 分组、availability、skill count、Provider 入口；
+     不可用 provider 折叠为「N unavailable locations」disclosure（默认收起）。
   2. 导入（共享全局对话框）与移除（仅 registry entry，confirm + busy 锁 + toast 终态）。
   3. 加载 / 空 / 更新中 / 失败四态可区分。
-  4. Health check 文字链（manage 模式 agent 审计的唯一入口；种子 prompt 进 composer）。
+  4. Health check 次级小按钮（manage 模式 agent 审计的唯一入口；种子 prompt 进 composer）。
 -->
 <script lang="ts">
   import {
@@ -39,6 +43,7 @@
   import IconPlus from "@lucide/svelte/icons/folder-plus";
   import IconTrash from "@lucide/svelte/icons/trash-2";
   import IconAlert from "@lucide/svelte/icons/triangle-alert";
+  import IconChevron from "@lucide/svelte/icons/chevron-right";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconWiki from "@lucide/svelte/icons/book-open";
   import SelfSkillConflictBanner from "$lib/components/self-skill-conflict-banner.svelte";
@@ -154,18 +159,23 @@
       <p class="sr-only">
         {librarySnapshot.skills} skills across {librarySnapshot.providers} agent locations.
       </p>
-      <!-- Health check（manage 模式 agent 审计）唯一入口：降级为单行文字链。 -->
-      <button
-        class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+      <!-- Health check（manage 模式 agent 审计）唯一入口：安静的次级 ghost 小按钮
+           （R2 #7）；完整审计语义经 title 携带，seed prompt 逐字不变。 -->
+      <Button
+        variant="ghost"
+        size="sm"
+        class="mt-1.5 h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+        title="Health check library — audit duplicates, vague descriptions, and stale skills, then propose fixes"
+        aria-label="Health check library"
         onclick={() =>
           startAgentAction(
             "manage",
             "Audit my skill library: find duplicates, vague descriptions, and stale skills, then propose concrete fixes.",
           )}
       >
-        <IconHeart class="h-3 w-3 shrink-0" />
-        Health check my library — duplicates, vague descriptions, stale skills
-      </button>
+        <IconHeart class="h-3.5 w-3.5" />
+        Health check library
+      </Button>
     </div>
     <div class="flex shrink-0 items-center gap-1.5">
       <Button
@@ -258,6 +268,8 @@
 
         {#each globalWorkspaces as ws (ws.id)}
           {@const target = ws.available ? ws : null}
+          {@const availableProviders = ws.providers.filter((provider) => provider.available)}
+          {@const unavailableProviders = ws.providers.filter((provider) => !provider.available)}
           <section class="rounded-lg border border-border">
             <div class="flex items-center gap-2.5 border-b border-border px-4 py-3">
               <IconGlobe class="h-4 w-4 shrink-0 text-primary" />
@@ -282,37 +294,65 @@
                 <IconWiki class="h-4 w-4" />
               </Button>
             </div>
-            <ul class="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
-              {#each ws.providers as provider (provider.id)}
-                <li>
-                  <!-- 有技能/零技能同一行样式（R1 Gap 5）：不可用行不降透明度，
-                       面色统一，「Not found on disk」文字即唯一空态播报；计数徽标
-                       为零时不渲染（避免同一空态双重播报）。 -->
-                  <button
-                    class="flex min-h-11 w-full items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70 disabled:pointer-events-none"
-                    disabled={!target || !provider.available}
-                    title={provider.path ?? provider.label}
-                    onclick={() => target && void goto(providerPath(ws, provider))}
-                  >
-                    <span class="min-w-0">
-                      <span class="block truncate text-xs font-medium">{provider.label}</span>
-                      {#if !provider.available}
-                        <span class="text-xs text-muted-foreground">Not found on disk</span>
-                      {:else if provider.path}
-                        <span class="block truncate font-mono text-xs text-muted-foreground">
-                          {provider.path}
-                        </span>
-                      {/if}
-                    </span>
-                    {#if provider.skillCount > 0}
-                      <Badge variant="secondary" class="shrink-0 tabular-nums">
-                        {provider.skillCount}
-                      </Badge>
+            <!-- R2 #1：可用/不可用 provider 分组——不可用条目折叠为默认收起的
+                 disclosure，不再与活条目混排打断扫描动线；展开后同款式行，
+                 零功能丢失。 -->
+            {#snippet providerRow(provider: WorkspaceProvider)}
+              <li>
+                <!-- 有技能/零技能同一行样式（R1 Gap 5）：不可用行不降透明度，
+                     面色统一，「Not found on disk」文字即唯一空态播报；计数徽标
+                     为零时不渲染（避免同一空态双重播报）。 -->
+                <button
+                  class="flex min-h-11 w-full items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70 disabled:pointer-events-none"
+                  disabled={!target || !provider.available}
+                  title={provider.path ?? provider.label}
+                  onclick={() => target && void goto(providerPath(ws, provider))}
+                >
+                  <span class="min-w-0">
+                    <span class="block truncate text-xs font-medium">{provider.label}</span>
+                    {#if !provider.available}
+                      <span class="text-xs text-muted-foreground">Not found on disk</span>
+                    {:else if provider.path}
+                      <span class="block truncate font-mono text-xs text-muted-foreground">
+                        {provider.path}
+                      </span>
                     {/if}
-                  </button>
-                </li>
-              {/each}
-            </ul>
+                  </span>
+                  {#if provider.skillCount > 0}
+                    <Badge variant="secondary" class="shrink-0 tabular-nums">
+                      {provider.skillCount}
+                    </Badge>
+                  {/if}
+                </button>
+              </li>
+            {/snippet}
+            {#if availableProviders.length > 0}
+              <ul class="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
+                {#each availableProviders as provider (provider.id)}
+                  {@render providerRow(provider)}
+                {/each}
+              </ul>
+            {/if}
+            {#if unavailableProviders.length > 0}
+              <details class="unavailable-details border-t border-border/60">
+                <summary
+                  class="flex min-h-9 cursor-pointer list-none items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden"
+                >
+                  <span class="unavailable-chevron flex shrink-0" aria-hidden="true">
+                    <IconChevron class="h-3 w-3" />
+                  </span>
+                  {unavailableProviders.length} unavailable location{unavailableProviders.length ===
+                  1
+                    ? ""
+                    : "s"}
+                </summary>
+                <ul class="grid grid-cols-1 gap-2 px-3 pb-3 pt-1 sm:grid-cols-2">
+                  {#each unavailableProviders as provider (provider.id)}
+                    {@render providerRow(provider)}
+                  {/each}
+                </ul>
+              </details>
+            {/if}
           </section>
         {/each}
 
@@ -426,3 +466,13 @@
   busy={removeBusy}
   onConfirm={() => void confirmRemove()}
 />
+
+<style>
+  /* R2 #1 折叠组箭头：details 原生 open 态驱动旋转（scoped，无 JS 状态）。 */
+  .unavailable-chevron {
+    transition: transform 120ms ease;
+  }
+  .unavailable-details[open] .unavailable-chevron {
+    transform: rotate(90deg);
+  }
+</style>

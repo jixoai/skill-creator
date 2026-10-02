@@ -2,6 +2,9 @@
   用户原始需求 [2026-07-27]：「看不到技能正文是当前最大的产品缺口」。
   修订 [2026-09-17]（skill-search-gui）：`q` 过滤升级为 daemon BM25 检索
   （skills.search RPC + debounce），检索失败降级前端 includes——断线不空白。
+  修订 [2026-10-02]（design-critique R2）：详情面板表单糊清理——frontmatter/
+  SKILL.md 空组整组不渲染（含组标题）；description 编辑框按内容行数自适应
+  （min 2 max 8，超出才内滚）；目录名 chip 与标题同名时去重。
   正交意图：
   1. 列出当前 Workspace.Provider 的技能（空 q 走 skills.list 全量；非空 q 经
      skills.search BM25 检索，按本 provider 作用域过滤投影；失败降级前端 includes）。
@@ -271,6 +274,10 @@
 
   const split = $derived(detail ? splitSkillContent(detail.content) : null);
   const renderedBody = $derived(split ? renderSkillBody(split.body) : "");
+
+  /** description 编辑框自适应行数（R2 #2b）：按内容行数，min 2 max 8——内容
+   *  增长时框随之长高，只有超过 8 行才出现内部滚动条。 */
+  const descriptionRows = $derived(Math.min(8, Math.max(2, draftDescription.split("\n").length)));
 
   // 当前 Provider 是否可写（决定 name/description 是否可编辑 + 是否显示 Save）。
   // Global Workspace 永不可写；导入 Workspace 的 provider 默认可写。
@@ -902,8 +909,8 @@
               {#if editable}
                 <textarea
                   bind:value={draftDescription}
-                  rows="2"
-                  class="mt-1 w-full resize-y rounded-md border border-input bg-input/20 px-2 py-1 text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                  rows={descriptionRows}
+                  class="mt-1 w-full resize-none rounded-md border border-input bg-input/20 px-2 py-1 text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
                   aria-label="Skill description"></textarea>
               {:else}
                 <p class="mt-0.5 text-xs leading-5 text-muted-foreground">{detail.description}</p>
@@ -965,7 +972,10 @@
           </div>
           <div class="mt-2 flex flex-wrap gap-1.5">
             <Badge variant="secondary">{detail.provider}</Badge>
-            <Badge variant="outline">{detail.directoryName}</Badge>
+            <!-- 目录名与标题同名时去重（R2 #2c：同一信息只保留一处）。 -->
+            {#if detail.directoryName !== detail.name}
+              <Badge variant="outline">{detail.directoryName}</Badge>
+            {/if}
             {#if detail.disabled}
               <Badge variant="outline" class="text-amber-700 dark:text-amber-300">Disabled</Badge>
             {/if}
@@ -993,11 +1003,12 @@
             {@const fmEntries = Object.entries(split.frontmatter).filter(
               ([key]) => !(editable && (key === "name" || key === "description")),
             )}
-            <section class="mb-4">
-              <h3 class="mb-2 text-xs font-medium text-muted-foreground">Frontmatter</h3>
-              <!-- 编辑态去重（design-critique R1 Gap 6）：name/description 已由头部
-                   Input/textarea 承载，表格不再重复列出；其余键全量保留。 -->
-              {#if fmEntries.length > 0}
+            <!-- 空组整组不渲染（R2 #2a）：frontmatter 无行时组标题也不出现。 -->
+            {#if fmEntries.length > 0}
+              <section class="mb-4">
+                <h3 class="mb-2 text-xs font-medium text-muted-foreground">Frontmatter</h3>
+                <!-- 编辑态去重（design-critique R1 Gap 6）：name/description 已由头部
+                     Input/textarea 承载，表格不再重复列出；其余键全量保留。 -->
                 <dl class="overflow-x-auto rounded-md border border-border">
                   {#each fmEntries as [key, value], i}
                     <div
@@ -1014,17 +1025,20 @@
                     </div>
                   {/each}
                 </dl>
-              {/if}
-            </section>
+              </section>
+            {/if}
           {/if}
 
-          <section>
-            <h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              SKILL.md
-            </h3>
-            <!-- 渲染器关闭原始 HTML 透传，并兜底 sanitize；详见 render-skill-md.ts -->
-            <div class="prose prose-sm max-w-none overflow-x-auto">{@html renderedBody}</div>
-          </section>
+          {#if renderedBody.trim().length > 0}
+            <!-- 空组整组不渲染（R2 #2a）：正文为空时 SKILL.md 组标题也不出现。 -->
+            <section>
+              <h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                SKILL.md
+              </h3>
+              <!-- 渲染器关闭原始 HTML 透传，并兜底 sanitize；详见 render-skill-md.ts -->
+              <div class="prose prose-sm max-w-none overflow-x-auto">{@html renderedBody}</div>
+            </section>
+          {/if}
         </div>
       </div>
     {/if}

@@ -1,6 +1,8 @@
 <!--
   设置面 General 分区（add-agent-settings-modes 迭代；2026-09-30
   shell-settings-ui：新增 Appearance 偏好）。
+  修订 [2026-10-02]（design-critique R2）：helper 散文压缩——每项一行，删重复
+  解释（操作后果语义保留）。
   正交意图：
   1. daemon 连接状态投影（连接/断开/重连中可见；断开时给出恢复提示）。
   2. Appearance（设备偏好，localStorage 单源）：主题三选（Light/Dark/System，
@@ -76,9 +78,9 @@
       <p class="text-[10px] text-destructive" role="alert">{connectionState.error}</p>
     {:else}
       <p class="text-[10px] text-muted-foreground">
-        The panel reconnects automatically; keep the daemon running via the tray or the <code
-          class="rounded bg-muted px-1 font-mono">skill-creator start</code
-        > command.
+        Reconnects automatically; restart with the <code class="rounded bg-muted px-1 font-mono"
+          >skill-creator start</code
+        > command if needed.
       </p>
     {/if}
   </section>
