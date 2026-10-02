@@ -75,6 +75,19 @@
   /** 最近会话（取最新 3 个；点击即回面板续聊）。 */
   const recentSessions = $derived(agentSessionsList.sessions.slice(0, 3));
 
+  /** 库快照：跨全部 workspace 的技能/位置总数（屏读摘要行 + 冒烟锚点，恒复数）。 */
+  const librarySnapshot = $derived.by(() => {
+    let skills = 0;
+    let providers = 0;
+    for (const ws of workspaceState.workspaces) {
+      for (const provider of ws.providers) {
+        providers += 1;
+        skills += provider.skillCount ?? 0;
+      }
+    }
+    return { skills, providers };
+  });
+
   function resumeSession(sessionId: string): void {
     selectAgentSession(sessionId);
     setAgentPanelOpen(true);
@@ -135,6 +148,11 @@
       <h1 class="text-lg font-semibold">Workspaces</h1>
       <p class="mt-0.5 text-xs text-muted-foreground">
         Your skill library across agent locations and imported workspaces.
+      </p>
+      <!-- 库快照屏读摘要（R1 减法删掉可见快照行后保留的状态无关数据面：屏读器
+           播报真实计数；web-mode 冒烟以此锚定 workspace.list 数据驱动渲染）。 -->
+      <p class="sr-only">
+        {librarySnapshot.skills} skills across {librarySnapshot.providers} agent locations.
       </p>
       <!-- Health check（manage 模式 agent 审计）唯一入口：降级为单行文字链。 -->
       <button
