@@ -3,6 +3,9 @@
  * 修订 [2026-10-02]（ux-polish-walkthrough-residue #1）：走查发现详情把
  * `description: >-` 折叠标量显示为原文「>-」——解析器补块标量（`>`/`|` ×
  * clip/strip/keep chomping），与列表行（ccski 服务端口径）一致。
+ * 修订 [2026-10-02]（codex 复核 P2）：折叠标量连续空行产出错误——两空行只
+ * 折出一个换行。统一为标准语义：任意位置连续 K 个空行 → K 个真实换行（此前
+ * 块首空行被丢弃，一并修正；yaml 包实证对齐）。
  * 正交意图：
  *   [1] splitSkillContent：把 SKILL.md 原文切分为 frontmatter 元数据与 markdown 正文。
  *   [2] renderSkillBody：把 markdown 正文渲染为受信任 HTML（关闭原始 HTML 透传）。
@@ -122,7 +125,7 @@ function parseBlockScalar(
   if (style === "|") {
     text = content.join("\n");
   } else {
-    // folded：连续非空行以空格连接成段；空行分隔段落（一个换行）。
+    // folded：段内换行折叠为空格；空行为段落分隔——连续 K 个空行 → K 个换行。
     const paragraphs: string[] = [];
     let current: string[] = [];
     for (const line of content) {
@@ -134,7 +137,9 @@ function parseBlockScalar(
       }
     }
     paragraphs.push(current.join(" "));
-    // 折叠语义：段间一个空行 = 一个换行；连续空行 = 多个换行（每空行一个）。
+    // 折叠语义（与标准 YAML 一致，yaml 包实证 2026-10-02）：任意位置连续 K 个
+    // 空行 → K 个真实换行。paragraphs 中空段数 = 空行数 - 1（首个空行终止前
+    // 段并消耗一次换行），故换行数 = pendingBreaks + 1；块首无前段时补 0。
     const parts: string[] = [];
     let pendingBreaks = 0;
     for (let p = 0; p < paragraphs.length; p += 1) {
@@ -143,7 +148,7 @@ function parseBlockScalar(
         pendingBreaks += 1;
         continue;
       }
-      if (parts.length > 0) parts.push("\n".repeat(pendingBreaks || 1));
+      parts.push("\n".repeat(pendingBreaks + (parts.length > 0 ? 1 : 0)));
       pendingBreaks = 0;
       parts.push(paragraph);
     }

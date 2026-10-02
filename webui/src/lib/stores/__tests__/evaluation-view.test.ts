@@ -28,6 +28,7 @@ vi.mock("../connection.svelte", () => ({
 
 import {
   buildEvaluationRows,
+  compareResultsNewestFirst,
   evaluationOutcomeBadge,
   evaluationViewState,
   latestResultByCase,
@@ -236,6 +237,18 @@ describe("evaluation-view store (evaluation-webui-view)", () => {
     const high = makeResult({ resultId: `evr_${"9".repeat(24)}`, caseId });
     expect(latestResultByCase([low, high]).get(caseId)).toBe(high);
     expect(latestResultByCase([high, low]).get(caseId)).toBe(high);
+  });
+
+  it("compares equal (endedAt, resultId) pairs as 0 with stable ordering (codex P2)", () => {
+    // Comparator 契约：相等键必须返回 0——旧实现对相同 resultId 返回 -1，
+    // 向排序器谎报严格偏序（违反 Array#sort comparator 语义）。
+    const caseId = `ev_${"a".repeat(24)}`;
+    const first = makeResult({ caseId });
+    const sameKey = makeResult({ caseId, resultId: first.resultId, endedAt: first.endedAt });
+    expect(compareResultsNewestFirst(first, sameKey)).toBe(0);
+    expect(compareResultsNewestFirst(sameKey, first)).toBe(0);
+    // 稳定排序落点：相同键不互换首见顺序，latest 仍取输入第一条。
+    expect(latestResultByCase([first, sameKey]).get(caseId)).toBe(first);
   });
 
   it("maps five outcome badges to pairwise distinct tones and keeps not-run rows latest=null", () => {

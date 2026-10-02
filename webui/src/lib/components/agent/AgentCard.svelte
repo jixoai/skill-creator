@@ -8,10 +8,12 @@
   2. postMessage 导航/高度：卡片按钮 → ui/navigate 意图 → host 翻译为 shell 路由；
      卡片 ui/resize 广播内容高度，host 夹取后收敛 iframe（消除固定高度空白）。
   妥协声明：无。
+  修订 [2026-10-02]（codex 复核 P2）：requireRpc 断线同步 throw 逃逸 $effect
+  （741eb3d Creator 冻结同族）——改 getRpc 判空早退 + 连接转 ready 自动重发。
 -->
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { requireRpc } from "$lib/stores/connection.svelte";
+  import { connectionState, getRpc } from "$lib/stores/connection.svelte";
 
   let {
     resourceUri,
@@ -29,13 +31,22 @@
   // 所有 AgentCard 共享 window message 事件，不过滤会互相覆盖高度。
   let frameEl = $state<HTMLIFrameElement | null>(null);
 
+  // 连接闸 + 转 ready 重发（与 eval-view/ProviderView 挂载竞态补救同族）：
+  // 读 status 建立依赖，断线 getRpc()=null 早退——绝不同步 throw（requireRpc
+  // 逃逸 $effect 会 discard 所在渲染分支＝面板冻结，741eb3d Creator 同族根因）；
+  // 早退置于 html 重置之前，断线重跑不清掉已渲染卡片。
   $effect(() => {
     const uri = resourceUri;
+    void connectionState.status;
+    const rpc = getRpc();
+    if (rpc === null) return;
     html = null;
     failed = false;
-    requireRpc()
-      .agent.card.get({ uri })
+    rpc.agent.card
+      .get({ uri })
       .then((result) => {
+        // 过期响应（uri 已切换或旧连接迟到回调）不提交。
+        if (resourceUri !== uri) return;
         if (result.html === null) {
           failed = true;
           return;
@@ -43,6 +54,7 @@
         html = result.html;
       })
       .catch(() => {
+        if (resourceUri !== uri) return;
         failed = true;
       });
   });

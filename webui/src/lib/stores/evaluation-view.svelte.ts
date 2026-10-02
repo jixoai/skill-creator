@@ -75,14 +75,25 @@ export function resetEvaluationView(): void {
   evaluationViewState.error = null;
 }
 
+/**
+ * 结果排序比较器（newest first）：endedAt 倒序，同刻按 resultId 倒序稳定
+ * tie-break。完全相同的 (endedAt, resultId) 返回 0（Comparator 契约：相等即
+ * 0——返回 -1 会向排序器谎报严格偏序；codex 复核 P2 修正）。
+ */
+export function compareResultsNewestFirst(
+  left: EvaluationResultView,
+  right: EvaluationResultView,
+): number {
+  if (left.endedAt !== right.endedAt) return left.endedAt < right.endedAt ? 1 : -1;
+  if (left.resultId === right.resultId) return 0;
+  return left.resultId < right.resultId ? 1 : -1;
+}
+
 /** 每案最新结果：endedAt 倒序（同刻按 resultId 倒序稳定 tie-break）首见即最新。 */
 export function latestResultByCase(
   results: EvaluationResultView[],
 ): Map<string, EvaluationResultView> {
-  const ordered = [...results].sort((left, right) => {
-    if (left.endedAt !== right.endedAt) return left.endedAt < right.endedAt ? 1 : -1;
-    return left.resultId < right.resultId ? 1 : -1;
-  });
+  const ordered = [...results].sort(compareResultsNewestFirst);
   const byCase = new Map<string, EvaluationResultView>();
   for (const result of ordered) {
     if (!byCase.has(result.caseId)) byCase.set(result.caseId, result);
