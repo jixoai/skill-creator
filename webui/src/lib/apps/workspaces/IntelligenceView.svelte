@@ -13,6 +13,7 @@
   import { untrack } from "svelte";
   import { useParams, useSearch, goById } from "$lib/shell";
   import {
+    connectionState,
     getConnectionGeneration,
     loadSkills,
     skillsState,
@@ -79,6 +80,26 @@
 
   $effect(() => {
     if (providerTarget) void loadSkills(providerTarget);
+  });
+
+  // 挂载竞态补救（WS5 走查小项 8；与 ProviderView 同族）：Global 深链首帧
+  // WS 未就绪时 loadSkills 落 error 态（"daemon is not connected"），此前只能
+  // 手动 Retry——连接转 ready 自动重发；proposal 首载失败同理。
+  let lastConnectionStatus = $state(connectionState.status);
+  $effect(() => {
+    const status = connectionState.status;
+    const was = untrack(() => lastConnectionStatus);
+    lastConnectionStatus = status;
+    if (was === "connected" || status !== "connected") return;
+    const retryTarget = untrack(() => providerTarget);
+    if (
+      retryTarget !== null &&
+      untrack(() => skillsState.error) !== null &&
+      untrack(() => skillsState.skills.length) === 0
+    ) {
+      void loadSkills(retryTarget);
+    }
+    if (untrack(() => proposalsError) !== null) void refreshProposals();
   });
 
   async function runAnalysis(): Promise<void> {
@@ -148,6 +169,7 @@
   // ---- proposal 草稿（审查 + 审批） ----
   let proposals = $state<ProposalDraft[]>([]);
   let proposalsLoading = $state(false);
+  let proposalsError = $state<string | null>(null);
   let proposing = $state(false);
   let approvingId = $state<string | null>(null);
   let rejectingId = $state<string | null>(null);
@@ -164,7 +186,12 @@
     proposalsLoading = true;
     try {
       const result = await loadProposals();
-      if (result.proposals) proposals = result.proposals;
+      if (result.proposals) {
+        proposals = result.proposals;
+        proposalsError = null;
+      } else if (result.error) {
+        proposalsError = result.error;
+      }
     } finally {
       proposalsLoading = false;
     }
@@ -366,12 +393,16 @@
         </p>
       </div>
     {:else}
+      {@const severityCounts = countBySeverity(report.findings)}
       <!-- 摘要 -->
       <section class="mb-4 flex flex-wrap items-center gap-2 text-xs" aria-label="Report summary">
         <Badge variant="outline">{report.snapshots.length} skills</Badge>
-        <Badge variant="destructive">{countBySeverity(report.findings).error} errors</Badge>
-        <Badge variant="secondary">{countBySeverity(report.findings).warning} warnings</Badge>
-        <Badge variant="outline">{countBySeverity(report.findings).info} info</Badge>
+        <!-- 零值计数用中性色（WS5 走查小项 6）：0 errors 不制造告警红。 -->
+        <Badge variant={severityCounts.error > 0 ? "destructive" : "secondary"}>
+          {severityCounts.error} errors</Badge
+        >
+        <Badge variant="secondary">{severityCounts.warning} warnings</Badge>
+        <Badge variant="outline">{severityCounts.info} info</Badge>
         {#if analyzeFailures.length > 0}
           <Badge variant="destructive">{analyzeFailures.length} failed to analyze</Badge>
         {/if}

@@ -10,6 +10,7 @@
   草稿身份 → 共享 creator-editor context。
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import { useCreatorEditor } from "$lib/stores/creator-editor.svelte";
   import {
     evaluationOutcomeBadge,
@@ -18,6 +19,7 @@
     resetEvaluationView,
     type EvaluationRow,
   } from "$lib/stores/evaluation-view.svelte";
+  import { connectionState } from "$lib/store.svelte";
   import { Button } from "$lib/components/ui/button";
   import IconClipboard from "@lucide/svelte/icons/clipboard-check";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
@@ -41,6 +43,25 @@
     return () => resetEvaluationView();
   });
 
+  // 挂载竞态补救（WS5 走查 B；与 ProviderView/file-browser 同族）：深链首帧
+  // WS 未就绪时 loadEvaluationView 对 rpc=null 静默 no-op——rows/error/loading
+  // 全空即无重试入口的空白面板。连接转 ready 且尚无数据时自动重发。
+  let lastConnectionStatus = $state(connectionState.status);
+  $effect(() => {
+    const status = connectionState.status;
+    const was = untrack(() => lastConnectionStatus);
+    lastConnectionStatus = status;
+    if (was === "connected" || status !== "connected") return;
+    if (untrack(() => evaluationViewState.rows) !== null) return;
+    const retrySkillId = untrack(() => draft.skillId);
+    if (untrack(() => draft.mode) !== "edit" || retrySkillId === null) return;
+    void loadEvaluationView({
+      workspaceId: untrack(() => draft.target.workspaceId),
+      providerId: untrack(() => draft.target.providerId),
+      skillId: retrySkillId,
+    });
+  });
+
   const rows = $derived(evaluationViewState.rows);
   const loading = $derived(evaluationViewState.loading);
   const error = $derived(evaluationViewState.error);
@@ -49,6 +70,12 @@
   function promptSummary(row: EvaluationRow): string {
     const firstLine = row.prompt.split("\n")[0] ?? "";
     return firstLine.length > 72 ? `${firstLine.slice(0, 72)}…` : firstLine;
+  }
+
+  /** revision 短显：剥掉 `sha256:` 前缀后截 hex 部分（整串截 14 只露 7 位 hex）。 */
+  function shortRevision(value: string): string {
+    const hex = value.startsWith("sha256:") ? value.slice("sha256:".length) : value;
+    return hex.slice(0, 14);
   }
 
   function reload(): void {
@@ -135,7 +162,7 @@
                 >
                   <span>{row.enabled ? "enabled" : "disabled"}</span>
                   <span>{row.assertionCount} assertion{row.assertionCount === 1 ? "" : "s"}</span>
-                  <span title={row.boundRevision}>bound {row.boundRevision.slice(0, 14)}…</span>
+                  <span title={row.boundRevision}>bound {shortRevision(row.boundRevision)}…</span>
                 </p>
               </div>
               <div class="flex shrink-0 flex-col items-end gap-1">
@@ -158,7 +185,7 @@
                         stale
                       </span>
                     {/if}
-                    rev {row.latest.observedEndRevision.slice(0, 14)}…
+                    rev {shortRevision(row.latest.observedEndRevision)}…
                   </span>
                 {:else}
                   <span

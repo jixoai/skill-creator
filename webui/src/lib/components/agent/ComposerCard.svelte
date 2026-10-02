@@ -98,7 +98,7 @@
     pickAgentFiles,
     hydratePickedImagePreviews,
   } from "$lib/stores/agent.svelte";
-  import { connectionState } from "$lib/stores/connection.svelte";
+  import { connectionState, getConnectionGeneration } from "$lib/stores/connection.svelte";
   import { skillsState } from "$lib/stores/skills.svelte";
   import {
     busyEnterPreference,
@@ -369,8 +369,12 @@
   async function openPicker(target: "image" | "file"): Promise<void> {
     if (picking !== null) return;
     picking = target;
+    // 世代快照（WS5 走查小项 7）：对话框打开期间传输断开时 oRPC pending 永不
+    // settle，迟到结果按世代丢弃；busy 态由下方 disconnected effect 复位。
+    const generation = getConnectionGeneration();
     try {
       const result = await pickAgentFiles(target);
+      if (getConnectionGeneration() !== generation) return;
       if (result === null || result.paths.length === 0) return;
       // name 从真实路径派生 basename（codex R18 P1：UI chip/移除按钮/live 回显
       // 都需要可读文件名；path 可能以 / 结尾的场景先剥再取）。
@@ -401,6 +405,13 @@
     }
     void setAgentSessionMode(mode);
   }
+
+  // 传输中断兜底（WS5 走查小项 7）：原生对话框打开期间 WS 断开时，oRPC pending
+  // 永不 settle、finally 无法到达——连接断开即复位 busy 态，按钮不再永久
+  // disabled+spinner；迟到结果由 openPicker 的世代比对丢弃。
+  $effect(() => {
+    if (connectionState.status === "disconnected") picking = null;
+  });
 
   /** SlashMenu 命令执行（§3.4 + W4）：客户端命令（/queue /steer 设忙碌 Enter
    *  偏好）本地处理；其余以命令文本发送（丢弃查询草稿与附件，不进入对话正文）；
@@ -783,7 +794,7 @@
       <DropdownMenu.DropdownMenu bind:open={modelMenuOpen}>
         <DropdownMenu.Trigger
           class="flex h-7 max-w-[150px] items-center gap-1.5 rounded-full border px-2.5 text-[11px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 {modelChip.dangling
-            ? 'border-amber-500/60 text-amber-600 dark:text-amber-400'
+            ? 'border-amber-500/60 text-amber-700 dark:text-amber-300'
             : 'border-border text-muted-foreground hover:text-foreground'}"
           title={running
             ? "Switch after the current turn ends"

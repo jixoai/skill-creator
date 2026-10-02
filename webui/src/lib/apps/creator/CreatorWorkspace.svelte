@@ -29,7 +29,7 @@
     takeCachedCreatorDraft,
     type CreatorDraft,
   } from "$lib/stores/creator-editor.svelte";
-  import { loadSkillDoc } from "$lib/store.svelte";
+  import { connectionState, loadSkillDoc } from "$lib/store.svelte";
   import { TEMPLATES } from "$lib/templates";
   import type { WorkspaceProviderTarget } from "$lib/types";
   import type { SkillId } from "$lib/types";
@@ -106,9 +106,13 @@
   // WS4 r7 minor：深链非 file 子视图（如 ?subview=test 直开）时 FileBrowser 未
   // 挂载，文档加载无人执行——Test 门槛（revision）永久停留。由路由属主兜底
   // 加载；file 子视图仍由 FileBrowser 负责，isDraftHydrated 双闸幂等。
+  // WS5 走查 B（阻塞根因链）：连接闸——未连接时不发（requireRpc 同步 throw 会
+  // 从本 effect 逃逸，打断挂载 flush 把整个分支 discard 成僵尸 DOM）；status 是
+  // 本 effect 的依赖，连接转 ready 自动重跑补载，断线窗口内的深链不再永久缺文档。
   $effect(() => {
     if (subview === "file") return;
     if (mode !== "edit" || skillId === undefined || target === null) return;
+    if (connectionState.status !== "connected") return;
     const key = creatorDraftKey(target, "edit", skillId);
     if (key !== null && isDraftHydrated(key)) return;
     void loadSkillDoc(target, skillId)
