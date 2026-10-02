@@ -84,6 +84,18 @@ describe("unified proposal projection (C′2)", () => {
     expect(view.result).toEqual({ applied: false, error: "revision moved" });
   });
 
+  // proposal-view-assertion（codex r8 小注）：approved = 审批已接受、执行在途的
+  // 中间态——status 必须原样直通投影，且不得伪造执行结果。
+  it("projects an approved (execution in-flight) view verbatim without a result", () => {
+    const view = projectMcpProposal(
+      mcpView({ status: "approved", decidedAt: "2026-09-30T00:00:30.000Z" }),
+    );
+    expect(view.id).toBe("mcp:prop_1");
+    expect(view.status).toBe("approved");
+    expect(view.result).toBeUndefined();
+    expect(view.decidedAt).toBe("2026-09-30T00:00:30.000Z");
+  });
+
   it("maps an intelligence draft as pending with target, finding, and revisions", () => {
     const view = projectIntelligenceDraft(draft());
     expect(view.id).toBe("si:pr_0123456789abcdef01234567");

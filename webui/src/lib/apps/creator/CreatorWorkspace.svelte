@@ -16,6 +16,7 @@
   import PreviewView from "$lib/components/creator/preview.svelte";
   import ValidationView from "$lib/components/creator/validation-view.svelte";
   import TestRunView from "$lib/components/creator/test-run-view.svelte";
+  import EvalView from "$lib/components/creator/eval-view.svelte";
   import {
     provideCreatorEditor,
     placeholderDraft,
@@ -166,6 +167,8 @@
           <ValidationView />
         {:else if subview === "test"}
           <TestRunView />
+        {:else if subview === "eval"}
+          <EvalView />
         {:else}
           <FileBrowser />
         {/if}

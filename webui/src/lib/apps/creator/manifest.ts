@@ -35,7 +35,7 @@ export const creatorApp = defineApp({
           providerId: ProviderIdSchema,
         }),
         search: z.object({
-          subview: z.enum(["file", "log", "preview", "validate", "test"]).optional(),
+          subview: z.enum(["file", "log", "preview", "validate", "test", "eval"]).optional(),
           template: z.string().optional(),
         }),
         component: () => import("./CreatorWorkspace.svelte"),
@@ -50,7 +50,7 @@ export const creatorApp = defineApp({
             // 子路由缺声明时 subview 恒回落 "file"，编辑路由上全部子视图
             // 切换失效（与父路由保持同一形状）。
             search: z.object({
-              subview: z.enum(["file", "log", "preview", "validate", "test"]).optional(),
+              subview: z.enum(["file", "log", "preview", "validate", "test", "eval"]).optional(),
               template: z.string().optional(),
             }),
             component: () => import("./CreatorWorkspace.svelte"),

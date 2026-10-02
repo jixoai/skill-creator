@@ -1,6 +1,6 @@
 <!--
   用户原始需求 [2026-07-27]：「Creator 编辑 tab 左右分栏，右侧各种子视图」。
-  正交意图：[1] 渲染 [文件][日志][预览][校验][测试] 五个子视图 tab；激活子视图编码到 URL。
+  正交意图：[1] 渲染 [文件][日志][预览][校验][测试][评估] 六个子视图 tab；激活子视图编码到 URL。
 -->
 <script lang="ts">
   import { useSearch } from "$lib/shell";
@@ -11,9 +11,10 @@
   import IconEye from "@lucide/svelte/icons/eye";
   import IconCheck from "@lucide/svelte/icons/check-circle";
   import IconFlask from "@lucide/svelte/icons/flask-conical";
+  import IconEval from "@lucide/svelte/icons/clipboard-check";
   import type { Component } from "svelte";
 
-  type SubView = "file" | "log" | "preview" | "validate" | "test";
+  type SubView = "file" | "log" | "preview" | "validate" | "test" | "eval";
 
   const TABS: Array<{ id: SubView; label: string; icon: Component }> = [
     { id: "file", label: "File", icon: IconFile },
@@ -21,6 +22,7 @@
     { id: "preview", label: "Preview", icon: IconEye },
     { id: "validate", label: "Validate", icon: IconCheck },
     { id: "test", label: "Test", icon: IconFlask },
+    { id: "eval", label: "Eval", icon: IconEval },
   ];
 
   const getSearch = useSearch<{ subview?: SubView }>();
