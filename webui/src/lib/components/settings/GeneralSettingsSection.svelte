@@ -87,7 +87,7 @@
     <span class="text-[11px] font-medium text-muted-foreground">Appearance</span>
 
     <div
-      class="flex items-center justify-between rounded-md border border-border bg-background/60 p-2.5"
+      class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/60 p-2.5"
     >
       <div>
         <p class="text-xs font-medium">Theme</p>
@@ -95,8 +95,11 @@
           System follows your OS color scheme; applies immediately.
         </p>
       </div>
+      <!-- 走查 #4：行级 flex-wrap 让分段控件在窄内容区（Agent 面板开启）整组换行，
+           控件自身 max-w-full + flex-wrap 兜底更窄场景——System 段不再被
+           overflow-hidden 裁切；未选中段显式 bg-transparent，仅选中态上底色。 -->
       <div
-        class="inline-flex overflow-hidden rounded-md border border-border"
+        class="inline-flex max-w-full flex-wrap overflow-hidden rounded-md border border-border"
         role="group"
         aria-label="Theme preference"
       >
@@ -106,7 +109,7 @@
             size="sm"
             class="h-7 rounded-none px-2.5 text-xs {theme === option.value
               ? 'bg-accent text-primary'
-              : 'text-muted-foreground'}"
+              : 'bg-transparent text-muted-foreground'}"
             aria-pressed={theme === option.value}
             onclick={() => setAppearanceTheme(option.value)}
           >

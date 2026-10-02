@@ -24,20 +24,21 @@ export interface CuratedSourceEntry {
 /**
  * 随应用发布的精选技能仓库源目录快照。
  * 浏览器安全：纯静态数据，daemon 与 WebUI 共享，不读盘、不发请求。
+ * 描述文案为英文（ux-polish-walkthrough-residue #5：Discover 卡 UI 语言一致性）。
  */
 export const CURATED_SOURCES: readonly CuratedSourceEntry[] = [
   {
     id: "anthropics-skills",
     label: "Anthropic Skills",
     gitUrl: "https://github.com/anthropics/skills.git",
-    description: "Anthropic 官方维护的 Agent skills 集合。",
+    description: "The official collection of Agent skills maintained by Anthropic.",
     homepage: "https://github.com/anthropics/skills",
   },
   {
     id: "vercel-labs-skills",
     label: "Vercel Labs Skills",
     gitUrl: "https://github.com/vercel-labs/skills.git",
-    description: "Vercel Labs 维护的社区 Agent skills 集合。",
+    description: "Community Agent skills maintained by Vercel Labs.",
     homepage: "https://github.com/vercel-labs/skills",
   },
 ];

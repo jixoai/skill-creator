@@ -1,10 +1,15 @@
 /**
  * 用户原始需求 [2026-07-27]：「看不到技能正文是当前最大的产品缺口」。
+ * 修订 [2026-10-02]（ux-polish-walkthrough-residue #1）：走查发现详情把
+ * `description: >-` 折叠标量显示为原文「>-」——解析器补块标量（`>`/`|` ×
+ * clip/strip/keep chomping），与列表行（ccski 服务端口径）一致。
  * 正交意图：
  *   [1] splitSkillContent：把 SKILL.md 原文切分为 frontmatter 元数据与 markdown 正文。
  *   [2] renderSkillBody：把 markdown 正文渲染为受信任 HTML（关闭原始 HTML 透传）。
  * 妥协声明：frontmatter 解析只覆盖 SkillFrontmatterSchema 实际承载的标量字段（与
  *   creator.save 一致）；不引入完整 YAML/gray-matter 链，保持浏览器 bundle 最小。
+ *   块标量实现为最小手写子集：缩进指示符（`>-2`）与多层嵌套不支持（SKILL.md
+ *   frontmatter 均为扁平结构）。
  */
 import { Marked } from "marked";
 
@@ -27,23 +32,127 @@ function isFrontmatterFence(line: string): boolean {
 }
 
 /**
- * 解析最小 YAML 子集：仅支持扁平 `key: value` 行与 `#` 整行注释。
+ * 解析最小 YAML 子集：扁平 `key: value` 行、`#` 整行注释，以及块标量
+ * （`>` 折叠 / `|` 字面 × clip(默认)/strip(`-`)/keep(`+`) chomping）。
  * 值可带可选的单/双引号；未闭合的引号按原样保留。列表/嵌套对象不支持（保持与
- * SkillFrontmatterSchema 的标量字段一致）。
+ * SkillFrontmatterSchema 的标量字段一致）。块标量吸收后续缩进块：空行是段落
+ * 分隔，缩进浅于首个内容行的行终止块（下一个键从那里继续解析）。
  */
 function parseFrontmatterBlock(block: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  for (const rawLine of block.split(/\r?\n/)) {
+  const lines = block.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const rawLine = lines[i]!;
     const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
+    if (!line || line.startsWith("#")) {
+      i += 1;
+      continue;
+    }
     const colon = line.indexOf(":");
-    if (colon <= 0) continue;
+    if (colon <= 0) {
+      i += 1;
+      continue;
+    }
     const key = line.slice(0, colon).trim();
-    if (!key) continue;
+    if (!key) {
+      i += 1;
+      continue;
+    }
     const rawValue = line.slice(colon + 1).trim();
+    const blockHeader = /^([>|])([+-]?$)/.exec(rawValue);
+    if (blockHeader) {
+      const style = blockHeader[1] === "|" ? "|" : ">";
+      const { value, next } = parseBlockScalar(lines, i + 1, rawLine, style, blockHeader[2] ?? "");
+      result[key] = value;
+      i = next;
+      continue;
+    }
     result[key] = parseScalar(rawValue);
+    i += 1;
   }
   return result;
+}
+
+/**
+ * 从 `start` 行吸收一个块标量的缩进内容块，返回 (标量值, 下一个待解析行号)。
+ * 块缩进 = 首个非空内容行的缩进；空行视为段落分隔保留；出现缩进浅于块缩进的
+ * 非空行即终止（该行交还外层继续按 `key: value` 解析）。keep chomping 保留
+ * 全部尾部空行，clip/strip 先裁掉尾部空行再分别补/不补单个换行。
+ */
+function parseBlockScalar(
+  lines: string[],
+  start: number,
+  keyLine: string,
+  style: ">" | "|",
+  chomp: string,
+): { value: string; next: number } {
+  const keyIndent = keyLine.length - keyLine.trimStart().length;
+  const content: string[] = [];
+  let blockIndent: number | null = null;
+  let j = start;
+  while (j < lines.length) {
+    const candidate = lines[j]!;
+    if (candidate.trim() === "") {
+      content.push("");
+      j += 1;
+      continue;
+    }
+    const indent = candidate.length - candidate.trimStart().length;
+    if (blockIndent === null) {
+      // 首个内容行决定块缩进：必须比键更深，否则视为空块。
+      if (indent <= keyIndent) break;
+      blockIndent = indent;
+    }
+    if (indent < blockIndent) break;
+    content.push(candidate.slice(blockIndent));
+    j += 1;
+  }
+  // 裁尾部空行（keep 除外）并统计保留数。
+  let keptTrailing = 0;
+  if (chomp !== "+") {
+    while (content.length > 0 && content[content.length - 1] === "") content.pop();
+  } else {
+    while (content.length > 0 && content[content.length - 1] === "") {
+      content.pop();
+      keptTrailing += 1;
+    }
+  }
+  let text: string;
+  if (style === "|") {
+    text = content.join("\n");
+  } else {
+    // folded：连续非空行以空格连接成段；空行分隔段落（一个换行）。
+    const paragraphs: string[] = [];
+    let current: string[] = [];
+    for (const line of content) {
+      if (line === "") {
+        paragraphs.push(current.join(" "));
+        current = [];
+      } else {
+        current.push(line);
+      }
+    }
+    paragraphs.push(current.join(" "));
+    // 折叠语义：段间一个空行 = 一个换行；连续空行 = 多个换行（每空行一个）。
+    const parts: string[] = [];
+    let pendingBreaks = 0;
+    for (let p = 0; p < paragraphs.length; p += 1) {
+      const paragraph = paragraphs[p]!;
+      if (paragraph === "") {
+        pendingBreaks += 1;
+        continue;
+      }
+      if (parts.length > 0) parts.push("\n".repeat(pendingBreaks || 1));
+      pendingBreaks = 0;
+      parts.push(paragraph);
+    }
+    text = parts.join("");
+  }
+  if (text === "" && keptTrailing === 0) return { value: "", next: j };
+  if (chomp === "-") return { value: text, next: j };
+  if (chomp === "+") return { value: `${text}${"\n".repeat(keptTrailing + 1)}`, next: j };
+  return { value: `${text}\n`, next: j };
 }
 
 /** 解析单个标量值，去除可选引号；空串视为 undefined 以便省略。 */

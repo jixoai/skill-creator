@@ -1,6 +1,8 @@
 <!--
   用户原始需求 [2026-09-06]（openspec skill-intelligence）：
   「提供 dependency/overlap/conflict graph 和可读的 finding 列表；每个 finding 绑定 Skill ID 与 observed revision。」
+  修订 [2026-10-02]（ux-polish-walkthrough-residue #6）：密集图（>24 节点）标签
+  互叠——默认只渲染 hover 节点的标签，稀疏图照旧全显。
   正交意图：
   1. 触发只读分析并持有报告（severity 过滤 + 证据展示 + 跳转 Skill detail）。
   2. 渲染技能关系图（圆布局 SVG；窄屏横向滚动，不遮挡恢复操作）。
@@ -260,29 +262,16 @@
     });
   }
 
-  /** 最小 frontmatter/body 切分（与 daemon 分析器同口径）。 */
-  function splitDocument(content: string): { frontmatter: Record<string, unknown>; body: string } {
-    const normalized = content.replace(/\r\n/g, "\n");
-    if (!normalized.startsWith("---")) return { frontmatter: {}, body: normalized };
-    const lines = normalized.split("\n");
-    const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-    if (closing === -1) return { frontmatter: {}, body: normalized };
-    const frontmatter: Record<string, unknown> = {};
-    for (const raw of lines.slice(1, closing)) {
-      const colon = raw.indexOf(":");
-      if (colon <= 0) continue;
-      frontmatter[raw.slice(0, colon).trim()] = raw.slice(colon + 1).trim();
-    }
-    return {
-      frontmatter,
-      body: lines
-        .slice(closing + 1)
-        .join("\n")
-        .replace(/^\n/, ""),
-    };
-  }
-
   // ---- 关系图（椭圆布局铺满画布宽度；窄屏靠容器横向滚动保持可读） ----
+  // 走查 #6：密集图（>DENSE_LABEL_THRESHOLD 节点）标签互叠——默认只渲染 hover
+  // 节点的标签（稀疏图照旧全显；全名恒有 <title> 提示兜底）。
+  const DENSE_LABEL_THRESHOLD = 24;
+  let hoveredSkillId = $state<string | null>(null);
+  const graphDense = $derived.by(() => (report?.snapshots.length ?? 0) > DENSE_LABEL_THRESHOLD);
+  // 图注后缀（前导空格在字符串内，绕开 Svelte 块边界空白折叠）。
+  const graphCaptionSuffix = $derived(
+    graphDense ? " Dense graph — hover a node to reveal its label." : "",
+  );
   const graph = $derived.by(() => {
     const snapshots = report?.snapshots ?? [];
     if (snapshots.length < 2) return null;
@@ -450,6 +439,8 @@
                   aria-label="Open {node.name} detail"
                   onclick={() => openSkillDetail(node.skillId)}
                   onkeydown={(e) => e.key === "Enter" && openSkillDetail(node.skillId)}
+                  onpointerenter={() => (hoveredSkillId = node.skillId)}
+                  onpointerleave={() => (hoveredSkillId = null)}
                 >
                   <title>{node.name}</title>
                   <circle
@@ -459,22 +450,24 @@
                     fill="var(--background, white)"
                     stroke="var(--border, gray)"
                   />
-                  <text
-                    x={node.x}
-                    y={node.y + node.labelDy}
-                    text-anchor="middle"
-                    font-size="9"
-                    fill="var(--foreground, black)"
-                  >
-                    {node.label}
-                  </text>
+                  {#if !graphDense || hoveredSkillId === node.skillId}
+                    <text
+                      x={node.x}
+                      y={node.y + node.labelDy}
+                      text-anchor="middle"
+                      font-size="9"
+                      fill="var(--foreground, black)"
+                    >
+                      {node.label}
+                    </text>
+                  {/if}
                 </g>
               {/each}
             </svg>
           </div>
           <p class="mt-1 text-[10px] text-muted-foreground">
             Solid red = conflict · solid blue = overlap · dashed gray = shared resource. Click a
-            node to open its detail.
+            node to open its detail.{graphCaptionSuffix}
           </p>
         </section>
       {/if}

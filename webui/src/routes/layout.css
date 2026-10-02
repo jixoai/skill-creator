@@ -30,7 +30,11 @@
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* 对比度（ux-polish-walkthrough-residue #2）：0.556 对 white 仅 ~4.7:1、
+     叠加 /80 透明度后跌到 ~3.2:1，12px 辅助文本不达 WCAG AA；压到 0.46
+     （对 --background 7.13:1、对 --muted 6.53:1）。dark 0.708 对 0.145 背景
+     7.6:1 不动。 */
+  --muted-foreground: oklch(0.46 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);

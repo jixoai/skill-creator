@@ -88,15 +88,16 @@
       Scan
     </button>
     {#if homepage}
+      <!-- 走查 #5：homepage 恒为源 Git 仓库页——「Home」语义不明，改为按实际行为命名。 -->
       <a
         href={homepage}
         target="_blank"
         rel="noreferrer noopener"
         class="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted/50"
-        aria-label={`Open ${label} homepage`}
+        aria-label={`Open the ${label} repository`}
       >
         <IconExternal class="h-3 w-3" />
-        Home
+        Open repo
       </a>
     {/if}
     {#if !builtIn && onremove}

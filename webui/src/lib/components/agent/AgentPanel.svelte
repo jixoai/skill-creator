@@ -158,7 +158,7 @@
       <span class="truncate"> Editing — resending keeps your full history (append-only) </span>
       <button
         type="button"
-        class="shrink-0 rounded p-0.5 text-amber-700/80 hover:text-amber-700 dark:text-amber-400/80 dark:hover:text-amber-400"
+        class="relative shrink-0 rounded p-0.5 text-amber-700/80 after:absolute after:-inset-1.5 after:content-[''] hover:text-amber-700 dark:text-amber-400/80 dark:hover:text-amber-400"
         title="Cancel edit"
         aria-label="Cancel edit"
         onclick={() => {

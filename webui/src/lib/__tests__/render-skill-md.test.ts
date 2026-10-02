@@ -46,6 +46,61 @@ describe("splitSkillContent", () => {
   });
 });
 
+describe("splitSkillContent block scalars (ux-polish-walkthrough-residue #1)", () => {
+  it("unfolds a `>-` folded scalar into one joined paragraph (no trailing newline)", () => {
+    const content =
+      "---\nname: My Skill\ndescription: >-\n  One long line that\n  wraps across source lines.\n---\nbody";
+    const { frontmatter, body } = splitSkillContent(content);
+    expect(frontmatter.description).toBe("One long line that wraps across source lines.");
+    expect(frontmatter.name).toBe("My Skill");
+    expect(body).toBe("body");
+  });
+
+  it("keeps paragraph breaks (blank lines) as newlines inside folded scalars", () => {
+    const content = "---\ndescription: >-\n  First paragraph.\n\n  Second paragraph.\n---\n";
+    const { frontmatter } = splitSkillContent(content);
+    expect(frontmatter.description).toBe("First paragraph.\nSecond paragraph.");
+  });
+
+  it("applies clip chomping to plain `>` (single trailing newline)", () => {
+    const content = "---\ndescription: >\n  folded text\n---\n";
+    const { frontmatter } = splitSkillContent(content);
+    expect(frontmatter.description).toBe("folded text\n");
+  });
+
+  it("keeps literal `|-` line breaks without a trailing newline", () => {
+    const content = "---\ndescription: |-\n  line one\n  line two\n---\n";
+    const { frontmatter } = splitSkillContent(content);
+    expect(frontmatter.description).toBe("line one\nline two");
+  });
+
+  it("applies clip chomping to plain `|` (single trailing newline)", () => {
+    const content = "---\ndescription: |\n  line one\n  line two\n---\n";
+    const { frontmatter } = splitSkillContent(content);
+    expect(frontmatter.description).toBe("line one\nline two\n");
+  });
+
+  it("resumes `key: value` parsing on the line that terminates a block scalar", () => {
+    const content = "---\nname: My Skill\ndescription: >-\n  folded body\nlicense: MIT\n---\n# Doc";
+    const { frontmatter } = splitSkillContent(content);
+    expect(frontmatter.description).toBe("folded body");
+    expect(frontmatter.license).toBe("MIT");
+  });
+
+  it("treats a block scalar header with no indented content as empty string", () => {
+    const content = "---\ndescription: >-\nname: still-parsed\n---\n";
+    const { frontmatter } = splitSkillContent(content);
+    expect(frontmatter.description).toBe("");
+    expect(frontmatter.name).toBe("still-parsed");
+  });
+
+  it("supports keep chomping (`|+`) preserving trailing blank lines", () => {
+    const content = "---\ndescription: |+\n  line one\n\n\n---\n";
+    const { frontmatter } = splitSkillContent(content);
+    expect(frontmatter.description).toBe("line one\n\n\n");
+  });
+});
+
 describe("renderSkillBody", () => {
   it("renders headings, lists, code blocks, and emphasis", () => {
     const body = "## Title\n\n- one\n- two\n\n**bold** and _italics_\n\n```\ncode block\n```";

@@ -314,7 +314,7 @@
             >
               <button
                 type="button"
-                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                class="relative flex h-5 w-5 items-center justify-center rounded text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-accent hover:text-foreground"
                 title="Copy"
                 aria-label="Copy message"
                 onclick={() => void copyText(item.text, item.seq)}
@@ -327,7 +327,7 @@
               </button>
               <button
                 type="button"
-                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                class="relative flex h-5 w-5 items-center justify-center rounded text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-accent hover:text-foreground"
                 title="Edit & resend — resends as a new message, keeps history"
                 aria-label="Edit and resend — resends as a new message, keeps history"
                 onclick={() => editIntoComposer(item.text)}
@@ -336,7 +336,7 @@
               </button>
               <button
                 type="button"
-                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                class="relative flex h-5 w-5 items-center justify-center rounded text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-accent hover:text-foreground disabled:opacity-50"
                 title="Resend — keeps history"
                 aria-label="Resend message — keeps history"
                 disabled={agentSession.sending}
@@ -383,7 +383,7 @@
             >
               <button
                 type="button"
-                class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                class="relative flex h-5 w-5 items-center justify-center rounded text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-accent hover:text-foreground"
                 title="Copy"
                 aria-label="Copy message"
                 onclick={() => void copyText(item.text, item.seq)}

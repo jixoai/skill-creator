@@ -617,7 +617,7 @@
           {/if}
           <button
             type="button"
-            class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+            class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 text-muted-foreground opacity-0 transition-opacity after:absolute after:-inset-1 after:content-[''] group-hover:opacity-100 hover:text-destructive"
             aria-label="Remove attachment"
             onclick={() =>
               (agentComposer.images = agentComposer.images.filter((_, i) => i !== index))}
@@ -633,7 +633,7 @@
           📄 {file.name}
           <button
             type="button"
-            class="text-muted-foreground hover:text-destructive"
+            class="relative flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:text-destructive"
             aria-label="Remove file {file.name}"
             onclick={() =>
               (agentComposer.files = agentComposer.files.filter((_, i) => i !== index))}
