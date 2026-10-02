@@ -640,212 +640,206 @@
           </ul>
         {/if}
       </section>
+    {/if}
 
-      <!-- proposals 审查（统一审批面：mcp: + si: 双源） -->
-      <section class="mt-6" aria-label="Proposal review">
-        <div class="mb-2 flex items-center gap-2">
-          <h2 class="text-xs font-medium text-muted-foreground">Proposals</h2>
-          {#if proposalsLoading}
-            <IconLoader class="h-3 w-3 animate-spin text-muted-foreground" />
-          {/if}
-          <span class="flex-1"></span>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 gap-1 px-2 text-xs"
-            onclick={() => void refreshProposals()}
-          >
-            <IconRefresh class="h-3 w-3" /> Refresh
-          </Button>
-        </div>
-        {#if proposals.length === 0}
-          <p class="py-4 text-xs text-muted-foreground">
-            No proposals yet. Propose a fix from any finding above or via an agent tool call;
-            nothing is applied until you approve it here.
-          </p>
-        {:else}
-          <ul class="space-y-2">
-            {#each proposals as proposal (proposal.id)}
-              {@const siPayload = siPayloadOf(proposal)}
-              {@const outcome =
-                approveOutcome?.proposalId === proposal.id ? approveOutcome.view : null}
-              {@const pending = proposal.status === "pending"}
-              <li class="rounded-md border border-border">
-                <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
-                  {#if siPayload?.kind === "edit"}
-                    <IconSparkles class="h-4 w-4 shrink-0 text-primary" />
-                  {:else if siPayload?.kind === "disable"}
-                    <IconPowerOff class="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  {:else if siPayload?.kind === "split"}
-                    <IconScissors class="h-4 w-4 shrink-0 text-primary" />
-                  {:else if siPayload?.kind === "merge"}
-                    <IconGitMerge class="h-4 w-4 shrink-0 text-primary" />
-                  {:else}
-                    <IconShield class="h-4 w-4 shrink-0 text-muted-foreground" />
-                  {/if}
-                  <button
-                    type="button"
-                    class="min-w-0 flex-1 truncate text-left text-xs font-medium"
-                    onclick={() => void expandProposal(proposal)}
-                  >
-                    {proposal.kind} · {titleOf(proposal)}
-                  </button>
-                  <!-- 来源角标：mcp 行显示 capability；si 行显示草稿来源。 -->
-                  <Badge
-                    variant={proposal.source === "mcp" ? "secondary" : "outline"}
-                    class="text-[10px]"
-                  >
-                    {proposal.source === "mcp"
-                      ? (proposal.capability ?? proposal.kind)
-                      : "si draft"}
-                  </Badge>
-                  {#if !pending}
-                    <Badge variant="outline" class="text-[10px]">
-                      {proposal.status}{proposal.rejectCause === "stale" ? " · stale" : ""}
-                    </Badge>
-                  {/if}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="h-7 px-2 text-[11px]"
-                    disabled={!pending || rejectingId === proposal.id}
-                    onclick={() => void handleReject(proposal)}
-                  >
-                    {#if rejectingId === proposal.id}<IconLoader
-                        class="h-3 w-3 animate-spin"
-                      />{/if}
-                    Reject
-                  </Button>
-                  <Button
-                    size="sm"
-                    class="h-7 px-2 text-[11px]"
-                    disabled={!pending || approvingId === proposal.id}
-                    onclick={() => void handleApprove(proposal)}
-                  >
-                    {#if approvingId === proposal.id}<IconLoader
-                        class="h-3 w-3 animate-spin"
-                      />{/if}
-                    Approve
-                  </Button>
-                </div>
-
-                {#if outcome}
-                  <div class="border-b border-border/60 px-3 py-2 text-[11px]">
-                    <p
-                      class={outcome.status === "executed"
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : outcome.status === "failed"
-                          ? "text-destructive"
-                          : "text-muted-foreground"}
-                    >
-                      {outcome.status}{outcome.result?.error ? `: ${outcome.result.error}` : ""}
-                    </p>
-                    {#if outcome.status === "rejected" && outcome.rejectCause === "stale"}
-                      <p class="mt-1 text-destructive">
-                        This proposal is stale. Re-analyze, then create a fresh proposal.
-                      </p>
-                    {/if}
-                  </div>
+    <!-- proposals 审查（统一审批面：mcp: + si: 双源） -->
+    <section class="mt-6" aria-label="Proposal review">
+      <div class="mb-2 flex items-center gap-2">
+        <h2 class="text-xs font-medium text-muted-foreground">Proposals</h2>
+        {#if proposalsLoading}
+          <IconLoader class="h-3 w-3 animate-spin text-muted-foreground" />
+        {/if}
+        <span class="flex-1"></span>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 gap-1 px-2 text-xs"
+          onclick={() => void refreshProposals()}
+        >
+          <IconRefresh class="h-3 w-3" /> Refresh
+        </Button>
+      </div>
+      {#if proposals.length === 0}
+        <p class="py-4 text-xs text-muted-foreground">
+          No proposals yet. Propose a fix from any finding above or via an agent tool call; nothing
+          is applied until you approve it here.
+        </p>
+      {:else}
+        <ul class="space-y-2">
+          {#each proposals as proposal (proposal.id)}
+            {@const siPayload = siPayloadOf(proposal)}
+            {@const outcome =
+              approveOutcome?.proposalId === proposal.id ? approveOutcome.view : null}
+            {@const pending = proposal.status === "pending"}
+            <li class="rounded-md border border-border">
+              <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
+                {#if siPayload?.kind === "edit"}
+                  <IconSparkles class="h-4 w-4 shrink-0 text-primary" />
+                {:else if siPayload?.kind === "disable"}
+                  <IconPowerOff class="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                {:else if siPayload?.kind === "split"}
+                  <IconScissors class="h-4 w-4 shrink-0 text-primary" />
+                {:else if siPayload?.kind === "merge"}
+                  <IconGitMerge class="h-4 w-4 shrink-0 text-primary" />
+                {:else}
+                  <IconShield class="h-4 w-4 shrink-0 text-muted-foreground" />
                 {/if}
+                <button
+                  type="button"
+                  class="min-w-0 flex-1 truncate text-left text-xs font-medium"
+                  onclick={() => void expandProposal(proposal)}
+                >
+                  {proposal.kind} · {titleOf(proposal)}
+                </button>
+                <!-- 来源角标：mcp 行显示 capability；si 行显示草稿来源。 -->
+                <Badge
+                  variant={proposal.source === "mcp" ? "secondary" : "outline"}
+                  class="text-[10px]"
+                >
+                  {proposal.source === "mcp" ? (proposal.capability ?? proposal.kind) : "si draft"}
+                </Badge>
+                {#if !pending}
+                  <Badge variant="outline" class="text-[10px]">
+                    {proposal.status}{proposal.rejectCause === "stale" ? " · stale" : ""}
+                  </Badge>
+                {/if}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-7 px-2 text-[11px]"
+                  disabled={!pending || rejectingId === proposal.id}
+                  onclick={() => void handleReject(proposal)}
+                >
+                  {#if rejectingId === proposal.id}<IconLoader class="h-3 w-3 animate-spin" />{/if}
+                  Reject
+                </Button>
+                <Button
+                  size="sm"
+                  class="h-7 px-2 text-[11px]"
+                  disabled={!pending || approvingId === proposal.id}
+                  onclick={() => void handleApprove(proposal)}
+                >
+                  {#if approvingId === proposal.id}<IconLoader class="h-3 w-3 animate-spin" />{/if}
+                  Approve
+                </Button>
+              </div>
 
-                {#if expandedId === proposal.id}
-                  <div class="space-y-2 px-3 py-2 text-[11px]">
-                    <p class="text-muted-foreground">{titleOf(proposal)}</p>
-                    <p class="text-muted-foreground">
-                      Created {new Date(proposal.createdAt).toLocaleString()} · origin
-                      {proposal.origin}.
+              {#if outcome}
+                <div class="border-b border-border/60 px-3 py-2 text-[11px]">
+                  <p
+                    class={outcome.status === "executed"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : outcome.status === "failed"
+                        ? "text-destructive"
+                        : "text-muted-foreground"}
+                  >
+                    {outcome.status}{outcome.result?.error ? `: ${outcome.result.error}` : ""}
+                  </p>
+                  {#if outcome.status === "rejected" && outcome.rejectCause === "stale"}
+                    <p class="mt-1 text-destructive">
+                      This proposal is stale. Re-analyze, then create a fresh proposal.
                     </p>
-                    {#if siPayload !== null}
-                      {@const affected = affectedOf(proposal)}
-                      {@const revisions = revisionsOf(proposal)}
-                      <p class="text-muted-foreground">Affects {affected.length} skill(s).</p>
-                      <ul class="space-y-1">
-                        {#each affected as selection, index (selection.skillId)}
-                          <li class="flex flex-wrap items-baseline gap-1">
-                            <button
-                              type="button"
-                              class="text-primary underline-offset-2 hover:underline"
-                              onclick={() => openSkillDetail(selection.skillId)}
+                  {/if}
+                </div>
+              {/if}
+
+              {#if expandedId === proposal.id}
+                <div class="space-y-2 px-3 py-2 text-[11px]">
+                  <p class="text-muted-foreground">{titleOf(proposal)}</p>
+                  <p class="text-muted-foreground">
+                    Created {new Date(proposal.createdAt).toLocaleString()} · origin
+                    {proposal.origin}.
+                  </p>
+                  {#if siPayload !== null}
+                    {@const affected = affectedOf(proposal)}
+                    {@const revisions = revisionsOf(proposal)}
+                    <p class="text-muted-foreground">Affects {affected.length} skill(s).</p>
+                    <ul class="space-y-1">
+                      {#each affected as selection, index (selection.skillId)}
+                        <li class="flex flex-wrap items-baseline gap-1">
+                          <button
+                            type="button"
+                            class="text-primary underline-offset-2 hover:underline"
+                            onclick={() => openSkillDetail(selection.skillId)}
+                          >
+                            {snapshotName(selection.skillId)}
+                          </button>
+                          {#if revisions[index] !== undefined}
+                            <code class="break-all text-[10px] text-muted-foreground"
+                              >{revisions[index]!.slice(0, 19)}…</code
                             >
-                              {snapshotName(selection.skillId)}
-                            </button>
-                            {#if revisions[index] !== undefined}
-                              <code class="break-all text-[10px] text-muted-foreground"
-                                >{revisions[index]!.slice(0, 19)}…</code
-                              >
-                            {/if}
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+
+                    {#if siPayload.kind === "edit"}
+                      {@const first = siPayload.edits[0]}
+                      {@const before = first ? beforeDocs[first.selection.skillId] : undefined}
+                      <div class="grid gap-2 md:grid-cols-2">
+                        <div class="rounded border border-border bg-muted/20 p-2">
+                          <p class="mb-1 font-medium">Before</p>
+                          {#if before}
+                            <p class="leading-4 text-muted-foreground">{before.description}</p>
+                          {:else}
+                            <p class="text-muted-foreground">Loading current document…</p>
+                          {/if}
+                        </div>
+                        <div class="rounded border border-border bg-muted/20 p-2">
+                          <p class="mb-1 font-medium">After (proposal)</p>
+                          <p class="leading-4 text-muted-foreground">
+                            {first?.frontmatter.description}
+                          </p>
+                        </div>
+                      </div>
+                      {#if first}
+                        <details>
+                          <summary class="cursor-pointer text-muted-foreground"
+                            >Preview body</summary
+                          >
+                          <pre
+                            class="mt-1 max-h-48 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">{first.body}</pre>
+                        </details>
+                      {/if}
+                    {:else if siPayload.kind === "disable"}
+                      <p class="rounded border border-border bg-muted/20 p-2 leading-4">
+                        Reason: {siPayload.reason}
+                      </p>
+                    {:else if siPayload.kind === "split"}
+                      <ul class="space-y-1">
+                        {#each siPayload.targets as target (target.directoryName)}
+                          <li>
+                            <span class="font-medium">{target.directoryName}</span>
+                            <span class="text-muted-foreground">
+                              — {target.frontmatter.description}</span
+                            >
                           </li>
                         {/each}
                       </ul>
-
-                      {#if siPayload.kind === "edit"}
-                        {@const first = siPayload.edits[0]}
-                        {@const before = first ? beforeDocs[first.selection.skillId] : undefined}
-                        <div class="grid gap-2 md:grid-cols-2">
-                          <div class="rounded border border-border bg-muted/20 p-2">
-                            <p class="mb-1 font-medium">Before</p>
-                            {#if before}
-                              <p class="leading-4 text-muted-foreground">{before.description}</p>
-                            {:else}
-                              <p class="text-muted-foreground">Loading current document…</p>
-                            {/if}
-                          </div>
-                          <div class="rounded border border-border bg-muted/20 p-2">
-                            <p class="mb-1 font-medium">After (proposal)</p>
-                            <p class="leading-4 text-muted-foreground">
-                              {first?.frontmatter.description}
-                            </p>
-                          </div>
-                        </div>
-                        {#if first}
-                          <details>
-                            <summary class="cursor-pointer text-muted-foreground"
-                              >Preview body</summary
-                            >
-                            <pre
-                              class="mt-1 max-h-48 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">{first.body}</pre>
-                          </details>
-                        {/if}
-                      {:else if siPayload.kind === "disable"}
-                        <p class="rounded border border-border bg-muted/20 p-2 leading-4">
-                          Reason: {siPayload.reason}
-                        </p>
-                      {:else if siPayload.kind === "split"}
-                        <ul class="space-y-1">
-                          {#each siPayload.targets as target (target.directoryName)}
-                            <li>
-                              <span class="font-medium">{target.directoryName}</span>
-                              <span class="text-muted-foreground">
-                                — {target.frontmatter.description}</span
-                              >
-                            </li>
-                          {/each}
-                        </ul>
-                      {:else if siPayload.kind === "merge"}
-                        <p>
-                          <span class="font-medium">{siPayload.target.directoryName}</span>
-                          <span class="text-muted-foreground">
-                            — {siPayload.target.frontmatter.description}</span
-                          >
-                        </p>
-                        <p class="text-muted-foreground">
-                          Merges {siPayload.sources.length} sources; approving removes them revision-safely.
-                        </p>
-                      {/if}
-                    {:else}
-                      <!-- mcp 行：capability input 的只读预览（不可信文本只经插值转义）。 -->
-                      <pre
-                        class="max-h-48 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">{payloadPreview(
-                          proposal,
-                        )}</pre>
+                    {:else if siPayload.kind === "merge"}
+                      <p>
+                        <span class="font-medium">{siPayload.target.directoryName}</span>
+                        <span class="text-muted-foreground">
+                          — {siPayload.target.frontmatter.description}</span
+                        >
+                      </p>
+                      <p class="text-muted-foreground">
+                        Merges {siPayload.sources.length} sources; approving removes them revision-safely.
+                      </p>
                     {/if}
-                  </div>
-                {/if}
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-    {/if}
+                  {:else}
+                    <!-- mcp 行：capability input 的只读预览（不可信文本只经插值转义）。 -->
+                    <pre
+                      class="max-h-48 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">{payloadPreview(
+                        proposal,
+                      )}</pre>
+                  {/if}
+                </div>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
   </div>
 </div>
