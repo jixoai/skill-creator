@@ -41,6 +41,24 @@ describe("matchRouteTree", () => {
     }
   });
 
+  it("matches a dynamic Page prefix and passes its params into the route tree", () => {
+    const root = makeRoute({
+      id: "skills.intelligence",
+      pattern: "intelligence/:providerId",
+      params: z.object({ wsId: z.string(), providerId: z.string() }),
+    });
+    const result = matchRouteTree(
+      root,
+      "/w/ws_abc/skills/intelligence/claude-code",
+      "",
+      "/w/:wsId/skills",
+    );
+    expect(result.kind).toBe("matched");
+    if (result.kind === "matched") {
+      expect(result.chain[0]?.rawParams).toEqual({ wsId: "ws_abc", providerId: "claude-code" });
+    }
+  });
+
   it("returns no-match when path has extra segments and no children", () => {
     const root = makeRoute({ id: "home", pattern: "" });
     const result = matchRouteTree(root, "/workspaces/extra/segments", "", "/workspaces");
@@ -74,6 +92,28 @@ describe("matchRouteTree", () => {
     if (result.kind === "parse-error") {
       expect(result.reason).toBe("params");
     }
+  });
+
+  it("validates parent params even when a nested child is the leaf", () => {
+    const child = makeRoute({
+      id: "creator.skill",
+      pattern: ":skillId",
+      params: z.object({ skillId: z.string().regex(/^sk_/), wsId: z.string().regex(/^ws_/) }),
+    });
+    const root = makeRoute({
+      id: "creator.editor",
+      pattern: "edit/:providerId",
+      params: z.object({ wsId: z.string().regex(/^ws_/), providerId: z.string().min(1) }),
+      children: [child],
+    });
+    const result = matchRouteTree(
+      root,
+      "/w/invalid/creator/edit/claude/sk_abc",
+      "",
+      "/w/:wsId/creator",
+    );
+    expect(result.kind).toBe("parse-error");
+    if (result.kind === "parse-error") expect(result.reason).toBe("params");
   });
 
   it("parses search params via leaf search schema", () => {

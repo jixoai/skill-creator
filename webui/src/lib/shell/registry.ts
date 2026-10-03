@@ -7,12 +7,14 @@
  */
 import type { ErasedRouteContract } from "./contract.js";
 import type { AppManifest } from "./types.js";
+import { matchPathPattern } from "./path-pattern.js";
 
 /** route 注册表条目。 */
 export interface RouteRegistryEntry {
   readonly id: string;
   readonly route: ErasedRouteContract;
   readonly absolutePattern: string;
+  readonly searchParamAliases?: Readonly<Record<string, string>>;
 }
 
 /** Route 注册表单例（id → entry）。 */
@@ -31,18 +33,11 @@ class RouteRegistry {
     return [...this.entries.values()];
   }
 
-  /** 按 absolute pattern 前缀匹配，返回首个命中的 entry。 */
+  /** 按 absolute pattern 的完整路径前缀匹配，返回最具体的 entry。 */
   findByPath(pathname: string): RouteRegistryEntry | undefined {
-    for (const entry of this.entries.values()) {
-      const patternWithoutParams = entry.absolutePattern.replace(/:[^/]+/g, "[^/]+");
-      try {
-        const re = new RegExp(`^${patternWithoutParams.replace(/\//g, "\\/")}\\/?$`);
-        if (re.test(pathname)) return entry;
-      } catch {
-        // pattern 编译失败，跳过
-      }
-    }
-    return undefined;
+    return [...this.entries.values()]
+      .filter((entry) => matchPathPattern(entry.absolutePattern, pathname, true) !== null)
+      .sort((left, right) => right.absolutePattern.length - left.absolutePattern.length)[0];
   }
 }
 

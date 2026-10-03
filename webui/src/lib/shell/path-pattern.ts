@@ -14,7 +14,49 @@ export interface CompiledPattern {
   readonly paramNames: readonly string[];
 }
 
-const PARAM_RE = /:([A-Za-z_][A-Za-z0-9_]*)/g;
+export interface PathPatternMatch {
+  readonly params: Readonly<Record<string, string>>;
+  readonly remainder: readonly string[];
+}
+
+/** Match a path against a segment pattern, optionally leaving a suffix for a route tree. */
+export function matchPathPattern(
+  pattern: string,
+  pathname: string,
+  allowRemainder = false,
+): PathPatternMatch | null {
+  const patternSegments = splitSegments(pattern);
+  const pathSegments = splitSegments(pathname).map(decodeSegment);
+  if (pathSegments.length < patternSegments.length) return null;
+  if (!allowRemainder && pathSegments.length !== patternSegments.length) return null;
+
+  const params: Record<string, string> = {};
+  for (let index = 0; index < patternSegments.length; index += 1) {
+    const expected = patternSegments[index]!;
+    const actual = pathSegments[index]!;
+    if (expected.startsWith(":")) {
+      if (!actual) return null;
+      params[expected.slice(1)] = actual;
+    } else if (expected !== actual) {
+      return null;
+    }
+  }
+
+  return { params, remainder: pathSegments.slice(patternSegments.length) };
+}
+
+function splitSegments(path: string): string[] {
+  const cleaned = path.replace(/^\/+|\/+$/g, "");
+  return cleaned === "" ? [] : cleaned.split("/");
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
 
 /** 编译相对 pattern 为正则 + 参数名列表。 */
 export function compilePattern(pattern: string): CompiledPattern {
@@ -23,13 +65,18 @@ export function compilePattern(pattern: string): CompiledPattern {
     return { regex: /^\/?$/, paramNames: [] };
   }
   const paramNames: string[] = [];
-  let regexSrc = cleaned.replace(PARAM_RE, (_, name: string) => {
-    paramNames.push(name);
-    return "([^/]+)";
-  });
-  regexSrc = regexSrc.replace(/\//g, "\\/");
-  regexSrc = `^${regexSrc}\\/?$`;
-  return { regex: new RegExp(regexSrc), paramNames };
+  const regexSrc = cleaned
+    .split("/")
+    .map((segment) => {
+      const parameter = /^:([A-Za-z_][A-Za-z0-9_]*)$/.exec(segment);
+      if (parameter) {
+        paramNames.push(parameter[1]!);
+        return "([^/]+)";
+      }
+      return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    })
+    .join("\\/");
+  return { regex: new RegExp(`^${regexSrc}\\/?$`), paramNames };
 }
 
 /** 拼接父级绝对前缀与子级相对 pattern。 */
@@ -45,8 +92,13 @@ export function stringifyPattern(
   pattern: string,
   params: Readonly<Record<string, string>>,
 ): string {
-  return pattern.replace(PARAM_RE, (_, name: string) => {
-    const v = params[name];
-    return v !== undefined ? encodeURIComponent(v) : `:${name}`;
-  });
+  return pattern
+    .split("/")
+    .map((segment) => {
+      const parameter = /^:([A-Za-z_][A-Za-z0-9_]*)$/.exec(segment);
+      if (!parameter) return segment;
+      const value = params[parameter[1]!];
+      return value !== undefined ? encodeURIComponent(value) : segment;
+    })
+    .join("/");
 }

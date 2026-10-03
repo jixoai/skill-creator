@@ -45,8 +45,8 @@
   // 只有完整 matched 才渲染叶子；parse-error 由 TabOutlet 的渲染前重定向清理，绝不带非法 ID 渲染。
   const leafChain = $derived(matchResult.kind === "matched" ? matchResult.chain : []);
 
-  const leafParams = $derived(extractParams(leafChain));
   const leafSearch = $derived(extractSearch(matchResult, leafChain));
+  const leafParams = $derived(extractParams(leafChain, activity.searchParamAliases, leafSearch));
 
   setPortalTarget(() => portalRoot);
   setAppContext({
@@ -105,10 +105,16 @@
 
   function extractParams(
     chain: readonly MatchedRouteNode[],
+    aliases?: Readonly<Record<string, string>>,
+    search?: Readonly<Record<string, unknown>>,
   ): Readonly<Record<string, unknown>> | undefined {
     if (chain.length === 0) return undefined;
     const merged: Record<string, string> = {};
     for (const node of chain) Object.assign(merged, node.rawParams);
+    for (const [paramName, searchName] of Object.entries(aliases ?? {})) {
+      const value = search?.[searchName];
+      if (typeof value === "string") merged[paramName] = value;
+    }
     return merged;
   }
 

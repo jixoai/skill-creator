@@ -3,7 +3,12 @@
  * 正交意图：[1] 验证 path-pattern 编译/拼接/渲染。
  */
 import { describe, expect, it } from "vitest";
-import { compilePattern, joinPattern, stringifyPattern } from "../path-pattern.js";
+import {
+  compilePattern,
+  joinPattern,
+  matchPathPattern,
+  stringifyPattern,
+} from "../path-pattern.js";
 
 describe("compilePattern", () => {
   it("compiles index route (empty pattern)", () => {
@@ -27,6 +32,12 @@ describe("compilePattern", () => {
     expect(compiled.regex.test("repo/a/b")).toBe(true);
     expect(compiled.regex.test("repo/a/b/")).toBe(true);
     expect(compiled.regex.test("repo/a")).toBe(false);
+  });
+
+  it("escapes static regular expression characters", () => {
+    const compiled = compilePattern(".well-known/:name");
+    expect(compiled.regex.test(".well-known/skills")).toBe(true);
+    expect(compiled.regex.test("xwell-known/skills")).toBe(false);
   });
 });
 
@@ -57,5 +68,25 @@ describe("stringifyPattern", () => {
 
   it("leaves missing params as :name (DEV warning)", () => {
     expect(stringifyPattern("repo/:owner/:repo", { owner: "a" })).toBe("repo/a/:repo");
+  });
+});
+
+describe("matchPathPattern", () => {
+  it("matches full dynamic segments and decodes URL values", () => {
+    expect(matchPathPattern("/w/:wsId/skills", "/w/%7E/skills")).toEqual({
+      params: { wsId: "~" },
+      remainder: [],
+    });
+  });
+
+  it("can leave a route suffix while rejecting partial segment matches", () => {
+    expect(
+      matchPathPattern("/w/:wsId/skills", "/w/ws_abc/skills/intelligence/provider", true),
+    ).toEqual({
+      params: { wsId: "ws_abc" },
+      remainder: ["intelligence", "provider"],
+    });
+    expect(matchPathPattern("/w/:wsId/skills", "/w/ws_abc/skills-extra", true)).toBeNull();
+    expect(matchPathPattern("/w/:wsId/skills", "/w/ws_abc/skills/extra")).toBeNull();
   });
 });

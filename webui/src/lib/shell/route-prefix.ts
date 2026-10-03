@@ -7,19 +7,11 @@
  */
 import type { AppActivity, AppManifest } from "./types.js";
 import { getEntryActivity } from "./types.js";
+import { matchPathPattern } from "./path-pattern.js";
 
 /** 将 pattern（含 :param）转为前缀匹配：把 :param 段视为通配。 */
 export function matchesRoutePrefix(pathname: string, pattern: string): boolean {
-  const patternSegs = pattern.replace(/\/+$/, "").split("/").filter(Boolean);
-  const pathSegs = pathname.replace(/\/+$/, "").split("/").filter(Boolean);
-  for (let i = 0; i < patternSegs.length; i++) {
-    const ps = patternSegs[i];
-    const actual = pathSegs[i];
-    if (ps?.startsWith(":")) continue;
-    if (!actual) return false;
-    if (ps !== actual) return false;
-  }
-  return true;
+  return matchPathPattern(pattern, pathname, true) !== null;
 }
 
 /** 从 manifest 的 activities 中找最长前缀匹配的 activity；无匹配时回退到 entry。 */

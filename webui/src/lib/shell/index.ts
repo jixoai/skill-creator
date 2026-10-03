@@ -7,7 +7,7 @@
 export type { RouteContract, ErasedRouteContract } from "./contract.js";
 export type { AppManifest, AppActivity, AppEntry } from "./types.js";
 export { getEntryRoute, getEntryActivity } from "./types.js";
-export type { CompiledPattern } from "./path-pattern.js";
+export type { CompiledPattern, PathPatternMatch } from "./path-pattern.js";
 export type { MatchedRouteNode, RouteMatchResult } from "./match.js";
 export type { NavAction, RouteId, RouteParamsMap, RouteSearchMap, IdTarget } from "./navigate.js";
 export type { RouteParams, RouteSearch } from "./navigate.js";
@@ -23,9 +23,14 @@ export { defineApp } from "./define-app.js";
 
 // 核心函数
 export { matchRouteTree } from "./match.js";
-export { compilePattern, joinPattern, stringifyPattern } from "./path-pattern.js";
+export { compilePattern, joinPattern, stringifyPattern, matchPathPattern } from "./path-pattern.js";
 export { stringifySearch, parseSearchString } from "./search.js";
-export { sanitizeShellLocation, SHELL_HOME_PATH } from "./route-hygiene.js";
+export {
+  sanitizeShellLocation,
+  canonicalizeShellLocation,
+  resolveShellRoute,
+  SHELL_HOME_PATH,
+} from "./route-hygiene.js";
 export type { HygieneDecision } from "./route-hygiene.js";
 
 // 注册表
@@ -66,3 +71,24 @@ export {
 // 组件
 export { default as AppShell } from "./AppShell.svelte";
 export { default as TabOutlet } from "./TabOutlet.svelte";
+
+export {
+  TAB_SESSION_STORAGE_KEY,
+  createTabNavigationState,
+  restoreTabNavigationState,
+  persistableTabSession,
+  persistTabSession,
+  addWorkspaceTab,
+  activateTab,
+  pushTabRoute,
+  replaceTabRoute,
+  moveTabCursor,
+  closeWorkspaceTab,
+  reconcileWorkspaceTabs,
+  currentTabRoute,
+  tabIdForPath,
+  routeForTabId,
+  splitLocation,
+  navigateWithReplaceState,
+} from "./tab-session.js";
+export type { TabNavigationState, TabRouteStack, PersistedTabSession } from "./tab-session.js";

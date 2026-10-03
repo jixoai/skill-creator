@@ -1,58 +1,49 @@
-/**
- * 用户原始需求 [2026-07-27]：「Creator 用来编写 Skill，深度融合 AI」。
- * 正交意图：[1] 声明 Creator App 的 manifest（home + 编辑/新建实例 activity）。
- */
+/** Creator block for a workspace-scoped Page. */
 import IconPen from "@lucide/svelte/icons/file-pen-line";
-import { defineApp, defineActivity, defineRoute, leafRoute } from "$lib/shell";
+import { defineApp, defineActivity, defineRoute } from "$lib/shell";
 import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
 import { SkillIdSchema } from "$shared/contracts/skills.js";
 import { z } from "zod";
 
-/** Creator App：AI 驱动的技能编写工作台。 */
+const creatorSearch = z.object({
+  subview: z.enum(["file", "log", "preview", "validate", "test", "eval"]).optional(),
+  template: z.string().optional(),
+});
+
 export const creatorApp = defineApp({
   id: "creator",
   name: "Creator",
   icon: IconPen,
+  pageKind: "workspace",
   activities: [
-    // home tab：引导（模板画廊 + 最近编辑 + 打开/新建入口）
     defineActivity({
-      pattern: "/creator",
+      pattern: "/w/:wsId/creator",
       entry: true,
-      root: leafRoute({
+      root: defineRoute({
         id: "creator.home",
+        pattern: "",
+        params: z.object({ wsId: WorkspaceIdSchema }),
         component: () => import("./CreatorHome.svelte"),
       }),
     }),
-    // 实例 tab：编辑或新建技能（单列子视图区；Agent 会话由 DSH host 承载，3.2）
     defineActivity({
-      pattern: "/creator",
+      pattern: "/w/:wsId/creator",
       root: defineRoute({
         id: "creator.workspace",
-        pattern: ":mode/:wsId/:providerId",
+        pattern: ":mode/:providerId",
         params: z.object({
           mode: z.enum(["edit", "new"]),
           wsId: WorkspaceIdSchema,
           providerId: ProviderIdSchema,
         }),
-        search: z.object({
-          subview: z.enum(["file", "log", "preview", "validate", "test", "eval"]).optional(),
-          template: z.string().optional(),
-        }),
+        search: creatorSearch,
         component: () => import("./CreatorWorkspace.svelte"),
         children: [
           defineRoute({
             id: "creator.workspace.skill",
             pattern: ":skillId",
-            params: z.object({
-              skillId: SkillIdSchema,
-            }),
-            // WS4 复走查 N2：extractSearch 只读叶子路由的 search schema——
-            // 子路由缺声明时 subview 恒回落 "file"，编辑路由上全部子视图
-            // 切换失效（与父路由保持同一形状）。
-            search: z.object({
-              subview: z.enum(["file", "log", "preview", "validate", "test", "eval"]).optional(),
-              template: z.string().optional(),
-            }),
+            params: z.object({ skillId: SkillIdSchema }),
+            search: creatorSearch,
             component: () => import("./CreatorWorkspace.svelte"),
           }),
         ],

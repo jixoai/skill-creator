@@ -1,90 +1,111 @@
-/**
- * 用户原始需求 [2026-09-05]：「不完整、未知或非法身份必须在渲染前清理。」
- * 正交意图：[1] 验证非法 opaque ID / 非法 search / 未知 app 在渲染前产出重定向决策。
- */
-import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import type { ErasedRouteContract } from "../contract.js";
-import { appRegistry } from "../registry.js";
-import { sanitizeShellLocation, SHELL_HOME_PATH } from "../route-hygiene.js";
-import type { AppManifest } from "../types.js";
+import { describe, expect, it, vi } from "vitest";
 
-const wsIdSchema = z.enum(["~"]).or(z.string().regex(/^ws_[a-f0-9]{8,}$/));
+const iconStub = vi.hoisted(() => ({ default: {} }));
+vi.mock("@lucide/svelte/icons/boxes", () => iconStub);
+vi.mock("@lucide/svelte/icons/book-open", () => iconStub);
+vi.mock("@lucide/svelte/icons/settings", () => iconStub);
+vi.mock("@lucide/svelte/icons/file-pen-line", () => iconStub);
+vi.mock("@lucide/svelte/icons/chart-no-axes-column-increasing", () => iconStub);
+vi.mock("@lucide/svelte/icons/message-square", () => iconStub);
+vi.mock("$app/state", () => ({
+  page: { url: { pathname: "/", search: "", searchParams: new URLSearchParams() } },
+}));
+vi.mock("$app/navigation", () => ({ goto: () => {} }));
 
-function makeRoute(overrides: Partial<ErasedRouteContract> = {}): ErasedRouteContract {
-  return {
-    id: "test-route",
-    pattern: "",
-    component: () => Promise.resolve({ default: {} as never }),
-    ...overrides,
-  };
-}
+import "../../apps/workspaces/manifest.js";
+import "../../apps/creator/manifest.js";
+import "../../apps/wiki/manifest.js";
+import "../../apps/settings/manifest.js";
+import "../../apps/agent/manifest.js";
+import "../../apps/evaluating/manifest.js";
+import {
+  canonicalizeShellLocation,
+  resolveShellRoute,
+  sanitizeShellLocation,
+  SHELL_HOME_PATH,
+} from "../route-hygiene.js";
 
-/** 构造与 workspaces App 同构的测试 App（home + :wsId/:providerId 实例）。 */
-function registerTestApp(): void {
-  const manifest: AppManifest = {
-    id: "hygiene-test",
-    name: "Hygiene Test",
-    icon: {} as AppManifest["icon"],
-    activities: [
-      {
-        pattern: "/hygiene-test",
-        entry: true,
-        root: makeRoute({ id: "hygiene-test.home", pattern: "" }),
-      },
-      {
-        pattern: "/hygiene-test",
-        root: makeRoute({
-          id: "hygiene-test.provider",
-          pattern: ":wsId/:providerId",
-          params: z.object({ wsId: wsIdSchema, providerId: z.string().min(1) }),
-          search: z.object({ view: z.enum(["list", "detail"]).optional() }),
-        }),
-      },
+const workspaceId = "ws_0123456789abcdef01234567";
+const skillId = "sk_0123456789abcdef01234567";
+
+describe("legacy shell URL migrations", () => {
+  it.each([
+    ["/workspaces", "", "/w/~/skills"],
+    [
+      "/workspaces/intelligence/ws_0123456789abcdef01234567/claude-code",
+      "?severity=warning",
+      "/w/ws_0123456789abcdef01234567/skills/intelligence/claude-code?severity=warning",
     ],
-  };
-  appRegistry.register(manifest);
-}
-
-registerTestApp();
-
-describe("sanitizeShellLocation", () => {
-  it("accepts the entry activity path", () => {
-    expect(sanitizeShellLocation("/hygiene-test", "")).toEqual({ kind: "ok" });
+    [
+      "/workspaces/ws_0123456789abcdef01234567/claude-code",
+      "?q=hello+world&skill=sk_0123456789abcdef01234567&view=detail",
+      "/w/ws_0123456789abcdef01234567/skills?q=hello+world&provider=claude-code&skill=sk_0123456789abcdef01234567",
+    ],
+    [
+      "/workspaces/ws_0123456789abcdef01234567/claude-code",
+      "?view=list",
+      "/w/ws_0123456789abcdef01234567/skills?provider=claude-code",
+    ],
+    ["/creator", "", "/w/~/creator"],
+    [
+      "/creator/edit/ws_0123456789abcdef01234567/claude-code/sk_0123456789abcdef01234567",
+      "?subview=preview&template=basic",
+      "/w/ws_0123456789abcdef01234567/creator/edit/claude-code/sk_0123456789abcdef01234567?subview=preview&template=basic",
+    ],
+    [
+      "/creator/new/ws_0123456789abcdef01234567/claude-code",
+      "?template=basic",
+      "/w/ws_0123456789abcdef01234567/creator/new/claude-code?template=basic",
+    ],
+    ["/wiki", "", "/w/~/wiki"],
+    ["/wiki/%7E", "", "/w/~/wiki"],
+    ["/wiki/ws_0123456789abcdef01234567", "", "/w/ws_0123456789abcdef01234567/wiki"],
+    ["/repository", "", "/w/~/skills"],
+    [
+      "/repository/scan/curated-source",
+      "?selected=a&targets=b&skill=c",
+      "/w/~/skills?selected=a&targets=b&skill=c",
+    ],
+  ])("maps %s%s", (pathname, search, expected) => {
+    expect(canonicalizeShellLocation(pathname, search)).toBe(expected);
   });
 
-  it("accepts a valid provider identity", () => {
-    expect(sanitizeShellLocation("/hygiene-test/ws_deadbeef/claude-code", "?view=list")).toEqual({
-      kind: "ok",
-    });
-    expect(sanitizeShellLocation("/hygiene-test/%7E/claude-code", "")).toEqual({ kind: "ok" });
+  it("does not rewrite the settings page URLs", () => {
+    expect(canonicalizeShellLocation("/settings/model", "")).toBe("/settings/model");
+    expect(sanitizeShellLocation("/settings/model", "")).toEqual({ kind: "ok" });
   });
 
-  it("redirects an invalid opaque workspace id to the app entry before render", () => {
-    const decision = sanitizeShellLocation("/hygiene-test/garbage-id/claude-code", "");
-    expect(decision).toEqual({ kind: "redirect", path: "/hygiene-test" });
-  });
-
-  it("redirects invalid search params to the same pathname without search", () => {
-    const decision = sanitizeShellLocation("/hygiene-test/ws_deadbeef/claude-code", "?view=bogus");
-    expect(decision).toEqual({
+  it("redirects invalid workspace identities before rendering", () => {
+    expect(sanitizeShellLocation("/w/garbage/skills", "")).toEqual({
       kind: "redirect",
-      path: "/hygiene-test/ws_deadbeef/claude-code",
+      path: "/w/~/skills",
     });
+    expect(
+      sanitizeShellLocation("/w/garbage/creator/edit/claude-code/sk_0123456789abcdef01234567", ""),
+    ).toEqual({ kind: "redirect", path: "/w/~/creator" });
   });
 
-  it("redirects an unmatched activity path to the app entry", () => {
-    expect(sanitizeShellLocation("/hygiene-test/only-one-segment", "")).toEqual({
+  it("drops invalid search while preserving the matched route", () => {
+    expect(sanitizeShellLocation("/w/~/skills", "?provider=INVALID")).toEqual({
       kind: "redirect",
-      path: "/hygiene-test",
+      path: "/w/~/skills",
     });
   });
 
-  it("redirects unknown apps to the global shell home", () => {
-    expect(sanitizeShellLocation("/not-registered/ws_deadbeef/x", "")).toEqual({
+  it("resolves workspace, agent, and settings Page manifests", () => {
+    expect(resolveShellRoute("/w/~/wiki", "")?.app.pageKind).toBe("workspace");
+    expect(resolveShellRoute("/agent", "")?.app.pageKind).toBe("agent");
+    expect(resolveShellRoute("/settings", "")?.app.pageKind).toBe("settings");
+  });
+
+  it("sends unknown and unmatched routes to Global Skills", () => {
+    expect(sanitizeShellLocation("/missing/path", "")).toEqual({
       kind: "redirect",
       path: SHELL_HOME_PATH,
     });
-    expect(sanitizeShellLocation("/", "")).toEqual({ kind: "redirect", path: SHELL_HOME_PATH });
+    expect(sanitizeShellLocation("/agent/unmatched", "")).toEqual({
+      kind: "redirect",
+      path: "/agent",
+    });
   });
 });

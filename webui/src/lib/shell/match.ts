@@ -8,6 +8,7 @@
 import type { ZodSchema } from "zod";
 import { parseSearchString } from "./search.js";
 import type { ErasedRouteContract } from "./contract.js";
+import { matchPathPattern } from "./path-pattern.js";
 
 /** 匹配成功时的单层节点信息。 */
 export interface MatchedRouteNode {
@@ -44,18 +45,19 @@ export function matchRouteTree(
   search: string,
   activityPrefix: string,
 ): RouteMatchResult {
-  const relativePath = stripPrefix(pathname, activityPrefix);
-  const segments = splitSegments(relativePath);
+  const prefix = matchPathPattern(activityPrefix, pathname, true);
+  if (!prefix) return { kind: "no-match", reason: "no-route" };
 
-  const chain = matchChain(root, segments, activityPrefix);
+  const chain = matchChain(root, prefix.remainder, activityPrefix, prefix.params);
   if (chain.length === 0) {
     return { kind: "no-match", reason: "no-route" };
   }
 
   const mergedRaw = mergeRawParams(chain);
   const leaf = chain[chain.length - 1].route;
-  const paramsSchema = leaf.params as ZodSchema | undefined;
-  if (paramsSchema) {
+  for (const node of chain) {
+    const paramsSchema = node.route.params as ZodSchema | undefined;
+    if (!paramsSchema) continue;
     const parsed = paramsSchema.safeParse(mergedRaw);
     if (!parsed.success) {
       return { kind: "parse-error", reason: "params", chain, errors: parsed.error };
@@ -72,25 +74,6 @@ export function matchRouteTree(
   }
 
   return { kind: "matched", chain };
-}
-
-function stripPrefix(path: string, prefix: string): string {
-  const p = prefix.replace(/\/+$/, "");
-  if (path === p) return "";
-  if (path.startsWith(p + "/")) return path.slice(p.length);
-  return path;
-}
-
-function splitSegments(path: string): string[] {
-  const cleaned = path.replace(/^\/+|\/+$/g, "");
-  if (cleaned === "") return [];
-  return cleaned.split("/").map((s) => {
-    try {
-      return decodeURIComponent(s);
-    } catch {
-      return s;
-    }
-  });
 }
 
 interface PatternSegment {
@@ -120,6 +103,7 @@ function matchChain(
   route: ErasedRouteContract,
   segments: readonly string[],
   parentAbsolute: string,
+  inheritedParams: Readonly<Record<string, string>> = {},
 ): MatchedRouteNode[] {
   const absolutePattern = joinAbsolute(parentAbsolute, route.pattern);
   const patternSegs = splitPatternSegments(route.pattern);
@@ -128,7 +112,7 @@ function matchChain(
     return [];
   }
 
-  const rawParams: Record<string, string> = {};
+  const rawParams: Record<string, string> = { ...inheritedParams };
   for (let i = 0; i < patternSegs.length; i++) {
     const ps = patternSegs[i];
     const actual = segments[i];
@@ -149,7 +133,7 @@ function matchChain(
 
   if (route.children && route.children.length > 0) {
     for (const child of route.children) {
-      const childChain = matchChain(child, remaining, absolutePattern);
+      const childChain = matchChain(child, remaining, absolutePattern, rawParams);
       if (childChain.length > 0) {
         return [node, ...childChain];
       }

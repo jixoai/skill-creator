@@ -34,10 +34,21 @@ export function resolveTabIdentity(pathname: string): TabIdentity | null {
   const cleaned = pathname.replace(/^\/+|\/+$/g, "");
   if (!cleaned) return null;
   const segments = cleaned.split("/");
+  if (segments[0] === "w" && segments[1] && segments[2]) {
+    return { app: segments[2], instanceKey: decodeSegment(segments[1]) };
+  }
   const app = segments[0];
   if (!app) return null;
   const instanceKey = segments[1] ?? "home";
   return { app, instanceKey };
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 /** NavControllerAdapter 实现（注入到 navigate 模块）。 */

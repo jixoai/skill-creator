@@ -1,50 +1,132 @@
-/**
- * 用户原始需求 [2026-09-05]：「不完整、未知或非法身份必须在渲染前清理。」
- * 正交意图：
- *   [1] 判定当前 location 是否需要渲染前重定向（纯函数，可单测）。
- *   [2] params 非法 → 回 app 入口；search 非法 → 剥离 search；未知 app / 无匹配 → 回入口。
- *   [3] 全局兜底入口常量（SHELL_HOME_PATH），未知 app 不得渲染空白壳。
- */
-import { matchRouteTree } from "./match.js";
+/** Canonical route matching and the legacy URL migration table. */
+import { matchRouteTree, type RouteMatchResult } from "./match.js";
+import { matchPathPattern } from "./path-pattern.js";
 import { appRegistry } from "./registry.js";
 import { getEntryActivity } from "./types.js";
+import type { AppActivity, AppManifest } from "./types.js";
 
-/** 未知 app / 无法解析时的全局兜底入口。 */
-export const SHELL_HOME_PATH = "/workspaces";
+export const SHELL_HOME_PATH = "/w/~/skills";
 
-/** 渲染前的卫生决策：ok 直接渲染；redirect 需 replaceState 后再渲染。 */
 export type HygieneDecision =
   | { readonly kind: "ok" }
   | { readonly kind: "redirect"; readonly path: string };
 
-/**
- * 判定 location 是否携带非法身份。
- *
- * 判定顺序与 TabOutlet 的 activity 匹配一致：首个 matched 即合法；
- * parse-error 优先于 no-match（结构命中但 ID 非法说明用户意图在此 activity）。
- */
-export function sanitizeShellLocation(pathname: string, search: string): HygieneDecision {
-  const appId = firstSegment(pathname);
-  const app = appId ? appRegistry.get(appId) : undefined;
-  if (!app) return { kind: "redirect", path: SHELL_HOME_PATH };
-  const entry = getEntryActivity(app);
-  if (!entry) return { kind: "redirect", path: SHELL_HOME_PATH };
+export interface ShellRouteMatch {
+  readonly app: AppManifest;
+  readonly activity: AppActivity;
+  readonly result: RouteMatchResult;
+}
 
-  for (const activity of app.activities) {
-    const result = matchRouteTree(activity.root, pathname, search, activity.pattern);
-    if (result.kind === "matched") return { kind: "ok" };
-    if (result.kind === "parse-error") {
-      return result.reason === "params"
-        ? { kind: "redirect", path: entry.pattern }
-        : { kind: "redirect", path: pathname };
+export function resolveShellRoute(pathname: string, search: string): ShellRouteMatch | null {
+  let parseError: ShellRouteMatch | null = null;
+  for (const app of appRegistry.list()) {
+    for (const activity of app.activities) {
+      if (!matchPathPattern(activity.pattern, pathname, true)) continue;
+      const result = matchRouteTree(activity.root, pathname, search, activity.pattern);
+      if (result.kind === "matched") return { app, activity, result };
+      if (result.kind === "parse-error" && parseError === null) {
+        parseError = { app, activity, result };
+      }
     }
   }
-  // 所有 activity 都 no-match（如 `/workspaces/only-one-segment`）：回入口并清理 URL。
-  return { kind: "redirect", path: entry.pattern };
+  return parseError;
+}
+
+export function sanitizeShellLocation(pathname: string, search: string): HygieneDecision {
+  const legacyPath = redirectLegacyPath(pathname, search);
+  if (legacyPath !== null) return { kind: "redirect", path: legacyPath };
+
+  const matched = resolveShellRoute(pathname, search);
+  if (matched?.result.kind === "matched") return { kind: "ok" };
+  if (matched?.result.kind === "parse-error") {
+    return matched.result.reason === "params"
+      ? { kind: "redirect", path: entryPath(matched.app) }
+      : { kind: "redirect", path: pathname };
+  }
+
+  const first = firstSegment(pathname);
+  const app = appRegistry.get(first ?? "");
+  return { kind: "redirect", path: app ? entryPath(app) : SHELL_HOME_PATH };
+}
+
+export function canonicalizeShellLocation(pathname: string, search: string): string {
+  const redirect = redirectLegacyPath(pathname, search);
+  return redirect ?? `${pathname}${search}`;
+}
+
+function entryPath(app: AppManifest): string {
+  const entry = getEntryActivity(app);
+  if (!entry) return SHELL_HOME_PATH;
+  return entry.pattern.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (segment, name: string) =>
+    name === "wsId" ? "~" : segment,
+  );
+}
+
+function redirectLegacyPath(pathname: string, search: string): string | null {
+  const parts = pathname.split("/").filter(Boolean).map(decodeSegment);
+  const query = new URLSearchParams(search);
+  const build = (path: string, values: Record<string, string | null | undefined>): string => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(values)) {
+      if (value !== null && value !== undefined && value !== "") params.set(key, value);
+    }
+    const suffix = params.toString();
+    return suffix ? `${path}?${suffix}` : path;
+  };
+
+  if (pathname === "/workspaces") return SHELL_HOME_PATH;
+  if (parts[0] === "workspaces" && parts[1] === "intelligence" && parts.length === 4) {
+    return build(
+      `/w/${encodePathPart(parts[2]!)}/skills/intelligence/${encodePathPart(parts[3]!)}`,
+      { severity: query.get("severity") },
+    );
+  }
+  if (parts[0] === "workspaces" && parts.length === 3) {
+    return build(`/w/${encodePathPart(parts[1]!)}/skills`, {
+      q: query.get("q"),
+      provider: parts[2]!,
+      skill: query.get("skill"),
+    });
+  }
+  if (pathname === "/creator") return "/w/~/creator";
+  if (parts[0] === "creator" && parts[1] === "edit" && parts.length === 5) {
+    return build(
+      `/w/${encodePathPart(parts[2]!)}/creator/edit/${encodePathPart(parts[3]!)}/${encodePathPart(parts[4]!)}`,
+      { subview: query.get("subview"), template: query.get("template") },
+    );
+  }
+  if (parts[0] === "creator" && parts[1] === "new" && parts.length === 4) {
+    return build(`/w/${encodePathPart(parts[2]!)}/creator/new/${encodePathPart(parts[3]!)}`, {
+      template: query.get("template"),
+    });
+  }
+  if (pathname === "/wiki") return "/w/~/wiki";
+  if (parts[0] === "wiki" && parts.length === 2) {
+    return `/w/${encodePathPart(parts[1]!)}/wiki`;
+  }
+  if (pathname === "/repository") return SHELL_HOME_PATH;
+  if (parts[0] === "repository" && parts[1] === "scan" && parts.length === 3) {
+    return build(SHELL_HOME_PATH, {
+      selected: query.get("selected"),
+      targets: query.get("targets"),
+      skill: query.get("skill"),
+    });
+  }
+  return null;
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+function encodePathPart(segment: string): string {
+  return encodeURIComponent(segment === "%7E" || segment.toLowerCase() === "%7e" ? "~" : segment);
 }
 
 function firstSegment(pathname: string): string | null {
-  const cleaned = pathname.replace(/^\/+/, "");
-  if (!cleaned) return null;
-  return cleaned.split("/")[0] ?? null;
+  return pathname.replace(/^\/+/, "").split("/")[0] || null;
 }

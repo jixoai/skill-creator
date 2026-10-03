@@ -50,8 +50,12 @@ export function defineRoute<
 }
 
 /** 当一个 Route 被作为 Activity root 使用时，回填其 absolutePattern（含 Activity 前缀）。 */
-export function registerActivityRoot(activityPattern: string, root: ErasedRouteContract): void {
-  registerActivityRootRecursive(activityPattern, root);
+export function registerActivityRoot(
+  activityPattern: string,
+  root: ErasedRouteContract,
+  searchParamAliases?: Readonly<Record<string, string>>,
+): void {
+  registerActivityRootRecursive(activityPattern, root, searchParamAliases);
 }
 
 function registerRouteRecursive(route: ErasedRouteContract, parentAbsolute: string): void {
@@ -64,12 +68,16 @@ function registerRouteRecursive(route: ErasedRouteContract, parentAbsolute: stri
   }
 }
 
-function registerActivityRootRecursive(activityPattern: string, route: ErasedRouteContract): void {
+function registerActivityRootRecursive(
+  activityPattern: string,
+  route: ErasedRouteContract,
+  searchParamAliases?: Readonly<Record<string, string>>,
+): void {
   const abs = joinAbsolute(activityPattern, route.pattern);
-  routeRegistry.register({ id: route.id, route, absolutePattern: abs });
+  routeRegistry.register({ id: route.id, route, absolutePattern: abs, searchParamAliases });
   if (route.children) {
     for (const child of route.children) {
-      registerActivityRootRecursive(abs, child);
+      registerActivityRootRecursive(abs, child, searchParamAliases);
     }
   }
 }

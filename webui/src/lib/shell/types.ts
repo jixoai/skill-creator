@@ -12,6 +12,8 @@ import type { ErasedRouteContract } from "./contract.js";
 export interface AppActivity {
   /** 该场景的绝对 pattern（如 `/workspaces`、`/workspaces/:wsId/:providerId`）。 */
   readonly pattern: string;
+  /** Expose selected query fields as route params for views that predate the URL migration. */
+  readonly searchParamAliases?: Readonly<Record<string, string>>;
   /** 场景的根 Route 树（root.pattern 通常为 ``，代表「Activity 入口」）。 */
   readonly root: ErasedRouteContract;
   /** 是否为应用入口场景。Dock 图标身份 = entry activity 的 pattern。 */
@@ -26,6 +28,8 @@ export interface AppManifest {
   readonly name: string;
   /** Lucide 图标组件。 */
   readonly icon: Component;
+  /** Page container that owns this route block. */
+  readonly pageKind?: "workspace" | "agent" | "settings";
   /** 应用拥有的全部屏幕场景。入口路由派生自 entry activity。 */
   readonly activities: readonly AppActivity[];
 }

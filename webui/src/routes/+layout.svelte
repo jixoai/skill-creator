@@ -11,14 +11,17 @@
   import "./layout.css";
   import { onMount } from "svelte";
   import { page } from "$app/state";
-  import { goto } from "$app/navigation";
+  import { beforeNavigate } from "$app/navigation";
   import { registerApps } from "$lib/apps";
+  import "$lib/apps/agent/manifest.js";
+  import "$lib/apps/evaluating/manifest.js";
   import { connect, connectionState, disconnect, loadWorkspaces } from "$lib/store.svelte";
   import { loadSelfSkillState } from "$lib/stores/self-skill.svelte";
   import { captureTokenFromHash } from "$lib/rpc-client";
   import { setNavControllerAdapter } from "$lib/shell";
-  import AppSidebar from "$lib/components/shell/app-sidebar.svelte";
-  import TabOutlet from "$lib/shell/TabOutlet.svelte";
+  import PageOutlet from "$lib/shell/PageOutlet.svelte";
+  import TabStrip from "$lib/shell/TabStrip.svelte";
+  import WorkspaceNavigation from "$lib/shell/WorkspaceNavigation.svelte";
   import WindowDragRegion from "$lib/components/window-drag-region.svelte";
   import ImportWorkspaceDialog from "$lib/components/import-workspace-dialog.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
@@ -34,36 +37,70 @@
   import IconAgent from "@lucide/svelte/icons/message-square";
   import AgentPanel from "$lib/components/agent/AgentPanel.svelte";
   import { agentPanel, setAgentPanelOpen } from "$lib/stores/agent.svelte";
+  import { resolveShellRoute } from "$lib/shell/route-hygiene.js";
+  import {
+    consumeExpectedNavigation,
+    initializeTabSession,
+    navigateTab,
+    navigateTabHistory,
+    openImportedWorkspaceTabs,
+    reconcileAvailableWorkspaceTabs,
+    syncExternalLocation,
+  } from "$lib/shell/tab-session.svelte.js";
+  import { workspaceState } from "$lib/stores/workspaces.svelte";
 
   // 顶层注册（在任何 $derived 之前执行，确保 appRegistry 在首次渲染时已填充）。
   registerApps();
 
   let { children } = $props();
 
+  let sessionInitialized = false;
+  let observedImportedWorkspaceIds: Set<string> | null = null;
+
+  beforeNavigate((navigation) => {
+    if (!navigation.to || navigation.willUnload) return;
+    const path = `${navigation.to.url.pathname}${navigation.to.url.search}`;
+    if (consumeExpectedNavigation(path)) return;
+    navigation.cancel();
+    navigateTab(path, "PUSH");
+  });
+
   onMount(() => {
     // 在任何导航之前先 capture token 到 sessionStorage（防止 goto 清掉 hash）。
     captureTokenFromHash();
-    if (page.url.pathname === "/") {
-      void goto("/workspaces", { replaceState: true });
-    }
     setNavControllerAdapter({
-      navigate(path, action) {
-        // REPLACE 必须走 goto({replaceState:true})：本版本 replaceState 浅路由
-        // 不更新响应式 page.url，search 派生会失联；keepFocus 保住筛选输入焦点。
-        if (action === "REPLACE") {
-          void goto(path, { replaceState: true, keepFocus: true, noScroll: true });
-        } else {
-          void goto(path);
-        }
+      navigate(path, action = "PUSH") {
+        navigateTab(path, action);
       },
     });
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return;
+      if (event.key === "[") {
+        event.preventDefault();
+        navigateTabHistory(-1);
+      } else if (event.key === "]") {
+        event.preventDefault();
+        navigateTabHistory(1);
+      }
+    };
+    const handlePopstate = () => {
+      queueMicrotask(() =>
+        syncExternalLocation(`${globalThis.location.pathname}${globalThis.location.search}`),
+      );
+    };
+    globalThis.addEventListener("keydown", handleKeydown);
+    globalThis.addEventListener("popstate", handlePopstate);
     connect();
-    return disconnect;
+    return () => {
+      globalThis.removeEventListener("keydown", handleKeydown);
+      globalThis.removeEventListener("popstate", handlePopstate);
+      disconnect();
+    };
   });
 
   let pathname = $derived(page.url.pathname);
   $effect(() => {
-    if (pathname.startsWith("/creator")) {
+    if (pathname.includes("/creator")) {
       void ensureMinimumWindowSize(CREATOR_MINIMUM_WINDOW_SIZE);
     } else {
       void ensureMinimumWindowSize(HOME_MINIMUM_WINDOW_SIZE);
@@ -78,6 +115,37 @@
       void loadSelfSkillState();
     }
   });
+
+  $effect(() => {
+    if (sessionInitialized || !connected || workspaceState.loading) return;
+    sessionInitialized = true;
+    const importedIds = workspaceState.workspaces
+      .filter((workspace) => workspace.kind === "directory")
+      .map((workspace) => workspace.id);
+    const redirect = initializeTabSession(importedIds, page.url.pathname, page.url.search);
+    if (redirect) navigateTab(redirect, "REPLACE");
+  });
+
+  $effect(() => {
+    if (!sessionInitialized) return;
+    const importedWorkspaces = workspaceState.workspaces.filter(
+      (workspace) => workspace.kind === "directory",
+    );
+    const importedIds = importedWorkspaces.map((workspace) => workspace.id);
+    const previousIds = observedImportedWorkspaceIds;
+    observedImportedWorkspaceIds = new Set(importedIds);
+    if (previousIds !== null) {
+      const addedIds = importedWorkspaces
+        .filter((workspace) => !previousIds.has(workspace.id))
+        .map((workspace) => workspace.id);
+      if (addedIds.length > 0) openImportedWorkspaceTabs(addedIds);
+    }
+    reconcileAvailableWorkspaceTabs(importedIds);
+  });
+
+  const activePageKind = $derived(
+    resolveShellRoute(page.url.pathname, page.url.search)?.app.pageKind ?? null,
+  );
 </script>
 
 <svelte:head>
@@ -127,6 +195,8 @@
       {/snippet}
     </WindowDragRegion>
 
+    <TabStrip />
+
     {#if connectionState.status === "disconnected"}
       <div
         class="flex min-h-8 items-center border-y border-destructive/30 bg-destructive/8 px-3 text-xs text-destructive"
@@ -136,18 +206,17 @@
       </div>
     {/if}
 
-    <!-- 主体：左侧 App 导航（AppSidebar 组件，shell-settings-ui Ch6）+ 右侧 TabOutlet -->
+    <!-- 主体：Workspace Page 使用左导航；其他 Page 占满内容区。 -->
     <div class="flex min-h-0 flex-1">
-      <AppSidebar />
-      <!-- Settings 入口 = settingsApp manifest 注册的主列表项（页面化裁决：
-           标准页面面板与其他 App 同列，不再保留底部 Dialog 时代的常驻齿轮——
-           vision 走查实证双齿轮无法区分）。 -->
+      {#if activePageKind === "workspace"}
+        <WorkspaceNavigation />
+      {/if}
 
       <!-- 右侧：Shell 内容区 + Agent 面板 drawer（shell 级、跨 tab 存活）。R17-C：
            常驻挂载——开关只是收起（宽屏 0 宽不占布局 / 窄屏 invisible 抽屉），
            不做 DOM 销毁；收起态层挂 pointer-events-none，覆盖层不拦截主区交互。 -->
       <main class="min-w-0 flex-1 overflow-hidden">
-        <TabOutlet />
+        <PageOutlet />
         {@render children?.()}
       </main>
       <div

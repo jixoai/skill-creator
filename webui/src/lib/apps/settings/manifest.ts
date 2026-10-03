@@ -15,6 +15,7 @@ export const settingsApp = defineApp({
   id: "settings",
   name: "Settings",
   icon: IconSettings,
+  pageKind: "settings",
   activities: [
     // home tab：/settings（无分区段 → General）
     defineActivity({

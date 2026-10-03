@@ -270,10 +270,11 @@ describe("web mode browser smoke (dist daemon + headless Chrome over CDP)", () =
       () =>
         cdp!.evaluate<string>(
           `(() => {
-              const navLabels = [...document.querySelectorAll('nav button')]
-                .map(b => b.getAttribute('aria-label'))
+              const navLabels = [...document.querySelectorAll('button, a')]
+                .map(b => b.getAttribute('aria-label') || b.textContent?.trim())
                 .filter(Boolean);
-              const hasNav = ['Workspaces', 'Creator', 'Repository'].every(t => navLabels.includes(t));
+              const hasNav = ['Global workspace tab', 'Agent tab', 'Skills', 'Creator', 'Wiki', 'Evaluating']
+                .every(t => navLabels.includes(t));
               // counts 卡本身即 workspace.list 的数据驱动渲染（数值可为 0——
               // 测试隔离环境下 provider 扫描可能返回空；非空机器数据不是断言面）。
               const text = document.body.innerText;
@@ -296,11 +297,12 @@ describe("web mode browser smoke (dist daemon + headless Chrome over CDP)", () =
     expect(parsed.hasCounts).toBe(true);
     expect(parsed.navLabels).toEqual(
       expect.arrayContaining([
-        "Workspaces",
+        "Global workspace tab",
+        "Agent tab",
+        "Skills",
         "Creator",
-        "Repository",
-        "Import workspace",
-        "Settings",
+        "Wiki",
+        "Evaluating",
       ]),
     );
   });

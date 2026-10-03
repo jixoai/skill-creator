@@ -13,6 +13,8 @@ import { registerActivityRoot } from "./define-route.js";
 export interface DefineActivityConfig {
   /** 该场景的绝对 pattern（如 `/workspaces`）。 */
   pattern: string;
+  /** Map route params onto canonical query fields during matching and URL generation. */
+  searchParamAliases?: Readonly<Record<string, string>>;
   /** 场景的根 Route 树。 */
   root: RouteContract;
   /** 是否为应用入口场景。 */
@@ -21,9 +23,14 @@ export interface DefineActivityConfig {
 
 /** 工厂：定义一个屏幕场景，回填其 Route 树的 absolutePattern。 */
 export function defineActivity(config: DefineActivityConfig): AppActivity {
-  registerActivityRoot(config.pattern, config.root as ErasedRouteContract);
+  registerActivityRoot(
+    config.pattern,
+    config.root as ErasedRouteContract,
+    config.searchParamAliases,
+  );
   return {
     pattern: config.pattern,
+    searchParamAliases: config.searchParamAliases,
     root: config.root,
     entry: config.entry,
   };

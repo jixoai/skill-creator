@@ -68,7 +68,7 @@ export function buildHrefById<R extends RouteId>(
     }
     return "/";
   }
-  return stringifyRoute(entry.absolutePattern, params, search);
+  return stringifyRoute(entry.absolutePattern, params, search, entry.searchParamAliases);
 }
 
 /** 执行导航（字符串 RouteId 版本，跨应用引用场景）。 */
@@ -104,9 +104,21 @@ export function goTarget(t: IdTarget): void {
 }
 
 /** 把 pattern + params + search 渲染成完整路径。 */
-function stringifyRoute(pattern: string, params: unknown, search?: unknown): string {
+function stringifyRoute(
+  pattern: string,
+  params: unknown,
+  search?: unknown,
+  aliases?: Readonly<Record<string, string>>,
+): string {
   const paramRecord = (params ?? {}) as Record<string, string>;
   const href = stringifyPattern(pattern, paramRecord);
-  const searchStr = search ? stringifySearch(search as Record<string, unknown>) : "";
+  const searchRecord = { ...((search ?? {}) as Record<string, unknown>) };
+  for (const [paramName, searchName] of Object.entries(aliases ?? {})) {
+    const value = paramRecord[paramName];
+    if (value !== undefined && searchRecord[searchName] === undefined) {
+      searchRecord[searchName] = value;
+    }
+  }
+  const searchStr = Object.keys(searchRecord).length > 0 ? stringifySearch(searchRecord) : "";
   return `${href}${searchStr}`;
 }

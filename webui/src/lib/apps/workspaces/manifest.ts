@@ -1,59 +1,41 @@
-/**
- * 用户原始需求 [2026-07-27]：「三个导航意味着三个 ChromeTabs」。
- * 正交意图：[1] 声明 Workspaces App 的 manifest（home / provider / intelligence）。
- * Steward activity 已下线（2026-09-11 用户裁决：Agent 面板 + 模式是唯一的 agent 面；
- * daemon steward 服务保留为内部面，无 UI 入口）。
- * wiki activity 已迁移（2026-09-22 wiki-directory-standard）：第四个一级 Wiki
- * 面板（/wiki）承接，旧 /workspaces/wiki/:wsId 路由删除（无双入口残留）。
- */
+/** Skills block for a workspace-scoped Page. */
 import IconBoxes from "@lucide/svelte/icons/boxes";
-import { defineApp, defineActivity, defineRoute, leafRoute } from "$lib/shell";
+import { defineApp, defineActivity, defineRoute } from "$lib/shell";
 import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
+import { SkillIdSchema } from "$shared/contracts/skills.js";
 import { z } from "zod";
 
-/** Workspaces App：管理已有 Skills，浏览/启用/禁用/更新/分析。 */
 export const workspacesApp = defineApp({
   id: "workspaces",
-  name: "Workspaces",
+  name: "Skills",
   icon: IconBoxes,
+  pageKind: "workspace",
   activities: [
-    // home tab：产品首页（快速行动 + 库快照 + 位置索引）
     defineActivity({
-      pattern: "/workspaces",
+      pattern: "/w/:wsId/skills",
       entry: true,
-      root: leafRoute({
-        id: "workspaces.home",
-        component: () => import("./WorkspacesHome.svelte"),
-      }),
-    }),
-    // 实例 tab：某个 Workspace.Provider 的技能列表 + 详情
-    defineActivity({
-      pattern: "/workspaces",
+      searchParamAliases: { providerId: "provider" },
       root: defineRoute({
         id: "workspaces.provider",
-        pattern: ":wsId/:providerId",
-        params: z.object({
-          wsId: WorkspaceIdSchema,
-          providerId: ProviderIdSchema,
-        }),
+        pattern: "",
+        params: z.object({ wsId: WorkspaceIdSchema, providerId: ProviderIdSchema.optional() }),
         search: z.object({
+          provider: ProviderIdSchema.optional(),
           q: z.string().optional(),
-          skill: z.string().optional(),
+          skill: SkillIdSchema.optional(),
           view: z.enum(["list", "detail"]).optional(),
+          selected: z.string().optional(),
+          targets: z.string().optional(),
         }),
-        component: () => import("./ProviderView.svelte"),
+        component: () => import("$lib/shell/SkillsPage.svelte"),
       }),
     }),
-    // 智能 tab：对选定 Provider 的技能做只读分析 + proposal 审查
     defineActivity({
-      pattern: "/workspaces",
+      pattern: "/w/:wsId/skills",
       root: defineRoute({
         id: "workspaces.intelligence",
-        pattern: "intelligence/:wsId/:providerId",
-        params: z.object({
-          wsId: WorkspaceIdSchema,
-          providerId: ProviderIdSchema,
-        }),
+        pattern: "intelligence/:providerId",
+        params: z.object({ wsId: WorkspaceIdSchema, providerId: ProviderIdSchema }),
         search: z.object({
           severity: z.enum(["all", "error", "warning", "info"]).optional(),
         }),
