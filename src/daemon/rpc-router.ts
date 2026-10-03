@@ -22,9 +22,11 @@ import {
   projectMcpProposal,
 } from "./agent-proposals-projection.js";
 import { searchConfigPath } from "./skill-search/config.js";
+import { createWorkspaceSkillsAggregator } from "./skill-search/workspace-aggregate.js";
 import { RpcErrorDefinitions } from "../shared/contracts/errors.js";
 import { rpcContract } from "../shared/rpc-contract.js";
 import type { DaemonStatus } from "../shared/contracts/daemon.js";
+import { GLOBAL_WORKSPACE_ID } from "../shared/contracts/workspaces.js";
 import type { DaemonDomain } from "./domain.js";
 import { DomainError } from "./domain-error.js";
 import { ensureAgentsMdPromptBlock } from "./agents-md-block.js";
@@ -43,6 +45,13 @@ export interface RpcRouterDeps {
 export function createRpcRouter(deps: RpcRouterDeps) {
   const { status, domain } = deps;
   const rpc = implement(rpcContract);
+  // skills-dashboard task 1.1：workspace 级聚合器由既有 domain 成员组装
+  // （skill-service discovery 复用 + skills.duplicates 同源投影），不新建域模块。
+  const workspaceSkills = createWorkspaceSkillsAggregator({
+    workspaces: domain.workspaces,
+    listSkills: (target, includeDisabled) => domain.skills.list(target, includeDisabled),
+    duplicates: () => domain.skillSearch.duplicates(),
+  });
   const domainErrorBoundary = rpc.middleware(async ({ next }) => {
     try {
       return await next();
@@ -88,6 +97,16 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       duplicates: rpc.skills.duplicates.handler(async () => ({
         groups: await domain.skillSearch.duplicates(),
       })),
+      // skills-dashboard task 1.1：workspace 级有界聚合（oRPC 不保证应用 zod
+      // default——limit 缺省在 handler 侧落 200）。
+      listWorkspace: rpc.skills.listWorkspace.handler(async ({ input }) =>
+        workspaceSkills.listWorkspace({
+          wsId: input.wsId,
+          ...(input.q === undefined ? {} : { q: input.q }),
+          limit: input.limit ?? 200,
+          ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+        }),
+      ),
       update: {
         check: rpc.skills.update.check.handler(async ({ input }) => {
           const discovered = await domain.skills.list(input, true);
@@ -200,6 +219,14 @@ export function createRpcRouter(deps: RpcRouterDeps) {
     evaluation: {
       // evaluation-corpus（工作计划 Ch3）：Imported-only 写门在 store（Global →
       // EvaluationStoreError → 错误边界 typed 拒绝）；读面 Imported/Global 均可。
+      // evaluating-dashboard task 1.1：overview 聚合 + Global run 前置闸。
+      overview: rpc.evaluation.overview.handler(async ({ input }) =>
+        domain.evaluation.overview({
+          wsId: input.wsId,
+          limit: input.limit ?? 50,
+          ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+        }),
+      ),
       cases: {
         list: rpc.evaluation.cases.list.handler(async ({ input }) => ({
           cases: await domain.evaluation.listCases(input.target),
@@ -217,6 +244,16 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       },
       run: {
         start: rpc.evaluation.run.start.handler(async ({ input }) => {
+          // Global run 前置闸（evaluating-dashboard design §2 r2）：排队与调用
+          // runner 之前拒绝——不产生 run entry、不触 provider adapter、零落盘。
+          // （service.startRun 有同一闸作进程内兜底；此处先行，使目标级前置
+          // 条件先于 caseIds 校验失败报告。）
+          if (input.target.workspaceId === GLOBAL_WORKSPACE_ID) {
+            throw new DomainError(
+              "INVALID_OPERATION",
+              `Global Workspace ${GLOBAL_WORKSPACE_ID} is read-only; evaluation runs require an Imported Workspace target`,
+            );
+          }
           // caseIds 前置校验：未知/禁用的 case 直接拒绝（不产生静默空 run）；
           // fixture case × provider-model 组合同样前置拒绝（analyzer 域样本）。
           const cases = domain.evaluation

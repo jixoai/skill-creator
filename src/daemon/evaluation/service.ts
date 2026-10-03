@@ -3,6 +3,10 @@
  *
  * 用户原始需求 [2026-09-30]：「webui 里面还有一些残留的未完成的工作，比如 skill
  * 测试与评估」。
+ * 修订 [2026-10-03]（evaluating-dashboard task 1.1）：补 `overview` 聚合（targets
+ * 字典序 cursor 分页 + recentRuns 固定窗口 20 + staleRatio revision 现读）与
+ * Global run 前置闸（design §2 r2：排队/runner 之前拒绝——不产生 run entry、
+ * 不触 adapter、零落盘）。
  *
  * 正交意图：
  *   [1] run 生命周期：start→{runId,queued}；内存态表 + 结果落盘；cancel 竞态
@@ -11,6 +15,8 @@
  *       unavailable（依赖族）/error（执行族）互斥。
  *   [3] analyzer runner：provider 语料全量分析 → 断言映射（finding-triggered/
  *       kind/severity/contains/not-contains）。
+ *   [4] overview 聚合：per-target 评估状态摘要（单 target IO 失败 typed 降级，
+ *       整页不失败；recentRuns = 持久结果行 + 内存 running/queued 组合）。
  */
 import type { SkillService } from "../skill-service.js";
 import type {
@@ -20,8 +26,21 @@ import type {
   EvaluationRunStatus,
   EvaluationTarget,
   EvaluationRunner,
+  EvaluationOverviewOutput,
+  EvaluationOverviewRecentRun,
 } from "../../shared/contracts/evaluation.js";
-import { createEvaluationStore, newEvaluationId, type EvaluationStore } from "./store.js";
+import {
+  decodeEvaluationOverviewCursor,
+  encodeEvaluationOverviewCursor,
+} from "../../shared/contracts/evaluation.js";
+import { GLOBAL_WORKSPACE_ID, type WorkspaceId } from "../../shared/contracts/workspaces.js";
+import { DomainError } from "../domain-error.js";
+import {
+  createEvaluationStore,
+  EvaluationStoreError,
+  newEvaluationId,
+  type EvaluationStore,
+} from "./store.js";
 import { analyzeDocuments, type AnalyzerFinding } from "../skill-intelligence/analyzer.js";
 import { fixtureCorpusDocuments } from "./fixture-import.js";
 
@@ -47,9 +66,13 @@ export interface ProviderSessionAdapter {
 
 interface RunEntry {
   runId: string;
+  target: EvaluationTarget;
   status: EvaluationRunStatus;
   resultIds: string[];
   cancelTarget: string | null;
+  /** overview 的内存投影源（recentRuns 排序键；startedAt = startRun 时刻）。 */
+  startedAt: string;
+  endedAt: string | null;
 }
 
 export interface EvaluationService {
@@ -61,6 +84,12 @@ export interface EvaluationService {
   runStatus(runId: string): { status: EvaluationRunStatus; resultIds: string[] };
   cancelRun(runId: string): { runId: string; status: EvaluationRunStatus };
   results(target: EvaluationTarget): Promise<Array<EvaluationResult & { stale: boolean }>>;
+  /** Evaluating 总览聚合（targets 摘要 + recentRuns 固定窗口；readonly）。 */
+  overview(input: {
+    wsId: WorkspaceId;
+    cursor?: string;
+    limit: number;
+  }): Promise<EvaluationOverviewOutput>;
   listCases(target: EvaluationTarget): ReturnType<EvaluationStore["listCases"]>;
   createCase(input: {
     target: EvaluationTarget;
@@ -93,6 +122,63 @@ interface SkillDocument {
     id: string;
     disabled: boolean;
   };
+}
+
+/** recentRuns 固定窗口（design §1 r3：不分页，startedAt 降序 + runId tie-break）。 */
+const RECENT_RUNS_WINDOW = 20;
+
+/** overview 枚举行：正常（cases+results 就绪）或 typed error（IO 失败降级）。 */
+type OverviewTargetRow =
+  | {
+      kind: "ok";
+      target: EvaluationTarget;
+      cases: EvaluationCase[];
+      results: EvaluationResult[];
+    }
+  | {
+      kind: "error";
+      target: EvaluationTarget;
+      error: { code: "unavailable" | "io-error"; message: string };
+    };
+
+/** 单 target 技能读取失败 → typed code 闭集（DomainError=不可解析/fs 错误=io）。 */
+function classifyTargetError(error: unknown): {
+  code: "unavailable" | "io-error";
+  message: string;
+} {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof DomainError) return { code: "unavailable", message };
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (
+    code === "EACCES" ||
+    code === "EPERM" ||
+    code === "EIO" ||
+    code === "ENOSPC" ||
+    code === "EROFS"
+  ) {
+    return { code: "io-error", message };
+  }
+  return { code: "unavailable", message };
+}
+
+/** 按 runId 聚合结果行（run 绑定单一 target：startRun 契约保证）。 */
+function groupResultsByRun(results: readonly EvaluationResult[]): Map<string, EvaluationResult[]> {
+  const byRun = new Map<string, EvaluationResult[]>();
+  for (const result of results) {
+    const bucket = byRun.get(result.runId) ?? [];
+    bucket.push(result);
+    byRun.set(result.runId, bucket);
+  }
+  return byRun;
+}
+
+/** target 三元组字典序游标比较（含起始行）：row 是否位于 key 或其后。 */
+function targetAtOrAfterKey(
+  target: EvaluationTarget,
+  key: { providerId: string; skillId: string },
+): boolean {
+  if (target.providerId !== key.providerId) return target.providerId > key.providerId;
+  return target.skillId >= key.skillId;
 }
 
 export function createEvaluationService(deps: EvaluationServiceDeps): EvaluationService {
@@ -355,8 +441,25 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
 
   return {
     startRun(input) {
+      // Global 前置闸（evaluating-dashboard design §2 r2）：在 runs.set 与排队
+      // 之前拒绝——不产生 run entry、不触 provider adapter、零落盘（RPC 入口
+      // 有同一闸先行；此处兜底所有进程内调用方）。
+      if (input.target.workspaceId === GLOBAL_WORKSPACE_ID) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `Global Workspace ${GLOBAL_WORKSPACE_ID} is read-only; evaluation runs require an Imported Workspace target`,
+        );
+      }
       const runId = newEvaluationId("run_");
-      const entry: RunEntry = { runId, status: "queued", resultIds: [], cancelTarget: null };
+      const entry: RunEntry = {
+        runId,
+        target: input.target,
+        status: "queued",
+        resultIds: [],
+        cancelTarget: null,
+        startedAt: new Date().toISOString(),
+        endedAt: null,
+      };
       runs.set(runId, entry);
       const runner: EvaluationRunner =
         input.runner === "analyzer"
@@ -387,6 +490,7 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
         }
         if (!cancelled()) entry.status = "completed";
         else if (entry.status === "running") entry.status = "cancelled";
+        entry.endedAt = new Date().toISOString();
       })();
       return { runId, status: "queued" };
     },
@@ -425,6 +529,177 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
         ...result,
         stale: currentRevision === null || currentRevision !== result.observedEndRevision,
       }));
+    },
+    async overview(input) {
+      let enumerated: EvaluationTarget[];
+      try {
+        // 仅读取 input.wsId 的 evaluation 目录（不触碰其他 ws）。
+        enumerated = store.listTargets(input.wsId);
+      } catch (error) {
+        // 枚举面 IO hard error → typed 整页失败（不伪装空态）。
+        throw new DomainError(
+          "UNAVAILABLE",
+          `evaluation overview enumeration failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { cause: error },
+        );
+      }
+      const rows: OverviewTargetRow[] = [];
+      for (const target of enumerated) {
+        try {
+          const cases = store.listCases(target);
+          const results = store.listResults(target);
+          // 无语料目录（cases 与 results 皆空）不进 targets。
+          if (cases.length === 0 && results.length === 0) continue;
+          rows.push({ kind: "ok", target, cases, results });
+        } catch (error) {
+          // 单 target IO 失败降级：typed error 行 + 摘要缺席，整页不失败。
+          const message = error instanceof Error ? error.message : String(error);
+          rows.push({
+            kind: "error",
+            target,
+            error: {
+              code: error instanceof EvaluationStoreError ? "io-error" : "unavailable",
+              message,
+            },
+          });
+        }
+      }
+
+      // recentRuns 组合：持久结果行按 runId 聚合 + 内存 running/queued 投影
+      // （同 runId 内存胜出——状态真相在 service；重启后内存部分自然消失）。
+      const recentById = new Map<string, EvaluationOverviewRecentRun>();
+      for (const row of rows) {
+        if (row.kind !== "ok" || row.results.length === 0) continue;
+        for (const [runId, bucket] of groupResultsByRun(row.results)) {
+          const first = bucket[0];
+          recentById.set(runId, {
+            runId,
+            target: row.target,
+            status: "completed",
+            startedAt: bucket.reduce(
+              (min, item) => (item.startedAt < min ? item.startedAt : min),
+              first.startedAt,
+            ),
+            endedAt: bucket.reduce(
+              (max, item) => (item.endedAt > max ? item.endedAt : max),
+              first.endedAt,
+            ),
+            resultIds: bucket.map((item) => item.resultId),
+          });
+        }
+      }
+      for (const entry of runs.values()) {
+        if (entry.target.workspaceId !== input.wsId) continue;
+        recentById.set(entry.runId, {
+          runId: entry.runId,
+          target: entry.target,
+          status: entry.status,
+          startedAt: entry.startedAt,
+          ...(entry.endedAt === null ? {} : { endedAt: entry.endedAt }),
+          resultIds: [...entry.resultIds],
+        });
+      }
+      const recentRuns = [...recentById.values()]
+        .sort((left, right) => {
+          // startedAt 降序 + runId 字典序 tie-break（design §1 r3）。
+          if (left.startedAt !== right.startedAt) return left.startedAt < right.startedAt ? 1 : -1;
+          return left.runId < right.runId ? -1 : left.runId > right.runId ? 1 : 0;
+        })
+        .slice(0, RECENT_RUNS_WINDOW);
+
+      // targets 分页：rows 已按 (providerId, skillId) 字典序；游标含起始行。
+      let start = 0;
+      if (input.cursor !== undefined) {
+        const key = decodeEvaluationOverviewCursor(input.cursor);
+        if (key === null) {
+          throw new DomainError("INVALID_OPERATION", "malformed evaluation overview cursor");
+        }
+        const index = rows.findIndex((row) => targetAtOrAfterKey(row.target, key));
+        start = index === -1 ? rows.length : index;
+      }
+      const pageRows = rows.slice(start, start + input.limit);
+      const nextRow = rows[start + input.limit];
+
+      const targets: EvaluationOverviewOutput["targets"] = [];
+      for (const row of pageRows) {
+        if (row.kind === "error") {
+          targets.push({ target: row.target, error: row.error });
+          continue;
+        }
+        // 当前 revision 现读（不缓存）；读取失败 → typed error 行 + 摘要缺席。
+        let info: SkillDocument["info"];
+        try {
+          info = await loadSkill(row.target);
+        } catch (error) {
+          targets.push({ target: row.target, error: classifyTargetError(error) });
+          continue;
+        }
+        // staleRatio：每 case 最新一条（caseId 分组、endedAt 最新、resultId
+        // tie-break）；分母 = 有结果的 case 数，零分母缺席（不返回 0/NaN）。
+        const latestByCase = new Map<string, EvaluationResult>();
+        for (const result of row.results) {
+          const existing = latestByCase.get(result.caseId);
+          if (
+            existing === undefined ||
+            result.endedAt > existing.endedAt ||
+            (result.endedAt === existing.endedAt && result.resultId > existing.resultId)
+          ) {
+            latestByCase.set(result.caseId, result);
+          }
+        }
+        const staleRatio =
+          latestByCase.size === 0
+            ? undefined
+            : [...latestByCase.values()].filter(
+                (result) => result.observedEndRevision !== info.revision,
+              ).length / latestByCase.size;
+        // lastRun：已落盘结果中 endedAt 最大的 run（持久投影无 run 状态，
+        // status=completed；overview 不承诺持久 run 历史）。
+        let bestRun: { endedAt: string; results: EvaluationResult[] } | null = null;
+        for (const bucket of groupResultsByRun(row.results).values()) {
+          const first = bucket[0];
+          const endedAt = bucket.reduce(
+            (max, item) => (item.endedAt > max ? item.endedAt : max),
+            first.endedAt,
+          );
+          if (bestRun === null || endedAt > bestRun.endedAt) bestRun = { endedAt, results: bucket };
+        }
+        const lastRun =
+          bestRun === null
+            ? undefined
+            : {
+                endedAt: bestRun.endedAt,
+                status: "completed" as const,
+                passedCount: bestRun.results.filter((result) => result.outcome === "passed").length,
+                failedCount: bestRun.results.filter((result) => result.outcome === "failed").length,
+                errorCount: bestRun.results.filter((result) => result.outcome === "error").length,
+                unavailableCount: bestRun.results.filter(
+                  (result) => result.outcome === "unavailable",
+                ).length,
+              };
+        targets.push({
+          target: row.target,
+          skillName: info.name,
+          caseCount: row.cases.length,
+          ...(lastRun === undefined ? {} : { lastRun }),
+          ...(staleRatio === undefined ? {} : { staleRatio }),
+        });
+      }
+
+      return {
+        targets,
+        recentRuns,
+        ...(nextRow === undefined
+          ? {}
+          : {
+              nextCursor: encodeEvaluationOverviewCursor({
+                providerId: nextRow.target.providerId,
+                skillId: nextRow.target.skillId,
+              }),
+            }),
+      };
     },
     listCases(target) {
       return store.listCases(target);

@@ -1,10 +1,14 @@
 /**
  * 用户原始需求 [2026-09-17]：「跨全部本地 skills 的检索：`skill-creator search <query>`
  * 进程内完成，canonical 去重、CJK 分词、typo 容忍，结果按 contentHash 折叠」。
+ * 修订 [2026-10-03]（skills-dashboard design §5）：补 `skills.listWorkspace` 的
+ * duplicates 有界投影契约（与 skills.duplicates 数据同源、形状不同形）。
  * 正交意图：
  * 1. 定义搜索索引文档（canonical skill 真相 + installations 作用域绑定）。
  * 2. 定义搜索结果（rerank 后得分 + content-dup 折叠附注）。
  * 3. 定义搜索选项（limit 边界），供 CLI/RPC 复用同一契约。
+ * 4. 定义 listWorkspace 的三层有界重复投影（组 ≤50 / 成员 ≤16 /
+ *    installations 为 {items ≤8, truncated} 包装）。
  */
 import { z } from "zod";
 import { SkillIdSchema } from "./skills.js";
@@ -89,6 +93,49 @@ export const SkillDuplicateGroupSchema = z
   })
   .strict();
 export type SkillDuplicateGroup = z.infer<typeof SkillDuplicateGroupSchema>;
+
+/**
+ * `skills.listWorkspace` 的重复组成员投影：与 SkillDuplicateMember 数据同源，
+ * 但 installations 从裸数组改为有界包装（skills-dashboard design §5 r4 定稿：
+ * items ≤8 + truncated 显式标志，与 skills.duplicates 的成员形状不同形）。
+ */
+export const SkillListWorkspaceDuplicateMemberSchema = SkillDuplicateMemberSchema.omit({
+  installations: true,
+})
+  .extend({
+    installations: z.strictObject({
+      items: z.array(SkillInstallationSchema).max(8),
+      truncated: z.boolean(),
+    }),
+  })
+  .strict();
+/** listWorkspace 有界重复组成员。 */
+export type SkillListWorkspaceDuplicateMember = z.infer<
+  typeof SkillListWorkspaceDuplicateMemberSchema
+>;
+
+/** listWorkspace 有界重复组：成员 ≤16 + membersTruncated 显式标志。 */
+export const SkillListWorkspaceDuplicateGroupSchema = z
+  .strictObject({
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+    members: z.array(SkillListWorkspaceDuplicateMemberSchema).max(16),
+    membersTruncated: z.boolean(),
+  })
+  .strict();
+/** listWorkspace 有界重复组。 */
+export type SkillListWorkspaceDuplicateGroup = z.infer<
+  typeof SkillListWorkspaceDuplicateGroupSchema
+>;
+
+/** listWorkspace duplicates 块：组 ≤50 + groupsTruncated（全量走 skills.duplicates）。 */
+export const SkillListWorkspaceDuplicatesSchema = z
+  .strictObject({
+    groups: z.array(SkillListWorkspaceDuplicateGroupSchema).max(50),
+    groupsTruncated: z.boolean(),
+  })
+  .strict();
+/** listWorkspace duplicates 有界投影。 */
+export type SkillListWorkspaceDuplicates = z.infer<typeof SkillListWorkspaceDuplicatesSchema>;
 
 /** 搜索结果：冻结 tie-break（final desc → name asc → canonicalPath asc）后的稳定投影。 */
 export const SkillSearchResultSchema = z

@@ -3,6 +3,9 @@
  *
  * 用户原始需求 [2026-09-30]：「webui 里面还有一些残留的未完成的工作，比如 skill
  * 测试与评估」。
+ * 修订 [2026-10-03]（evaluating-dashboard task 1.1）：补 `listTargets`——按
+ * workspace 枚举 evaluation 目录下的 target 三元组（overview 聚合的枚举源，
+ * 不读取其他 ws 的目录）。
  *
  * 正交意图：
  *   [1] server-owned 文件布局：appDir()/evaluation/<ws>/<p>/<skill>/{cases,results}.json
@@ -23,7 +26,12 @@ import {
   type EvaluationResult,
   type EvaluationTarget,
 } from "../../shared/contracts/evaluation.js";
-import { GLOBAL_WORKSPACE_ID } from "../../shared/contracts/workspaces.js";
+import { SkillIdSchema } from "../../shared/contracts/skills.js";
+import {
+  GLOBAL_WORKSPACE_ID,
+  ProviderIdSchema,
+  type WorkspaceId,
+} from "../../shared/contracts/workspaces.js";
 
 /** IO hard error（权限/磁盘/原子写失败——绝不静默空值；B′6）。 */
 export class EvaluationStoreError extends Error {
@@ -106,6 +114,12 @@ export interface EvaluationStore {
   /** 追加结果（每 case 有界保留；同 resultId 幂等跳过；结果不可变）。 */
   appendResult(target: EvaluationTarget, result: EvaluationResult): void;
   listResults(target: EvaluationTarget): EvaluationResult[];
+  /**
+   * 枚举一个 workspace 下的全部 target 三元组（目录名经 schema 收窄，不兼容
+   * 条目丢弃；evaluation 根缺席 → 空集；不读取其他 ws 的目录）。排序 =
+   * (providerId, skillId) 字典序。非 ENOENT 读故障 → EvaluationStoreError。
+   */
+  listTargets(wsId: WorkspaceId): EvaluationTarget[];
 }
 
 /** 目录布局（B1）：恒由 appDir() 派生（setHomeOverride/SKILL_CREATOR_HOME 兼容测试）。 */
@@ -198,6 +212,42 @@ export function createEvaluationStore(home?: string): EvaluationStore {
     listResults(target) {
       return readEnvelope(resultsFile(target), EvaluationResultEnvelopeSchema, EMPTY_RESULTS)
         .results;
+    },
+    listTargets(wsId) {
+      // 目录名是外部输入：provider/skill 名经 schema 收窄，不兼容条目丢弃。
+      const root = path.join(home ?? appDir(), "evaluation", wsId);
+      const readDir = (directory: string): fs.Dirent[] => {
+        try {
+          return fs.readdirSync(directory, { withFileTypes: true });
+        } catch (error) {
+          const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+          if (code === "ENOENT") return [];
+          throw new EvaluationStoreError("read", directory, error);
+        }
+      };
+      const targets: EvaluationTarget[] = [];
+      for (const providerEntry of readDir(root)) {
+        if (!providerEntry.isDirectory()) continue;
+        const provider = ProviderIdSchema.safeParse(providerEntry.name);
+        if (!provider.success) continue;
+        for (const skillEntry of readDir(path.join(root, providerEntry.name))) {
+          if (!skillEntry.isDirectory()) continue;
+          const skill = SkillIdSchema.safeParse(skillEntry.name);
+          if (!skill.success) continue;
+          targets.push({ workspaceId: wsId, providerId: provider.data, skillId: skill.data });
+        }
+      }
+      return targets.sort((left, right) =>
+        left.providerId !== right.providerId
+          ? left.providerId < right.providerId
+            ? -1
+            : 1
+          : left.skillId < right.skillId
+            ? -1
+            : left.skillId > right.skillId
+              ? 1
+              : 0,
+      );
     },
   };
 }

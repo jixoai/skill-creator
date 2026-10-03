@@ -118,6 +118,7 @@ import {
   SkillSearchOptionsSchema,
   SkillDuplicateGroupSchema,
   SkillSearchResultSchema,
+  SkillListWorkspaceDuplicatesSchema,
 } from "./contracts/search.js";
 import {
   AnalyzeInputSchema,
@@ -137,6 +138,7 @@ import {
 } from "./contracts/skills.js";
 import {
   ImportedWorkspaceIdSchema,
+  ProviderIdSchema,
   WorkspaceProviderTargetSchema,
   WorkspaceIdSchema,
   WorkspaceSchema,
@@ -163,6 +165,8 @@ import {
   EvaluationCaseRemoveInputSchema,
   EvaluationCaseSchema,
   EvaluationCaseUpdateInputSchema,
+  EvaluationOverviewInputSchema,
+  EvaluationOverviewOutputSchema,
   EvaluationResultViewSchema,
   EvaluationResultsListInputSchema,
   EvaluationRunRefInputSchema,
@@ -210,6 +214,81 @@ export const SkillsSearchInputSchema = z
     limit: SkillSearchOptionsSchema.shape.limit,
   })
   .strict();
+
+/**
+ * skills.listWorkspace 游标 codec：opaque 起始键（providerId, skillId；含起始行）。
+ * 纯字符串往返（base64），输入 schema refine 与 daemon 分页共用同一判定源。
+ */
+export function encodeSkillsListWorkspaceCursor(key: {
+  providerId: string;
+  skillId: string;
+}): string {
+  return btoa(`${key.providerId}:${key.skillId}`);
+}
+
+/** 解码 listWorkspace 游标；非法形状返回 null（schema refine 据此拒绝 typed 校验错误）。 */
+export function decodeSkillsListWorkspaceCursor(value: string): {
+  providerId: string;
+  skillId: string;
+} | null {
+  let decoded: string;
+  try {
+    decoded = atob(value);
+  } catch {
+    return null;
+  }
+  const separator = decoded.indexOf(":");
+  if (separator === -1) return null;
+  const providerId = decoded.slice(0, separator);
+  const skillId = decoded.slice(separator + 1);
+  if (!/^[a-z][a-z0-9-]*$/.test(providerId)) return null;
+  if (!/^sk_[a-f0-9]{24}$/.test(skillId)) return null;
+  return { providerId, skillId };
+}
+
+const SkillsListWorkspaceCursorSchema = z
+  .string()
+  .min(1)
+  .refine((value) => decodeSkillsListWorkspaceCursor(value) !== null, {
+    message: "malformed skills.listWorkspace cursor",
+  });
+
+/** skills.listWorkspace 输入（skills-dashboard design §5：limit 1..500 默认 200）。 */
+export const SkillsListWorkspaceInputSchema = z.strictObject({
+  wsId: WorkspaceIdSchema,
+  /** server 端预过滤（name/description 包含式，大小写不敏感；非 BM25）。 */
+  q: z.string().optional(),
+  limit: z.number().int().min(1).max(500).default(200),
+  cursor: SkillsListWorkspaceCursorSchema.optional(),
+});
+
+/** skills.listWorkspace 平铺行（SkillMetadata + typed providerId 归属）。 */
+export const SkillsListWorkspaceRowSchema = SkillMetadataSchema.extend({
+  providerId: ProviderIdSchema,
+});
+
+/** skills.listWorkspace 的 provider 摘要行（单 provider 失败 → typed error，整屏不失败）。 */
+export const SkillsListWorkspaceProviderSchema = z.strictObject({
+  providerId: ProviderIdSchema,
+  label: z.string().min(1),
+  available: z.boolean(),
+  skillCount: z.number().int().nonnegative(),
+  error: z
+    .strictObject({
+      code: z.enum(["unavailable", "scan-failed", "io-error"]),
+      message: z.string(),
+    })
+    .optional(),
+});
+
+/** skills.listWorkspace 输出（skills 恒 ≤ limit；duplicates 三层有界投影）。 */
+export const SkillsListWorkspaceOutputSchema = z.strictObject({
+  providers: z.array(SkillsListWorkspaceProviderSchema),
+  skills: z.array(SkillsListWorkspaceRowSchema),
+  nextCursor: z.string().optional(),
+  duplicates: SkillListWorkspaceDuplicatesSchema,
+});
+export type SkillsListWorkspaceOutput = z.infer<typeof SkillsListWorkspaceOutputSchema>;
 /** repository.scan 输入。 */
 export const RepositoryScanInputSchema = z.object({
   source: z.string().trim().min(1),
@@ -255,6 +334,14 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     duplicates: oc
       .input(z.object({}))
       .output(z.object({ groups: z.array(SkillDuplicateGroupSchema) })),
+    /**
+     * workspace 级有界聚合读（skills-dashboard design §5）：单一 workspace 全部
+     * provider 平铺（q 预过滤 + (providerId, skillId) 字典序 + opaque cursor 分段，
+     * skills 恒 ≤ limit）+ provider 计数（单 provider 失败 typed 隔离）+
+     * duplicates 同源三层有界投影（组 ≤50 / 成员 ≤16 / installations {items≤8,
+     * truncated}；完整数据走 skills.duplicates）。
+     */
+    listWorkspace: oc.input(SkillsListWorkspaceInputSchema).output(SkillsListWorkspaceOutputSchema),
     update: {
       /** Compare skills-CLI lock hashes against upstream and report outdated skills. */
       check: oc.input(UpdateCheckInputSchema).output(UpdateCheckResultSchema),
@@ -360,6 +447,13 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     keep: oc.input(z.object({}).strict()).output(SelfSkillKeepResultSchema),
   },
   evaluation: {
+    /**
+     * Evaluating 总览聚合（readonly；evaluating-dashboard design §1 r2 定稿）：
+     * targets 摘要（三元组字典序 cursor 分页 + 单 target typed error 行 +
+     * staleRatio 每-case-最新口径）+ recentRuns 固定窗口 20（仅 input.wsId，
+     * 持久结果行 + 内存 running/queued 组合，不分页）。
+     */
+    overview: oc.input(EvaluationOverviewInputSchema).output(EvaluationOverviewOutputSchema),
     /** List cases for one skill scope（Imported 与 Global 均可读）. */
     cases: {
       list: oc

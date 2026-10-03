@@ -4,12 +4,16 @@
  * 用户原始需求 [2026-09-30]：「webui 里面还有一些残留的未完成的工作，比如 skill
  * 测试与评估」——评估语料 = workspace-private、server-owned 的 case 存储 +
  * 五态结果协议（codex r2-r5 复核冻结）。
+ * 修订 [2026-10-03]（evaluating-dashboard design §1 r2 定稿）：补
+ * `evaluation.overview` 聚合 io（targets 字典序 cursor 分页 + recentRuns 固定
+ * 窗口 20 + staleRatio 零分母缺席 + 单 target typed error 行）。
  *
  * 正交意图：
  *   [1] case schema（B2/B′5）：五类断言（min(1)）+ 双 hash 域（boundRevision
  *       技能文档域 / corpusDigest 语料域）。
  *   [2] result schema（B3/B′1）：五态判别联合；outcome↔failure 互斥 refine；
  *       unavailable/stale 断言恒空。
+ *   [3] overview 聚合 io：per-target 评估状态摘要（Evaluating 区块总览屏）。
  */
 import { z } from "zod";
 import { SkillIdSchema } from "./skills.js";
@@ -247,3 +251,106 @@ export const EvaluationResultViewSchema = z.intersection(
   z.strictObject({ stale: z.boolean() }),
 );
 export type EvaluationResultView = z.infer<typeof EvaluationResultViewSchema>;
+
+/** ---- overview 聚合 io（evaluating-dashboard design §1 r2 定稿）---- */
+
+/**
+ * overview 游标 codec：opaque 起始键（providerId, skillId；含起始行）。
+ * 纯字符串往返（base64），输入 schema 与 daemon 共用同一判定源。
+ */
+export function encodeEvaluationOverviewCursor(key: {
+  providerId: string;
+  skillId: string;
+}): string {
+  return btoa(`${key.providerId}:${key.skillId}`);
+}
+
+/** 解码 overview 游标；非法形状返回 null（schema refine 据此拒绝 typed 校验错误）。 */
+export function decodeEvaluationOverviewCursor(value: string): {
+  providerId: string;
+  skillId: string;
+} | null {
+  let decoded: string;
+  try {
+    decoded = atob(value);
+  } catch {
+    return null;
+  }
+  const separator = decoded.indexOf(":");
+  if (separator === -1) return null;
+  const providerId = decoded.slice(0, separator);
+  const skillId = decoded.slice(separator + 1);
+  if (!/^[a-z][a-z0-9-]*$/.test(providerId)) return null;
+  if (!/^sk_[a-f0-9]{24}$/.test(skillId)) return null;
+  return { providerId, skillId };
+}
+
+const EvaluationOverviewCursorSchema = z
+  .string()
+  .min(1)
+  .refine((value) => decodeEvaluationOverviewCursor(value) !== null, {
+    message: "malformed evaluation overview cursor",
+  });
+
+/** overview 输入：targets 分页 limit 默认 50、上限 200（design §1 r2 定稿）。 */
+export const EvaluationOverviewInputSchema = z.strictObject({
+  wsId: WorkspaceIdSchema,
+  cursor: EvaluationOverviewCursorSchema.optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+});
+export type EvaluationOverviewInput = z.infer<typeof EvaluationOverviewInputSchema>;
+
+/** 单 target 的 IO 失败投影（typed code 闭集；摘要字段缺席，整页不失败）。 */
+export const EvaluationOverviewTargetErrorSchema = z.strictObject({
+  target: EvaluationTargetSchema,
+  error: z.strictObject({
+    code: z.enum(["unavailable", "io-error"]),
+    message: z.string(),
+  }),
+});
+
+/** overview 正常 target 摘要行（lastRun/staleRatio 可选缺席）。 */
+export const EvaluationOverviewTargetOkSchema = z.strictObject({
+  target: EvaluationTargetSchema,
+  skillName: z.string(),
+  caseCount: z.number().int().nonnegative(),
+  /** 最新一条已落盘 run 的摘要（endedAt = 该 run 结果行最大 endedAt）。 */
+  lastRun: z
+    .strictObject({
+      endedAt: z.string().min(1),
+      status: EvaluationRunStatusSchema,
+      passedCount: z.number().int().nonnegative(),
+      failedCount: z.number().int().nonnegative(),
+      errorCount: z.number().int().nonnegative(),
+      unavailableCount: z.number().int().nonnegative(),
+    })
+    .optional(),
+  /** 每 case 最新一条结果中 observedEndRevision ≠ 当前 revision 的占比；零分母缺席。 */
+  staleRatio: z.number().min(0).max(1).optional(),
+});
+
+/** overview target 行：正常摘要或 typed error 行（error 行摘要字段缺席）。 */
+export const EvaluationOverviewTargetSchema = z.union([
+  EvaluationOverviewTargetOkSchema,
+  EvaluationOverviewTargetErrorSchema,
+]);
+export type EvaluationOverviewTarget = z.infer<typeof EvaluationOverviewTargetSchema>;
+
+/** recentRuns 行（固定窗口 20；startedAt 降序 + runId 字典序 tie-break，不分页）。 */
+export const EvaluationOverviewRecentRunSchema = z.strictObject({
+  runId: z.string().regex(/^run_[a-f0-9]{24}$/),
+  target: EvaluationTargetSchema,
+  status: EvaluationRunStatusSchema,
+  startedAt: z.string().min(1),
+  endedAt: z.string().min(1).optional(),
+  resultIds: z.array(z.string().regex(/^evr_[a-f0-9]{24}$/)),
+});
+export type EvaluationOverviewRecentRun = z.infer<typeof EvaluationOverviewRecentRunSchema>;
+
+/** overview 输出（targets 按 target 三元组字典序唯一排序；nextCursor 缺席即末段）。 */
+export const EvaluationOverviewOutputSchema = z.strictObject({
+  targets: z.array(EvaluationOverviewTargetSchema),
+  recentRuns: z.array(EvaluationOverviewRecentRunSchema),
+  nextCursor: z.string().optional(),
+});
+export type EvaluationOverviewOutput = z.infer<typeof EvaluationOverviewOutputSchema>;
