@@ -20,8 +20,7 @@ creator-agent-chat / evaluating-dashboard）的地基。
     本 change 仅占位空态（实体归 skills-agent-page change）。
   - `SettingsPage`（`/settings/:section?`）：按需开启的 tab；右上角 settings
     按钮入口；addressBarActions = theme-toggle（lang-select 待 i18n 后批）。
-- **tab strip**（第一行，~36px，兼窗口拖拽区）：tab = workspace 图标 + label
-  +（Imported 才有）关闭 ×；胶囊形态；溢出横滚；`＋` 专注创建 workspace
+- **tab strip**（第一行，~36px，兼窗口拖拽区）：tab = workspace 图标 + label +（Imported 才有）关闭 ×；胶囊形态；溢出横滚；`＋` 专注创建 workspace
   （导入/切到已导入）；关闭 tab 与 Remove Workspace 是两个动作（后者在 tab
   管理菜单）。
 - **omnibox 地址栏**（第二行，~36px）：非聚焦态显示当前 Page 的真实 URL
@@ -46,7 +45,7 @@ creator-agent-chat / evaluating-dashboard）的地基。
   `/repository*`）replace-redirect 到新 canonical（入口迁移语义，非兼容层；
   repository 重定向目标暂为 `/w/~/skills`，dashboard 落地后更新）。
 - **冒烟锚点随迁**：WorkspacesHome 的 sr-only 行（`skills across \d+ agent
-  locations`，test/web-mode-smoke.test.ts 断言）保持 en 逐字不变，迁移到新
+locations`，test/web-mode-smoke.test.ts 断言）保持 en 逐字不变，迁移到新
   Global tab 的过渡挂载点（c062db3 教训）。
 - **过渡策略**：本 change 内容区复用现有视图组件（ProviderView/Wiki 两视图/
   CreatorWorkspace 照旧挂载，仅路由前缀与导航壳变化）；dashboard、AgentChat、

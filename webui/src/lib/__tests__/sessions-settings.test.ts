@@ -73,6 +73,7 @@ function session(
     cwd: "/tmp",
     createdAt: new Date().toISOString(),
     mode: "free",
+    seedSkill: null,
     ...partial,
   };
 }

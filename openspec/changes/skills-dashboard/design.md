@@ -3,22 +3,37 @@
 ## 1. mobileScreen 网格（Owner Q4/Q11 裁决；r2 修订：单列回落显式化）
 
 ```css
-.dashboard-shell { container-type: inline-size; container-name: dashboard; }
+.dashboard-shell {
+  container-type: inline-size;
+  container-name: dashboard;
+}
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 12px;
 }
-.screen { height: var(--screen-h, 480px); overflow: hidden; display: flex; flex-direction: column; }
-.screen > .screen-body { overflow-y: auto; min-height: 0; }
-.skills-screen { grid-column: span 2; }   /* 主屏双列起步（2 列网格 = 占满整行）*/
+.screen {
+  height: var(--screen-h, 480px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.screen > .screen-body {
+  overflow-y: auto;
+  min-height: 0;
+}
+.skills-screen {
+  grid-column: span 2;
+} /* 主屏双列起步（2 列网格 = 占满整行）*/
 
 /* r2 修订：CSS Grid 不保证 span 2 在单列网格自然回落（1 列显式网格内
    span 2 会创建隐式第二列导致横向溢出）——以 container query 显式降档。
    阈值 = 2×minmax 轨道 + 1×gap = 692px：容器窄于它时 auto-fill 只能解析
    出 1 列。 */
 @container dashboard (width < 692px) {
-  .skills-screen { grid-column: span 1; }
+  .skills-screen {
+    grid-column: span 1;
+  }
 }
 ```
 
@@ -129,7 +144,7 @@ output: {
   投影为 schema 块中的 `duplicates` 对象——组 ≤ 50（`groupsTruncated`）/
   每组成员 ≤ 16（`membersTruncated`）/ 每成员 installations ≤ 8；成员的
   `installations` 投影为 `{ items: Installation[] /* ≤8 */, truncated:
-  boolean }`（成员级截断显式标志，非隐式丢弃）。任一 truncated = true 时
+boolean }`（成员级截断显式标志，非隐式丢弃）。任一 truncated = true 时
   UI 提示经 `skills.duplicates` 全量查询；整响应规模因此恒有界。
 - 排序与游标稳定（r3）：skills 行按 `(providerId, skillId)` 字典序；nextCursor
   = 下一首行键编码，续页严格不重不漏（q 过滤下同序）。
@@ -157,7 +172,7 @@ output: {
 
 - listWorkspace 聚合：正常 / 单 provider 失败（typed error 投影 + 该
   provider skills 缺席）/ 空 ws / duplicates 投影 / 有界分段（默认 200 截断
-  + nextCursor 续拉到尾 / limit>500 typed 拒绝）。
+  - nextCursor 续拉到尾 / limit>500 typed 拒绝）。
 - 平铺列表 + 筛选 + 搜索联动（store 纯函数单测）。
 - 迁移 redirect 更新 + scan 会话流回归（安装/预览状态机不回归）。
 - mobileScreen 网格 dom 测试：container query 单列回落（span 1）+ 一栏容器

@@ -131,11 +131,11 @@ AgentSessionSummarySchema += {
 
 ## 5. 扩展面板 panelTabs
 
-| panelTab | 内容 | 数据源 |
-| --- | --- | --- |
+| panelTab   | 内容                                     | 数据源                          |
+| ---------- | ---------------------------------------- | ------------------------------- |
 | Agent 终端 | 内核 tool-bash 执行流（只读回放 + 展开） | transcript 帧（tool_call 结果） |
-| 审批 | proposal 队列 + 批准/拒绝 | agent.proposals.*（统一审批面） |
-| 卡片 | ui:// 卡片渲染（沙箱 iframe 沿用） | 工具结果卡 |
+| 审批       | proposal 队列 + 批准/拒绝                | agent.proposals.*（统一审批面） |
+| 卡片       | ui:// 卡片渲染（沙箱 iframe 沿用）       | 工具结果卡                      |
 
 - panelTabs 按会话上下文自动切换（新审批到达 → 审批 tab 角标）；用户手动
   切换优先（会话内记忆）。

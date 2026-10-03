@@ -16,11 +16,11 @@ skill 聚合。Codex r1 F 题裁决：独立入口 + server-owned 聚合 RPC（c
   - **技能详情**（r2 修订：路由定稿）：`/w/:wsId/evaluating/:providerId/:skillId`
     path 三段路由（无歧义可深链；替代 `?skill=` 单参数——同 ws 多 provider
     同名技能下有歧义）；迁移 eval-view 为独立详情面（cases 全列表 + 五态结果
-    + 失败断言展开 + observedEndRevision 对比）；run 发起（显式 target 三元组
-    标注确认，不自动运行）+ cancel；case 创建/编辑（Imported only）。
+    - 失败断言展开 + observedEndRevision 对比）；run 发起（显式 target 三元组
+      标注确认，不自动运行）+ cancel；case 创建/编辑（Imported only）。
 - **聚合 RPC**：`evaluation.overview`（ws 级：有语料 targets + 每 target 摘要
-  + 近期 runs；cursor 分页 + 有界响应；r2 修订：targets 补 typed `error`
-  行投影单技能 IO 失败，recentRuns 定稿固定窗口 20 条不分页）；Global 可读。
+  - 近期 runs；cursor 分页 + 有界响应；r2 修订：targets 补 typed `error`
+    行投影单技能 IO 失败，recentRuns 定稿固定窗口 20 条不分页）；Global 可读。
 - **Global run 前置闸**（r2 修订：真实缺口）：现状 `run.start` 未在排队前
   拒绝 Global target（写闸只在结果落盘时）——Global run 会真实执行全部
   case 后才失败且 run 卡 running。server MUST 在排队/调用 runner 之前

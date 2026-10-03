@@ -6,8 +6,7 @@
       不动其他字段；`shell/__tests__` 补 language 读写用例
       （`pnpm exec vp test run webui/src/lib/shell/__tests__`）
 - [x] 1.2 `webui/src/lib/i18n/` 基建：catalogs/en.ts + catalogs/zh.ts +
-      locale.svelte.ts（$state locale、DevicePrefs 持久化、document.lang 同步）
-      + index.ts 公共 API；文件意图头齐全
+      locale.svelte.ts（$state locale、DevicePrefs 持久化、document.lang 同步）+ index.ts 公共 API；文件意图头齐全
 - [x] 1.3 i18n 单测：插值 / locale 持久化 / document.lang 同步 / en-zh key
       集合相等（`pnpm exec vp test run webui/src/lib/i18n`；9/9 绿）
 
@@ -35,9 +34,9 @@
 - [x] 2.9 `components/agent/TranscriptView.svelte`（19 key；编辑聚焦选择器改
       data-agent-panel，locale 无关）→ agent-panel + agent-frame-payload 37/37 绿
 - [x] 2.10 `components/agent/SkillMenu.svelte` + `ReferenceMenu.svelte` +
-       `DropOverlay.svelte` + `DisclosureRow.svelte` + `ChipPaintLayer.svelte`
-       （23 key；SkillMenu 空态占位 en 固定现网中文值）→ skill-menu /
-       reference-menu / composer-paint / composer-chips 33/33 绿
+      `DropOverlay.svelte` + `DisclosureRow.svelte` + `ChipPaintLayer.svelte`
+      （23 key；SkillMenu 空态占位 en 固定现网中文值）→ skill-menu /
+      reference-menu / composer-paint / composer-chips 33/33 绿
 
 ## 3. 盘点与门禁
 

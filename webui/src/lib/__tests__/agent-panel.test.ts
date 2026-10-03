@@ -308,6 +308,7 @@ describe("agent panel store (task 3.x)", () => {
         cwd: "/tmp",
         createdAt: "2026-09-08T00:00:00.000Z",
         mode: "create",
+        seedSkill: null,
       },
     ];
     connection.rpc = {
