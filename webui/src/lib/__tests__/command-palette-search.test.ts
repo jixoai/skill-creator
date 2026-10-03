@@ -111,7 +111,7 @@ describe("command palette skills search", () => {
     if (!item) throw new Error("navigate item not rendered");
     item.click();
     await tick();
-    expect(nav.goto).toHaveBeenCalledWith("/workspaces");
+    expect(nav.goto).toHaveBeenCalledWith("/w/~/skills");
     // 选中写入的是 Root 的 value（stub data-value 可见），不得流进检索通道：
     // 重开后输入必须为空，且超过去抖窗口后也从未以条目值或残留值发起检索。
     openPalette();

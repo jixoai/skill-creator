@@ -1,20 +1,21 @@
 // @vitest-environment jsdom
 /**
- * Agent 面板 R17-C resize/收起测试（宽屏拖拽 + 开关=收起不销毁）。
+ * Agent attach 面板 resize/收起测试（宽屏拖拽 + 开关=收起不销毁）。
  *
- * 用户原始需求 [2026-09-13]：「Agent Chat 面板也能支持 resize，并且控制好窄屏幕
- * 的支持，窄屏模式下和主面板不再是并排显示，而是用抽屉的方式提供层级覆盖。
- * 开关 AgentChat 面板，只是收起，不是 DOM 级别的销毁。」
+ * 用户原始需求 [2026-09-13]：「Agent Chat 面板也能支持 resize……开关 AgentChat
+ * 面板，只是收起，不是 DOM 级别的销毁。」——2026-10-03（skills-agent-page 1.7）：
+ * 面板迁为 workspace 页右侧 attach，宽度/开合持久从 sessionStorage 会话级迁
+ * DevicePrefs appearance 域（localStorage 单源）。
  *
  * 正交意图：
- *   [1] 宽度语义：clamp 边界（320–720/默认 440，非有限数回默认）；拖拽写入
- *       经 sessionStorage 持久（skill-creator.agentPanelWidth.v1），模块重初始化
- *       往返恢复；损坏/越界持久值按领域收窄不迁移。
+ *   [1] 宽度语义：clamp 边界（320–720/默认 440，非有限数回默认）；拖拽写入经
+ *       DevicePrefs 持久（skill-creator:device-prefs），模块重初始化往返恢复；
+ *       损坏/越界持久值按 schema 收窄回默认（不迁移）。
  *   [2] 收起语义：setAgentPanelOpen(false) 后 aside 仍留在 DOM（同一元素身份），
- *       宽屏收起 0 宽不占布局（border-l-0 + CSS var 0），窄屏收起 invisible +
- *       translate 退场；收起/展开不清 composer 草稿（与 Track A 开合语义对齐）。
- *   [3] 拖拽交互：pointerdown（左缘拖柄，仅 ≥720px 命中区类）→ window pointermove
- *       clamp 更新 → pointerup 恢复 body 选择/光标并持久。
+ *       宽屏收起 0 宽不占布局，窄屏收起 invisible + translate 退场；开合不清
+ *       composer 草稿。
+ *   [3] 拖拽交互：pointerdown（左缘拖柄）→ window pointermove clamp 更新 →
+ *       pointerup 恢复 body 选择/光标并持久。
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,29 +31,26 @@ vi.mock("../stores/connection.svelte", () => ({
     if (!connection.rpc) throw new Error("not connected");
     return connection.rpc;
   },
-  // AgentPanel 的配置惰性加载 effect 消费 status（走查 P1 修复）。
   connectionState: { status: "connected", error: null },
 }));
 vi.mock("../toast.svelte", () => ({
   showToast: vi.fn(),
 }));
 vi.mock("@lucide/svelte/icons/x", async () => await import("./stubs/lucide-icon-mocks.js"));
-vi.mock("@lucide/svelte/icons/plus", async () => await import("./stubs/lucide-icon-mocks.js"));
-// 子组件不在被测面：以空渲染 stub 隔离（AgentHeader→settings-ui/lucide、
-// TranscriptView→markstream、ComposerCard→bits-ui 的重导入链全部短路）。
-vi.mock("../components/agent/AgentHeader.svelte", async () => {
-  const { default: stub } = await import("./stubs/markdown-render-stub.svelte");
-  return { default: stub };
-});
-vi.mock("../components/agent/TranscriptView.svelte", async () => {
-  const { default: stub } = await import("./stubs/markdown-render-stub.svelte");
-  return { default: stub };
-});
-vi.mock("../components/agent/TodoDock.svelte", async () => {
-  const { default: stub } = await import("./stubs/markdown-render-stub.svelte");
-  return { default: stub };
-});
-vi.mock("../components/agent/ComposerCard.svelte", async () => {
+vi.mock(
+  "@lucide/svelte/icons/external-link",
+  async () => await import("./stubs/lucide-icon-mocks.js"),
+);
+vi.mock(
+  "@lucide/svelte/icons/panels-top-left",
+  async () => await import("./stubs/lucide-icon-mocks.js"),
+);
+// shell 依赖（workspace id 解析 + 深链导航）不在被测面：stub 隔离导入链。
+vi.mock("../shell/tab-session.js", () => ({ tabIdForPath: () => "~" }));
+vi.mock("../shell/tab-session.svelte.js", () => ({ navigateTab: vi.fn() }));
+// 子组件不在被测面：以空渲染 stub 隔离（SessionFace→markstream/bits-ui 的
+// 重导入链全部短路）。
+vi.mock("../components/agent/SessionFace.svelte", async () => {
   const { default: stub } = await import("./stubs/markdown-render-stub.svelte");
   return { default: stub };
 });
@@ -69,7 +67,17 @@ import {
 } from "../stores/agent.svelte";
 import { agentComposer, resetAllComposerTracks } from "../stores/agent-composer.svelte";
 
-const WIDTH_KEY = "skill-creator.agentPanelWidth.v1";
+const PREFS_KEY = "skill-creator:device-prefs";
+
+function readPrefs(): Record<string, unknown> {
+  const raw = localStorage.getItem(PREFS_KEY);
+  if (raw === null) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
 
 function mountPanel() {
   agentPanel.open = true;
@@ -103,9 +111,13 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  localStorage.clear();
   sessionStorage.clear();
   connection.rpc = {
-    agent: { settings: { get: async () => ({ settings: {}, providers: [] }) } },
+    agent: {
+      settings: { get: async () => ({ settings: {}, providers: [] }) },
+      sessions: { list: async () => ({ sessions: [] }) },
+    },
   };
   connection.generation = 0;
   agentPanel.open = false;
@@ -125,7 +137,7 @@ afterEach(() => {
   document.body.style.cursor = "";
 });
 
-describe("agent panel width domain (R17-C)", () => {
+describe("agent panel width domain (R17-C → DevicePrefs)", () => {
   it("clamps widths into 320–720 and recovers defaults from non-finite input", () => {
     expect(clampAgentPanelWidth(100)).toBe(320);
     expect(clampAgentPanelWidth(-5)).toBe(320);
@@ -135,15 +147,22 @@ describe("agent panel width domain (R17-C)", () => {
     expect(clampAgentPanelWidth(Number.POSITIVE_INFINITY)).toBe(AGENT_PANEL_DEFAULT_WIDTH);
   });
 
-  it("persists dragged widths to sessionStorage after clamping", () => {
+  it("persists dragged widths to DevicePrefs after clamping", () => {
     setAgentPanelWidth(520);
     expect(agentPanel.width).toBe(520);
-    expect(sessionStorage.getItem(WIDTH_KEY)).toBe("520");
+    expect(readPrefs().workspaceAgentPanelWidth).toBe(520);
     setAgentPanelWidth(50);
     expect(agentPanel.width).toBe(320);
-    expect(sessionStorage.getItem(WIDTH_KEY)).toBe("320");
+    expect(readPrefs().workspaceAgentPanelWidth).toBe(320);
     setAgentPanelWidth(9999);
-    expect(sessionStorage.getItem(WIDTH_KEY)).toBe("720");
+    expect(readPrefs().workspaceAgentPanelWidth).toBe(720);
+  });
+
+  it("persists open state to DevicePrefs (workspace attach preference)", () => {
+    setAgentPanelOpen(true);
+    expect(readPrefs().workspaceAgentPanelOpen).toBe(true);
+    setAgentPanelOpen(false);
+    expect(readPrefs().workspaceAgentPanelOpen).toBe(false);
   });
 
   it("restores the persisted width on module re-init (roundtrip)", async () => {
@@ -153,16 +172,17 @@ describe("agent panel width domain (R17-C)", () => {
     expect(fresh.agentPanel.width).toBe(610);
   });
 
-  it("projects corrupted or out-of-range stored values into the domain", async () => {
-    sessionStorage.setItem(WIDTH_KEY, "not-a-number");
+  it("projects corrupted or out-of-range stored values into the domain default", async () => {
+    localStorage.setItem(PREFS_KEY, "not-a-json");
     vi.resetModules();
     const corrupted = await import("../stores/agent.svelte");
     expect(corrupted.agentPanel.width).toBe(AGENT_PANEL_DEFAULT_WIDTH);
 
-    sessionStorage.setItem(WIDTH_KEY, "9999");
+    // 越界值（schema max 720 违例）：整份 prefs 收窄回默认（不迁移不写回）。
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ version: 1, workspaceAgentPanelWidth: 9999 }));
     vi.resetModules();
     const clamped = await import("../stores/agent.svelte");
-    expect(clamped.agentPanel.width).toBe(720);
+    expect(clamped.agentPanel.width).toBe(AGENT_PANEL_DEFAULT_WIDTH);
   });
 });
 
@@ -258,7 +278,7 @@ describe("AgentPanel drag resize (R17-C)", () => {
     flushSync();
     expect(document.body.style.userSelect).toBe("");
     expect(document.body.style.cursor).toBe("");
-    expect(sessionStorage.getItem(WIDTH_KEY)).toBe("320");
+    expect(readPrefs().workspaceAgentPanelWidth).toBe(320);
     ctx.cleanup();
   });
 

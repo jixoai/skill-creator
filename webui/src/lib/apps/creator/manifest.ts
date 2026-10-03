@@ -6,7 +6,9 @@ import { SkillIdSchema } from "$shared/contracts/skills.js";
 import { z } from "zod";
 
 const creatorSearch = z.object({
-  subview: z.enum(["file", "log", "preview", "validate", "test", "eval"]).optional(),
+  // evaluating-dashboard 1.4：test/eval 子视图退役（评估迁独立 Evaluating 区块，
+  // 三段路由深链）；Creator 保留 file/log/preview/validate 四子视图。
+  subview: z.enum(["file", "log", "preview", "validate"]).optional(),
   template: z.string().optional(),
 });
 

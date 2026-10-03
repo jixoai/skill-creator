@@ -2,9 +2,12 @@
 /**
  * Creator 深链恢复回归测试（WS5 走查 B 阻塞项）。
  *
- * 用户原始需求 [2026-10-02]（走查简报）：「/creator/edit/<ws>/<provider>/<skill>?subview=eval
- * 整页直开间歇性失败：Eval 头渲染但 case 数据永不加载；任何子视图 tab 都只改 URL
+ * 用户原始需求 [2026-10-02]（走查简报）：「/creator/edit/<ws>/<provider>/<skill>?subview=<非file>
+ * 整页直开间歇性失败：子视图头渲染但数据永不加载；任何子视图 tab 都只改 URL
  * 而面板与高亮冻结」。
+ * 修订 [2026-10-03]（evaluating-dashboard 1.4）：test/eval 子视图退役——非 file
+ * 深链样本从 eval 换为 log（评估行的补载/愈合钉随迁移移驻
+ * apps/evaluating/__tests__/evaluating-detail.dom.test.ts）。
  *
  * 根因链（确定性复现于 /tmp 沙箱 + WS 延迟代理）：
  *   [1] 深链非 file 子视图首帧 WS 未就绪时，CreatorWorkspace 的兜底 hydrate
@@ -12,14 +15,14 @@
  *       附着，异常逃逸出 $effect，Svelte 5 batch traverse 捕获后 reset_all +
  *       discard 整个 creator 渲染分支（DOM 残留、效应全死）→ tab/高亮/Refresh
  *       冻结、后续状态写不再投影到 DOM。
- *   [2] EvalView 的 load 对 rpc=null 静默 no-op 且无「连接转 ready 重发」→
- *       即使不冻结，rows 也永远空白（无 loading/error/empty 可辨）。
+ *   [2] 断线窗口内的深链子视图 RPC 静默失败 → 无重试面（各子视图自带 catch，
+ *       不崩但空白；连接恢复后的文档兜底由路由属主承担）。
  *
  * 正交意图：
  *   [1] store 层钉：loadSkillDoc/saveSkill 断线时必须返回 rejected promise，
  *       不得同步 throw（async 化修复的回归钉）。
  *   [2] 组件层钉：深链 + 未连接挂载必须存活（不逃逸同步异常）、连接转 ready
- *       后文档与评估行自动补载、URL search 变化仍然驱动子视图切换（反冻结钉）。
+ *       后文档自动补载且 URL search 变化仍然驱动子视图切换（反冻结钉）。
  */
 import { flushSync, mount, unmount } from "./svelte-client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -55,17 +58,15 @@ vi.mock("../shell/portal-context.svelte", async () => {
 vi.mock("$app/state", () => ({
   page: {
     url: {
-      pathname: "/creator/edit/ws_1/openclaw/sk_1",
-      search: "?subview=eval",
-      searchParams: new URLSearchParams("subview=eval"),
+      pathname: "/w/ws_0123456789abcdef01234567/creator/edit/openclaw/sk_0123456789abcdef01234567",
+      search: "?subview=log",
+      searchParams: new URLSearchParams("subview=log"),
     },
     params: {},
   },
 }));
 vi.mock("$app/navigation", () => ({ goto: vi.fn() }));
 vi.mock("../toast.svelte", () => ({ showToast: vi.fn() }));
-// CreatorWorkspace 的静态依赖树里只有 test-run-view 触达 agent store。
-vi.mock("../stores/agent.svelte", () => ({ seedAgentTestRun: vi.fn() }));
 // shadcn 原语 → bits-ui（node_modules .svelte，vitest 外置）：button/input 以
 // 同契约 stub 替换；ConfirmDialog 用既有 stub（FileBrowser 删除流不在本测试面）。
 vi.mock("$lib/components/ui/button", async () => {
@@ -94,31 +95,11 @@ import {
   resetDraftHydration,
   creatorDraftKey,
 } from "../stores/creator-editor.svelte";
-import type { EvaluationCase } from "$shared/contracts/evaluation.js";
 import type { WorkspaceProviderTarget, SkillId } from "../types";
 
 const WS = "ws_0123456789abcdef01234567" as WorkspaceProviderTarget["workspaceId"];
 const PROVIDER = "openclaw" as WorkspaceProviderTarget["providerId"];
 const SK = "sk_0123456789abcdef01234567" as SkillId;
-
-function makeCase(): EvaluationCase {
-  return {
-    schemaVersion: 1,
-    caseId: `ev_${"a".repeat(24)}`,
-    enabled: true,
-    createdAt: "2026-10-01T00:00:00.000Z",
-    updatedAt: "2026-10-01T00:00:00.000Z",
-    source: "user",
-    boundRevision: `sha256:${"b".repeat(64)}`,
-    input: {
-      prompt: "Summarize the licensing section",
-      assertions: [
-        { kind: "contains", value: "MIT" },
-        { kind: "finding-triggered", value: true },
-      ],
-    },
-  } as EvaluationCase;
-}
 
 function makeRpcMock() {
   return {
@@ -130,10 +111,7 @@ function makeRpcMock() {
         frontmatter: { name: "code-review", description: "Reviews code changes." },
         body: "## When to Use\n\nReviews code before merging.",
       }),
-    },
-    evaluation: {
-      cases: { list: vi.fn().mockResolvedValue({ cases: [makeCase()] }) },
-      results: { list: vi.fn().mockResolvedValue({ results: [] }) },
+      revisions: vi.fn().mockResolvedValue({ revisions: [] }),
     },
   };
 }
@@ -150,7 +128,7 @@ let target: HTMLElement | null = null;
 beforeEach(() => {
   resetConnectionStub();
   shellRouteState.params = { mode: "edit", wsId: WS, providerId: PROVIDER, skillId: SK };
-  shellRouteState.search = { subview: "eval" };
+  shellRouteState.search = { subview: "log" };
   const key = creatorDraftKey({ workspaceId: WS, providerId: PROVIDER }, "edit", SK);
   if (key !== null) {
     dropCachedCreatorDraft(key);
@@ -194,13 +172,13 @@ describe("creator deep-link recovery (WS5 walkthrough B)", () => {
     const instance = mount(CreatorWorkspace, { target: target as HTMLElement });
     await flushAsync();
 
-    expect(target?.textContent).toContain("Evaluation");
-    // 未连接：不发文档/评估 RPC（连接闸），也不进入 loading/error/empty——
-    // 正是走查观察到的「无 loading/error/empty 空白面板」状态。
+    expect(target?.textContent).toContain("Change history");
+    // 未连接：不发文档 RPC（连接闸）；子视图 RPC（revisions）失败被 catch 成
+    // 错误面——页面存活不冻结。
     expect(rpc.creator.load).not.toHaveBeenCalled();
-    expect(rpc.evaluation.cases.list).not.toHaveBeenCalled();
+    expect(target?.textContent).toContain("not connected");
 
-    // 连接转 ready：文档兜底 hydrate 与 Eval 行自动补载。
+    // 连接转 ready：文档兜底 hydrate 自动补载。
     connectMockClient(rpc as unknown as Record<string, unknown>);
     await flushAsync();
 
@@ -209,12 +187,6 @@ describe("creator deep-link recovery (WS5 walkthrough B)", () => {
       providerId: PROVIDER,
       skillId: SK,
     });
-    expect(rpc.evaluation.cases.list).toHaveBeenCalledWith({
-      target: { workspaceId: WS, providerId: PROVIDER, skillId: SK },
-    });
-    expect(target?.textContent).toContain("2 assertions");
-    // 小项 4 钉：bound revision 短显截 hex 部分（整串截 14 只露 7 位 hex 的回归）。
-    expect(target?.textContent).toContain(`bound ${"b".repeat(14)}…`);
 
     // 反冻结钉：URL search 变化仍驱动子视图切换（僵尸分支不可能做到），
     // 且兜底 hydrate 的文档落在草稿上（Name 字段 = 服务器名，非空占位）。
@@ -227,19 +199,18 @@ describe("creator deep-link recovery (WS5 walkthrough B)", () => {
     unmount(instance);
   });
 
-  it("does not re-send evaluation rows after healing when data already committed", async () => {
+  it("does not re-hydrate the document after healing when data already committed", async () => {
     const rpc = makeRpcMock();
     const instance = mount(CreatorWorkspace, { target: target as HTMLElement });
     await flushAsync();
     connectMockClient(rpc as unknown as Record<string, unknown>);
     await flushAsync();
-    expect(target?.textContent).toContain("2 assertions");
-    const callsAfterHeal = rpc.evaluation.cases.list.mock.calls.length;
+    const loadCallsAfterHeal = rpc.creator.load.mock.calls.length;
 
-    // 二次断线→重连：rows 已存在，不重复补载（重发只在无数据时发生）。
+    // 二次断线→重连：文档已 hydrate，不重复补载（isDraftHydrated 双闸幂等）。
     connectMockClient(rpc as unknown as Record<string, unknown>);
     await flushAsync();
-    expect(rpc.evaluation.cases.list.mock.calls.length).toBe(callsAfterHeal);
+    expect(rpc.creator.load.mock.calls.length).toBe(loadCallsAfterHeal);
 
     unmount(instance);
   });

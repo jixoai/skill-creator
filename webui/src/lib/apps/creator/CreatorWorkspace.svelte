@@ -4,6 +4,8 @@
   Agent 会话由 DSH host 唯一承载；Creator 回归单列编辑器。
   修订 [2026-10-02]（design-critique R1 Gap 1）：页头主标题 = 技能名（draft.name），
   sk_/ws_ hash 降级为小号 muted 可复制次要行，不再作标题。
+  修订 [2026-10-03]（evaluating-dashboard 1.4）：test/eval 子视图退役（评估迁独立
+  Evaluating 区块）；编辑页保留「View evaluation」深链（三段路由同三元组）。
   正交意图：
   1. 单列编辑器布局（子视图区占满），子视图通过 sub-view-tabs 切换，激活子视图编码到 URL search param。
   2. 通过 Svelte context 下发共享编辑草稿（File 写入 / Preview / Log / Validate 读取）。
@@ -11,14 +13,12 @@
   同一身份的草稿在卸载时快照进模块级缓存（island 关闭→重开 / 与官方 session 往返不丢 dirty draft）。
 -->
 <script lang="ts">
-  import { useParams, useSearch } from "$lib/shell";
+  import { useParams, useSearch, goById } from "$lib/shell";
   import SubViewTabs from "$lib/components/creator/sub-view-tabs.svelte";
   import FileBrowser from "$lib/components/creator/file-browser.svelte";
   import ChangeLog from "$lib/components/creator/change-log.svelte";
   import PreviewView from "$lib/components/creator/preview.svelte";
   import ValidationView from "$lib/components/creator/validation-view.svelte";
-  import TestRunView from "$lib/components/creator/test-run-view.svelte";
-  import EvalView from "$lib/components/creator/eval-view.svelte";
   import {
     provideCreatorEditor,
     placeholderDraft,
@@ -106,7 +106,7 @@
     }
   });
 
-  // WS4 r7 minor：深链非 file 子视图（如 ?subview=test 直开）时 FileBrowser 未
+  // WS4 r7 minor：深链非 file 子视图（如 ?subview=log 直开）时 FileBrowser 未
   // 挂载，文档加载无人执行——Test 门槛（revision）永久停留。由路由属主兜底
   // 加载；file 子视图仍由 FileBrowser 负责，isDraftHydrated 双闸幂等。
   // WS5 走查 B（阻塞根因链）：连接闸——未连接时不发（requireRpc 同步 throw 会
@@ -163,7 +163,26 @@
 <div class="flex h-full flex-col overflow-hidden">
   <!-- 标题栏：主标题 = 技能名；opaque id 降级为小号 muted 可复制次要行。 -->
   <header class="flex shrink-0 flex-col gap-0.5 border-b border-border px-4 py-2">
-    <span class="truncate text-sm font-medium">{headerTitle}</span>
+    <div class="flex items-center justify-between gap-2">
+      <span class="truncate text-sm font-medium">{headerTitle}</span>
+      {#if mode === "edit" && skillId && target}
+        <!-- evaluating-dashboard 1.4：test/eval 子视图退役——「查看评估」深链到
+             Evaluating 详情（三段路由，同三元组）。 -->
+        <button
+          type="button"
+          class="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          title="View this skill's evaluation corpus"
+          onclick={() =>
+            goById("evaluating.detail", {
+              wsId: target.workspaceId,
+              providerId: target.providerId,
+              skillId,
+            })}
+        >
+          View evaluation
+        </button>
+      {/if}
+    </div>
     {#if wsId && providerId}
       <div
         class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground"
@@ -213,10 +232,6 @@
           <PreviewView />
         {:else if subview === "validate"}
           <ValidationView />
-        {:else if subview === "test"}
-          <TestRunView />
-        {:else if subview === "eval"}
-          <EvalView />
         {:else}
           <FileBrowser />
         {/if}

@@ -371,16 +371,20 @@ describe("R12-B 6: New Session mode sync (composer chip <-> pendingMode)", () =>
 });
 
 describe("R12-B 7/8: two-state rendering and the + entry", () => {
-  it("new-session state has no + button; the session select shows New session…", () => {
-    agentSessionsList.sessions = [sessionSummary("agent-s1", "free")];
+  it("new-session state has no + button; the ws session list renders (skills-agent-page 1.7)", () => {
+    agentSessionsList.sessions = [
+      // attach 面板按 target.workspaceId 过滤（page stub = "/" → Global "~"）。
+      sessionSummary("agent-s1", "free"),
+    ];
     agentSessionsList.loaded = true;
     const ctx = mountPanel();
 
     expect(plusButton()).toBeNull();
-    const select = document.querySelector<HTMLSelectElement>('select[aria-label="Session"]');
-    expect(select).not.toBeNull();
-    expect(select!.value).toBe("");
-    expect(select!.options[0]?.textContent).toContain("New session");
+    // 旧 AgentHeader 全局会话 select 已随 shell drawer 退役——本 ws 会话列表
+    // （data-workspace-sessions）承载选择面；无归属会话不混入任何 ws 组。
+    const list = document.querySelector<HTMLElement>("[data-workspace-sessions]");
+    expect(list).not.toBeNull();
+    expect(list!.textContent).toContain("No sessions in this workspace yet");
     ctx.cleanup();
   });
 
