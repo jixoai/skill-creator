@@ -106,6 +106,29 @@ describe("Page manifests", () => {
     expectActivity(settingsApp, "/settings/model", "", "settings.section");
   });
 
+  it("matches the Evaluating three-segment detail route (deep-linkable triple)", () => {
+    // evaluating-dashboard design §3 r2：path 三段唯一确定三元组（总览卡与
+    // Creator 深链都落这里）。
+    expectActivity(
+      evaluatingApp,
+      `/w/${WS}/evaluating/claude-code/${SKILL}`,
+      "",
+      "evaluating.detail",
+    );
+    expectActivity(evaluatingApp, `/w/~/evaluating/claude-code/${SKILL}`, "", "evaluating.detail");
+    // 残缺三元组（缺 skillId）不匹配——深链不允许歧义身份。
+    for (const activity of evaluatingApp.manifest.activities) {
+      expect(
+        matchRouteTree(
+          activity.root as never,
+          `/w/${WS}/evaluating/claude-code`,
+          "",
+          activity.pattern,
+        ).kind,
+      ).not.toBe("matched");
+    }
+  });
+
   it("does not match migrated legacy paths or partial dynamic segments", () => {
     for (const activity of workspacesApp.manifest.activities) {
       expect(
