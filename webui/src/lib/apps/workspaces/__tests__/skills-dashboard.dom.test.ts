@@ -11,6 +11,8 @@
  *   [4] 筛选 URL 面：duplicates-only / provider chip。
  *   [5] Global 页脚冒烟锚点 en 逐字（/skills across \d+ agent locations/）。
  *   [6] Intelligence 双入口同链（Agents screen 与 detail 面同 href）。
+ *   [7] 窄屏栈切换 + detail 头部布局机制契约（修复批 2）：隐藏类只落在 pane、
+ *       无身份 view=detail 落回列表；标题块全宽、动作行独立（文本柱不塌缩）。
  * 妥协声明：jsdom 无布局——网格列数/容器查询回落由 skills-dashboard-css.test
  * 钉契约，真实布局归 1.10 ego-browser 走查门。
  */
@@ -537,5 +539,90 @@ describe("SkillsDashboard 三屏网格", () => {
     const rendered = root.querySelectorAll("button[data-skill-id^='sk_']").length;
     expect(rendered).toBeGreaterThan(0);
     expect(rendered).toBeLessThan(250);
+  });
+});
+
+describe("窄屏栈切换 DOM 契约（修复批 2：450px 盲区）", () => {
+  // jsdom 无布局/容器查询——钉死机制契约：窄屏 display:none 的生效路径 =
+  // pane 上的隐藏类 + .skills-master-detail 自身的 inline-size 容器。
+  // （类落在 wrapper 上时，无名 @container 上溯 .dashboard-shell 解析条件，
+  // 整个 master-detail——行、空态、详情——被藏掉 = 走查 450px 空白盲区。）
+  it("list mode hides the detail pane only — rows and the empty state stay reachable", async () => {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(log, listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]));
+    const root = mountDashboard();
+    await settle();
+
+    const wrapper = root.querySelector<HTMLElement>(".skills-master-detail");
+    const listPane = root.querySelector<HTMLElement>(".skills-list-pane");
+    const detailPane = root.querySelector<HTMLElement>(".skills-detail-pane");
+    expect(wrapper).not.toBeNull();
+    expect(listPane).not.toBeNull();
+    expect(detailPane).not.toBeNull();
+    expect(wrapper?.classList.contains("list-hidden")).toBe(false);
+    expect(wrapper?.classList.contains("detail-hidden")).toBe(false);
+    expect(listPane?.classList.contains("list-hidden")).toBe(false);
+    expect(detailPane?.classList.contains("detail-hidden")).toBe(true);
+  });
+
+  it("detail mode with a valid identity flips list-hidden onto the list pane", async () => {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(log, listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]));
+    const root = mountDashboard({ provider: "claude-code", skill: SK_A, view: "detail" });
+    await settle(60);
+
+    expect(
+      root.querySelector<HTMLElement>(".skills-list-pane")?.classList.contains("list-hidden"),
+    ).toBe(true);
+    expect(
+      root.querySelector<HTMLElement>(".skills-detail-pane")?.classList.contains("detail-hidden"),
+    ).toBe(false);
+  });
+
+  it("stale ?view=detail without identity falls back to the list pane (never both hidden)", async () => {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(log, listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]));
+    const root = mountDashboard({ view: "detail" });
+    await settle();
+
+    // 无身份残留 view=detail：落回列表态——窄屏两 pane 全隐 = 空白盲区。
+    expect(
+      root.querySelector<HTMLElement>(".skills-list-pane")?.classList.contains("list-hidden"),
+    ).toBe(false);
+    expect(
+      root.querySelector<HTMLElement>(".skills-detail-pane")?.classList.contains("detail-hidden"),
+    ).toBe(true);
+  });
+});
+
+describe("skill-detail 头部栈式布局契约（修复批 2 P1-1：文本柱塌缩）", () => {
+  it("stacks the full-width title block above an independent actions row", async () => {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(log, listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]));
+    // Imported workspace：editable=true——Edit in Creator 按钮在场（最长动作项，
+    // 同级行布局下正是它把 flex-1 文本柱挤成 60-90px 细柱的元凶）。
+    const root = mountDashboard(
+      { provider: "claude-code", skill: SK_A, view: "detail" },
+      `ws_${"b".repeat(24)}`,
+    );
+    await settle(60);
+
+    const heading = root.querySelector<HTMLHeadingElement>(".skills-detail-pane header h2");
+    expect(heading?.textContent).toBe("Skill A");
+    // 全名截断兜底：title 属性携带完整名称。
+    expect(heading?.getAttribute("title")).toBe("Skill A");
+    // 标题块（h2 的父容器）内没有任何动作按钮——文本块不再与按钮同行争宽。
+    const titleBlock = heading?.parentElement ?? null;
+    expect(titleBlock?.querySelector("button")).toBeNull();
+    // 动作行 = 标题行的下一兄弟节点（独立行，含全部管理动作）。
+    const actionsRow = titleBlock?.parentElement?.nextElementSibling ?? null;
+    const actionTexts = [...(actionsRow?.querySelectorAll("button") ?? [])].map((button) =>
+      textOf(button as HTMLElement),
+    );
+    expect(actionTexts).toEqual(expect.arrayContaining(["Edit in Creator", "Validate", "Disable"]));
   });
 });

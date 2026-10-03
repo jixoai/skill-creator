@@ -397,10 +397,15 @@
 
   <div class="relative min-w-0 flex-1">
     {#if editing}
+      <!-- 编辑态：type="text" 是品牌焦点环的前置条件——@tailwindcss/forms 的 base
+           只枚举 :not([type]) 与特定 type，typeless input 会拿到插件注入的
+           blue-600 :focus 环/边框（走查实测 RGB(37,99,235)）。显式 type=text
+           脱离插件面，焦点态由 wrapper 的品牌 token（primary/50 边框 +
+           primary/40 ring）承载。 -->
       <div
         class="flex h-7 items-center gap-1 rounded border border-border bg-background px-2 {invalid
           ? 'omnibox-invalid'
-          : 'focus-within:border-primary/50'}"
+          : 'focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/40'}"
       >
         {#if commandMode}<IconCommand
             class="h-3.5 w-3.5 shrink-0 text-muted-foreground"
@@ -408,6 +413,8 @@
         <input
           bind:this={inputElement}
           bind:value={input}
+          type="text"
+          role="combobox"
           class="h-full min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground"
           aria-label="Address and command input"
           aria-autocomplete="list"

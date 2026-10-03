@@ -228,6 +228,10 @@
       tabindex="-1"
       class="shrink-0 border-b border-border px-4 py-3 focus:outline-none"
     >
+      <!-- 头部栈式两行（修复批 2 P1-1）：标题/描述横跨 pane 全宽，动作按钮独立
+           成行——同级行布局下 shrink-0 动作列（~300px）会把 flex-1 文本柱挤压成
+           60-90px 的逐词换行细柱（master-detail pane 宽 ~430px 时，1919px 视口
+           三屏复现——pane 宽由网格轨道决定，与视口宽度无关）。 -->
       <div class="flex items-start gap-2">
         {#if onBack}
           <button
@@ -252,71 +256,71 @@
           </button>
         {/if}
         <div class="min-w-0 flex-1">
-          <h2 class="truncate text-base font-semibold">{detail.name}</h2>
+          <h2 class="truncate text-base font-semibold" title={detail.name}>{detail.name}</h2>
           <p class="mt-0.5 text-xs leading-5 text-muted-foreground">{detail.description}</p>
         </div>
-        <div class="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            class="h-8 w-8"
-            title={t("skillDetail.insightsTitle")}
-            aria-label={t("skillDetail.insightsTitle")}
-            onclick={() =>
-              goById("workspaces.intelligence", {
-                wsId: target.workspaceId,
-                providerId: target.providerId,
-              })}
-          >
-            <IconGraph class="h-4 w-4" />
-          </Button>
-          {#if editable}
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-8 gap-1.5"
-              title={t("skillDetail.editTitle")}
-              onclick={() =>
-                goById("creator.workspace.skill", {
-                  mode: "edit",
-                  wsId: target.workspaceId,
-                  providerId: target.providerId,
-                  // skillId prop 与 detail.id 同源（loadDetail 已 safeParse）；
-                  // 回调闭包里 detail 的窄化不可靠，prop 是稳定真相。
-                  skillId,
-                })}
-            >
-              <IconPen class="h-3.5 w-3.5" />
-              {t("skillDetail.editInCreator")}
-            </Button>
-          {/if}
+      </div>
+      <div class="mt-2 flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-8 w-8"
+          title={t("skillDetail.insightsTitle")}
+          aria-label={t("skillDetail.insightsTitle")}
+          onclick={() =>
+            goById("workspaces.intelligence", {
+              wsId: target.workspaceId,
+              providerId: target.providerId,
+            })}
+        >
+          <IconGraph class="h-4 w-4" />
+        </Button>
+        {#if editable}
           <Button
             variant="outline"
             size="sm"
             class="h-8 gap-1.5"
-            disabled={validating}
-            onclick={() => void handleValidate()}
+            title={t("skillDetail.editTitle")}
+            onclick={() =>
+              goById("creator.workspace.skill", {
+                mode: "edit",
+                wsId: target.workspaceId,
+                providerId: target.providerId,
+                // skillId prop 与 detail.id 同源（loadDetail 已 safeParse）；
+                // 回调闭包里 detail 的窄化不可靠，prop 是稳定真相。
+                skillId,
+              })}
           >
-            {#if validating}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconShield
-                class="h-3.5 w-3.5"
-              />{/if}
-            {t("skillDetail.validate")}
+            <IconPen class="h-3.5 w-3.5" />
+            {t("skillDetail.editInCreator")}
           </Button>
-          <Button
-            size="sm"
-            variant={detail.disabled ? "default" : "outline"}
-            class="h-8 gap-1.5"
-            disabled={toggling}
-            onclick={() => void handleToggle()}
-          >
-            {#if toggling}
-              <IconLoader class="h-3.5 w-3.5 animate-spin" />
-            {:else}
-              <IconPower class="h-3.5 w-3.5" />
-            {/if}
-            {detail.disabled ? t("skillDetail.enable") : t("skillDetail.disable")}
-          </Button>
-        </div>
+        {/if}
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 gap-1.5"
+          disabled={validating}
+          onclick={() => void handleValidate()}
+        >
+          {#if validating}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconShield
+              class="h-3.5 w-3.5"
+            />{/if}
+          {t("skillDetail.validate")}
+        </Button>
+        <Button
+          size="sm"
+          variant={detail.disabled ? "default" : "outline"}
+          class="h-8 gap-1.5"
+          disabled={toggling}
+          onclick={() => void handleToggle()}
+        >
+          {#if toggling}
+            <IconLoader class="h-3.5 w-3.5 animate-spin" />
+          {:else}
+            <IconPower class="h-3.5 w-3.5" />
+          {/if}
+          {detail.disabled ? t("skillDetail.enable") : t("skillDetail.disable")}
+        </Button>
       </div>
       <div class="mt-2 flex flex-wrap items-center gap-1.5">
         <Badge variant="secondary">{detail.provider}</Badge>

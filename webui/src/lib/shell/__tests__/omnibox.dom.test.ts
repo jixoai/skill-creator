@@ -276,4 +276,17 @@ describe("Omnibox interactions", () => {
       document.querySelector<HTMLButtonElement>('[aria-label="Forward in this tab"]')?.disabled,
     ).toBe(false);
   });
+
+  it("brands the editing focus state instead of the forms-plugin default blue (P2-3)", async () => {
+    mountOmnibox();
+    editButton().click();
+    await tick();
+    // 机制：@tailwindcss/forms 的 base 只枚举 :not([type]) 与特定 type——typeless
+    // input 的 :focus 会拿到插件注入的 blue-600 环/边框（走查实测 RGB(37,99,235)）。
+    // 显式 type="text" 脱离插件面；焦点态由 wrapper 的品牌 token 承载。
+    expect(inputElement().getAttribute("type")).toBe("text");
+    const field = inputElement().closest("div");
+    expect(field?.className).toContain("focus-within:border-primary/50");
+    expect(field?.className).toContain("focus-within:ring-primary/40");
+  });
 });

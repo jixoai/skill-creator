@@ -10,6 +10,8 @@
  *       screen 固定高/内滚/overscroll 不冒泡分层。
  *   [4] detail 面零写源扫描（design §7：除 skills.toggle 外零写 RPC、无
  *       creator.save/delete 调用）。
+ *   [5] 窄屏栈切换类放置 + chips 滚动条隐藏契约（修复批 2：450px 盲区 /
+ *       滚动条残段）。
  * 妥协声明：jsdom 无布局引擎（scrollWidth/clientWidth 恒 0）——真实布局的
  * 不溢出验证归 1.10 ego-browser 走查门；本测试钉死防溢出的 CSS 机制契约。
  */
@@ -120,6 +122,38 @@ describe("真实目录规模防塌机制契约（走查 13-fix）", () => {
     expect(footerSrc).toMatch(/class="imported-list[^"]*"/);
     expect(footerCss).toMatch(/\.imported-list\s*\{[\s\S]*?max-height:/);
     expect(footerCss).toMatch(/\.imported-list\s*\{[\s\S]*?overflow-y:\s*auto/);
+  });
+});
+
+describe("窄屏栈切换与 chips 滚动条机制契约（修复批 2）", () => {
+  const screenCss = skillsScreenSrc.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+
+  it("places narrow-stack hidden classes on the panes, never on the master-detail wrapper", () => {
+    // 450px 盲区根因：@container (max-width: 559px) 的查询容器是匹配元素最近的
+    // 祖先容器。类落在 pane 上 → 解析到 .skills-master-detail（inline-size 容器，
+    // 「屏容器 < 560px」语义成立）；类落在 wrapper 自身 → 上溯到外层
+    // .dashboard-shell 解析，列表行 + 空态 + 详情面整个被藏掉（宽度无关的
+    // 空白盲区，450px 复现 / 700px 不复现正是 shell 容器宽度的两侧）。
+    const wrapperClass = skillsScreenSrc.match(/class="skills-master-detail[^"]*"/)?.[0];
+    expect(wrapperClass).toBeDefined();
+    expect(wrapperClass).not.toMatch(/list-hidden|detail-hidden/);
+    expect(skillsScreenSrc).toMatch(/class="skills-list-pane[^"]*list-hidden/);
+    expect(skillsScreenSrc).toMatch(/class="skills-detail-pane[^"]*detail-hidden/);
+  });
+
+  it("keeps the inline-size container on the master-detail wrapper as the panes' query container", () => {
+    expect(screenCss).toMatch(/\.skills-master-detail\s*\{[\s\S]*?container-type:\s*inline-size/);
+    expect(screenCss).toMatch(/@container \(max-width: 559px\)/);
+  });
+
+  it("hides the chips-row scrollbar behind an edge fade mask without losing scroll", () => {
+    // P2-4：scrollbar-width: thin 会在「All」chip 下留常驻灰色滚动条残段——
+    // 隐藏滚动条（Firefox scrollbar-width + WebKit 伪元素双面）+ mask 渐隐承担
+    // 「可滚」affordance；overflow-x: auto 保留横滚能力。
+    expect(screenCss).toMatch(/\.chips-row\s*\{[\s\S]*?scrollbar-width:\s*none/);
+    expect(screenCss).toMatch(/\.chips-row::-webkit-scrollbar\s*\{[\s\S]*?display:\s*none/);
+    expect(screenCss).toMatch(/\.chips-row\s*\{[\s\S]*?mask-image:/);
+    expect(screenCss).toMatch(/\.chips-row\s*\{[\s\S]*?overflow-x:\s*auto/);
   });
 });
 

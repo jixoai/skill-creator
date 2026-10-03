@@ -215,6 +215,10 @@
     return { workspaceId: wsId, providerId: provider, skillId: selectedSkillId };
   });
 
+  // 窄屏栈切换生效判定（修复批 2 P1-2）：?view=detail 只有在详情身份有效时才
+  // 隐藏列表面——无身份的残留 view=detail 落回列表态，两 pane 永不全隐。
+  const detailVisible = $derived(viewMode === "detail" && detailIdentity !== null);
+
   // ---- 虚拟化窗口（>200 行时只渲染可见切片） ----
 
   let listScrollEl = $state<HTMLDivElement | null>(null);
@@ -414,13 +418,17 @@
     </div>
   {/if}
 
-  <div
-    class="skills-master-detail flex min-h-0 flex-1 {viewMode === 'detail'
-      ? 'list-hidden'
-      : ''} {viewMode === 'list' || !detailIdentity ? 'detail-hidden' : ''}"
-  >
-    <!-- 列表面（窄屏 ?view=detail 时隐藏） -->
-    <div class="skills-list-pane flex min-h-0 min-w-0 flex-1 flex-col">
+  <!-- 窄屏栈切换的隐藏类只落在 pane 上（修复批 2 P1-2）：类落在
+       .skills-master-detail 自身时，无名 @container 会以上溯到的外层
+       .dashboard-shell 容器解析条件（559px），把整个 master-detail——列表行、
+       空态文案、详情面——一起藏掉，形成 450px 空白盲区。 -->
+  <div class="skills-master-detail flex min-h-0 flex-1">
+    <!-- 列表面（窄屏 ?view=detail 且详情身份有效时隐藏） -->
+    <div
+      class="skills-list-pane flex min-h-0 min-w-0 flex-1 flex-col {detailVisible
+        ? 'list-hidden'
+        : ''}"
+    >
       <div
         bind:this={listScrollEl}
         class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
@@ -525,7 +533,11 @@
     </div>
 
     <!-- 详情面（宽屏右滑入；窄屏 ?view=detail push——design §2 master-detail） -->
-    <div class="skills-detail-pane flex min-h-0 min-w-0 flex-1 flex-col border-l border-border">
+    <div
+      class="skills-detail-pane flex min-h-0 min-w-0 flex-1 flex-col border-l border-border {detailVisible
+        ? ''
+        : 'detail-hidden'}"
+    >
       {#if detailIdentity}
         <SkillDetailPanel
           target={{ workspaceId: wsId, providerId: detailIdentity.providerId }}
@@ -560,16 +572,42 @@
   .skills-detail-pane {
     min-width: 0;
   }
-  /* provider chips 单行横滚（走查 13-fix）：不换行 + overflow-x + 收窄滚动条 +
-     内滚不冒泡——header 高度与 provider 数量解耦，master-detail 不再被挤塌。 */
+  /* provider chips 单行横滚（走查 13-fix）：不换行 + overflow-x + 内滚不冒泡——
+     header 高度与 provider 数量解耦，master-detail 不再被挤塌。
+     滚动条残段根治（修复批 2 P2-4）：隐藏原生滚动条（scrollbar-width + WebKit
+     伪元素双面），「可滚」affordance 交给边缘渐隐 mask。mask 渐变区正好落在
+     容器自有 16px inline padding 上（负 margin 抵消对位）——未滚动/滚到底时
+     chip 不被裁，滚动中滑出的 chip 渐隐。 */
   .chips-row {
     flex-wrap: nowrap;
     overflow-x: auto;
-    scrollbar-width: thin;
+    scrollbar-width: none;
     overscroll-behavior-x: contain;
+    padding-inline: 16px;
+    margin-inline: -16px;
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+  }
+  .chips-row::-webkit-scrollbar {
+    display: none;
   }
   /* 窄屏（屏容器 < 560px）：list/detail 栈式切换（?view 参数驱动）；
-     宽屏两类都渲染——master-detail 并列，隐藏类 inert（ProviderView 同族样板）。 */
+     宽屏两类都渲染——master-detail 并列，隐藏类 inert（ProviderView 同族样板）。
+     隐藏类必须落在 pane 上：pane 的最近祖先容器 = .skills-master-detail 本身
+     （下方 container-type），查询条件即「屏容器 < 560px」；落在 wrapper 自身上
+     会上溯到 .dashboard-shell 解析，整个 master-detail 被藏掉（450px 盲区）。 */
   @container (max-width: 559px) {
     .list-hidden,
     .detail-hidden {
