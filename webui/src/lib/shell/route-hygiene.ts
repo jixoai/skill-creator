@@ -104,9 +104,11 @@ function redirectLegacyPath(pathname: string, search: string): string | null {
   if (parts[0] === "wiki" && parts.length === 2) {
     return `/w/${encodePathPart(parts[1]!)}/wiki`;
   }
-  if (pathname === "/repository") return SHELL_HOME_PATH;
+  // Repository App 退役（skills-dashboard 1.8）：legacy 路由直指 dashboard 的
+  // Repos screen 深链（?screen=repos；scan 实例子路由原样保留参数）。
+  if (pathname === "/repository") return `${SHELL_HOME_PATH}?screen=repos`;
   if (parts[0] === "repository" && parts[1] === "scan" && parts.length === 3) {
-    return build(SHELL_HOME_PATH, {
+    return build(`/w/~/skills/repos/scan/${encodePathPart(parts[2]!)}`, {
       selected: query.get("selected"),
       targets: query.get("targets"),
       skill: query.get("skill"),

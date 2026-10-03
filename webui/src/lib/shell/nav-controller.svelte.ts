@@ -55,8 +55,8 @@ function decodeSegment(segment: string): string {
 export const navController = {
   navigate(path: string, action: "PUSH" | "REPLACE" = "PUSH"): void {
     if (action === "REPLACE") {
-      // replace 语义 + 保持焦点 + 不重置滚动；仍走完整导航以更新 page.url。
-      void goto(path, { replaceState: true, keepFocus: true, noScroll: true });
+      // Replace semantics while keeping the current focus and scroll position.
+      void goto(path, { replace: true, reset: false });
     } else {
       void goto(path);
     }

@@ -22,9 +22,8 @@ export interface TabNavigationState {
 }
 
 export interface ReplaceNavigationOptions {
-  readonly replaceState: true;
-  readonly keepFocus: true;
-  readonly noScroll: true;
+  readonly replace: true;
+  readonly reset: false;
 }
 
 export interface TabSessionStorage {
@@ -107,7 +106,7 @@ export function navigateWithReplaceState(
   path: string,
   navigate: (path: string, options: ReplaceNavigationOptions) => void,
 ): void {
-  navigate(path, { replaceState: true, keepFocus: true, noScroll: true });
+  navigate(path, { replace: true, reset: false });
 }
 
 export function addWorkspaceTab(

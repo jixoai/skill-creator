@@ -21,7 +21,9 @@
   import { setNavControllerAdapter } from "$lib/shell";
   import PageOutlet from "$lib/shell/PageOutlet.svelte";
   import TabStrip from "$lib/shell/TabStrip.svelte";
+  import Omnibox from "$lib/shell/Omnibox.svelte";
   import WorkspaceNavigation from "$lib/shell/WorkspaceNavigation.svelte";
+  import { toggleWorkspaceNavigation } from "$lib/shell/workspace-navigation.svelte.js";
   import WindowDragRegion from "$lib/components/window-drag-region.svelte";
   import ImportWorkspaceDialog from "$lib/components/import-workspace-dialog.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
@@ -34,15 +36,13 @@
   } from "$lib/window-size";
   import IconCommand from "@lucide/svelte/icons/command";
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
-  import IconAgent from "@lucide/svelte/icons/message-square";
   import AgentPanel from "$lib/components/agent/AgentPanel.svelte";
-  import { agentPanel, setAgentPanelOpen } from "$lib/stores/agent.svelte";
+  import { agentPanel } from "$lib/stores/agent.svelte";
   import { resolveShellRoute } from "$lib/shell/route-hygiene.js";
   import {
     consumeExpectedNavigation,
     initializeTabSession,
     navigateTab,
-    navigateTabHistory,
     openImportedWorkspaceTabs,
     reconcileAvailableWorkspaceTabs,
     syncExternalLocation,
@@ -73,26 +73,14 @@
         navigateTab(path, action);
       },
     });
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return;
-      if (event.key === "[") {
-        event.preventDefault();
-        navigateTabHistory(-1);
-      } else if (event.key === "]") {
-        event.preventDefault();
-        navigateTabHistory(1);
-      }
-    };
     const handlePopstate = () => {
       queueMicrotask(() =>
         syncExternalLocation(`${globalThis.location.pathname}${globalThis.location.search}`),
       );
     };
-    globalThis.addEventListener("keydown", handleKeydown);
     globalThis.addEventListener("popstate", handlePopstate);
     connect();
     return () => {
-      globalThis.removeEventListener("keydown", handleKeydown);
       globalThis.removeEventListener("popstate", handlePopstate);
       disconnect();
     };
@@ -181,21 +169,11 @@
         >
           <IconRefresh class="h-3.5 w-3.5" />
         </button>
-        <button
-          class="no-drag flex h-6 w-6 items-center justify-center rounded transition-colors {agentPanel.open
-            ? 'bg-primary/10 text-primary'
-            : 'text-muted-foreground hover:text-foreground'} max-[720px]:h-11 max-[720px]:w-11"
-          aria-label="Toggle agent panel"
-          title="Agent panel"
-          aria-pressed={agentPanel.open}
-          onclick={() => setAgentPanelOpen(!agentPanel.open)}
-        >
-          <IconAgent class="h-3.5 w-3.5" />
-        </button>
       {/snippet}
     </WindowDragRegion>
 
     <TabStrip />
+    <Omnibox onToggleNavigation={toggleWorkspaceNavigation} />
 
     {#if connectionState.status === "disconnected"}
       <div
@@ -207,25 +185,27 @@
     {/if}
 
     <!-- 主体：Workspace Page 使用左导航；其他 Page 占满内容区。 -->
-    <div class="flex min-h-0 flex-1">
+    <div class="relative flex min-h-0 flex-1">
       {#if activePageKind === "workspace"}
         <WorkspaceNavigation />
       {/if}
 
-      <!-- 右侧：Shell 内容区 + Agent 面板 drawer（shell 级、跨 tab 存活）。R17-C：
-           常驻挂载——开关只是收起（宽屏 0 宽不占布局 / 窄屏 invisible 抽屉），
-           不做 DOM 销毁；收起态层挂 pointer-events-none，覆盖层不拦截主区交互。 -->
+      <!-- 右侧：Shell 内容区 + Agent 面板层。R17-C：常驻挂载——开关只是收起。
+           skills-agent-page 1.7：shell 级 drawer 退役——面板 attach 到 workspace
+           页（activePageKind 闸；非 workspace 页不挂载）。 -->
       <main class="min-w-0 flex-1 overflow-hidden">
         <PageOutlet />
         {@render children?.()}
       </main>
-      <div
-        class="agent-panel-layer shrink-0 max-[720px]:absolute max-[720px]:inset-0 max-[720px]:z-40 {agentPanel.open
-          ? ''
-          : 'pointer-events-none'}"
-      >
-        <AgentPanel />
-      </div>
+      {#if activePageKind === "workspace"}
+        <div
+          class="agent-panel-layer shrink-0 max-[720px]:absolute max-[720px]:inset-0 max-[720px]:z-40 {agentPanel.open
+            ? ''
+            : 'pointer-events-none'}"
+        >
+          <AgentPanel />
+        </div>
+      {/if}
     </div>
   </div>
 </TooltipProvider>

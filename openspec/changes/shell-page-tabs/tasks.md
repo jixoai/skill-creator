@@ -25,23 +25,23 @@
 
 ## 3. omnibox
 
-- [ ] 3.1 命令注册表抽核（lib/shell/commands.ts：palette 与 omnibox 双消费）
-- [ ] 3.2 omnibox 组件（显示/编辑双态 + scheme 前缀渲染 + ⌘L/F6 聚焦）
-- [ ] 3.3 解析与补全内核（path 前缀 / workspace / skills.search 模糊 / `> `
+- [x] 3.1 命令注册表抽核（lib/shell/commands.ts：palette 与 omnibox 双消费）
+- [x] 3.2 omnibox 组件（显示/编辑双态 + scheme 前缀渲染 + ⌘L/F6 聚焦）
+- [x] 3.3 解析与补全内核（path 前缀 / workspace / skills.search 模糊 / `> `
       命令模式；纯函数单测）
-- [ ] 3.4 补全下拉面板（键盘导航 + dom 测试）
-- [ ] 3.5 actions per Page 机制 + settings 齿枪迁位 + theme-toggle（settings
+- [x] 3.4 补全下拉面板（键盘导航 + dom 测试）
+- [x] 3.5 actions per Page 机制 + settings 齿枪迁位 + theme-toggle（settings
       actions）+ agent action（开现有 AgentPanel）+ terminal/rightPanel 占位禁用
 
 ## 4. 壳与导航
 
 - [x] 4.1 +layout.svelte 重构（两行顶部 + PageOutlet + 左导航仅 Workspace
       Page 渲染）
-- [ ] 4.2 AppSidebar 收敛为 SkillsWorkspacePage 内组件（四项 + Global 的
+- [x] 4.2 AppSidebar 收敛为 SkillsWorkspacePage 内组件（四项 + Global 的
       Creator 引导空态）
-- [ ] 4.3 evaluating 占位空态页
-- [ ] 4.4 窄屏/平台：tab 横滚 + actions 溢出 + caption 安全区（macOS/Windows）
-- [ ] 4.5 现有视图过渡挂载验证（ProviderView/Wiki/CreatorWorkspace 于新壳内
+- [x] 4.3 evaluating 占位空态页
+- [x] 4.4 窄屏/平台：tab 横滚 + actions 溢出 + caption 安全区（macOS/Windows）
+- [x] 4.5 现有视图过渡挂载验证（ProviderView/Wiki/CreatorWorkspace 于新壳内
       功能不回归）
 
 ## 5. 验证门

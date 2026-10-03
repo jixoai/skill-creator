@@ -4,8 +4,6 @@
   import IconMessage from "@lucide/svelte/icons/message-square";
   import IconPlus from "@lucide/svelte/icons/plus";
   import IconX from "@lucide/svelte/icons/x";
-  import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
-  import IconArrowRight from "@lucide/svelte/icons/arrow-right";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import { requestImportWorkspace } from "$lib/stores/import-workspace.svelte";
   import {
@@ -17,9 +15,7 @@
   import { showToast } from "$lib/toast.svelte";
   import {
     activateTabAndNavigate,
-    canNavigateTabHistory,
     closeImportedTab,
-    navigateTabHistory,
     removeWorkspaceTab,
     tabSession,
   } from "./tab-session.svelte.js";
@@ -44,8 +40,6 @@
       workspace: workspaceState.workspaces.find((item) => item.id === id),
     })),
   );
-  const canBack = $derived(canNavigateTabHistory(-1));
-  const canForward = $derived(canNavigateTabHistory(1));
 
   onMount(() => {
     const closeMenus = (event: PointerEvent) => {
@@ -216,26 +210,6 @@
         </div>
       {/if}
     </div>
-  </div>
-
-  <div class="flex h-9 items-center gap-1 border-t border-border/60 px-2">
-    <button
-      class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-35"
-      aria-label="Back in this tab"
-      aria-keyshortcuts="Meta+["
-      title="Back in this tab (⌘[)"
-      disabled={!canBack}
-      onclick={() => navigateTabHistory(-1)}><IconArrowLeft class="h-3.5 w-3.5" /></button
-    >
-    <button
-      class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-35"
-      aria-label="Forward in this tab"
-      aria-keyshortcuts="Meta+]"
-      title="Forward in this tab (⌘])"
-      disabled={!canForward}
-      onclick={() => navigateTabHistory(1)}><IconArrowRight class="h-3.5 w-3.5" /></button
-    >
-    <div class="min-w-0 flex-1"></div>
   </div>
 </div>
 

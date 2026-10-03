@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Component } from "svelte";
   /**
    * 原始需求 [2026-07-14]：「这需要你的导航功能足够清晰简单」。
    * 修订 [2026-09-17]（skill-search-gui）：增异步 Skills 组——跨 Workspace 的
@@ -12,7 +13,8 @@
    */
   import * as Command from "$lib/components/ui/command";
   import { goto } from "$app/navigation";
-  import { goById } from "$lib/shell";
+  import { executeShellCommand, SHELL_COMMANDS } from "$lib/shell/commands.js";
+  import type { ShellCommandId } from "$lib/shell/commands.js";
   import { t } from "$lib/i18n";
   import {
     installationScopeLabel,
@@ -27,11 +29,26 @@
   } from "$lib/store.svelte";
   import type { ProviderId, SkillSearchResult, WorkspaceId } from "$lib/types";
   import IconFolder from "@lucide/svelte/icons/folder-open";
-  import IconPen from "@lucide/svelte/icons/file-plus-2";
-  import IconGlobe from "@lucide/svelte/icons/globe";
-  import IconSliders from "@lucide/svelte/icons/sliders-horizontal";
-  import IconGrid from "@lucide/svelte/icons/layout-grid";
   import IconSparkles from "@lucide/svelte/icons/sparkles";
+  import IconGrid from "@lucide/svelte/icons/layout-grid";
+  import IconPen from "@lucide/svelte/icons/file-pen-line";
+  import IconBook from "@lucide/svelte/icons/book-open";
+  import IconChart from "@lucide/svelte/icons/chart-no-axes-column-increasing";
+  import IconGlobe from "@lucide/svelte/icons/globe";
+  import IconMessage from "@lucide/svelte/icons/message-square";
+  import IconSettings from "@lucide/svelte/icons/settings";
+  import IconSliders from "@lucide/svelte/icons/sliders-horizontal";
+
+  const commandIcons = {
+    skills: IconGrid,
+    creator: IconPen,
+    wiki: IconBook,
+    evaluating: IconChart,
+    repository: IconGlobe,
+    agent: IconMessage,
+    settings: IconSettings,
+    "search-config": IconSliders,
+  } satisfies Record<ShellCommandId, Component>;
 
   let open = $state(false);
   let query = $state("");
@@ -129,31 +146,22 @@
     {/if}
 
     <Command.Group heading={t("palette.groupNavigate")}>
-      <Command.Item
-        onSelect={() => run(() => goto("/workspaces"))}
-        value="go workspaces manage locations"
-      >
-        <IconGrid class="h-4 w-4" />
-        {t("palette.navWorkspaces")}
-      </Command.Item>
-      <Command.Item onSelect={() => run(() => goto("/creator"))} value="go creator new skill">
-        <IconPen class="h-4 w-4" />
-        {t("palette.navCreator")}
-      </Command.Item>
-      <Command.Item
-        onSelect={() => run(() => goto("/repository"))}
-        value="go repository browse remote"
-      >
-        <IconGlobe class="h-4 w-4" />
-        {t("palette.navRepository")}
-      </Command.Item>
-      <Command.Item
-        onSelect={() => run(() => void openSkillSearchConfig())}
-        value="go search config toml"
-      >
-        <IconSliders class="h-4 w-4" />
-        {t("palette.navSearchConfig")}
-      </Command.Item>
+      {#each SHELL_COMMANDS as command (command.id)}
+        <Command.Item
+          onSelect={() =>
+            run(() =>
+              executeShellCommand(command, {
+                navigate: (path) => goto(path),
+                openSearchConfig: () => void openSkillSearchConfig(),
+              }),
+            )}
+          value={`${command.label} ${command.keywords.join(" ")}`}
+        >
+          {@const Icon = commandIcons[command.id]}
+          <Icon class="h-4 w-4" />
+          <span class="min-w-0 flex-1 truncate">{command.label}</span>
+        </Command.Item>
+      {/each}
     </Command.Group>
 
     {#if workspaceState.workspaces.length > 0}
@@ -203,13 +211,13 @@
               value={`skill ${row.result.name} ${row.key}`}
               forceMount
               onSelect={() =>
-                run(() =>
-                  goById(
-                    "workspaces.provider",
-                    { wsId: row.workspaceId, providerId: row.providerId },
-                    { skill: row.result.id, view: "detail" },
-                  ),
-                )}
+                run(() => {
+                  const search = new URLSearchParams({
+                    provider: row.providerId,
+                    skill: row.result.id,
+                  });
+                  goto(`/w/${encodeURIComponent(row.workspaceId)}/skills?${search.toString()}`);
+                })}
             >
               <IconSparkles class="h-4 w-4 shrink-0" />
               <span class="min-w-0 flex-1 truncate">{row.result.name}</span>

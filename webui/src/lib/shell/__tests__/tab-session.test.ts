@@ -188,7 +188,7 @@ describe("tab session persistence", () => {
   it("keeps browser history depth constant by using replaceState for every route", () => {
     const entries = ["/initial"];
     const optionsSeen: unknown[] = [];
-    const apply = (path: string, options: { replaceState: true }) => {
+    const apply = (path: string, options: { replace: true; reset: false }) => {
       optionsSeen.push(options);
       entries[0] = path;
     };
@@ -198,9 +198,7 @@ describe("tab session persistence", () => {
     }
     expect(entries).toEqual(["/w/ws_a/wiki"]);
     expect(optionsSeen).toHaveLength(4);
-    expect(
-      optionsSeen.every((options) => (options as { replaceState?: boolean }).replaceState),
-    ).toBe(true);
+    expect(optionsSeen.every((options) => (options as { replace?: boolean }).replace)).toBe(true);
     expect(TAB_SESSION_STORAGE_KEY).toBe("skill-creator.tabs.v1");
   });
 });
