@@ -33,6 +33,7 @@
   } from "$lib/stores/creator-editor.svelte";
   import { connectionState, loadSkillDoc } from "$lib/store.svelte";
   import { showToast } from "$lib/toast.svelte";
+  import { t } from "$lib/i18n";
   import { TEMPLATES } from "$lib/templates";
   import type { WorkspaceProviderTarget } from "$lib/types";
   import type { SkillId } from "$lib/types";
@@ -144,18 +145,18 @@
 
   // 页头主标题（R1 Gap 1）：技能名优先（人语汇），空名回退 "Skill"。
   const headerTitle = $derived.by(() => {
-    if (mode === "new") return "New skill";
+    if (mode === "new") return t("creatorEditor.newSkillTitle");
     const name = editor.draft.name.trim();
-    return name.length > 0 ? name : "Skill";
+    return name.length > 0 ? name : t("creatorEditor.untitledSkill");
   });
 
   /** 次要行 hash 点击复制（clipboard 不可用时 toast 提示，不静默失败）。 */
   async function copyId(label: string, value: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(value);
-      showToast(`${label} copied.`);
+      showToast(t("creatorEditor.copiedToast", { label }));
     } catch {
-      showToast("Copy failed — clipboard unavailable.");
+      showToast(t("creatorEditor.copyFailedToast"));
     }
   }
 </script>
@@ -171,7 +172,7 @@
         <button
           type="button"
           class="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          title="View this skill's evaluation corpus"
+          title={t("creatorEditor.viewEvaluationTitle")}
           onclick={() =>
             goById("evaluating.detail", {
               wsId: target.workspaceId,
@@ -179,7 +180,7 @@
               skillId,
             })}
         >
-          View evaluation
+          {t("creatorEditor.viewEvaluation")}
         </button>
       {/if}
     </div>
@@ -190,7 +191,7 @@
         <button
           type="button"
           class="max-w-40 truncate font-mono underline-offset-2 hover:underline"
-          title={`Copy workspace id: ${wsId}`}
+          title={t("creatorEditor.copyWorkspaceIdTitle", { id: wsId })}
           onclick={() => void copyId("Workspace id", wsId)}
         >
           {wsId}
@@ -202,7 +203,7 @@
           <button
             type="button"
             class="max-w-40 truncate font-mono underline-offset-2 hover:underline"
-            title={`Copy skill id: ${skillId}`}
+            title={t("creatorEditor.copySkillIdTitle", { id: skillId })}
             onclick={() => void copyId("Skill id", skillId)}
           >
             {skillId}
@@ -218,7 +219,7 @@
       <div
         class="flex flex-1 items-center justify-center p-4 text-center text-xs text-muted-foreground"
       >
-        Invalid workspace target.
+        {t("creatorEditor.invalidTarget")}
       </div>
     {:else}
       <SubViewTabs />

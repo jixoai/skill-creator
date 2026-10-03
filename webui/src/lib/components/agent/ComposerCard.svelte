@@ -25,6 +25,11 @@
   修订 [2026-10-02]（design-critique R2）：model chip 的 title 在所有态都携带
   完整 `provider · model` 标签——胶囊 max-w 截断后悬停仍见全名（截断本身
   R1 已有 max-w + truncate）。
+  修订 [2026-10-03]（creator-agent-chat 1.7 = design §4）：底排控件三簇分组——
+  左（附件/@/$ 引用族：`+` 启动器 + 图片/文件）/ 中（模式 chip）/ 右（model
+  胶囊 + ContextMeter + 发送/queue）；模型胶囊截断根治——右簇 min-w-0 可收缩 +
+  溢出渐隐（mask，非硬截断）+ title 全名（SessionFace 共用面，Agent 页/Panel
+  同步受益）。
   正交意图：
   1. 输入卡：附件条（图片缩略/文件 chip，与 UserMessage 附件同视觉语言）、
      自动长高 textarea（1 行 44px → 4 行 160px 封顶内滚；Enter 发送 /
@@ -243,6 +248,21 @@
     const model = view.settings.model;
     const dangling = !view.settings.modelRoutes.some((route) => route.provider === model.provider);
     return { label: `${model.provider} · ${model.model}`, effort: model.reasoningEffort, dangling };
+  });
+
+  /**
+   * 模型胶囊截断根治（creator-agent-chat 1.7 = design §4）：胶囊是右簇 flex 子项
+   * （min-w-0 可收缩）；标签溢出时以渐隐替代硬截断（mask 渐变），完整名在
+   * title/aria（R2 已有）。溢出检测按真实度量（scrollWidth > clientWidth）——
+   * 不溢出不渐隐（短名尾不该被吃掉）。
+   */
+  let modelLabelEl = $state<HTMLSpanElement | null>(null);
+  let modelLabelOverflows = $state(false);
+  $effect(() => {
+    const label = modelChip?.label;
+    const el = modelLabelEl;
+    if (el === null || label === undefined) return;
+    modelLabelOverflows = el.scrollWidth > el.clientWidth;
   });
 
   /** 菜单数据：routes 分组（组头 = catalog label ?? provider id）+ 模型清单。 */
@@ -690,242 +710,273 @@
         aria-label={t("composer.messageAria")}></textarea>
     {/key}
   </div>
-  <div class="flex h-11 items-center gap-1 px-2.5">
-    <!-- 左簇：模式 chip + 图片 + 文件 -->
-    <DropdownMenu.DropdownMenu bind:open={modeMenuOpen}>
-      <DropdownMenu.Trigger
-        class="flex h-7 max-w-[130px] items-center gap-1.5 rounded-full border border-border px-2.5 text-[11px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-        title={running
-          ? t("composer.modeChipTitleRunning")
-          : agentSession.sessionId
-            ? t("composer.modeChipTitleSession")
-            : t("composer.modeChipTitlePending")}
-        aria-label={t("composer.modeChipAria")}
-        disabled={running}
-        onkeydown={(event) => {
-          // 鼠标打开的 bits-ui 菜单焦点留在 trigger：Esc 在此（target 层）先占，
-          // 阻断冒泡到 AgentPanel 的 window-Escape，并受控收起菜单。
-          if (event.key === "Escape" && modeMenuOpen) {
-            event.stopPropagation();
-            modeMenuOpen = false;
-          }
+  <!-- 底排分组（creator-agent-chat 1.7 = design §4）：左（附件/@/$ 引用族）·
+       中（模式 chip）· 右（model 胶囊 + ContextMeter + 发送/queue）。 -->
+  <div class="flex h-11 items-center gap-1 px-2.5" data-composer-toolbar="true">
+    <!-- 左簇：附件/@/$ 引用族——`+` 启动器（`/`、`@`、`$` 键入触发的编程式入口）+ 图片/文件附件。 -->
+    <div class="flex shrink-0 items-center gap-1" data-composer-group="left">
+      <button
+        type="button"
+        class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
+        title={t("composer.launcherTitle")}
+        aria-label={t("composer.launcherTitle")}
+        aria-expanded={launcherOpen}
+        onclick={() => {
+          // W3 `+` 编程式启动器：无 query 全量展开；再点切换关闭（官方同语义）。
+          launcherOpen = !launcherOpen;
+          textareaEl?.focus();
         }}
       >
-        <span class="truncate">{modeLabel ?? t("composer.modeChipFallback")}</span>
-        <IconChevronDown class="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
-      </DropdownMenu.Trigger>
-      <!-- Content 仅在本菜单 open 时挂载（bits-ui 本就如此；显式门控让菜单内容
-           的存在与 modeMenuOpen 同步——测试桩的开合态是共享单例，无门控时模式
-           菜单内容会先于 model 菜单落 DOM，干扰既有 model chip 组件测试）。 -->
-      {#if modeMenuOpen}
-        <DropdownMenu.Content
-          align="start"
-          class="max-h-72 w-44 overflow-y-auto"
+        <IconPlus class="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
+        title={t("composer.attachImages")}
+        aria-label={t("composer.attachImages")}
+        aria-busy={picking === "image"}
+        disabled={picking !== null}
+        onclick={() => void openPicker("image")}
+      >
+        <span class="relative flex items-center justify-center">
+          <IconImage class="h-4 w-4 {picking === 'image' ? 'opacity-0' : ''}" />
+          {#if picking === "image"}
+            <IconLoader class="absolute inset-0 m-auto h-4 w-4 animate-spin" aria-hidden="true" />
+          {/if}
+        </span>
+      </button>
+      <button
+        type="button"
+        class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
+        title={t("composer.attachFiles")}
+        aria-label={t("composer.attachFiles")}
+        aria-busy={picking === "file"}
+        disabled={picking !== null}
+        onclick={() => void openPicker("file")}
+      >
+        <span class="relative flex items-center justify-center">
+          <IconFileUp class="h-4 w-4 {picking === 'file' ? 'opacity-0' : ''}" />
+          {#if picking === "file"}
+            <IconLoader class="absolute inset-0 m-auto h-4 w-4 animate-spin" aria-hidden="true" />
+          {/if}
+        </span>
+      </button>
+    </div>
+    <div class="min-w-2 flex-1"></div>
+    <!-- 中簇：模式 chip（R12-B 6/8 行为不变——仅位置归中）。 -->
+    <div class="flex shrink-0 items-center" data-composer-group="center">
+      <DropdownMenu.DropdownMenu bind:open={modeMenuOpen}>
+        <DropdownMenu.Trigger
+          class="flex h-7 max-w-[130px] items-center gap-1.5 rounded-full border border-border px-2.5 text-[11px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          title={running
+            ? t("composer.modeChipTitleRunning")
+            : agentSession.sessionId
+              ? t("composer.modeChipTitleSession")
+              : t("composer.modeChipTitlePending")}
+          aria-label={t("composer.modeChipAria")}
+          disabled={running}
           onkeydown={(event) => {
-            // 菜单打开时 Esc 归菜单所有（与 model chip 同语义）：阻止冒泡到
-            // AgentPanel 的 window-Escape，并显式落 open=false 走受控关闭。
-            if (event.key === "Escape") {
+            // 鼠标打开的 bits-ui 菜单焦点留在 trigger：Esc 在此（target 层）先占，
+            // 阻断冒泡到 AgentPanel 的 window-Escape，并受控收起菜单。
+            if (event.key === "Escape" && modeMenuOpen) {
               event.stopPropagation();
               modeMenuOpen = false;
             }
           }}
         >
-          {#each DSH_AGENT_MODES as entry (entry.id)}
-            <DropdownMenu.Item
-              data-mode-active={activeMode === entry.id ? "true" : undefined}
-              class="gap-1.5"
-              onclick={() => onModeChange(entry.id)}
-            >
-              <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                {#if activeMode === entry.id}
-                  <IconCheck class="h-3 w-3" aria-hidden="true" />
-                {/if}
-              </span>
-              <span class="truncate">{entry.label}</span>
-            </DropdownMenu.Item>
-          {/each}
-        </DropdownMenu.Content>
-      {/if}
-    </DropdownMenu.DropdownMenu>
-    <button
-      type="button"
-      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-      title={t("composer.launcherTitle")}
-      aria-label={t("composer.launcherTitle")}
-      aria-expanded={launcherOpen}
-      onclick={() => {
-        // W3 `+` 编程式启动器：无 query 全量展开；再点切换关闭（官方同语义）。
-        launcherOpen = !launcherOpen;
-        textareaEl?.focus();
-      }}
-    >
-      <IconPlus class="h-4 w-4" />
-    </button>
-    <button
-      type="button"
-      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-      title={t("composer.attachImages")}
-      aria-label={t("composer.attachImages")}
-      aria-busy={picking === "image"}
-      disabled={picking !== null}
-      onclick={() => void openPicker("image")}
-    >
-      <span class="relative flex items-center justify-center">
-        <IconImage class="h-4 w-4 {picking === 'image' ? 'opacity-0' : ''}" />
-        {#if picking === "image"}
-          <IconLoader class="absolute inset-0 m-auto h-4 w-4 animate-spin" aria-hidden="true" />
-        {/if}
-      </span>
-    </button>
-    <button
-      type="button"
-      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-      title={t("composer.attachFiles")}
-      aria-label={t("composer.attachFiles")}
-      aria-busy={picking === "file"}
-      disabled={picking !== null}
-      onclick={() => void openPicker("file")}
-    >
-      <span class="relative flex items-center justify-center">
-        <IconFileUp class="h-4 w-4 {picking === 'file' ? 'opacity-0' : ''}" />
-        {#if picking === "file"}
-          <IconLoader class="absolute inset-0 m-auto h-4 w-4 animate-spin" aria-hidden="true" />
-        {/if}
-      </span>
-    </button>
-    <div class="flex-1"></div>
-    <!-- 右簇：model chip + ContextMeter + 主按钮 -->
-    {#if modelChip}
-      <DropdownMenu.DropdownMenu bind:open={modelMenuOpen}>
-        <!-- R2：所有态 title 前置完整标签——max-w 截断后悬停仍见全名。 -->
-        <DropdownMenu.Trigger
-          class="flex h-7 max-w-[150px] items-center gap-1.5 rounded-full border px-2.5 text-[11px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 {modelChip.dangling
-            ? 'border-amber-500/60 text-amber-700 dark:text-amber-300'
-            : 'border-border text-muted-foreground hover:text-foreground'}"
-          title={modelChip.dangling
-            ? t("composer.modelDanglingTitle", { label: modelChip.label })
-            : running
-              ? t("composer.modelRunningTitle", { label: modelChip.label })
-              : t("composer.modelTitle", { label: modelChip.label })}
-          aria-label={modelChip.dangling
-            ? t("composer.modelDanglingAria", { label: modelChip.label })
-            : t("composer.modelAria")}
-          disabled={running}
-          onkeydown={(event) => {
-            // 同模式 chip：Esc 在 trigger（target 层）先占，不冒泡收起整个面板。
-            if (event.key === "Escape" && modelMenuOpen) {
-              event.stopPropagation();
-              modelMenuOpen = false;
-            }
-          }}
-        >
-          <span class="truncate">{modelChip.label}</span>
-          {#if modelChip.effort}
-            <span
-              class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
-              title={t("composer.effortTitle", { effort: modelChip.effort })}
-            ></span>
-          {/if}
+          <span class="truncate">{modeLabel ?? t("composer.modeChipFallback")}</span>
           <IconChevronDown class="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
         </DropdownMenu.Trigger>
-        <DropdownMenu.Content
-          align="end"
-          class="max-h-72 w-56 overflow-y-auto"
-          onkeydown={(event) => {
-            // 菜单打开时 Esc 归菜单所有：阻止冒泡到 AgentPanel 的 window-Escape
-            //（否则一次 Esc 连带收起整个面板；ContextMeter popover 用 role=dialog
-            // 达成同一语义，菜单 role=menu 只能在此拦截）。stopPropagation 同时
-            // 挡掉 bits-ui 的 bubble 层关闭——故显式落 open=false 走受控关闭。
-            if (event.key === "Escape") {
-              event.stopPropagation();
-              modelMenuOpen = false;
-            }
-          }}
-        >
-          {#if modelChip.dangling}
-            <DropdownMenu.Label
-              data-dangling="true"
-              class="px-2 py-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
-            >
-              {t("composer.danglingLabel", { label: modelChip.label })}
-            </DropdownMenu.Label>
-            <DropdownMenu.Separator />
-          {/if}
-          {#each routeGroups as group (group.provider)}
-            <DropdownMenu.Group>
-              <DropdownMenu.GroupHeading
-                class="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium"
+        <!-- Content 仅在本菜单 open 时挂载（bits-ui 本就如此；显式门控让菜单内容
+             的存在与 modeMenuOpen 同步——测试桩的开合态是共享单例，无门控时模式
+             菜单内容会先于 model 菜单落 DOM，干扰既有 model chip 组件测试）。 -->
+        {#if modeMenuOpen}
+          <DropdownMenu.Content
+            align="start"
+            class="max-h-72 w-44 overflow-y-auto"
+            onkeydown={(event) => {
+              // 菜单打开时 Esc 归菜单所有（与 model chip 同语义）：阻止冒泡到
+              // AgentPanel 的 window-Escape，并显式落 open=false 走受控关闭。
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                modeMenuOpen = false;
+              }
+            }}
+          >
+            {#each DSH_AGENT_MODES as entry (entry.id)}
+              <DropdownMenu.Item
+                data-mode-active={activeMode === entry.id ? "true" : undefined}
+                class="gap-1.5"
+                onclick={() => onModeChange(entry.id)}
               >
-                <span
-                  class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-[8px] font-semibold text-white"
-                  style="background: {group.color}"
-                  aria-hidden="true"
-                >
-                  {group.letter}
+                <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                  {#if activeMode === entry.id}
+                    <IconCheck class="h-3 w-3" aria-hidden="true" />
+                  {/if}
                 </span>
-                <span class="truncate">{group.label}</span>
-              </DropdownMenu.GroupHeading>
-              {#each group.models as id (id)}
-                <DropdownMenu.Item
-                  data-model-active={isModelActive(group.provider, id) ? "true" : undefined}
-                  class="gap-1.5"
-                  onclick={() => void selectModel(group.provider, id)}
-                >
-                  <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    {#if isModelActive(group.provider, id)}
-                      <IconCheck class="h-3 w-3" aria-hidden="true" />
-                    {/if}
-                  </span>
-                  <span class="truncate">{id}</span>
-                </DropdownMenu.Item>
-              {/each}
-            </DropdownMenu.Group>
-            <DropdownMenu.Separator />
-          {/each}
-          <DropdownMenu.Item onclick={() => openSettings("model")}>
-            {t("composer.openSettings")}
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
+                <span class="truncate">{entry.label}</span>
+              </DropdownMenu.Item>
+            {/each}
+          </DropdownMenu.Content>
+        {/if}
       </DropdownMenu.DropdownMenu>
-    {/if}
-    <ContextMeter />
-    <button
-      type="button"
-      class="relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full transition-colors after:absolute after:-inset-0.5 after:content-[''] {primaryMode ===
-      'stop'
-        ? 'bg-destructive text-white hover:bg-destructive/90'
-        : primaryMode === 'queue' || primaryMode === 'steer'
-          ? 'bg-primary/85 text-primary-foreground hover:bg-primary'
-          : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'}"
-      aria-label={primaryMode === "stop"
-        ? t("composer.stopAria")
-        : primaryMode === "queue"
-          ? t("composer.queueAria")
-          : primaryMode === "steer"
-            ? t("composer.steerAria")
-            : t("composer.sendAria")}
-      title={primaryMode === "stop"
-        ? t("composer.stopTitle")
-        : primaryMode === "queue"
-          ? t("composer.queueTitle")
-          : primaryMode === "steer"
-            ? t("composer.steerTitle")
-            : t("composer.sendTitle")}
-      disabled={primaryMode !== "stop" && (!hasDraft || agentSession.sending)}
-      onclick={() =>
-        primaryMode === "stop"
-          ? void cancelAgentSession()
-          : submit(primaryMode === "steer" && busyEnterPreference() === "queue")}
-    >
-      {#if primaryMode === "stop"}
-        <IconStop class="h-3 w-3" />
-      {:else if primaryMode === "queue"}
-        <IconListPlus class="h-4 w-4" />
-      {:else if primaryMode === "steer"}
-        <IconSplit class="h-4 w-4" />
-      {:else}
-        <IconSend class="h-4 w-4" />
+    </div>
+    <div class="min-w-2 flex-1"></div>
+    <!-- 右簇：model 胶囊（min-w 收缩 + 渐隐）+ ContextMeter + 发送/queue 主按钮。 -->
+    <div class="flex min-w-0 items-center justify-end gap-1" data-composer-group="right">
+      {#if modelChip}
+        <DropdownMenu.DropdownMenu bind:open={modelMenuOpen}>
+          <!-- R2：所有态 title 前置完整标签——max-w 截断后悬停仍见全名。 -->
+          <DropdownMenu.Trigger
+            class="flex h-7 min-w-0 max-w-[150px] shrink items-center gap-1.5 rounded-full border px-2.5 text-[11px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 {modelChip.dangling
+              ? 'border-amber-500/60 text-amber-700 dark:text-amber-300'
+              : 'border-border text-muted-foreground hover:text-foreground'}"
+            title={modelChip.dangling
+              ? t("composer.modelDanglingTitle", { label: modelChip.label })
+              : running
+                ? t("composer.modelRunningTitle", { label: modelChip.label })
+                : t("composer.modelTitle", { label: modelChip.label })}
+            aria-label={modelChip.dangling
+              ? t("composer.modelDanglingAria", { label: modelChip.label })
+              : t("composer.modelAria")}
+            disabled={running}
+            data-model-capsule="true"
+            onkeydown={(event) => {
+              // 同模式 chip：Esc 在 trigger（target 层）先占，不冒泡收起整个面板。
+              if (event.key === "Escape" && modelMenuOpen) {
+                event.stopPropagation();
+                modelMenuOpen = false;
+              }
+            }}
+          >
+            <!-- 1.7 截断根治：溢出时渐隐（非硬截断）；完整名在 title/aria。 -->
+            <span
+              bind:this={modelLabelEl}
+              class="composer-capsule-label {modelLabelOverflows
+                ? 'composer-capsule-label-faded'
+                : ''}">{modelChip.label}</span
+            >
+            {#if modelChip.effort}
+              <span
+                class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
+                title={t("composer.effortTitle", { effort: modelChip.effort })}
+              ></span>
+            {/if}
+            <IconChevronDown class="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content
+            align="end"
+            class="max-h-72 w-56 overflow-y-auto"
+            onkeydown={(event) => {
+              // 菜单打开时 Esc 归菜单所有：阻止冒泡到 AgentPanel 的 window-Escape
+              //（否则一次 Esc 连带收起整个面板；ContextMeter popover 用 role=dialog
+              // 达成同一语义，菜单 role=menu 只能在此拦截）。stopPropagation 同时
+              // 挡掉 bits-ui 的 bubble 层关闭——故显式落 open=false 走受控关闭。
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                modelMenuOpen = false;
+              }
+            }}
+          >
+            {#if modelChip.dangling}
+              <DropdownMenu.Label
+                data-dangling="true"
+                class="px-2 py-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+              >
+                {t("composer.danglingLabel", { label: modelChip.label })}
+              </DropdownMenu.Label>
+              <DropdownMenu.Separator />
+            {/if}
+            {#each routeGroups as group (group.provider)}
+              <DropdownMenu.Group>
+                <DropdownMenu.GroupHeading
+                  class="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium"
+                >
+                  <span
+                    class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-[8px] font-semibold text-white"
+                    style="background: {group.color}"
+                    aria-hidden="true"
+                  >
+                    {group.letter}
+                  </span>
+                  <span class="truncate">{group.label}</span>
+                </DropdownMenu.GroupHeading>
+                {#each group.models as id (id)}
+                  <DropdownMenu.Item
+                    data-model-active={isModelActive(group.provider, id) ? "true" : undefined}
+                    class="gap-1.5"
+                    onclick={() => void selectModel(group.provider, id)}
+                  >
+                    <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                      {#if isModelActive(group.provider, id)}
+                        <IconCheck class="h-3 w-3" aria-hidden="true" />
+                      {/if}
+                    </span>
+                    <span class="truncate">{id}</span>
+                  </DropdownMenu.Item>
+                {/each}
+              </DropdownMenu.Group>
+              <DropdownMenu.Separator />
+            {/each}
+            <DropdownMenu.Item onclick={() => openSettings("model")}>
+              {t("composer.openSettings")}
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.DropdownMenu>
       {/if}
-    </button>
+      <ContextMeter />
+      <button
+        type="button"
+        class="relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full transition-colors after:absolute after:-inset-0.5 after:content-[''] {primaryMode ===
+        'stop'
+          ? 'bg-destructive text-white hover:bg-destructive/90'
+          : primaryMode === 'queue' || primaryMode === 'steer'
+            ? 'bg-primary/85 text-primary-foreground hover:bg-primary'
+            : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'}"
+        aria-label={primaryMode === "stop"
+          ? t("composer.stopAria")
+          : primaryMode === "queue"
+            ? t("composer.queueAria")
+            : primaryMode === "steer"
+              ? t("composer.steerAria")
+              : t("composer.sendAria")}
+        title={primaryMode === "stop"
+          ? t("composer.stopTitle")
+          : primaryMode === "queue"
+            ? t("composer.queueTitle")
+            : primaryMode === "steer"
+              ? t("composer.steerTitle")
+              : t("composer.sendTitle")}
+        disabled={primaryMode !== "stop" && (!hasDraft || agentSession.sending)}
+        onclick={() =>
+          primaryMode === "stop"
+            ? void cancelAgentSession()
+            : submit(primaryMode === "steer" && busyEnterPreference() === "queue")}
+      >
+        {#if primaryMode === "stop"}
+          <IconStop class="h-3 w-3" />
+        {:else if primaryMode === "queue"}
+          <IconListPlus class="h-4 w-4" />
+        {:else if primaryMode === "steer"}
+          <IconSplit class="h-4 w-4" />
+        {:else}
+          <IconSend class="h-4 w-4" />
+        {/if}
+      </button>
+    </div>
   </div>
 </div>
+
+<style>
+  /* 模型胶囊标签（1.7 截断根治）：溢出时右缘渐隐（mask），非溢出零衰减——
+     溢出判定在 script 层按真实度量（scrollWidth > clientWidth）切换 faded。 */
+  .composer-capsule-label {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .composer-capsule-label-faded {
+    mask-image: linear-gradient(to right, black calc(100% - 14px), transparent);
+    -webkit-mask-image: linear-gradient(to right, black calc(100% - 14px), transparent);
+  }
+</style>

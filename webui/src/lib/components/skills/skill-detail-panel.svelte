@@ -6,9 +6,11 @@
   1. 只读文档详情：frontmatter 解析表 + markdown 正文渲染（skills.info，组件级
      $state + request-generation gate，不跨渲染周期缓存）。
   2. 管理动作：Validate / Update check（只读检查，apply 不在此面）/ Toggle
-     （skills.toggle = skills 域唯一写 RPC）/ Chat about this skill（按钮位，动作
-     归 creator-agent-chat 后续批次）/ Edit in Creator 深链 / Insights 深链
-     （workspaces.intelligence 与 Agents screen 同链）。
+     （skills.toggle = skills 域唯一写 RPC）/ Chat about this skill
+     （creator-agent-chat 1.4 实装：resume 键 = target + seedSkill 精确匹配，
+     命中续聊 / 无匹配新建携带技能上下文——agent 域动作，非 skills 域写）/
+     Edit in Creator 深链 / Insights 深链（workspaces.intelligence 与
+     Agents screen 同链）。
   3. 零编辑写：无 creator.save/delete 调用；除 skills.toggle 外零写 RPC
      （design §7 源扫描断言面）。
   4. 窄屏返回触发行恢复由父级（skills screen）管理；本组件只回调 onBack。
@@ -29,6 +31,7 @@
   import type { WorkspaceProviderTarget } from "$shared/contracts/workspaces.js";
   import { splitSkillContent, renderSkillBody } from "$lib/render-skill-md";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
+  import { startSkillChat } from "$lib/apps/creator/skill-chat-action.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import IconCheck from "@lucide/svelte/icons/circle-check";
@@ -181,6 +184,19 @@
     } finally {
       checkingUpdate = false;
     }
+  }
+
+  // Chat about this skill（1.4）：agent 域入口——resume 键在 action 内解析
+  // （target + seedSkill 精确匹配）；本面不持会话逻辑。
+  function handleChatAbout(): void {
+    const current = detail;
+    if (!current) return;
+    void startSkillChat({
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillId: current.id,
+      skillName: current.name,
+    });
   }
 </script>
 
@@ -373,19 +389,18 @@
         {/if}
       </section>
 
-      <!-- Chat about this skill：按钮位（动作归 creator-agent-chat 后续批次，design §2 r3）。 -->
+      <!-- Chat about this skill（creator-agent-chat 1.4）：resume/新建两态在 action 内裁决。 -->
       <section class="mb-4">
         <button
           type="button"
-          disabled
-          class="flex w-full items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-left text-xs text-muted-foreground"
-          title={t("skillDetail.chatSoonTitle")}
+          class="relative flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-xs transition-colors after:absolute after:-inset-1 after:content-[''] hover:border-primary/40 hover:bg-muted/50"
+          title={t("skillDetail.chatTitle")}
+          aria-label={t("skillDetail.chatTitle")}
+          data-skill-chat-entry="true"
+          onclick={handleChatAbout}
         >
           <IconMessage class="h-3.5 w-3.5 shrink-0" />
           <span class="min-w-0 flex-1 truncate">{t("skillDetail.chatAbout")}</span>
-          <span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-            {t("skillDetail.chatSoonBadge")}
-          </span>
         </button>
       </section>
 

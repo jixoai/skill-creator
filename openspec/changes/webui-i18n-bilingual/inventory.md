@@ -54,12 +54,12 @@ token、`$`/`@`/`/` 触发符）、daemon 透传错误原文（后端消息翻�
 | `routes/+layout.svelte`（顶栏 Refresh/Agent 按钮 aria）                                                                                                                             | 顶栏重构                                                      | 同上                                                                                                                                                                                                                                            |
 | `src/app.html`                                                                                                                                                                      | shell 属地                                                    | 不改（lang 由 i18n store 运行时同步，已生效）                                                                                                                                                                                                   |
 | `apps/workspaces/**`（WorkspacesHome/ProviderView/IntelligenceView/finding-propose-templates）                                                                                      | → skills-dashboard（**已完成**，见 5.2）                      | **冒烟锚点已迁**：`dashboard.librarySnapshot` en 值逐字 `"{skills} skills across {providers} agent locations."`（Global 页脚 sr-only；web-mode-smoke 正则仍绿）；ProviderView 行内轻量编辑退役未迁移；IntelligenceView 本体文案仍为 B（后续批） |
-| `apps/creator/**`（CreatorHome/CreatorWorkspace/manifest）                                                                                                                          | Creator AgentChat 化                                          | 整面文案随新形态重写后入词典                                                                                                                                                                                                                    |
+| `apps/creator/**`（CreatorHome/CreatorWorkspace/manifest）                                                                                                                          | Creator AgentChat 化（**已完成**，见 5.4）                    | 整面文案随新形态重写后入词典（creatorHome/creatorChat/creatorEditor/creatorTabs 域）                                                                                                                                                            |
 | `apps/repository/**`（RepositoryHome/RepositoryScan/manifest）                                                                                                                      | 迁入 dashboard（**已完成**，见 5.2 reposScreen/reposScan 域） | 扫描/安装状态文案族（AGENTS §7.2 可区分性要求）已随迁词典化；目录已删除                                                                                                                                                                         |
 | `apps/settings/manifest.ts`                                                                                                                                                         | settings tab 化                                               | manifest 元数据文案 key 化                                                                                                                                                                                                                      |
 | `components/creator/eval-view.svelte`                                                                                                                                               | → 独立 evaluating app                                         | 已迁移（2026-10-03 文件删除，转 C 类 5.3）                                                                                                                                                                                                      |
 | `components/import-workspace-dialog.svelte`                                                                                                                                         | 挪顶栏                                                        | 随顶栏批迁移                                                                                                                                                                                                                                    |
-| `components/creator/**` 其余（change-log/file-browser/markdown-editor/preview/sub-view-tabs/test-* /validation-view）                                                               | 随 Creator AgentChat 化                                       | 随 Creator 批迁移                                                                                                                                                                                                                               |
+| `components/creator/**` 其余（change-log/file-browser/markdown-editor/preview/sub-view-tabs/test-* /validation-view）                                                               | 随 Creator AgentChat 化                                       | sub-view-tabs 已随 5.4 词典化（creatorTabs 域）；change-log/file-browser/markdown-editor/preview/validation-view 的残留英文仍为 B（编辑页子视图，非本 change 的 AgentChat 面，后续小批收尾）                                                    |
 
 toast 消息的 B 类调用点（repository/creator/workspaces 各 store 与组件）随各自批次
 词典化；本轮这些 toast 仍输出英文原文（默认 locale 下无行为差异）。
@@ -125,6 +125,23 @@ terminal、omnibox——出生约定：第一 commit 起文案只写词典
 
 计数更新：evaluating 批新增 **113 key**（en=zh；`evaluating.*` 单域）。`components/
 creator/eval-view.svelte` 已删除（B 类行退役）——迁移源文案全部并入 evaluating 域。
+
+### 5.4 已出生（creator-agent-chat 2026-10-03）
+
+| 面                                                             | key 域                                          | key 数（en=zh） | 备注                                                                                      |
+| -------------------------------------------------------------- | ----------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| `apps/creator/CreatorHome.svelte`（重写：会话工作台 + 引导卡） | creatorHome                                     | 25              | capture 三输入/模板 seed 选项/Global 空态引导；会话行 Edit 深链 aria                      |
+| `apps/creator/CreatorChat.svelte`（SessionFace 复用 + 护栏轨） | creatorChat                                     | 28              | 循环阶段 chip（提示性）/测试话术建议/草稿产出卡（Save via proposal）/双挂载拖放去重妥协面 |
+| `apps/creator/CreatorWorkspace.svelte`（二级编辑页残留收编）   | creatorEditor                                   | 9               | 「View evaluation」硬编码 en 入词典（E 批遗留）+ 页头标题/复制 toast/非法 target          |
+| `components/creator/sub-view-tabs.svelte`                      | creatorTabs                                     | 4               | file/history/preview/validate 四子视图标签                                                |
+| `components/skills/skill-detail-panel.svelte`（Chat 入口实装） | skillDetail（chatSoon* 2 key 退役，+chatTitle） | +1/-2           | chatSoonTitle/chatSoonBadge 删除；chatTitle = Chat 入口 tooltip（resume 语义）            |
+| `components/agent/ComposerCard.svelte`（1.7 底排重组，共用面） | （零新 key）                                    | 0               | 复用 composer.* 既有键；分组/胶囊纯结构改动                                               |
+
+计数更新：creator-agent-chat 批新增 **66 key**（creatorHome 25 + creatorChat 28
+
+- creatorEditor 9 + creatorTabs 4；en=zh；skillDetail 净 -1：+chatTitle/-chatSoon×2）。
+  B 类 creator 面标记完成（apps/creator/** 全量 + sub-view-tabs）；components/creator
+  其余子视图残留文案仍为 B，留后续小批。
 
 ## 6. 计数汇总
 

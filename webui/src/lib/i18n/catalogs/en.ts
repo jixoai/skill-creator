@@ -641,13 +641,91 @@ export const en = {
   "skillDetail.updateFailed": "failed",
   "skillDetail.updateUnavailable": "unavailable",
   "skillDetail.chatAbout": "Chat about this skill",
-  "skillDetail.chatSoonTitle": "Coming soon — chat about this skill with the agent",
-  "skillDetail.chatSoonBadge": "soon",
+  "skillDetail.chatTitle":
+    "Chat about this skill — continues the latest session seeded with this skill",
   "skillDetail.frontmatter": "Frontmatter",
   "skillDetail.emptyBody": "This SKILL.md has no body content.",
   "skillDetail.unknownError": "unknown error",
   "skillDetail.alreadyEnabled": "already enabled.",
   "skillDetail.alreadyDisabled": "already disabled.",
+
+  /** ---------- Creator 首屏（会话工作台 + capture 引导卡 + Global 空态；creator-agent-chat 1.1/1.5/1.8） ---------- */
+  "creatorHome.title": "Creator",
+  "creatorHome.subtitle": "Write skills with the agent — capture, draft, test, review, improve.",
+  "creatorHome.sessionsHeader": "Creation sessions",
+  "creatorHome.sessionsLoading": "Loading sessions…",
+  "creatorHome.sessionsEmpty":
+    "No creation sessions in this workspace yet. Start one below, or use Chat about this skill from a skill's detail.",
+  "creatorHome.newCreation": "New skill",
+  "creatorHome.sessionEditTitle": "Edit the seeded skill in the Creator editor",
+  "creatorHome.guideTitle": "Start a new skill",
+  "creatorHome.guideIntro":
+    "Describe what you want — the agent drafts the SKILL.md and walks the loop with you.",
+  "creatorHome.loopHint": "capture → draft → test → review → improve",
+  "creatorHome.intentLabel": "What should it enable the model to do?",
+  "creatorHome.intentPlaceholder": "e.g. Turn a repeated deployment workflow into a reusable skill",
+  "creatorHome.triggerLabel": "When should it trigger? (optional)",
+  "creatorHome.triggerPlaceholder":
+    "e.g. Whenever I mention shipping a release or cutting a version",
+  "creatorHome.examplesLabel": "Example inputs and expected outputs (optional)",
+  "creatorHome.examplesPlaceholder": "One example per line: input → expected output",
+  "creatorHome.templateLabel": "Start from a template (optional)",
+  "creatorHome.templateNone": "No template — start blank",
+  "creatorHome.startDraft": "Let the agent draft it",
+  "creatorHome.startDraftTitle":
+    "Seeds a structured first prompt; nothing is sent until you press Enter.",
+  "creatorHome.globalTitle": "Create skills in an imported workspace",
+  "creatorHome.globalBody":
+    "The Global workspace is read-only for creation. Switch to an imported workspace to start a creation session.",
+  "creatorHome.globalNone":
+    "No imported workspaces yet — import a directory from the Workspaces tab first.",
+
+  /** ---------- Creator 会话面（护栏轨 + 话术建议 + 草稿卡；creator-agent-chat 1.2/1.3） ---------- */
+  "creatorChat.stageRailAria": "Creation loop stages",
+  "creatorChat.stageCapture": "Capture",
+  "creatorChat.stageDraft": "Draft",
+  "creatorChat.stageTest": "Test",
+  "creatorChat.stageReview": "Review",
+  "creatorChat.stageImprove": "Improve",
+  "creatorChat.stageHint": "Advisory stage marker — chat freely at any point",
+  "creatorChat.suggestTests": "Suggest test prompts",
+  "creatorChat.suggestTestsTitle":
+    "Ask the agent for 2–3 realistic test prompts for the current draft",
+  "creatorChat.suggestionsTitle":
+    "Suggested test prompts — click to open the evaluating case draft",
+  "creatorChat.suggestionChipTitle": "Open this skill's evaluating detail to add the case draft",
+  "creatorChat.suggestionNoSkill":
+    "Save the skill first — evaluating cases need an existing skill.",
+  "creatorChat.draftDockAria": "Skill drafts from this session",
+  "creatorChat.draftModeCreate": "create",
+  "creatorChat.draftModeUpdate": "update",
+  "creatorChat.draftRevisionTitle": "Expected revision (revision gate)",
+  "creatorChat.draftExpand": "Show draft",
+  "creatorChat.draftCollapse": "Collapse draft",
+  "creatorChat.draftSave": "Save via proposal",
+  "creatorChat.draftReject": "Reject",
+  "creatorChat.draftSaved": "Saved",
+  "creatorChat.draftRejected": "Rejected",
+  "creatorChat.draftFailed": "Save failed",
+  "creatorChat.draftWaitingProposal": "Waiting for proposal…",
+  "creatorChat.draftNoProposal": "No proposal id in the result — approve in the Agent panel.",
+  "creatorChat.draftEditInEditor": "Edit in Creator",
+  "creatorChat.draftEditNewHint": "Editor deep link needs a saved skill (update draft).",
+
+  /** ---------- Creator 编辑页（二级工作页残留文案入词典；creator-agent-chat 1.9） ---------- */
+  "creatorEditor.newSkillTitle": "New skill",
+  "creatorEditor.untitledSkill": "Skill",
+  "creatorEditor.invalidTarget": "Invalid workspace target.",
+  "creatorEditor.viewEvaluation": "View evaluation",
+  "creatorEditor.viewEvaluationTitle": "View this skill's evaluation corpus",
+  "creatorEditor.copyWorkspaceIdTitle": "Copy workspace id: {id}",
+  "creatorEditor.copySkillIdTitle": "Copy skill id: {id}",
+  "creatorEditor.copiedToast": "{label} copied.",
+  "creatorEditor.copyFailedToast": "Copy failed — clipboard unavailable.",
+  "creatorTabs.file": "File",
+  "creatorTabs.history": "History",
+  "creatorTabs.preview": "Preview",
+  "creatorTabs.validate": "Validate",
 } as const;
 
 export type EnCatalog = typeof en;

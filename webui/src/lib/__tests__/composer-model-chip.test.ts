@@ -298,3 +298,53 @@ describe("ComposerCard model chip dropdown (B2)", () => {
     ctx.cleanup();
   });
 });
+
+describe("ComposerCard bottom toolbar regrouping (creator-agent-chat 1.7)", () => {
+  it("groups the toolbar into left/center/right with the mode chip centered", () => {
+    resetAgentStoreStub(view(ROUTES, { provider: "zai", model: "glm-4.7" }));
+    const ctx = mountComposer();
+
+    const toolbar = document.querySelector("[data-composer-toolbar='true']");
+    expect(toolbar).not.toBeNull();
+    const groups = [...toolbar!.querySelectorAll("[data-composer-group]")].map((node) =>
+      node.getAttribute("data-composer-group"),
+    );
+    expect(groups).toEqual(["left", "center", "right"]);
+
+    // 左簇 = 引用族（+ 启动器 + 图片/文件附件）；模式 chip 归中。
+    const left = toolbar!.querySelector("[data-composer-group='left']")!;
+    const leftArias = [...left.querySelectorAll("button[aria-label]")].map((n) =>
+      n.getAttribute("aria-label"),
+    );
+    expect(leftArias.some((label) => label?.startsWith("Attach images"))).toBe(true);
+    expect(leftArias.some((label) => label?.startsWith("Attach files"))).toBe(true);
+    expect(left.querySelector("button[aria-label='Session mode']")).toBeNull();
+
+    const center = toolbar!.querySelector("[data-composer-group='center']")!;
+    expect(center.querySelector("button[aria-label='Session mode']")).not.toBeNull();
+
+    // 右簇 = model 胶囊 + 发送主按钮。
+    const right = toolbar!.querySelector("[data-composer-group='right']")!;
+    expect(right.querySelector("[data-model-capsule='true']")).not.toBeNull();
+    expect(right.querySelector("button[aria-label^='Send message']")).not.toBeNull();
+    ctx.cleanup();
+  });
+
+  it("root-fixes the model capsule truncation (min-w shrink + conditional fade + full title)", () => {
+    resetAgentStoreStub(view(ROUTES, { provider: "zai", model: "glm-4.7" }));
+    const ctx = mountComposer();
+
+    const capsule = document.querySelector<HTMLButtonElement>("[data-model-capsule='true']");
+    expect(capsule).not.toBeNull();
+    // flex min-w：胶囊可随右簇收缩（不再硬顶布局）。
+    expect(capsule!.className).toContain("min-w-0");
+    // 渐隐替代硬截断：标签不再用 truncate（溢出时由 faded 类挂 mask）。
+    const label = capsule!.querySelector(".composer-capsule-label");
+    expect(label).not.toBeNull();
+    expect(label!.className).not.toContain("truncate");
+    expect(label!.className).not.toContain("composer-capsule-label-faded");
+    // title 全名（R2 既有语义保持）。
+    expect(capsule!.title).toContain("zai · glm-4.7");
+    ctx.cleanup();
+  });
+});

@@ -8,6 +8,7 @@
   import { useSearch } from "$lib/shell";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { t } from "$lib/i18n";
   import IconFile from "@lucide/svelte/icons/file-text";
   import IconHistory from "@lucide/svelte/icons/history";
   import IconEye from "@lucide/svelte/icons/eye";
@@ -16,11 +17,11 @@
 
   type SubView = "file" | "log" | "preview" | "validate";
 
-  const TABS: Array<{ id: SubView; label: string; icon: Component }> = [
-    { id: "file", label: "File", icon: IconFile },
-    { id: "log", label: "History", icon: IconHistory },
-    { id: "preview", label: "Preview", icon: IconEye },
-    { id: "validate", label: "Validate", icon: IconCheck },
+  const TABS: Array<{ id: SubView; labelKey: Parameters<typeof t>[0]; icon: Component }> = [
+    { id: "file", labelKey: "creatorTabs.file", icon: IconFile },
+    { id: "log", labelKey: "creatorTabs.history", icon: IconHistory },
+    { id: "preview", labelKey: "creatorTabs.preview", icon: IconEye },
+    { id: "validate", labelKey: "creatorTabs.validate", icon: IconCheck },
   ];
 
   const getSearch = useSearch<{ subview?: SubView }>();
@@ -43,7 +44,7 @@
       onclick={() => switchView(tab.id)}
     >
       <tab.icon class="h-3.5 w-3.5" />
-      {tab.label}
+      {t(tab.labelKey)}
     </button>
   {/each}
 </div>

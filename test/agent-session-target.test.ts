@@ -209,6 +209,23 @@ describe("Scenario: target 与 seedSkill 的 summary 投影", () => {
     expect(meta?.target).toEqual({ workspaceId: WS_A, providerId: PROVIDER_ZCODE });
   });
 
+  it("projects seedSkill for skill-chat seed (creator-agent-chat resume 环闭环)", async () => {
+    const harness = makeService();
+    const created = await harness.service.create({
+      target: { workspaceId: WS_A, providerId: PROVIDER_ZCODE },
+      metadata: {
+        kind: "skill-chat",
+        workspaceId: WS_A,
+        providerId: PROVIDER_ZCODE,
+        skillId: SEED_METADATA.skillId,
+      },
+    });
+    expect(created.seedSkill).toBe(SEED_METADATA.skillId);
+    expect(
+      harness.service.list().find((item) => item.sessionId === created.sessionId)?.seedSkill,
+    ).toBe(SEED_METADATA.skillId);
+  });
+
   it("projects seedSkill=null (not absent) for sessions without a seed", async () => {
     const harness = makeService();
     const created = await harness.service.create({ target: { workspaceId: WS_A } });

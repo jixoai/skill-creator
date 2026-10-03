@@ -535,6 +535,50 @@ export function seedAgentTestRun(
 }
 
 /**
+ * 技能维度 chat 会话 seed（creator-agent-chat 1.4 r3 补线）：落 transcript meta
+ * （kind=skill-chat 三元组）——summary.seedSkill 投影由此闭环，「chat→再 chat→
+ * resume」环与 CreatorHome 列表过滤（seedSkill 非 null）共享同一数据面。
+ */
+export function seedSkillChat(seed: {
+  workspaceId: WorkspaceId;
+  providerId: ProviderId;
+  skillId: SkillId;
+  skillName: string;
+  /** 引言文本（调用方构建——apps 层产物不进 store 依赖）。 */
+  intro: string;
+  cwd?: string;
+}): void {
+  beginNewAgentSession({
+    target: { workspaceId: seed.workspaceId, providerId: seed.providerId },
+    ...(seed.cwd !== undefined ? { cwd: seed.cwd } : {}),
+  });
+  agentPanel.open = true;
+  const metadata: AgentSessionSeedMetadata = {
+    kind: "skill-chat",
+    workspaceId: seed.workspaceId,
+    providerId: seed.providerId,
+    skillId: seed.skillId,
+  };
+  agentPanel.seed = {
+    text: seed.intro,
+    reference: {
+      kind: "skill",
+      token: `$${seed.skillName}`,
+      target: seed.skillId as string,
+      label: seed.skillName,
+      skill: {
+        workspaceId: seed.workspaceId,
+        providerId: seed.providerId,
+        skillId: seed.skillId,
+      },
+    },
+    metadata,
+  };
+  pendingSeedMetadata = metadata;
+  agentSession.pendingMode = "free";
+}
+
+/**
  * 进入 New Session 空态（R12-B 8）：退出当前会话视图（内核会话与列表不动），
  * 不创建任何会话——创建只发生在首条消息发出时（sendAgentPrompt 惰性建会话）。
  * pendingMode 复位 free：空态默认选中 General。

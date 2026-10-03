@@ -98,6 +98,30 @@ describe("Page manifests", () => {
     );
   });
 
+  it("rejects retired Creator subviews while accepting the frozen four (creator-agent-chat 1.5)", () => {
+    const activity = creatorApp.manifest.activities[1]!;
+    // 退役的 test/eval 子视图（evaluating-dashboard 1.4）不得再被 search 收窄接受。
+    for (const retired of ["?subview=test", "?subview=eval"]) {
+      const matched = matchRouteTree(
+        activity.root as never,
+        `/w/${WS}/creator/edit/claude-code/${SKILL}`,
+        retired,
+        activity.pattern,
+      );
+      expect(matched.kind).toBe("parse-error");
+      expect(matched.kind === "parse-error" && matched.reason).toBe("search");
+    }
+    for (const live of ["?subview=file", "?subview=log", "?subview=preview", "?subview=validate"]) {
+      const matched = matchRouteTree(
+        activity.root as never,
+        `/w/${WS}/creator/edit/claude-code/${SKILL}`,
+        live,
+        activity.pattern,
+      );
+      expect(matched.kind).toBe("matched");
+    }
+  });
+
   it("matches Wiki, Evaluating, Agent, and Settings Page roots", () => {
     expectActivity(wikiApp, "/w/~/wiki", "", "wiki.scope");
     expectActivity(evaluatingApp, `/w/${WS}/evaluating`, "", "evaluating.home");

@@ -109,6 +109,14 @@ export const AgentSessionSeedMetadataSchema = z.discriminatedUnion("kind", [
     templateId: z.string().min(1),
     templateVersion: z.number().int().positive(),
   }),
+  z.strictObject({
+    /** creator-agent-chat：技能维度 chat 会话的 seed（resume 查找键 = target
+     * + seedSkill 精确匹配；无 revision 约束——chat 不绑定文档版本）。 */
+    kind: z.literal("skill-chat"),
+    workspaceId: WorkspaceIdSchema,
+    providerId: ProviderIdSchema,
+    skillId: SkillIdSchema,
+  }),
 ]);
 /** 会话 seed 元数据。 */
 export type AgentSessionSeedMetadata = z.infer<typeof AgentSessionSeedMetadataSchema>;
