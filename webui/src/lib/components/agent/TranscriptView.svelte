@@ -40,6 +40,13 @@
   import "markstream-svelte/index.css";
   import "./agent-flow.css";
 
+  /**
+   * 会话呈现面注入（skills-agent-page 1.4 session-face 组件族）：编辑回填后
+   * 聚焦本面 composer 的句柄。缺省（不在 SessionFace 内独立挂载时）回退全局
+   * data 锚点——同一组件在面板与 Agent 页两呈现面下行为一致。
+   */
+  let { focusComposer }: { focusComposer?: () => void } = $props();
+
   let scrollBody = $state<HTMLElement | null>(null);
   /** 折叠态行（thinking/tool）的 per-seq 展开表（streaming 态强制开）。 */
   let openItems = $state<Record<number, boolean>>({});
@@ -104,7 +111,12 @@
   function editIntoComposer(text: string): void {
     // §4.3：编辑重发不截断历史（append-only）——注记条 + placeholder 由 editing 态表达。
     beginComposerEdit(text);
-    // locale 无关锚点（aria-label 文案随语言变化，data 属性稳定）。
+    // 聚焦本呈现面的 composer（skills-agent-page 1.4：面注入句柄；未注入时
+    // 回退 data 锚点，行为兼容独立挂载）。
+    if (focusComposer !== undefined) {
+      focusComposer();
+      return;
+    }
     document.querySelector<HTMLTextAreaElement>("aside[data-agent-panel] textarea")?.focus();
   }
 

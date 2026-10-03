@@ -1,79 +1,89 @@
 <!--
   用户原始需求 [2026-09-08]：「我们可以简单理解成，我们在 skill creator 的右侧
   嵌入了一个聊天对话框。」——2026-09-12 redesign §3.3：面板拆分为 AgentHeader /
-  TranscriptView / ComposerCard 后，AgentPanel 收敛为容器（drawer 编排 + 数据
-  接线），行渲染器与 header 语义见对应组件。——2026-09-13 R17-C：面板常驻挂载
-  （开关=收起不销毁，开合不清草稿）；≥720px 宽度可拖拽（320–720px，左缘拖柄，
-  sessionStorage 持久）；<720px 抽屉全屏覆盖（收起 translate 退场）。
+  TranscriptView / ComposerCard 后，AgentPanel 收敛为容器（编排 + 数据接线）。
+  ——2026-09-13 R17-C：面板常驻挂载（开关=收起不销毁，开合不清草稿）；≥720px
+  宽度可拖拽（320–720px，左缘拖柄）；<720px 抽屉全屏覆盖。
+  ——2026-10-03（skills-agent-page 1.7）：shell 级 drawer 退役——面板迁为
+  workspace 页右侧 attach（+layout 挂载层按 activePageKind === "workspace" 闸）；
+  内容 = 本 ws 会话列表（target.workspaceId 过滤，零新 RPC）+ 会话面
+  （SessionFace，1.4 组件族——与 Agent 页双消费同一份）；「在 Agent 页打开」
+  深链（/agent?session=）+ 同 session 双开角标（agentPageSessionId 数据面）。
   正交意图：
-  1. shell 级右栏 drawer：≥720px 常驻侧栏（宽度 = agentPanel.width，inline CSS
-     var + 媒体断点消费），<720px 单屏覆盖；跨 tab 存活（挂载于 +layout，状态
-     在 module store）。Esc 收起（模态打开时让位）；面板级 drop 分流；首次打开
-     惰性加载配置；首屏种子注入；resize 拖拽（pointer 捕获
-     + window move/up，拖拽中禁 body 选择并关闭 width 过渡保跟手）。
-     R17-A：草稿按 sessionId 分轨，挂载/开合不重置（清轨点在 store 侧收窄为
-     显式新建与发送成功）。
-  2. 面板纵向编排：TranscriptView → 错误条 → TodoDock → edit-mode 注记条 →
-     ComposerCard（§3.1 骨架顺序）。
+  1. attach 容器：≥720px 常驻侧栏（宽度 = agentPanel.width，DevicePrefs 持久），
+     <720px 单屏覆盖；Esc 收起（模态打开时让位）；resize 拖拽（pointer 捕获）。
+     R17-A：草稿按 sessionId 分轨，挂载/开合不重置。
+  2. 面板纵向编排：ws 会话列表（compact）→ SessionFace（transcript/composer
+     编排收敛在 1.4 组件族内）。
   妥协声明：无（各分片语义在子组件内自持）。
 -->
 <script lang="ts">
   import IconX from "@lucide/svelte/icons/x";
+  import IconPlus from "@lucide/svelte/icons/plus";
+  import IconExternalLink from "@lucide/svelte/icons/external-link";
+  import IconPanelsTopLeft from "@lucide/svelte/icons/panels-top-left";
+  import { page } from "$app/state";
   import {
+    agentPageActiveSession,
     agentPanel,
     agentSession,
-    loadAgentSettings,
-    agentRuntimeConfig,
+    agentSessionsList,
+    beginNewAgentSession,
+    loadAgentSessions,
+    registerAgentSurface,
+    selectAgentSession,
     setAgentPanelOpen,
     setAgentPanelWidth,
   } from "$lib/stores/agent.svelte";
   import { connectionState } from "$lib/stores/connection.svelte";
-  import { agentComposer, addComposerReference } from "$lib/stores/agent-composer.svelte";
   import { t } from "$lib/i18n";
-  import AgentHeader from "./AgentHeader.svelte";
-  import TranscriptView from "./TranscriptView.svelte";
-  import DropOverlay from "./DropOverlay.svelte";
-  import TodoDock from "./TodoDock.svelte";
-  import ComposerCard from "./ComposerCard.svelte";
+  import { tabIdForPath } from "$lib/shell/tab-session.js";
+  import { navigateTab } from "$lib/shell/tab-session.svelte.js";
+  import SessionFace from "./SessionFace.svelte";
+  import { sessionDisplayName, sessionsForWorkspace } from "$lib/apps/agent/session-tree.js";
+  import type { WorkspaceId } from "$shared/contracts/workspaces.js";
 
-  // R17-A：不再有挂载重置 effect——草稿按 sessionId 分轨，清轨点收窄为显式新建
-  // 与发送成功（均在 store 侧：agent.svelte 挂接）；面板开合/重挂载不清草稿，
-  // 与 R17-C「开关=收起不销毁」语义对齐。
-
-  // 惰性加载配置投影（model chip 消费）：面板常驻挂载后以 open 为闸——首次
-  // 打开且 view 缺失时补拉（未打开不发 RPC；断线重连由 open 重开驱动）。
-  // 走查 P1 修复（2026-09-16）：连接建立前不开闸——requireRpc 未连接时同步抛错
-  // 会让 loading/error 在同一 effect 帧内写回，effect_update_depth_exceeded 无限环
-  // 杀死整个 app 响应性；status 入依赖后，连接建立/重连本身驱动补拉。
+  // 双开在场注册（agentSurfaces.panel 计数——Agent 页角标的数据面之一）。
+  const unregister = registerAgentSurface("panel");
   $effect(() => {
-    if (
-      agentPanel.open &&
-      connectionState.status === "connected" &&
-      agentRuntimeConfig.view === null &&
-      !agentRuntimeConfig.loading
-    ) {
-      void loadAgentSettings();
-    }
+    return () => unregister();
   });
 
-  // composer 种子（creator-test-session A2/A′2）：面板挂载即一次性消费——文本
-  // 填入（不覆盖已有草稿）+ 引用经 addComposerReference 注册（registry 唯一
-  // 写者；test-run 的技能三元组芯片由此入轨）。不自动发送；会话由首条消息惰性
-  // 创建，种子无需等待 sessionId。
+  // 本面板 attach 的 workspace（/w/:wsId/* 路径解析；非 ws 路径回退 Global）。
+  const workspaceId = $derived((tabIdForPath(page.url.pathname) ?? "~") as WorkspaceId);
+
+  // 会话列表：连接建立后拉取（面板在 ws 页常驻挂载；requireRpc 同步 throw 不入
+  // effect）。每连接一次性自动拉取：失败不重试（刷新钮/重连重新武装）——无此
+  // 闸时 loaded/loading 双 false 态会在失败后无限重触发。
+  let autoLoadedList = false;
   $effect(() => {
-    if (agentPanel.seed) {
-      const seed = agentPanel.seed;
-      agentPanel.seed = null;
-      if (agentComposer.text.length === 0) agentComposer.text = seed.text;
-      if (seed.reference !== undefined && agentComposer.text.includes(seed.reference.token)) {
-        addComposerReference(seed.reference);
-      }
+    if (connectionState.status !== "connected") {
+      autoLoadedList = false;
+      return;
     }
+    if (autoLoadedList || agentSessionsList.loaded || agentSessionsList.loading) return;
+    autoLoadedList = true;
+    void loadAgentSessions();
   });
+
+  /** 本 ws 会话（target.workspaceId 过滤；createdAt 降序）。 */
+  const workspaceSessions = $derived(sessionsForWorkspace(agentSessionsList.sessions, workspaceId));
+
+  /** 双开角标：Agent 页正在显示同一会话（agent-surface spec「dual open」）。 */
+  const dualOpenInAgentPage = $derived(
+    agentSession.sessionId !== null && agentPageActiveSession() === agentSession.sessionId,
+  );
+
+  /** 深链到 Agent 页（激活同一会话）。 */
+  function openInAgentPage(): void {
+    const sessionId = agentSession.sessionId;
+    if (sessionId === null) return;
+    navigateTab(`/agent?session=${encodeURIComponent(sessionId)}`);
+  }
 
   // R17-C 宽屏 resize：左缘拖柄 pointer 序列。宽度经 setAgentPanelWidth clamp
-  // + 持久；拖拽中 body 禁选择 + col-resize 光标；resizing 态摘除 width 过渡
-  // （否则拖柄滞后跟手）。
+  // + 持久（DevicePrefs）；拖拽中 body 禁选择 + col-resize 光标；resizing 态
+  // 摘除 width 过渡（否则拖柄滞后跟手）。
   let resizing = $state(false);
   let resizeStartX = 0;
   let resizeStartWidth = 0;
@@ -122,10 +132,7 @@
   aria-label={t("agentPanel.panelAria")}
   data-agent-panel="true"
 >
-  <!-- W2：document 级拖放（覆盖层 + 全窗落点）接管附件拖放；面板级 ondrop 移除。 -->
-  <DropOverlay />
-  <!-- 左缘拖柄（仅 ≥720px；窄屏抽屉无侧栏宽度语义）：6px col-resize 命中区，
-       hover 高亮。 -->
+  <!-- 左缘拖柄（仅 ≥720px；窄屏抽屉无侧栏宽度语义）：6px col-resize 命中区。 -->
   <div
     class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 min-[720px]:block"
     role="separator"
@@ -134,44 +141,90 @@
     onpointerdown={startResize}
   ></div>
 
-  <AgentHeader />
-
-  <TranscriptView />
-
-  {#if agentSession.promptError ?? agentSession.error}
-    <div
-      class="border-t border-destructive/30 bg-destructive/8 px-3 py-1.5 text-xs text-destructive"
-      role="alert"
+  <!-- 面板头：Agent 标签 + 双开角标 + 深链 + 关闭。 -->
+  <header class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
+    <span class="px-1 text-xs font-medium text-muted-foreground">{t("agentHeader.agentLabel")}</span
     >
-      {agentSession.promptError ?? agentSession.error}
-    </div>
-  {/if}
-
-  {#if agentSession.sessionId && agentSession.todos.length > 0}
-    <TodoDock todos={agentSession.todos} />
-  {/if}
-
-  {#if agentComposer.editing !== null}
-    <!-- edit-mode 注记条（§3.4/§4.3）：amber tint；发送/取消退出。 -->
-    <div
-      class="mx-3 mb-1.5 flex h-7 shrink-0 items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-2.5 text-[11px] text-amber-700 dark:text-amber-400"
-      role="status"
-    >
-      <span class="truncate"> {t("agentPanel.editingNote")} </span>
+    {#if dualOpenInAgentPage}
+      <span
+        class="flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
+        role="status"
+        title={t("agentPanel.dualOpenHint")}
+      >
+        <IconPanelsTopLeft class="h-3 w-3" aria-hidden="true" />
+        {t("agentPanel.dualOpenBadge")}
+      </span>
+    {/if}
+    <span class="min-w-0 flex-1"></span>
+    {#if agentSession.sessionId}
+      <!-- New Session 入口（R12-B 7/8 语义平移）：仅 session 态显示；点击 = 回到
+           New Session 空态（不建会话——首条消息才建）。 -->
       <button
         type="button"
-        class="relative shrink-0 rounded p-0.5 text-amber-700/80 after:absolute after:-inset-1.5 after:content-[''] hover:text-amber-700 dark:text-amber-400/80 dark:hover:text-amber-400"
-        title={t("agentPanel.cancelEdit")}
-        aria-label={t("agentPanel.cancelEdit")}
-        onclick={() => {
-          if (agentComposer.editing !== null) agentComposer.text = "";
-          agentComposer.editing = null;
-        }}
+        class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
+        title={t("agentHeader.newSession")}
+        aria-label={t("agentHeader.newSession")}
+        onclick={() => beginNewAgentSession()}
       >
-        <IconX class="h-3 w-3" />
+        <IconPlus class="h-4 w-4" />
       </button>
-    </div>
-  {/if}
+    {/if}
+    <button
+      type="button"
+      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground {agentSession.sessionId ===
+      null
+        ? 'pointer-events-none opacity-40'
+        : ''}"
+      title={t("agentPanel.openInAgentPage")}
+      aria-label={t("agentPanel.openInAgentPage")}
+      disabled={agentSession.sessionId === null}
+      onclick={openInAgentPage}
+    >
+      <IconExternalLink class="h-4 w-4" />
+    </button>
+    <button
+      type="button"
+      class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
+      title={t("agentHeader.closePanel")}
+      aria-label={t("agentHeader.closePanel")}
+      onclick={() => setAgentPanelOpen(false)}
+    >
+      <IconX class="h-4 w-4" />
+    </button>
+  </header>
 
-  <ComposerCard />
+  <!-- 本 ws 会话列表（target.workspaceId 过滤；compact 行——续聊入口）。 -->
+  <div
+    class="max-h-40 shrink-0 overflow-y-auto border-b border-border py-1"
+    data-workspace-sessions="true"
+  >
+    {#if workspaceSessions.length === 0}
+      <p class="px-3 py-1 text-[11px] text-muted-foreground">{t("agentPanel.noWsSessions")}</p>
+    {:else}
+      {#each workspaceSessions as session (session.sessionId)}
+        <button
+          type="button"
+          class="flex h-7 w-full items-center gap-1.5 rounded px-3 text-left text-xs transition-colors {agentSession.sessionId ===
+          session.sessionId
+            ? 'bg-primary/10 text-primary'
+            : 'text-foreground/80 hover:bg-muted'}"
+          aria-current={agentSession.sessionId === session.sessionId ? "true" : undefined}
+          title="{sessionDisplayName(session)} ({session.status})"
+          onclick={() => selectAgentSession(session.sessionId)}
+        >
+          <span
+            class="h-1.5 w-1.5 shrink-0 rounded-full {session.status === 'running'
+              ? 'bg-primary'
+              : session.status === 'disposed'
+                ? 'bg-muted-foreground/40'
+                : 'bg-muted-foreground'}"
+            aria-hidden="true"
+          ></span>
+          <span class="min-w-0 flex-1 truncate">{sessionDisplayName(session)}</span>
+        </button>
+      {/each}
+    {/if}
+  </div>
+
+  <SessionFace />
 </aside>

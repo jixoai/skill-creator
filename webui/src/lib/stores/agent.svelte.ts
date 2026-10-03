@@ -21,6 +21,10 @@
  *       （composer 模式 chip 即唯一入口，2026-10-02 R1 减法后空态卡已删；
  *       默认 free/General）；会话创建是惰性的——只发生在
  *       首条消息发出时（sendAgentPrompt 无会话先建），header 的 + 只回到空态。
+ * 修订 [2026-10-03]（skills-agent-page）：面板从 shell drawer 迁为 workspace 页
+ *       右侧 attach（开合/宽度入 DevicePrefs appearance 域）；+ pendingSessionTarget
+ *       （左树新建入口的归属 target + cwd，惰性建会话消费）与 agentSurfaces
+ *       （page/panel 双开在场计数——双开角标数据面）。
  * 修订 [2026-09-13]（R17-A）：composer 草稿按 sessionId 分轨，本模块是草稿生命
  *       周期的挂接点——beginNewAgentSession 清 "__new__" 桶、resetSessionView
  *       换轨、sendAgentPrompt 惰性建会话迁移在途草稿并在发送成功后清发送轨
@@ -37,6 +41,7 @@ import {
   type AgentSessionsCleanupResult,
   type AgentSessionSeedMetadata,
   type AgentSessionSummary,
+  type AgentSessionTarget,
 } from "$shared/contracts/agent.js";
 import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
 import type { SkillId } from "$shared/contracts/skills.js";
@@ -63,6 +68,7 @@ import {
 } from "./agent-composer.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 import { showToast } from "$lib/toast.svelte";
+import { readDevicePrefs, updateDevicePrefs } from "$lib/shell/device-prefs.js";
 
 /** 待答审批的视图投影（approval-request 帧的 questions 载荷）。 */
 export interface PanelApprovalQuestion {
@@ -144,28 +150,17 @@ const cleanupGate = createRequestGenerationGate(getConnectionGeneration);
 // C2：内核 inbox 队列投影（best-effort——失败保留上一状态，不打断帧流）。
 const queueGate = createRequestGenerationGate(getConnectionGeneration);
 
-/** 宽屏侧栏宽度语义（R17-C resize）：≥720px 可拖拽，320–720px，默认 440；
- * 持久键 sessionStorage（会话级，随 tab 存活，不在 daemon/文件系统落地）。 */
+/** 宽屏侧栏宽度语义（R17-C resize → skills-agent-page 1.7 迁 DevicePrefs）：
+ * ≥720px 可拖拽，320–720px，默认 440；持久键 DevicePrefs.workspaceAgentPanelWidth
+ * （appearance 域，设备级；原 sessionStorage 会话级持久退役——无迁移，缺省回默认）。 */
 export const AGENT_PANEL_MIN_WIDTH = 320;
 export const AGENT_PANEL_MAX_WIDTH = 720;
 export const AGENT_PANEL_DEFAULT_WIDTH = 440;
-const AGENT_PANEL_WIDTH_STORAGE_KEY = "skill-creator.agentPanelWidth.v1";
 
 /** 宽度收窄：非有限数（持久值损坏/坐标派生 NaN）回默认，越界 clamp 到边界。 */
 export function clampAgentPanelWidth(width: number): number {
   if (!Number.isFinite(width)) return AGENT_PANEL_DEFAULT_WIDTH;
   return Math.min(AGENT_PANEL_MAX_WIDTH, Math.max(AGENT_PANEL_MIN_WIDTH, Math.round(width)));
-}
-
-/** 恢复持久宽度（外部输入：不可读/损坏一律回默认，不迁移、不写回）。 */
-function readStoredAgentPanelWidth(): number {
-  try {
-    const stored = sessionStorage.getItem(AGENT_PANEL_WIDTH_STORAGE_KEY);
-    if (stored === null) return AGENT_PANEL_DEFAULT_WIDTH;
-    return clampAgentPanelWidth(Number(stored));
-  } catch {
-    return AGENT_PANEL_DEFAULT_WIDTH;
-  }
 }
 
 /**
@@ -179,12 +174,48 @@ export interface AgentPanelSeed {
   metadata?: AgentSessionSeedMetadata;
 }
 
-/** drawer 开合（跨 tab 存活，开关=收起不销毁）；seed 为塞进 composer 的一次性
- * 种子（面板挂载即消费）；width 为 ≥720px 侧栏宽度（初始化自 sessionStorage）。 */
+/**
+ * 会话呈现面在场计数（skills-agent-page §3 双开角标）：page = SkillsAgentPage
+ * 挂载数，panel = workspace attach 面板挂载数。同一 session 双开 = 两个面同时
+ * 在场且共享同一 agentSession 单例投影（帧流一致性由单 store 天然承载）。
+ */
+export const agentSurfaces = $state({ page: 0, panel: 0 });
+
+/** 注册一个呈现面在场；返回注销函数（组件卸载时调用）。 */
+export function registerAgentSurface(surface: "page" | "panel"): () => void {
+  agentSurfaces[surface] += 1;
+  return () => {
+    agentSurfaces[surface] = Math.max(0, agentSurfaces[surface] - 1);
+  };
+}
+
+/**
+ * Agent 页当前/最近会话（skills-agent-page §3）：SkillsAgentPage 挂载期间随
+ * agentSession.sessionId 同步，卸载后保留最后值——workspace attach 面板的
+ * 「also open in Agent page」角标与「Open in Agent page」深链依据（tab 制下
+ * 两呈现面不同时在 DOM，角标表达的是「切到 Agent 页将看到同一会话」）。
+ * 可赋值 runes 状态不直接导出（export const 绑定不可重赋）——读取走 getter，
+ * 写入走唯一 setter（SkillsAgentPage 的 effect）。
+ */
+let pageSessionId = $state<string | null>(null);
+
+/** Agent 页当前/最近会话（响应式读取）。 */
+export function agentPageActiveSession(): string | null {
+  return pageSessionId;
+}
+
+/** SkillsAgentPage 的会话同步点（effect 内调用）。 */
+export function setAgentPageSessionId(sessionId: string | null): void {
+  pageSessionId = sessionId;
+}
+
+/** attach 面板开合（开关=收起不销毁；skills-agent-page 1.7：workspace 页右侧
+ * attach，偏好入 DevicePrefs appearance 域）；seed 为塞进 composer 的一次性
+ * 种子（面板挂载即消费）；width 初始化自 DevicePrefs。 */
 export const agentPanel = $state({
-  open: false,
+  open: readDevicePrefs().workspaceAgentPanelOpen,
   seed: null as AgentPanelSeed | null,
-  width: readStoredAgentPanelWidth(),
+  width: clampAgentPanelWidth(readDevicePrefs().workspaceAgentPanelWidth),
 });
 
 /**
@@ -192,6 +223,18 @@ export const agentPanel = $state({
  * 透传入 agent.session.create，创建成功即消费（失败保留供重试）。
  */
 let pendingSeedMetadata: AgentSessionSeedMetadata | null = null;
+
+/**
+ * 待建会话的归属 target（skills-agent-page 1.3）：左树「新建」入口设定（当前
+ * ws 或跨 ws 选择）；sendAgentPrompt 惰性建会话时透传，创建成功即消费。
+ * cwd 与 target 成对（Imported ws 的 root path；Global/无 target 不传）。
+ */
+export interface PendingAgentSessionTarget {
+  target: AgentSessionTarget;
+  cwd?: string;
+}
+
+let pendingSessionTarget: PendingAgentSessionTarget | null = null;
 
 /** 当前会话与帧视图（跨 tab 存活；切会话清空重载）。 */
 export const agentSession = $state({
@@ -262,9 +305,10 @@ let pendingUsage: { inputTokens: number; outputTokens: number } | null = null;
  */
 let pendingToolArgs = new Map<string, { name?: string; text: string }>();
 
-/** 打开/关闭 drawer（打开时惰性加载会话列表）。 */
+/** 打开/关闭 attach 面板（打开时惰性加载会话列表；偏好入 DevicePrefs）。 */
 export function setAgentPanelOpen(open: boolean): void {
   agentPanel.open = open;
+  updateDevicePrefs({ workspaceAgentPanelOpen: open });
   if (open && !agentSessionsList.loaded && !agentSessionsList.loading) {
     void loadAgentSessions();
   }
@@ -276,14 +320,10 @@ export function setAgentPanelOpen(open: boolean): void {
   }
 }
 
-/** 拖拽改宽（R17-C）：clamp 后写状态并持久；存储不可用只丢持久化，不阻塞拖拽。 */
+/** 拖拽改宽（R17-C）：clamp 后写状态并持久（DevicePrefs appearance 域）。 */
 export function setAgentPanelWidth(width: number): void {
   agentPanel.width = clampAgentPanelWidth(width);
-  try {
-    sessionStorage.setItem(AGENT_PANEL_WIDTH_STORAGE_KEY, String(agentPanel.width));
-  } catch {
-    // 隐私上下文等存储异常：本次会话内宽度仍生效。
-  }
+  updateDevicePrefs({ workspaceAgentPanelWidth: agentPanel.width });
 }
 
 /** 会话列表在 WS 未就绪时的有界重试计数（打开面板早于连接完成的一次性竞态）。 */
@@ -357,11 +397,12 @@ export async function cleanupAgentSessions(
   }
 }
 
-/** 新建会话（可选首 prompt）；成功后切换到该会话并开始轮询。 */
+/** 新建会话（可选首 prompt/target）；成功后切换到该会话并开始轮询。 */
 export async function createAgentSession(
   prompt?: string,
   mode?: DshAgentMode,
   metadata?: AgentSessionSeedMetadata,
+  pending?: PendingAgentSessionTarget,
 ): Promise<void> {
   const request = createGate.issue();
   agentSession.sending = true;
@@ -370,9 +411,12 @@ export async function createAgentSession(
       ...(prompt ? { prompt } : {}),
       ...(mode ? { mode } : {}),
       ...(metadata ? { metadata } : {}),
+      ...(pending?.target ? { target: pending.target } : {}),
+      ...(pending?.cwd ? { cwd: pending.cwd } : {}),
     });
     if (!request.isCurrent()) return;
     if (metadata !== undefined) pendingSeedMetadata = null;
+    if (pending !== undefined) pendingSessionTarget = null;
     resetSessionView(result.session.sessionId, result.session.status, result.session.mode);
     agentSessionsList.loaded = false;
     void loadAgentSessions();
@@ -494,11 +538,14 @@ export function seedAgentTestRun(
  * 进入 New Session 空态（R12-B 8）：退出当前会话视图（内核会话与列表不动），
  * 不创建任何会话——创建只发生在首条消息发出时（sendAgentPrompt 惰性建会话）。
  * pendingMode 复位 free：空态默认选中 General。
+ * skills-agent-page 1.3：可携带归属 target（左树「新建」入口——当前 ws 或跨
+ * ws 选择；无 target 调用 = 无归属会话，语义与旧行为一致）。
  */
-export function beginNewAgentSession(): void {
+export function beginNewAgentSession(pending?: PendingAgentSessionTarget): void {
   // codex r5 P1：任何非 test-run 的显式新建都作废未消费的 seed 元数据
   // （seedAgentTestRun 在本函数返回后才 stash，不受影响）。
   pendingSeedMetadata = null;
+  pendingSessionTarget = pending ?? null;
   stopPolling();
   agentSession.sessionId = null;
   agentSession.status = "idle";
@@ -620,7 +667,12 @@ export async function sendAgentPrompt(
   // W4：running 中以 queue 模式提交 → 发件箱投影（durable 帧到达退队）。
   if (mode === "queue" && agentSession.status === "running") trackQueuedSend(text);
   if (!agentSession.sessionId) {
-    await createAgentSession(undefined, agentSession.pendingMode, pendingSeedMetadata ?? undefined);
+    await createAgentSession(
+      undefined,
+      agentSession.pendingMode,
+      pendingSeedMetadata ?? undefined,
+      pendingSessionTarget ?? undefined,
+    );
     // 创建失败（含被代次门取代）：sessionId 仍为 null，错误已进 error 面。
     if (!agentSession.sessionId) return;
     // R17-A：惰性建会话换轨后，把 "__new__" 桶的在途草稿迁到新会话轨——草稿在
