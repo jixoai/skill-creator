@@ -19,4 +19,4 @@
 - [x] 1.8 addressBarActions terminal/rightPanel 启用
 - [x] 1.9 i18n：完成时在 webui-i18n-bilingual 的 inventory.md 标记对应 C 类
       面完成并双语适配（唯一帐本 = 该 change）
-- [ ] 1.10 验证门：全量绿 + webui check + ego-browser（布局/终端/双开/深链）+ vision 验收 + PTY 进程回收证据（stop 后零孤儿进程）
+- [x] 1.10 验证门：全量绿 + webui check + ego-browser（布局/终端/双开/深链）+ vision 验收 + PTY 进程回收证据（stop 后零孤儿进程）

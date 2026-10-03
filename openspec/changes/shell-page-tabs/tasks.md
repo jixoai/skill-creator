@@ -47,10 +47,10 @@
 ## 5. 验证门
 
 - [x] 5.1 `pnpm --dir webui check` 0 error；`pnpm exec vp test run` 全量绿
-- [ ] 5.2 ego-browser 走查：桌面+窄屏（tab 切换恢复/＋导入/omnibox 三类补全/
+- [x] 5.2 ego-browser 走查：桌面+窄屏（tab 切换恢复/＋导入/omnibox 三类补全/
       per-tab Back 隔离/caption 安全区/左导航 drawer）
-- [ ] 5.3 vision 子代理视觉验收（胶囊 tab/两行密度/对比度）
-- [ ] 5.4 残留进程回收审计（走查 daemon PID 证据）
+- [x] 5.3 vision 子代理视觉验收（胶囊 tab/两行密度/对比度）
+- [x] 5.4 残留进程回收审计（走查 daemon PID 证据）
 
 ## 已定裁决（r2 修订落定，非待确认）
 

@@ -17,5 +17,5 @@
 - [x] 1.8 Global 空态引导（切换 Imported）
 - [x] 1.9 i18n（引用制，r2 修订）：完成时在 webui-i18n-bilingual 的
       inventory.md 标记对应 B 类面完成并双语适配（唯一帐本 = 该 change）
-- [ ] 1.10 验证门：全量绿 + webui check + ego-browser（引导流/草稿保存链/
+- [x] 1.10 验证门：全量绿 + webui check + ego-browser（引导流/草稿保存链/
       只读深链）+ vision 验收 + 进程回收

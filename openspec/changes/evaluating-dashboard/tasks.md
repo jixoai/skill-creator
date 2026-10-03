@@ -11,4 +11,4 @@
 - [x] 1.5 非零 errors 红 chip 真实语料抽查断言（残留台账项）
 - [x] 1.6 i18n：完成时在 webui-i18n-bilingual 的 inventory.md 标记对应 C 类
       面完成并双语适配（唯一帐本 = 该 change）
-- [ ] 1.7 验证门：全量绿 + webui check + ego-browser（总览→详情→run→cancel 链）+ vision 验收 + 进程回收
+- [x] 1.7 验证门：全量绿 + webui check + ego-browser（总览→详情→run→cancel 链）+ vision 验收 + 进程回收

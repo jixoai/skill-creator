@@ -18,5 +18,5 @@
 - [x] 1.8 Repository/Workspaces app manifest 删除 + redirect 更新
 - [x] 1.9 i18n（引用制，r2 修订）：完成时在 webui-i18n-bilingual 的
       inventory.md 标记对应 B 类面完成并双语适配（唯一帐本 = 该 change）
-- [ ] 1.10 验证门：全量测试绿 + webui check + ego-browser 走查（网格 1/2/3
+- [x] 1.10 验证门：全量测试绿 + webui check + ego-browser 走查（网格 1/2/3
       列 + 单列容器不溢出）+ vision 验收 + 进程回收证据
