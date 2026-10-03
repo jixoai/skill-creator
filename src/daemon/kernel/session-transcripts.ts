@@ -17,6 +17,9 @@
  *       会留下 ghost 索引。
  * 妥协声明：写入 best-effort——追加失败只记日志不打断 live 会话（转录是投影，
  * 不是 authority）；磁盘无淘汰，转录体积由会话规模自然约束。
+ * 修订 [2026-10-03]（skills-agent-page 1.1/1.1b）：meta 增 target 块（创建时
+ * server 校验后落盘、生命周期不可变、updateMode/updateTitle 重写原样保留）；
+ * summaryOfMeta 直投影 target 与 seedSkill（必填 nullable）。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -29,8 +32,12 @@ import {
 import type {
   AgentSessionSeedMetadata,
   AgentSessionSummary,
+  AgentSessionTarget,
 } from "../../shared/contracts/agent.js";
-import { AgentSessionSeedMetadataSchema } from "../../shared/contracts/agent.js";
+import {
+  AgentSessionSeedMetadataSchema,
+  AgentSessionTargetSchema,
+} from "../../shared/contracts/agent.js";
 
 /** 转录元数据（meta.json；全部字段按外部输入 safeParse）。 */
 export interface SessionTranscriptMeta {
@@ -42,6 +49,12 @@ export interface SessionTranscriptMeta {
   mode: DshAgentMode;
   /** seed 来源记录（creator-test-session A4：产品 seed 入口建会话时携带；缺失 = 非 seed 会话）。 */
   seed?: AgentSessionSeedMetadata;
+  /**
+   * 归属 target（skills-agent-page §2：与 mode/seed 同层）：创建时 server 校验
+   * 后落盘，生命周期内不可变（updateMode/updateTitle 的 meta 重写原样保留）。
+   * 缺失 = 本契约之前的旧会话（Unassigned，只读降级）。
+   */
+  target?: AgentSessionTarget;
 }
 
 /** 日期桶（目录段 YYYY/MM/DD 的投影；R14-C 清理消费）。 */
@@ -82,10 +95,12 @@ function parseMeta(raw: unknown): SessionTranscriptMeta | null {
     cwd?: unknown;
     mode?: unknown;
     seed?: unknown;
+    target?: unknown;
   };
   if (typeof meta.sessionId !== "string" || meta.sessionId.length === 0) return null;
   if (typeof meta.createdAt !== "string" || meta.createdAt.length === 0) return null;
   const seed = AgentSessionSeedMetadataSchema.safeParse(meta.seed);
+  const target = AgentSessionTargetSchema.safeParse(meta.target);
   return {
     sessionId: meta.sessionId,
     title: typeof meta.title === "string" ? meta.title : "",
@@ -93,6 +108,7 @@ function parseMeta(raw: unknown): SessionTranscriptMeta | null {
     cwd: typeof meta.cwd === "string" ? meta.cwd : "",
     mode: DshAgentModeSchema.safeParse(meta.mode).success ? (meta.mode as DshAgentMode) : "free",
     ...(seed.success ? { seed: seed.data } : {}),
+    ...(target.success ? { target: target.data } : {}),
   };
 }
 
@@ -328,5 +344,8 @@ export function summaryOfMeta(meta: SessionTranscriptMeta): AgentSessionSummary 
     cwd: meta.cwd || process.cwd(),
     createdAt: meta.createdAt,
     mode: meta.mode,
+    ...(meta.target ? { target: meta.target } : {}),
+    // seedSkill 必填 nullable（skills-agent-page r4）：无 seed = null，非缺省。
+    seedSkill: meta.seed?.skillId ?? null,
   };
 }

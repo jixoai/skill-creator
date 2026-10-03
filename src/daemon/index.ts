@@ -276,6 +276,9 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
       const tasks = [
         settleTeardown("tray host", async () => handlesRef.trayHost?.destroy()),
         settleTeardown("agent sessions", () => domain.agentSessions.dispose()),
+        // 人类终端（skills-agent-page 1.6）：stop coordinator 有界回收——
+        // SIGHUP → 宽限 → SIGKILL 渐进升级，不留孤儿终端进程。
+        settleTeardown("terminal domain", () => domain.terminal.dispose()),
         settleTeardown("dsh kernel host", () => dshHost.dispose()),
         settleTeardown("web server", () => web.stop({ graceMs: SHUTDOWN_GRACE_MS })),
         settleTeardown("IPC server", () => ipc.stop({ graceMs: SHUTDOWN_GRACE_MS })),

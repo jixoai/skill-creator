@@ -25,6 +25,10 @@
  *       主体执行（enqueue-handler capability 的 registry 调用即队列投递并等待
  *       终态）；reject(awaitable) 决定后 await onRejected（ledger 迁移 IO 失败
  *       → typed DISTILL_IO 上抛，proposal 决定不可逆）。
+ *   [4] 会话 target enforcement（skills-agent-page 1.1，Manager mutation 域）：
+ *       admission 前验证写入目标落在调用会话 target 允许范围（无 target 只读 /
+ *       Global 全拒 / 跨 ws·provider 越权 / 无 workspace 目标的配置域写入全部
+ *       typed 拒绝，零落库 + 审计含会话 id 与目标三元组）；非会话调用不在管辖。
  * 妥协声明：存储为 daemon 生命周期内存（重启丢弃——未审批的 proposal 不是
  *   持久事实；已执行结果的 durable 真相归各域模块的审计面/ledger）。
  *   「持久化」在现实现 = 内存原子快照语义（单一同步临界区 + 回滚快照）。
@@ -37,6 +41,8 @@ import type {
   ProposalRejectCause,
 } from "../../shared/contracts/wiki-distill.js";
 import { ProposalDecisionSnapshotSchema } from "../../shared/contracts/wiki-distill.js";
+import type { AgentSessionTarget } from "../../shared/contracts/agent.js";
+import { GLOBAL_WORKSPACE_ID } from "../../shared/contracts/workspaces.js";
 import { DomainError } from "../domain-error.js";
 
 /** proposal 状态（闭合集合；McpProposalStatusSchema 同值）。 */
@@ -62,8 +68,10 @@ export interface McpProposalView {
 export interface McpProposalAuditEntry {
   at: string;
   proposalId: string;
-  event: "created" | "approved" | "rejected" | "executed" | "failed";
+  event: "created" | "approved" | "rejected" | "executed" | "failed" | "target-rejected";
   detail?: string;
+  /** target-rejected 行的调用会话（skills-agent-page：审计含会话 id）。 */
+  sessionId?: string;
 }
 
 /** admitBatch 单项输入（capability 名即路由键，N）。 */
@@ -119,6 +127,80 @@ export interface McpProposalStore {
 export interface McpProposalStoreOptions {
   /** reject 决定落定后的 awaitable 接缝（N：ledger 迁移；cause=cancelled 由接线方 no-op）。 */
   onRejected?: (view: McpProposalView, cause: ProposalRejectCause) => Promise<void>;
+  /**
+   * 会话 target enforcement 的归属解析 seam（skills-agent-page 1.1）：按 MCP
+   * propose 工具名返回当前持有未闭合 tool/call 的会话（含各自 target）。
+   * 未注入或返回空 = 非产品会话调用（外部 MCP client / 蒸馏链）——不在会话
+   * target 管辖（人工审批照旧兜底）。注入方：domain 装配桥接 agentSessions。
+   */
+  attributeProposeCalls?: (toolName: string) => ReadonlyArray<ProposeCallSession>;
+}
+
+/** enforcement 归属条目（agentSessions.proposeCallSessions 的结构面）。 */
+export interface ProposeCallSession {
+  sessionId: string;
+  /** undefined = 无 target 旧会话（只读降级——proposal 全拒）。 */
+  target: AgentSessionTarget | undefined;
+}
+
+/**
+ * capability → MCP propose 工具名（与 skill-creator-mcp 的 mcpToolName 同一投影：
+ * `.` → `_` + `_propose` 后缀 + 内核 dsh-mcp-client 的 `mcp__skill-creator__` 前缀）。
+ * enforcement（本文件）与归属表（agent-sessions）共用此映射。
+ */
+export function proposeToolNameOf(capability: string): string {
+  return `mcp__skill-creator__${capability.replace(/\./g, "_")}_propose`;
+}
+
+/** proposal 输入里可提取的写入目标（workspace + 可选 provider）。 */
+interface ProposalWriteTarget {
+  workspaceId: string;
+  providerId?: string;
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * 从 capability 输入提取写入目标三元组的 ws/provider 面（unknown 防御读）：
+ * - workspace.remove/setActive：`id` 即目标 workspace；
+ * - repository.install：`targets` 数组逐项；
+ * - wiki.append：`scope` 即目标 workspace（`~` = Global）；
+ * - 其余平铺 `workspaceId`(+`providerId`) 面（skills.toggle / skills.update.apply /
+ *   creator.save / creator.remove 等）；
+ * - 无法提取（workspace.add / repository.preview / sources.* / wiki.distill_apply）：
+ *   空数组 = 写入落在任何 workspace 之外（Manager 配置/会话态），对归属会话
+ *   fail-closed 拒绝。
+ */
+function extractWriteTargets(capability: string, input: unknown): ProposalWriteTarget[] {
+  if (typeof input !== "object" || input === null) return [];
+  const record = input as Record<string, unknown>;
+  if (capability === "workspace.remove" || capability === "workspace.setActive") {
+    const id = asNonEmptyString(record.id);
+    return id === undefined ? [] : [{ workspaceId: id }];
+  }
+  if (capability === "repository.install") {
+    if (!Array.isArray(record.targets)) return [];
+    const out: ProposalWriteTarget[] = [];
+    for (const entry of record.targets) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const target = entry as Record<string, unknown>;
+      const workspaceId = asNonEmptyString(target.workspaceId);
+      if (workspaceId === undefined) continue;
+      const providerId = asNonEmptyString(target.providerId);
+      out.push(providerId === undefined ? { workspaceId } : { workspaceId, providerId });
+    }
+    return out;
+  }
+  if (capability === "wiki.append") {
+    const scope = asNonEmptyString(record.scope);
+    return scope === undefined ? [] : [{ workspaceId: scope }];
+  }
+  const workspaceId = asNonEmptyString(record.workspaceId);
+  if (workspaceId === undefined) return [];
+  const providerId = asNonEmptyString(record.providerId);
+  return providerId === undefined ? [{ workspaceId }] : [{ workspaceId, providerId }];
 }
 
 /** store 全集容量上限（T：冻结现 CAPACITY 常量值，导出常量化）。 */
@@ -162,10 +244,70 @@ export function createMcpProposalStore(
     proposalId: string,
     event: McpProposalAuditEntry["event"],
     detail?: string,
+    sessionId?: string,
   ): void {
-    auditLog.push({ at: new Date().toISOString(), proposalId, event, detail });
+    auditLog.push({
+      at: new Date().toISOString(),
+      proposalId,
+      event,
+      ...(detail === undefined ? {} : { detail }),
+      ...(sessionId === undefined ? {} : { sessionId }),
+    });
     if (auditLog.length > MAX_PROPOSALS * 4) {
       auditLog.splice(0, auditLog.length - MAX_PROPOSALS * 4);
+    }
+  }
+
+  /**
+   * 会话 target enforcement（skills-agent-page §2.4；Manager mutation 域）：
+   * proposal 创建（admission 临界区前）验证写入目标落在调用会话 target 允许
+   * 范围——无 target（无归属）/ Global target（只读分析）/ 跨 workspace /
+   * provider 不匹配 / 写入面无法提取 workspace 目标（Manager 配置域），全部
+   * typed 拒绝且不落 proposal（审计行携带会话 id 与目标三元组）。归属不确定
+   * （同工具名多会话并发）时对全部候选 fail-closed。非会话调用（外部 MCP
+   * client、蒸馏链）不在管辖——人工审批照旧兜底。错误消息以稳定前缀
+   * SESSION_TARGET_* 区分「无归属」家族（code 闭集内取 INVALID_OPERATION）。
+   */
+  function enforceSessionTargetScope(capability: string, input: unknown): void {
+    if (!options.attributeProposeCalls) return;
+    const sessions = options.attributeProposeCalls(proposeToolNameOf(capability));
+    for (const session of sessions) {
+      const writeTargets = extractWriteTargets(capability, input);
+      let violation: string;
+      if (session.target === undefined) {
+        violation = "SESSION_TARGET_UNASSIGNED";
+      } else if (session.target.workspaceId === GLOBAL_WORKSPACE_ID) {
+        violation = "SESSION_TARGET_GLOBAL_READONLY";
+      } else if (writeTargets.length === 0) {
+        violation = "SESSION_TARGET_UNSCOPED";
+      } else {
+        const outsideWorkspace = writeTargets.find(
+          (target) => target.workspaceId !== session.target!.workspaceId,
+        );
+        const outsideProvider =
+          session.target.providerId !== undefined
+            ? writeTargets.find((target) => target.providerId !== session.target!.providerId)
+            : undefined;
+        if (outsideWorkspace !== undefined) {
+          violation = "SESSION_TARGET_WORKSPACE_SCOPE";
+        } else if (outsideProvider !== undefined) {
+          violation = "SESSION_TARGET_PROVIDER_SCOPE";
+        } else {
+          continue;
+        }
+      }
+      const detail = `capability=${capability} targets=[${writeTargets
+        .map((target) => `${target.workspaceId}/${target.providerId ?? "*"}`)
+        .join(",")}] sessionTarget=${
+        session.target === undefined
+          ? "(unassigned)"
+          : `${session.target.workspaceId}/${session.target.providerId ?? "*"}`
+      }`;
+      appendAudit(newId(), "target-rejected", detail, session.sessionId);
+      throw new DomainError(
+        "INVALID_OPERATION",
+        `${violation}: session ${session.sessionId} cannot propose ${capability} (${detail})`,
+      );
     }
   }
 
@@ -217,6 +359,11 @@ export function createMcpProposalStore(
   return {
     admitBatch(items) {
       if (items.length === 0) return { created: [], refused: 0 };
+      // skills-agent-page 1.1：会话 target enforcement 先于容量事务（越权整批
+      // typed 拒绝，store 零变更、无 proposal 落库）。
+      for (const item of items) {
+        enforceSessionTargetScope(item.capability, item.input);
+      }
       const free = MAX_PROPOSALS - proposals.size;
       if (free < items.length) {
         const terminal = [...proposals.values()].filter(isTerminal).sort(byDecidedAtAsc);
@@ -273,6 +420,7 @@ export function createMcpProposalStore(
       return MAX_PROPOSALS - proposals.size + terminalCount;
     },
     create(capability, input) {
+      // enforcement 在 admitBatch 临界区内统一执行（单条路径同样先验后建）。
       const batch = this.admitBatch([{ capability, input }]);
       const created = batch.created[0];
       if (created === undefined) {

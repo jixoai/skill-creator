@@ -43,7 +43,24 @@ export const AgentSessionStatusSchema = z.enum(["idle", "running", "disposed"]);
 /** agent 会话状态。 */
 export type AgentSessionStatus = z.infer<typeof AgentSessionStatusSchema>;
 
-/** 会话摘要（list/create/setMode 返回）。 */
+/**
+ * 会话归属 target（skills-agent-page design §2，契约定稿 r2）：Manager mutation
+ * 域的写入范围证明——创建时 server 校验（workspaceId 解析 registry、providerId
+ * 属于该 ws 投影），落 transcript meta（mode/seed 同层）后生命周期内不可变。
+ * 未含 providerId = 该 workspace 全 provider；无 target 旧会话 = 只读（无归属）。
+ */
+export const AgentSessionTargetSchema = z.strictObject({
+  workspaceId: WorkspaceIdSchema,
+  providerId: ProviderIdSchema.optional(),
+});
+/** 会话归属 target。 */
+export type AgentSessionTarget = z.infer<typeof AgentSessionTargetSchema>;
+
+/**
+ * 会话摘要（list/create/setMode 返回）。skills-agent-page r3/r4：`target` 与
+ * `seedSkill` 直投影——UI 按 target.workspaceId 分组、Creator 按 seedSkill 续聊
+ * 过滤的唯一合法数据面（零额外 RPC）。seedSkill 必填 nullable：无 seed = null。
+ */
 export const AgentSessionSummarySchema = z.object({
   sessionId: z.string().min(1),
   /** 自动标题（内核 session-title；首 prompt 前为空串）。 */
@@ -53,6 +70,10 @@ export const AgentSessionSummarySchema = z.object({
   createdAt: z.string().min(1),
   /** 会话模式（旧转录缺失读 free——其创建时即全工具面的事实投影）。 */
   mode: DshAgentModeSchema,
+  /** 归属 target（与转录 meta 同形直投影；无 target 旧会话缺省 = Unassigned 只读）。 */
+  target: AgentSessionTargetSchema.optional(),
+  /** seed 技能 ID（转录 meta.seed.skillId 直投影；非 seed 会话 = null，非缺省）。 */
+  seedSkill: SkillIdSchema.nullable(),
   /** 产品转录归属（R15 codex P1-3）：false = kernel/steward-only 会话——清理
    * RPC 只管产品转录层，这类行 UI 禁删并以 kernel-only 标记呈现。 */
   hasTranscript: z.boolean().optional(),
@@ -102,6 +123,12 @@ export const AgentSessionCreateInputSchema = z.object({
   mode: DshAgentModeSchema.optional(),
   /** seed 来源记录（可选；写入转录 meta 的 seed 块）。 */
   metadata: AgentSessionSeedMetadataSchema.optional(),
+  /**
+   * 归属 target（skills-agent-page §2；可选）：server 创建时校验 workspaceId
+   * 解析于 registry、providerId（给出时）属于该 ws 的 provider 投影——失败
+   * typed 拒绝（不建会话不写 meta）。创建后不可变；绝不从 cwd 推断归属。
+   */
+  target: AgentSessionTargetSchema.optional(),
 });
 /** 会话创建输入。 */
 export type AgentSessionCreateInput = z.infer<typeof AgentSessionCreateInputSchema>;

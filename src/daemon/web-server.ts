@@ -7,6 +7,9 @@
  *   [2] 在协议升级前拒绝未授权 WebSocket。
  *   [3] 通过受权 socket 承载共享 oRPC router，并有界回收完整连接生命周期。
  *   [4] /mcp：skill-creator MCP 面（stateless streamable HTTP + Bearer）。
+ *   [5] /ws/terminal（skills-agent-page 1.6）：人类终端专用 WS——?token= web
+ *       token 与 /ws/rpc 同法则鉴权，upgrade 后交给 terminal 域（typed JSON
+ *       协议按 sessionId 多路复用；终端流不进 oRPC 通道）。
  */
 import { existsSync, promises as fs } from "node:fs";
 import http from "node:http";
@@ -111,6 +114,8 @@ export class WebServer {
   private readonly connections = new Set<Socket>();
   private readonly rpcWsServer = new WebSocketServer({ noServer: true });
   private readonly acpWsServer = new WebSocketServer({ noServer: true });
+  /** 人类终端专用端点（skills-agent-page 1.6；升级路由见 handleUpgrade）。 */
+  private readonly terminalWsServer = new WebSocketServer({ noServer: true });
   private readonly rpcHandler: RPCHandler<Record<never, never>>;
   /** 订阅 agent 子进程异常退出事件，断开时由 dispose 自动取消。 */
   private readonly unsubscribeExited: () => void;
@@ -233,10 +238,18 @@ export class WebServer {
       let serverClosed = false;
       let rpcWsClosed = false;
       let acpWsClosed = false;
+      let terminalWsClosed = false;
       let closeError: Error | undefined;
       let settled = false;
       const finishIfClosed = (): void => {
-        if (settled || !serverClosed || !rpcWsClosed || !acpWsClosed || this.connections.size > 0) {
+        if (
+          settled ||
+          !serverClosed ||
+          !rpcWsClosed ||
+          !acpWsClosed ||
+          !terminalWsClosed ||
+          this.connections.size > 0
+        ) {
           return;
         }
         settled = true;
@@ -247,6 +260,7 @@ export class WebServer {
       const forceClose = (): void => {
         for (const client of this.rpcWsServer.clients) client.terminate();
         for (const client of this.acpWsServer.clients) client.terminate();
+        for (const client of this.terminalWsServer.clients) client.terminate();
         for (const connection of this.connections) connection.destroy();
         server.closeAllConnections();
       };
@@ -273,6 +287,11 @@ export class WebServer {
         closeError ??= error;
         finishIfClosed();
       });
+      this.terminalWsServer.close((error) => {
+        terminalWsClosed = true;
+        closeError ??= error;
+        finishIfClosed();
+      });
       for (const connection of this.connections) connection.once("close", finishIfClosed);
       for (const client of this.rpcWsServer.clients) {
         try {
@@ -283,6 +302,14 @@ export class WebServer {
         }
       }
       for (const client of this.acpWsServer.clients) {
+        try {
+          client.close(1001, "Server shutting down");
+        } catch (error) {
+          closeError ??= error instanceof Error ? error : new Error(String(error));
+          client.terminate();
+        }
+      }
+      for (const client of this.terminalWsServer.clients) {
         try {
           client.close(1001, "Server shutting down");
         } catch (error) {
@@ -338,6 +365,18 @@ export class WebServer {
     // ACP 桥接端点：/ws/acp/<sessionId>?token=<webToken>，与 /ws/rpc 同鉴权。
     if (url.pathname.startsWith("/ws/acp/")) {
       this.handleAcpUpgrade(request, socket, head, url);
+      return;
+    }
+    // 人类终端端点（skills-agent-page 1.6）：专用 WS（终端流与 oRPC 通道分离）；
+    // 鉴权 ?token= web token 与 /ws/rpc 同法则（401 先于 upgrade）。
+    if (url.pathname === "/ws/terminal") {
+      if (url.searchParams.get("token") !== this.options.webToken) {
+        socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+        return;
+      }
+      this.terminalWsServer.handleUpgrade(request, socket, head, (websocket) => {
+        this.options.domain.terminal.attachSocket(websocket as WsWebSocket);
+      });
       return;
     }
     if (url.pathname !== "/ws/rpc") {

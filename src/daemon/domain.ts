@@ -47,6 +47,7 @@ import {
 } from "./steward/pipeline-service.js";
 import { createDshSettingsService, type DshSettingsService } from "./steward/dsh-settings.js";
 import { createAgentSessionsService, type AgentSessionsService } from "./kernel/agent-sessions.js";
+import { createTerminalService, type TerminalService } from "./kernel/terminal/service.js";
 import { createModelCatalogService, type ModelCatalogService } from "./model-catalog.js";
 import { createSessionTranscripts } from "./kernel/session-transcripts.js";
 import type { DshKernelHandle } from "./kernel/dsh-kernel.js";
@@ -58,6 +59,8 @@ import { createCodexAppServerAdapter } from "./steward/codex-adapter.js";
 import { createFixtureHarnessAdapter } from "./steward/fixture-adapter.js";
 import type { HarnessAdapter } from "./steward/harness-adapter.js";
 import { createWorkspaceRegistry, type WorkspaceRegistry } from "./workspace-registry/index.js";
+import { DomainError } from "./domain-error.js";
+import { GLOBAL_WORKSPACE_ID } from "../shared/contracts/workspaces.js";
 
 /**
  * 生产 daemon 的 steward backend 集合：DSH 与 Codex 总是注册（缺失时 typed
@@ -107,6 +110,11 @@ export interface DaemonDomain {
   dshSettings: DshSettingsService;
   /** 内核 agent 会话服务（task 2.2；kernel 句柄由 daemon index boot 后注入）。 */
   agentSessions: AgentSessionsService;
+  /**
+   * 人类终端域（skills-agent-page 1.6）：daemon-owned node-pty 池 + 专用
+   * /ws/terminal typed JSON 协议；不入 agent 工具面（与内核收窄面正交）。
+   */
+  terminal: TerminalService;
   /** 后端文件选择器服务（R17-B）：真实路径浏览/预览 + prompt 附件 path 通道读盘。 */
   agentFiles: AgentFilesService;
   /** agent-models-config 标准生成物（agent-models.generated.ts）的 provider 画廊投影。 */
@@ -165,6 +173,28 @@ export function createDaemonDomain(
     kernel: () => kernelHostRef.handle,
     modelSelection: async () => (await dshSettings.getView()).settings.model,
     defaultMode: async () => (await dshSettings.getView()).settings.defaultMode,
+    // skills-agent-page 1.1：target 创建校验（ws 解析 registry + provider 属该 ws
+    // 投影；失败 typed 拒绝不建会话不写 meta——绝不从 cwd 推断归属）。
+    validateTarget: async (target) => {
+      if (
+        target.workspaceId !== GLOBAL_WORKSPACE_ID &&
+        workspaces.lookup(target.workspaceId) === null
+      ) {
+        throw new DomainError("NOT_FOUND", `workspace not found: ${target.workspaceId}`);
+      }
+      if (target.providerId === undefined) return;
+      const projection = await workspaces.list();
+      const workspace = projection.find((item) => item.id === target.workspaceId);
+      if (workspace === undefined) {
+        throw new DomainError("NOT_FOUND", `workspace not found: ${target.workspaceId}`);
+      }
+      if (!workspace.providers.some((provider) => provider.id === target.providerId)) {
+        throw new DomainError(
+          "INVALID_OPERATION",
+          `provider ${target.providerId} is not part of workspace ${target.workspaceId}`,
+        );
+      }
+    },
     // codex R7 B1：活动路由模型富字段驱动自动压缩阈值（缺字段 = 关闭不猜）。
     modelLimits: async (provider, model) => {
       const { settings } = await dshSettings.getView();
@@ -235,6 +265,9 @@ export function createDaemonDomain(
     skillSteward: createSkillStewardPipelineService({ workspaces, skills, creator }),
     dshSettings,
     agentSessions,
+    // 人类终端（skills-agent-page 1.6）：daemon-owned PTY 池；与 agent 工具面
+    // 正交（内核收窄面无终端工具），cwd 只是启动目录（非 sandbox，如实声明）。
+    terminal: createTerminalService(),
     agentFiles,
     modelCatalog,
     setKernelHost: (handle: DshKernelHandle): void => {
@@ -260,6 +293,9 @@ export function createDaemonDomain(
   });
   const mcpProposals = createMcpProposalStore(managerCapabilities, {
     onRejected: (view, cause) => wikiDistill.onProposalRejected(view, cause),
+    // skills-agent-page 1.1：mcp *_propose 链的会话归属桥（fail-closed——同工具
+    // 名多会话并发时对全部候选校验）。
+    attributeProposeCalls: (toolName) => agentSessions.proposeCallSessions(toolName),
   });
   proposalsRef.store = mcpProposals;
   Object.defineProperty(domain, "mcpProposals", {

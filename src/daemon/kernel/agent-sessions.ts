@@ -8,11 +8,18 @@
  * 正交意图：
  *   [1] 会话生命周期：create 走官方 agents.create（产品 preset + 按模式的工具面
  *       收窄 setup）；prompt 经 followup；cancel 经 agent.cancel；list 从 sessions
- *       store 投影摘要。
+ *       store 投影摘要。修订 [2026-10-03]（skills-agent-page 1.1）：create 携带
+ *       可选 target（server 校验：ws 解析 registry + provider 属该 ws 投影；
+ *       失败 typed 拒绝不建会话不写 meta）；target 落转录 meta 后生命周期内
+ *       不可变（setMode dispose+resume 复活链从 meta 读回）；绝不从 cwd 推断
+ *       归属；summary 直投影 target 与 seedSkill（必填 nullable）。
  *   [2] 脱敏 stream 环形投影：订阅 session/event firehose，把 turn/status/
  *       message 事件映射为 DshSessionStreamFrame（payload 过 redactDshPayload）；
  *       全部被消费事件类型的 data 先过 Zod safeParse，畸形丢弃 + 有界诊断
- *       （2026-09-12 codex R2：六类 tool/message 事件补齐收窄）。
+ *       （2026-09-12 codex R2：六类 tool/message 事件补齐收窄）。修订
+ *       [2026-10-03]：同 firehose 维护 in-flight `*_propose` 工具调用归属表
+ *       （tool/call 入表 / tool/result 出表），供 mcp proposal 链的 target
+ *       enforcement 解析调用会话（session.append 同步派发——窗口可靠）。
  *   [3] 跨重启持久：帧 write-through 到转录存储（sessions/YYYY/MM/DD/<id>），
  *       含 assistant-reasoning 终帧（Thinking 与正文同序 durable，回放等价
  *       live）；重启后 list/stream 由转录回放，prompt 经内核 agents.resume 续聊。
@@ -39,6 +46,7 @@ import type {
   AgentSessionSeedMetadata,
   AgentSessionStatus,
   AgentSessionSummary,
+  AgentSessionTarget,
   AgentSessionsCleanupInput,
   AgentSessionsCleanupResult,
 } from "../../shared/contracts/agent.js";
@@ -54,6 +62,7 @@ import { registerProductPromptSections } from "./product-prompt.js";
 import { runSessionCleanup } from "./session-cleanup.js";
 import { projectInbox, rebuildEditedMessage, type InboxLike } from "./agent-queue.js";
 import { summaryOfMeta, type SessionTranscripts } from "./session-transcripts.js";
+import { proposeToolNameOf } from "../mcp/proposals.js";
 
 /** 内核句柄访问器（daemon boot 后注入；未挂载返回 null）。 */
 export type KernelAccessor = () => DshKernelHandle | null;
@@ -96,6 +105,14 @@ export interface AgentSessionsDeps {
    * 读取在 domain 装配（kernel/ 不 import daemon 根模块；测试可替换）。
    */
   expandSkillReferences?: (references: SkillReferenceInput[]) => Promise<string[]>;
+  /**
+   * 归属 target 创建校验（skills-agent-page 1.1）：workspaceId 解析 registry +
+   * providerId（给出时）属于该 ws 的 provider 投影；失败抛 typed DomainError
+   * （不建会话不写 meta）。domain 装配注入（kernel/ 不 import workspace-registry）；
+   * 缺省 = fail-closed——携带 target 的 create 一律 typed 拒绝（与 file 引用
+   * 展开缺省同法则：不能证明归属就不建）。
+   */
+  validateTarget?: (target: AgentSessionTarget) => Promise<void>;
 }
 
 /** 内核 Agent/Session 的最小结构面（unknown 收窄）。 */
@@ -365,6 +382,13 @@ interface LivePanelSession {
   title: string;
   /** 会话模式（setup 固化；切换即释放句柄）。 */
   mode: DshAgentMode;
+  /**
+   * 归属 target（skills-agent-page 1.1）：创建/复活时从输入或转录 meta 固化；
+   * 生命周期内不可变（无变更面）。undefined = 无 target 旧会话（只读降级）。
+   */
+  target: AgentSessionTarget | undefined;
+  /** seed 技能投影（summary.seedSkill 的 live 事实源；无 seed = null）。 */
+  seedSkill: SkillId | null;
   /** 按 requestSeq 索引的待答问题（ask_user_question waterfall）。 */
   pending: Map<number, PendingApproval>;
   /** tool/call 的 callId → 工具名（tool/result 事件不带名，按 callId 回填）。 */
@@ -414,6 +438,28 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     }
   }
   let firehoseBound = false;
+
+  /**
+   * in-flight `*_propose` 工具调用归属表（skills-agent-page 1.1 enforcement 数据面）：
+   * 键 = tool/call 的 callId，值 = 调用会话 + MCP 工具名。session.append 同步派发
+   * session/event（dsh-session 实测），tool/call 先于工具实现执行——MCP HTTP 请求
+   * 必落在 [tool/call, tool/result) 窗口内，归属可靠；tool/result 出表，会话释放
+   * 整段清退（无 turn/end 兜底必要：调度器 await 全部 in-flight 工具后才收 turn）。
+   */
+  const proposeInFlight = new Map<string, { sessionId: string; toolName: string }>();
+
+  /** tool/call 事件的 propose 归属入表（非 propose 工具 no-op）。 */
+  function trackProposeCall(sessionId: string, toolName: string, callId: string): void {
+    if (!toolName.startsWith("mcp__skill-creator__") || !toolName.endsWith("_propose")) return;
+    proposeInFlight.set(callId, { sessionId, toolName });
+  }
+
+  /** 清退某会话的全部 in-flight propose 归属（释放/清理路径）。 */
+  function forgetProposeCallsOf(sessionId: string): void {
+    for (const [callId, record] of proposeInFlight) {
+      if (record.sessionId === sessionId) proposeInFlight.delete(callId);
+    }
+  }
 
   function requireKernel(): DshKernelHandle {
     const kernel = deps.kernel();
@@ -847,6 +893,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         const callName = checked.data.name;
         const callId = checked.data.callId;
         entry.toolNames.set(callId, callName);
+        // skills-agent-page 1.1：propose 工具调用归属入表（enforcement 消费）。
+        trackProposeCall(entry.agent.session.id, callName, callId);
         // toolCallId（§4.1）：call+result 合并行的关联键；参数流增量已在此帧前
         // 冲刷（非 chunk 事件先 flush），store 以完整参数收敛 argsText。
         return [
@@ -878,6 +926,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           }
         }
         const resultCallId = message.source.callId;
+        // skills-agent-page 1.1：propose 归属窗口闭合（无论成败）。
+        proposeInFlight.delete(resultCallId);
         const resolvedName = entry.toolNames.get(resultCallId);
         return [
           {
@@ -991,6 +1041,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       frameSeq: (seeded.at(-1)?.seq ?? 0) + 1,
       title: meta.title,
       mode: meta.mode,
+      // 不可变归属：复活链从转录 meta 读回（setMode dispose+revive 保留 target）。
+      target: meta.target,
+      seedSkill: meta.seed?.skillId ?? null,
       pending: new Map(),
       toolNames: new Map(),
       deltaBuffer: [],
@@ -1176,6 +1229,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
   async function disposeLiveSession(sessionId: string): Promise<void> {
     const entry = live.get(sessionId);
     if (!entry) return;
+    forgetProposeCallsOf(sessionId);
     for (const pending of entry.pending.values()) pending.resolve({ answers: [] });
     entry.pending.clear();
     live.delete(sessionId);
@@ -1223,6 +1277,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       cwd: entry.agent.session.header.cwd ?? process.cwd(),
       createdAt: isoCreatedAt(entry.agent.session.header),
       mode: entry.mode,
+      ...(entry.target ? { target: entry.target } : {}),
+      seedSkill: entry.seedSkill,
     };
   }
 
@@ -1246,6 +1302,25 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
     /** 墓碑（R15 终验 P1-2 终闭）：transcript 删除成功后永久拒绝复活。 */
     markCleaned(sessionId: string): void {
       tombstoneCleaned(sessionId);
+    },
+    /**
+     * in-flight propose 工具调用的会话归属（skills-agent-page 1.1 enforcement
+     * 数据面）：返回当前对该 MCP 工具名有未闭合 tool/call 的去重会话集合（含
+     * 各自 target；无 target = 旧会话只读）。同工具名多会话并发时全量返回——
+     * 消费方（proposal 链）对全部候选执行 fail-closed 校验。
+     */
+    proposeCallSessions(toolName: string): Array<{
+      sessionId: string;
+      target: AgentSessionTarget | undefined;
+    }> {
+      const out: Array<{ sessionId: string; target: AgentSessionTarget | undefined }> = [];
+      const seen = new Set<string>();
+      for (const record of proposeInFlight.values()) {
+        if (record.toolName !== toolName || seen.has(record.sessionId)) continue;
+        seen.add(record.sessionId);
+        out.push({ sessionId: record.sessionId, target: live.get(record.sessionId)?.target });
+      }
+      return out;
     },
     /**
      * 清理面板会话转录（R14-C）：委托 session-cleanup.ts——只动产品转录层
@@ -1289,7 +1364,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           continue;
         }
         // 非 agent 驱动的 session（steward 绑定等）以 disposed 形态列出即可见性；
-        // 无面板转录即无模式事实，投影 free（无收窄）。
+        // 无面板转录即无模式事实，投影 free（无收窄）；无转录即无归属/seed 事实。
         summaries.push({
           sessionId: session.id,
           title: "",
@@ -1297,19 +1372,36 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           cwd: session.header.cwd ?? process.cwd(),
           createdAt: isoCreatedAt(session.header),
           mode: "free",
+          seedSkill: null,
           hasTranscript: false,
         });
       }
       return summaries;
     },
-    /** 创建产品会话（产品 preset + 按模式的工具面收窄 setup；可选首 prompt 与 seed 元数据）。 */
+    /**
+     * 创建产品会话（产品 preset + 按模式的工具面收窄 setup；可选首 prompt、seed
+     * 元数据与归属 target）。target 校验（skills-agent-page §2.1）先于内核会话
+     * 创建与转录落盘：workspaceId 解析 registry、providerId（给出时）属于该 ws
+     * 的 provider 投影——失败 typed 拒绝，不产生会话与 meta。
+     */
     async create(input: {
       cwd?: string;
       prompt?: string;
       mode?: DshAgentMode;
       /** seed 来源记录（creator-test-session A4）：写入转录 meta 供审计追溯。 */
       metadata?: AgentSessionSeedMetadata;
+      /** 归属 target（skills-agent-page 1.1；server 校验后落 meta，不可变）。 */
+      target?: AgentSessionTarget;
     }): Promise<AgentSessionSummary> {
+      if (input.target !== undefined) {
+        if (deps.validateTarget === undefined) {
+          throw new DomainError(
+            "INVALID_OPERATION",
+            "session target validation is not wired (cannot prove workspace ownership)",
+          );
+        }
+        await deps.validateTarget(input.target);
+      }
       const kernel = requireKernel();
       const agents = agentsService(kernel.ctx);
       const sessionId = `agent-${randomUUID()}`;
@@ -1341,6 +1433,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         frameSeq: 1,
         title: "",
         mode,
+        target: input.target,
+        seedSkill: input.metadata?.skillId ?? null,
         pending: new Map(),
         toolNames: new Map(),
         deltaBuffer: [],
@@ -1357,6 +1451,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         cwd: input.cwd ?? process.cwd(),
         mode,
         ...(input.metadata ? { seed: input.metadata } : {}),
+        ...(input.target ? { target: input.target } : {}),
       });
       if (input.prompt) {
         handle.agent.followup(
@@ -1527,6 +1622,9 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
         );
       }
       const from = entry?.mode ?? meta?.mode ?? "free";
+      // 不可变归属（skills-agent-page 1.1）：setMode 只改写 mode；target 与
+      // seedSkill 从 live 条目或转录 meta 原样透传（dispose+revive 链保留）。
+      const target = entry?.target ?? meta?.target;
       const summary: AgentSessionSummary = {
         sessionId,
         title: entry?.title ?? meta?.title ?? "",
@@ -1536,6 +1634,8 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
           ? isoCreatedAt(entry.agent.session.header)
           : (meta?.createdAt ?? new Date().toISOString()),
         mode,
+        ...(target ? { target } : {}),
+        seedSkill: entry?.seedSkill ?? meta?.seed?.skillId ?? null,
       };
       // 同模式切换是 no-op：不持久化、不产生 mode-changed 帧（live 态保持现状）。
       if (from === mode) {
@@ -1698,6 +1798,7 @@ export function createAgentSessionsService(deps: AgentSessionsDeps) {
       }
       await Promise.allSettled([...live.values()].map((entry) => entry.dispose()));
       live.clear();
+      proposeInFlight.clear();
     },
   };
 }

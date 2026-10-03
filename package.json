@@ -88,6 +88,7 @@
     "@jsquash/jpeg": "1.6.0",
     "@jsquash/png": "3.1.1",
     "@jsquash/resize": "2.1.1",
+    "@lydell/node-pty": "1.1.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@opentray/ext-dialog": "0.34.0",
