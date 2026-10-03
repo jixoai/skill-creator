@@ -1,9 +1,30 @@
-/** Skills block for a workspace-scoped Page. */
+/**
+ * 用户原始需求 [2026-07-27]：「三个导航意味着三个 ChromeTabs」。
+ * 修订 [2026-10-03]（skills-dashboard）：Skills Page = mobileScreen dashboard
+ * （Skills/Agents/Repos 三屏网格；Repository 一级导航退役被吸收；scan 实例迁
+ * 子路由 repos/scan/:sourceId；?screen= 深链切屏）。
+ * 正交意图：[1] 声明 Skills dashboard App 的路由树（root = dashboard 网格 +
+ * repos scan 子路由；intelligence 平行 activity）。
+ */
 import IconBoxes from "@lucide/svelte/icons/boxes";
 import { defineApp, defineActivity, defineRoute } from "$lib/shell";
 import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
 import { SkillIdSchema } from "$shared/contracts/skills.js";
 import { z } from "zod";
+
+/** dashboard 根 search（?screen= 切屏 + 主屏筛选/详情身份 + repos 源过滤）。 */
+const DashboardSearchSchema = z.object({
+  /** 深链屏（缺省 skills；宽屏并列全显 + 高亮，单列容器单屏切换）。 */
+  screen: z.enum(["skills", "agents", "repos"]).optional(),
+  provider: ProviderIdSchema.optional(),
+  q: z.string().optional(),
+  /** repos screen 的源过滤（与主屏技能搜索 q 分道）。 */
+  reposQ: z.string().optional(),
+  skill: SkillIdSchema.optional(),
+  view: z.enum(["list", "detail"]).optional(),
+  /** duplicates-only 过滤开关（出现 = 开）。 */
+  duplicates: z.literal("1").optional(),
+});
 
 export const workspacesApp = defineApp({
   id: "workspaces",
@@ -19,15 +40,30 @@ export const workspacesApp = defineApp({
         id: "workspaces.provider",
         pattern: "",
         params: z.object({ wsId: WorkspaceIdSchema, providerId: ProviderIdSchema.optional() }),
-        search: z.object({
-          provider: ProviderIdSchema.optional(),
-          q: z.string().optional(),
-          skill: SkillIdSchema.optional(),
-          view: z.enum(["list", "detail"]).optional(),
-          selected: z.string().optional(),
-          targets: z.string().optional(),
-        }),
-        component: () => import("$lib/shell/SkillsPage.svelte"),
+        search: DashboardSearchSchema,
+        component: () => import("./SkillsDashboard.svelte"),
+        children: [
+          // repos 扫描实例：sourceId（curated 或 user_）path param；选中/预览走
+          // search（组件 $state 表单的 targets 除外——D5 妥协见 RepositoryView 注释）。
+          defineRoute({
+            id: "workspaces.reposScan",
+            pattern: "repos/scan/:sourceId",
+            params: z.object({
+              wsId: WorkspaceIdSchema,
+              sourceId: z
+                .string()
+                .min(1)
+                .max(128)
+                .regex(/^[a-z0-9_-]+$/i),
+            }),
+            search: z.object({
+              selected: z.string().optional(),
+              skill: z.string().optional(),
+              targets: z.string().optional(),
+            }),
+            component: () => import("./RepositoryScan.svelte"),
+          }),
+        ],
       }),
     }),
     defineActivity({

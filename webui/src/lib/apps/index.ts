@@ -4,18 +4,18 @@
  * 索引，detail=patterns 列表；旧 Workspaces 内 wiki 视图迁入）。
  * 修订 [2026-09-25]（settings-panel-zcode-source）：Settings 页面面板（原 shell
  * Dialog 退役；入口钉在左导航底部，导航语义与其他 App 一致）。
+ * 修订 [2026-10-03]（skills-dashboard）：Repository App 退役——Discover/scan 迁入
+ * Skills dashboard 的 Repos screen（legacy /repository 路由经 redirect 表指深链）。
  * 正交意图：[1] 统一注册全部内置 App，供 Shell 启动时调用。
  */
 
 import "./workspaces/manifest.js";
 import "./creator/manifest.js";
-import "./repository/manifest.js";
 import "./wiki/manifest.js";
 import "./settings/manifest.js";
 
 export { workspacesApp } from "./workspaces/manifest.js";
 export { creatorApp } from "./creator/manifest.js";
-export { repositoryApp } from "./repository/manifest.js";
 export { wikiApp } from "./wiki/manifest.js";
 export { settingsApp } from "./settings/manifest.js";
 

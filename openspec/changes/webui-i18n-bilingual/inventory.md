@@ -48,18 +48,18 @@ token、`$`/`@`/`/` 触发符）、daemon 透传错误原文（后端消息翻�
 
 ## 2. B 类（IA 将重构，本轮禁改文案结构）
 
-| 文件/面                                                                                                                                                                             | IA 动向                            | 检查点（IA 落定后）                                                                                   |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `lib/shell/AppShell.svelte`、`TabOutlet.svelte`、`nav-controller.svelte.ts`、`components/shell/app-sidebar.svelte`、`components/window-drag-region.svelte`、`routes/+layout.svelte` | tab 栏 + 地址栏 + dashboard 平行化 | 导航 aria（web-mode-smoke 断言 Workspaces/Creator/Repository）迁 `shell.*` 域；断言测试与词典同批更新 |
-| `routes/+layout.svelte`（顶栏 Refresh/Agent 按钮 aria）                                                                                                                             | 顶栏重构                           | 同上                                                                                                  |
-| `src/app.html`                                                                                                                                                                      | shell 属地                         | 不改（lang 由 i18n store 运行时同步，已生效）                                                         |
-| `apps/workspaces/**`（WorkspacesHome/ProviderView/IntelligenceView/finding-propose-templates）                                                                                      | → skills-dashboard                 | **冒烟锚点**：`skills across {n} agent locations`（web-mode-smoke 正则断言）迁词典时 en 值逐字保留    |
-| `apps/creator/**`（CreatorHome/CreatorWorkspace/manifest）                                                                                                                          | Creator AgentChat 化               | 整面文案随新形态重写后入词典                                                                          |
-| `apps/repository/**`（RepositoryHome/RepositoryScan/manifest）                                                                                                                      | 迁入 dashboard                     | 扫描/安装状态文案族（AGENTS §7.2 可区分性要求）随迁                                                   |
-| `apps/settings/manifest.ts`                                                                                                                                                         | settings tab 化                    | manifest 元数据文案 key 化                                                                            |
-| `components/creator/eval-view.svelte`                                                                                                                                               | → 独立 evaluating app              | 随新 app 出生即 i18n（转 C 类）                                                                       |
-| `components/import-workspace-dialog.svelte`                                                                                                                                         | 挪顶栏                             | 随顶栏批迁移                                                                                          |
-| `components/creator/**` 其余（change-log/file-browser/markdown-editor/preview/sub-view-tabs/test-* /validation-view）                                                               | 随 Creator AgentChat 化            | 随 Creator 批迁移                                                                                     |
+| 文件/面                                                                                                                                                                             | IA 动向                                                       | 检查点（IA 落定后）                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/shell/AppShell.svelte`、`TabOutlet.svelte`、`nav-controller.svelte.ts`、`components/shell/app-sidebar.svelte`、`components/window-drag-region.svelte`、`routes/+layout.svelte` | tab 栏 + 地址栏 + dashboard 平行化                            | 导航 aria（web-mode-smoke 断言 Workspaces/Creator/Repository）迁 `shell.*` 域；断言测试与词典同批更新                                                                                                                                           |
+| `routes/+layout.svelte`（顶栏 Refresh/Agent 按钮 aria）                                                                                                                             | 顶栏重构                                                      | 同上                                                                                                                                                                                                                                            |
+| `src/app.html`                                                                                                                                                                      | shell 属地                                                    | 不改（lang 由 i18n store 运行时同步，已生效）                                                                                                                                                                                                   |
+| `apps/workspaces/**`（WorkspacesHome/ProviderView/IntelligenceView/finding-propose-templates）                                                                                      | → skills-dashboard（**已完成**，见 5.2）                      | **冒烟锚点已迁**：`dashboard.librarySnapshot` en 值逐字 `"{skills} skills across {providers} agent locations."`（Global 页脚 sr-only；web-mode-smoke 正则仍绿）；ProviderView 行内轻量编辑退役未迁移；IntelligenceView 本体文案仍为 B（后续批） |
+| `apps/creator/**`（CreatorHome/CreatorWorkspace/manifest）                                                                                                                          | Creator AgentChat 化                                          | 整面文案随新形态重写后入词典                                                                                                                                                                                                                    |
+| `apps/repository/**`（RepositoryHome/RepositoryScan/manifest）                                                                                                                      | 迁入 dashboard（**已完成**，见 5.2 reposScreen/reposScan 域） | 扫描/安装状态文案族（AGENTS §7.2 可区分性要求）已随迁词典化；目录已删除                                                                                                                                                                         |
+| `apps/settings/manifest.ts`                                                                                                                                                         | settings tab 化                                               | manifest 元数据文案 key 化                                                                                                                                                                                                                      |
+| `components/creator/eval-view.svelte`                                                                                                                                               | → 独立 evaluating app                                         | 已迁移（2026-10-03 文件删除，转 C 类 5.3）                                                                                                                                                                                                      |
+| `components/import-workspace-dialog.svelte`                                                                                                                                         | 挪顶栏                                                        | 随顶栏批迁移                                                                                                                                                                                                                                    |
+| `components/creator/**` 其余（change-log/file-browser/markdown-editor/preview/sub-view-tabs/test-* /validation-view）                                                               | 随 Creator AgentChat 化                                       | 随 Creator 批迁移                                                                                                                                                                                                                               |
 
 toast 消息的 B 类调用点（repository/creator/workspaces 各 store 与组件）随各自批次
 词典化；本轮这些 toast 仍输出英文原文（默认 locale 下无行为差异）。
@@ -81,8 +81,50 @@ toast 消息的 B 类调用点（repository/creator/workspaces 各 store 与组�
 ## 5. C 类（IA 新增面，出生即 i18n）
 
 dashboard、skills-dashboard、SkillsAgentPage、evaluating（eval-view 独立 app）、
-terminal、omnibox——均尚未存在。出生约定：第一 commit 起文案只写词典
+terminal、omnibox——出生约定：第一 commit 起文案只写词典
 （key 域按新 App 名）、组件零裸文案、测试断言走 en 事实源（design §6）。
+已出生批次见下方 5.1-5.3。
+
+### 5.1 已出生（skills-agent-page 2026-10-03）
+
+| 面                                                                                                  | key 域                   | key 数（en=zh） | 备注                                                                                      |
+| --------------------------------------------------------------------------------------------------- | ------------------------ | --------------- | ----------------------------------------------------------------------------------------- |
+| `apps/agent/SkillsAgentPage.svelte`                                                                 | agentPage                | 8               | 布局壳工具钮/双开角标/树折叠 aria                                                         |
+| `apps/agent/SessionTree.svelte`                                                                     | agentTree                | 13              | 分组树/续聊/新建带 target 选择；Unassigned 只读徽标                                       |
+| `apps/agent/ExtensionPanel.svelte`                                                                  | extensionPanel           | 8               | panelTabs 三页（终端流/审批/卡片）                                                        |
+| `components/agent/terminal/TerminalDock.svelte`、`TerminalPane.svelte`、`terminal-client.svelte.ts` | terminal                 | 14              | 多 tab/拖高/非 sandbox 首开提示（human-terminal spec「首开提示」场景）/limit 与错误 toast |
+| `components/agent/AgentPanel.svelte`（workspace attach 化扩展）                                     | agentPanel（新增 4 key） | +4              | 双开角标/「在 Agent 页打开」深链/本 ws 会话空态                                           |
+
+计数更新（本批 +47）：agentPage 8 + agentTree 13 + extensionPanel 8 + terminal 14
+
+- agentPanel 新增 4（en=zh 齐全；i18n key 集合相等测试双保险）。
+
+### 5.2 已出生（skills-dashboard 2026-10-03）
+
+| 面                                                                 | key 域                      | key 数（en=zh） | 备注                                                                                                                |
+| ------------------------------------------------------------------ | --------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `apps/workspaces/SkillsDashboard.svelte` + `screens/*.svelte`      | dashboard（壳/切换器/页脚） | 15              | 库快照 sr-only 行 = web-mode 冒烟锚点（en 逐字 `"{skills} skills across {providers} agent locations."`，冒烟跑 en） |
+| `screens/skills-screen.svelte`                                     | skillsScreen                | 23              | 平铺列表/搜索/chips/duplicates/load-more/master-detail 空态；sameContent 单复分支                                   |
+| `screens/agents-screen.svelte`                                     | agentsScreen                | 9               | provider 卡片 + View findings（与 detail 面同链）                                                                   |
+| `screens/repos-screen.svelte`（RepositoryHome 迁入）               | reposScreen                 | 25              | Discover feed/add/remove 源表单（B 类 repository 面随迁转 C）                                                       |
+| `apps/workspaces/RepositoryScan.svelte`（迁移）                    | reposScan                   | 31              | pinned-clone 状态机/安装目标预填与 Global 引导/dry-run/汇总                                                         |
+| `components/skills/skill-detail-panel.svelte`（抽自 ProviderView） | skillDetail                 | 27              | 只读文档 + 管理动作（toggle=唯一写）；name/description 行内轻量编辑退役未迁移                                       |
+
+计数更新：skills-dashboard 批新增 **130 key**（en=zh；域计数见上表）。词典总
+计数随并行批次（evaluating 等）动态增长，以 i18n.test 的 en=zh key 集合相等
+断言为齐全性门，不在本表钉总数字。
+
+### 5.3 已出生（evaluating-dashboard 2026-10-03）
+
+| 面                                          | key 域     | key 数（en=zh） | 备注                                                                              |
+| ------------------------------------------- | ---------- | --------------- | --------------------------------------------------------------------------------- |
+| `apps/evaluating/EvaluatingOverview.svelte` | evaluating | 113（全域）     | 总览屏：技能卡五态徽标行/stale 黄标/相对时间/typed error 降级卡/load-more/空态    |
+| `apps/evaluating/EvaluatingDetail.svelte`   | 同上       | （并入 113）    | 详情屏：三段路由身份/cases 表（R1-R3 revision 钉随迁）/失败断言展开/Global 只读门 |
+| `apps/evaluating/run-confirm-dialog.svelte` | 同上       | （并入 113）    | Run 显式确认（三元组标注 + runner + case 勾选；禁自动运行）；toast 族             |
+| `apps/evaluating/case-editor-dialog.svelte` | 同上       | （并入 113）    | case 新建/编辑（Imported-only）：五类断言编辑 + 前端校验 + 删除两步确认           |
+
+计数更新：evaluating 批新增 **113 key**（en=zh；`evaluating.*` 单域）。`components/
+creator/eval-view.svelte` 已删除（B 类行退役）——迁移源文案全部并入 evaluating 域。
 
 ## 6. 计数汇总
 
@@ -92,6 +134,14 @@ B（IA 禁改） : 10 个文件面（shell 族 / workspaces / creator / reposito
               settings manifest / eval-view / import-workspace-dialog / creator 组件族）
 TBD          : 4 个裁决点（settings 内容文案、wiki manifest、4 个共享组件归属）
 SKIP         : components/ui/**（生成器属地）
-C（未出生）  : dashboard / skills-dashboard / SkillsAgentPage / evaluating /
-              terminal / omnibox
+C（已出生）  : SkillsAgentPage + agentTree + extensionPanel + terminal +
+              agentPanel 扩展 = +47 key（agentPage 8 + agentTree 13 +
+              extensionPanel 8 + terminal 14 + agentPanel 4；en=zh；
+              skills-agent-page 2026-10-03）
+C（已出生）  : skills-dashboard = +130 key（dashboard 15 + skillsScreen 23 +
+              agentsScreen 9 + reposScreen 25 + reposScan 31 + skillDetail 27；
+              en=zh；skills-dashboard 2026-10-03）
+C（已出生）  : evaluating = +113 key（evaluating.* 单域；en=zh；
+              evaluating-dashboard 2026-10-03）
+C（未出生）  : omnibox（shell 批）
 ```

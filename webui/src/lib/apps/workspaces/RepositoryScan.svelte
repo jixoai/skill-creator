@@ -1,16 +1,25 @@
 <!--
-  用户原始需求 [2026-07-27]：「扫描实例 Tab：复用现有 scan + preview + install 流程，视图状态来自 URL。」
+  用户原始需求 [2026-07-27]：「扫描实例 Tab：复用现有 scan + preview + install 流程，
+  视图状态来自 URL。」
+  迁移修订 [2026-10-03]（skills-dashboard 1.5）：apps/repository → apps/workspaces；
+  路由迁 /w/:wsId/skills/repos/scan/:sourceId（pinned-clone → preview/install 状态机
+  原样）；安装目标按当前 tab wsId 预填（Imported 才可选；Global 只读空态引导）；
+  文案出生即 i18n（C 类面）。
   正交意图：
-    1. 从 URL path param sourceId 解析源 gitUrl（curated 静态目录或 user 源 RPC list），首扫自动触发。
-    2. 选中技能编码到 URL ?selected=rsk_1,rsk_2（视图状态真相源，刷新可恢复）；安装目标走组件 $state 表单。
-    3. scan session daemon-owned：浏览器按需拉取 repository.scan / preview / install RPC，不缓存跨渲染周期。
-  妥协声明：targets 表单提交时直接走 install RPC（短列表用 $state；超 URL 长度的方案见设计 D5，当前以
-  组件 $state 表单为主，刷新可恢复 selected，targets 需重选——已在 tasks 5.4 标注）。
+    1. 从 URL path param sourceId 解析源 gitUrl（curated 静态目录或 user 源 RPC list），
+       首扫自动触发。
+    2. 选中技能编码到 URL ?selected=rsk_1,rsk_2（视图状态真相源，刷新可恢复）；
+       安装目标走组件 $state 表单（当前 wsId 预填）。
+    3. scan session daemon-owned：浏览器按需拉取 repository.scan / preview / install RPC，
+       不缓存跨渲染周期。
+  妥协声明：targets 表单提交时直接走 install RPC（短列表用 $state；超 URL 长度的方案
+  见设计 D5，当前以组件 $state 表单为主，刷新可恢复 selected，targets 需重选）。
 -->
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { useParams, useSearch, goById } from "$lib/shell";
+  import { t } from "$lib/i18n";
   import { curatedSourceEntry } from "$shared/curated-sources.js";
   import {
     installRemoteSkills,
@@ -31,18 +40,28 @@
     RemoteSkillPreview,
     WorkspaceProviderTarget,
   } from "$lib/types";
+  import { WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
+  import type { WorkspaceId } from "$shared/contracts/workspaces.js";
 
-  const getParams = useParams<{ sourceId: string }>();
+  const getParams = useParams<{ wsId: string; sourceId: string }>();
   const getSearch = useSearch<{ selected?: string; skill?: string }>();
 
+  const rawWsId = $derived(getParams?.()?.wsId);
   const sourceId = $derived(getParams?.()?.sourceId);
+  // wsId 经 manifest zod schema 校验（match 阶段）；这里安全解析为 branded 类型。
+  const wsId = $derived.by(() => {
+    const parsed = WorkspaceIdSchema.safeParse(rawWsId);
+    return parsed.success ? (parsed.data as WorkspaceId) : null;
+  });
 
   // 源解析：优先 curated 静态目录，回退到 user 源 RPC list。
   const curatedHit = $derived(sourceId ? curatedSourceEntry(sourceId) : undefined);
   const userHit = $derived(
     sourceId ? repositorySourcesState.user.find((entry) => entry.id === sourceId) : undefined,
   );
-  const sourceLabel = $derived(curatedHit?.label ?? userHit?.label ?? sourceId ?? "Repository");
+  const sourceLabel = $derived(
+    curatedHit?.label ?? userHit?.label ?? sourceId ?? t("reposScan.sourceFallback"),
+  );
   const gitUrl = $derived(curatedHit?.gitUrl ?? userHit?.gitUrl);
 
   // 扫描会话（daemon-owned，组件持当前视图所需结果）。
@@ -83,6 +102,19 @@
   });
 
   const targets = $derived(writableWorkspaceProviders());
+
+  // 安装目标预填（skills-dashboard 1.5）：当前 tab 是 Imported ws → 预勾选其全部
+  // 可写 provider（一次 latch；用户此后可自由增删）；Global tab → 不预填 + 引导。
+  let prefilled = false;
+  $effect(() => {
+    if (prefilled || targets.length === 0) return;
+    prefilled = true;
+    const current = wsId;
+    if (!current || current === ("~" as const)) return;
+    selectedTargets = targets
+      .filter((entry) => entry.target.workspaceId === current)
+      .map((entry) => entry.target);
+  });
 
   // 触发扫描；sourceId 与 gitUrl 就绪后只跑一次（基于已扫描的 sourceId 记忆）。
   let scannedSourceKey = $state<string | null>(null);
@@ -140,6 +172,11 @@
     previewing = false;
   }
 
+  function scanPath(params: URLSearchParams): string {
+    const qs = params.toString();
+    return `/w/${wsId}/skills/repos/scan/${encodeURIComponent(sourceId ?? "")}${qs ? `?${qs}` : ""}`;
+  }
+
   function toggleSelected(skill: RemoteSkill): void {
     const next = new Set(selectedIds);
     if (next.has(skill.id)) next.delete(skill.id);
@@ -152,18 +189,13 @@
     const search = new URLSearchParams(page.url.search);
     if (value) search.set("selected", value);
     else search.delete("selected");
-    const qs = search.toString();
-    void goto(`/repository/scan/${encodeURIComponent(sourceId ?? "")}${qs ? `?${qs}` : ""}`, {
-      replaceState: true,
-    });
+    void goto(scanPath(search), { replaceState: true });
   }
 
   function selectSkillForPreview(skill: RemoteSkill): void {
     const search = new URLSearchParams(page.url.search);
     search.set("skill", skill.id);
-    void goto(`/repository/scan/${encodeURIComponent(sourceId ?? "")}?${search.toString()}`, {
-      replaceState: true,
-    });
+    void goto(scanPath(search), { replaceState: true });
   }
 
   function toggleTarget(target: WorkspaceProviderTarget): void {
@@ -227,8 +259,12 @@
     );
   });
 
-  function viewInWorkspaces(workspaceId: string, providerId: string, skillId: string): void {
-    goById("workspaces.provider", { wsId: workspaceId, providerId }, { skill: skillId });
+  function viewInDashboard(workspaceId: string, providerId: string, skillId: string): void {
+    goById(
+      "workspaces.provider",
+      { wsId: workspaceId, providerId },
+      { skill: skillId, view: "detail" },
+    );
   }
 </script>
 
@@ -241,8 +277,8 @@
       {/if}
     </div>
     {#if scan}
-      <span class="shrink-0 text-[11px] text-muted-foreground">
-        {scan.skills.length} skills · commit {scan.commit.slice(0, 12)}
+      <span class="shrink-0 text-[11px] text-muted-foreground" data-testid="scan-meta">
+        {t("reposScan.meta", { count: scan.skills.length, commit: scan.commit.slice(0, 12) })}
       </span>
     {/if}
     <form
@@ -254,9 +290,9 @@
     >
       <input
         bind:value={scanRef}
-        placeholder="branch / tag"
-        title="Optional Git ref to scan (defaults to the repository default branch)"
-        aria-label="Git ref for scanning"
+        placeholder={t("reposScan.refPlaceholder")}
+        title={t("reposScan.refTitle")}
+        aria-label={t("reposScan.refTitle")}
         class="h-7 w-28 rounded-md border border-input bg-input/20 px-2 font-mono text-[11px] outline-none placeholder:text-muted-foreground focus-visible:border-ring"
       />
       <button
@@ -264,15 +300,15 @@
         disabled={scanning || !gitUrl}
         class="h-7 rounded-md border border-border px-2 text-[11px] transition-colors hover:bg-muted/50 disabled:opacity-50"
       >
-        {scanning ? "Scanning…" : "Rescan"}
+        {scanning ? t("reposScan.scanning") : t("reposScan.rescan")}
       </button>
     </form>
     <button
       type="button"
-      onclick={() => goto("/repository")}
+      onclick={() => goto(`/w/${wsId}/skills?screen=repos`)}
       class="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] hover:bg-muted/50"
     >
-      Discover
+      {t("reposScan.discover")}
     </button>
   </header>
 
@@ -283,10 +319,8 @@
       data-testid="session-expired"
     >
       <span class="min-w-0 flex-1">
-        <span class="font-medium">Scan session expired.</span>
-        <span class="text-muted-foreground">
-          The pinned commit is no longer held by the daemon. Rescan this repository to continue.
-        </span>
+        <span class="font-medium">{t("reposScan.expiredTitle")}</span>
+        <span class="text-muted-foreground">{t("reposScan.expiredBody")}</span>
       </span>
       <button
         type="button"
@@ -294,12 +328,12 @@
         onclick={() => gitUrl && void runScan(gitUrl, scanRef)}
         class="h-7 shrink-0 rounded-md border border-border bg-background px-3 text-[11px] font-medium transition-colors hover:bg-muted/50 disabled:opacity-50"
       >
-        Rescan
+        {t("reposScan.rescan")}
       </button>
     </div>
   {/if}
   {#if scanning}
-    <p class="px-4 py-8 text-center text-xs text-muted-foreground">Scanning…</p>
+    <p class="px-4 py-8 text-center text-xs text-muted-foreground">{t("reposScan.scanning")}</p>
   {:else if scanError}
     <p class="px-4 py-8 text-center text-xs text-destructive">{scanError.message}</p>
     {#if gitUrl}
@@ -309,15 +343,15 @@
           onclick={() => runScan(gitUrl)}
           class="rounded-md border border-border px-3 py-1 text-xs hover:bg-muted/50"
         >
-          Retry scan
+          {t("reposScan.retryScan")}
         </button>
       </div>
     {/if}
   {:else if !scan}
-    <p class="px-4 py-8 text-center text-xs text-muted-foreground">No scan yet.</p>
+    <p class="px-4 py-8 text-center text-xs text-muted-foreground">{t("reposScan.noScan")}</p>
   {:else if scan.skills.length === 0}
     <p class="px-4 py-8 text-center text-xs text-muted-foreground">
-      No installable skills found in this repository.
+      {t("reposScan.noSkills")}
     </p>
   {:else}
     <div class="flex min-h-0 flex-1">
@@ -326,14 +360,16 @@
         <header
           class="flex shrink-0 items-center justify-between px-3 py-2 text-xs text-muted-foreground"
         >
-          <span>{selectedIds.size} selected</span>
+          <span data-testid="selected-count"
+            >{t("reposScan.selectedCount", { count: selectedIds.size })}</span
+          >
           {#if selectedIds.size > 0}
             <button
               type="button"
               class="hover:text-foreground"
               onclick={() => writeSelected(new Set())}
             >
-              Clear
+              {t("reposScan.clear")}
             </button>
           {/if}
         </header>
@@ -357,18 +393,18 @@
                   toggleSelected(skill);
                 }}
                 class="mt-0.5 h-3.5 w-3.5"
-                aria-label="Select skill"
+                aria-label={t("reposScan.selectSkillAria")}
               />
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-[13px] font-medium text-foreground">
                   {skill.name}
                 </span>
                 <span class="mt-0.5 line-clamp-2 block text-[11px] text-muted-foreground">
-                  {skill.description || "No description"}
+                  {skill.description || t("reposScan.noDescription")}
                 </span>
                 {#if !skill.installable}
                   <span class="mt-0.5 block text-[10px] text-amber-600 dark:text-amber-400">
-                    {skill.issues.join(" ") || "Not installable"}
+                    {skill.issues.join(" ") || t("reposScan.notInstallable")}
                   </span>
                 {/if}
               </span>
@@ -380,30 +416,34 @@
       <!-- 右：预览 + 安装表单 + 结果 -->
       <section class="flex w-1/2 min-w-0 flex-col overflow-y-auto">
         <div class="border-b border-border p-3">
-          <h2 class="text-xs font-medium text-muted-foreground">Preview</h2>
+          <h2 class="text-xs font-medium text-muted-foreground">{t("reposScan.preview")}</h2>
           {#if previewing}
-            <p class="mt-2 text-xs text-muted-foreground">Loading…</p>
+            <p class="mt-2 text-xs text-muted-foreground">{t("reposScan.previewLoading")}</p>
           {:else if preview}
             <pre
               class="mt-2 max-h-48 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-4">{preview.content}</pre>
           {:else}
-            <p class="mt-2 text-xs text-muted-foreground">Select a skill to preview.</p>
+            <p class="mt-2 text-xs text-muted-foreground">{t("reposScan.previewEmpty")}</p>
           {/if}
         </div>
 
         <div class="border-b border-border p-3">
           <h2 class="text-xs font-medium text-muted-foreground">
-            Install targets ({selectedTargets.length})
+            {t("reposScan.installTargets", { count: selectedTargets.length })}
           </h2>
-          {#if targets.length === 0}
-            <p class="mt-2 text-xs text-muted-foreground">
-              No writable workspace providers. Import a directory workspace first.
+          {#if wsId === ("~" as const)}
+            <!-- Global tab：安装目标只读引导（写入闸在 Imported ws——AGENTS §2 约束 2）。 -->
+            <p class="mt-2 text-xs text-muted-foreground" data-testid="global-target-hint">
+              {t("reposScan.globalHint")}
             </p>
+          {/if}
+          {#if targets.length === 0}
+            <p class="mt-2 text-xs text-muted-foreground">{t("reposScan.noTargets")}</p>
           {:else}
             <ul class="mt-2 space-y-1">
               {#each targets as target (target.target.workspaceId + ":" + target.target.providerId)}
                 <li>
-                  <label class="flex items-center gap-2 text-xs">
+                  <label class="flex min-h-7 items-center gap-2 text-xs">
                     <input
                       type="checkbox"
                       checked={isTargetSelected(target.target)}
@@ -411,6 +451,13 @@
                       class="h-3.5 w-3.5"
                     />
                     <span class="truncate">{target.label}</span>
+                    {#if target.target.workspaceId === wsId}
+                      <span
+                        class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      >
+                        {t("reposScan.currentTab")}
+                      </span>
+                    {/if}
                   </label>
                 </li>
               {/each}
@@ -425,7 +472,7 @@
               onclick={() => runInstall(true)}
               class="h-7 rounded-md border border-border px-2 text-[11px] hover:bg-muted/50 disabled:opacity-50"
             >
-              Dry-run
+              {t("reposScan.dryRun")}
             </button>
             <button
               type="button"
@@ -435,7 +482,7 @@
               onclick={() => runInstall(false)}
               class="h-7 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {installing ? "Installing…" : "Install"}
+              {installing ? t("reposScan.installing") : t("reposScan.install")}
             </button>
           </div>
           {#if installError && !sessionExpired}
@@ -445,19 +492,25 @@
 
         {#if installResult?.kind === "preview"}
           <div class="p-3 text-xs">
-            <h2 class="font-medium text-muted-foreground">Dry-run preview</h2>
+            <h2 class="font-medium text-muted-foreground">{t("reposScan.dryRunTitle")}</h2>
             <p class="mt-1">
-              {installResult.totalInstalls} install(s) planned across {installResult.destinations
-                .length} destination(s).
+              {t("reposScan.dryRunBody", {
+                installs: installResult.totalInstalls,
+                destinations: installResult.destinations.length,
+              })}
             </p>
           </div>
         {/if}
 
         {#if installSummary}
-          <div class="p-3 text-xs">
+          <div class="p-3 text-xs" data-testid="install-summary">
             <h2 class="font-medium text-muted-foreground">
-              Installed {installSummary.installed} · overwritten {installSummary.overwritten} · skipped
-              {installSummary.skipped} · failed {installSummary.failed}
+              {t("reposScan.summary", {
+                installed: installSummary.installed,
+                overwritten: installSummary.overwritten,
+                skipped: installSummary.skipped,
+                failed: installSummary.failed,
+              })}
             </h2>
             {#if installedEntries.length > 0}
               <div class="mt-2 space-y-1">
@@ -472,13 +525,13 @@
                       type="button"
                       class="shrink-0 rounded bg-primary/10 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/20"
                       onclick={() =>
-                        viewInWorkspaces(
+                        viewInDashboard(
                           entry.target.workspaceId,
                           entry.target.providerId,
                           entry.skillId,
                         )}
                     >
-                      View in Workspaces
+                      {t("reposScan.viewInDashboard")}
                     </button>
                   </div>
                 {/each}

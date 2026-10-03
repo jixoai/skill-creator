@@ -1,36 +1,48 @@
 <!--
-  用户原始需求 [2026-07-27]：「Repository home Tab 呈现 Discover 体验：搜索 + 精选源卡片 + 用户源 + 最近扫描。」
-  修订 [2026-10-02]（design-critique R2）：页面对齐导航命名——h1 改「Repository」，
-  「Discover skills」降为源卡区分组标题；源卡网格在卡片数 <3 时封顶 2 列
-  （3 列网格摆 2 卡不再留锯齿空位）。
+  用户原始需求 [2026-07-27]（RepositoryHome 迁入 dashboard，skills-dashboard
+  design §4）：「Repository home Tab 呈现 Discover 体验：搜索 + 精选源卡片 +
+  用户源 + 最近扫描。」
+  迁移修订 [2026-10-03]（skills-dashboard 1.5）：路由迁 /w/:wsId/skills?screen=repos
+  （源过滤参数 reposQ，与主屏技能搜索 q 分道）；Scan 实例 → 子路由
+  /w/:wsId/skills/repos/scan/:sourceId；文案出生即 i18n（C 类面）。
   正交意图：
-    1. 卡片数据来自 repository.sources.list RPC（不缓存跨渲染周期、不写 localStorage）。
-    2. 搜索纯客户端过滤；未提交文本是组件局部 $state，提交后走 URL search ?q=。
-    3. 点源卡片 Scan → 打开 /repository/scan/<sourceId> 实例 Tab。
-  妥协声明：home 与 scan 共用一个 entry activity AppShell（Shell 当前每 App 渲染一个 entry）。
+  1. 卡片数据来自 repository.sources.list RPC（不缓存跨渲染周期、不写 localStorage）。
+  2. 搜索纯客户端过滤；未提交文本是组件局部 $state，提交后走 URL ?reposQ=。
+  3. 点源卡片 Scan → 打开 scan 实例子路由（RepositoryScan 用 sourceId 反查 gitUrl）。
 -->
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { useSearch, goById } from "$lib/shell";
   import SourceCard from "$lib/components/source-card.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import { showToast } from "$lib/toast.svelte";
-  import { useSearch } from "$lib/shell";
+  import { t } from "$lib/i18n";
   import {
     addSource,
     loadSources,
     removeSource,
     repositorySourcesState,
   } from "$lib/stores/repository-sources.svelte";
-  import {
-    getScanSummary,
-    isScanSummaryStale,
-    recordScanSummary,
-  } from "$lib/stores/scan-summary.svelte";
+  import { getScanSummary, isScanSummaryStale } from "$lib/stores/scan-summary.svelte";
+  import type { WorkspaceId } from "$shared/contracts/workspaces.js";
 
-  const getSearch = useSearch<{ q?: string }>();
+  type DashboardSearch = {
+    screen?: "skills" | "agents" | "repos";
+    provider?: string;
+    q?: string;
+    reposQ?: string;
+    skill?: string;
+    view?: "list" | "detail";
+    duplicates?: "1";
+  };
 
-  // 已提交的搜索过滤来自 URL（视图状态真相源，刷新可恢复）。
-  const committedQuery = $derived(getSearch?.()?.q?.trim() ?? "");
+  let { wsId }: { wsId: WorkspaceId } = $props();
+
+  const getSearch = useSearch<DashboardSearch>();
+  const search = $derived(getSearch?.() ?? {});
+
+  // 已提交的源过滤来自 URL（刷新可恢复）；与主屏技能搜索 q 互不干扰。
+  const committedQuery = $derived(search.reposQ?.trim() ?? "");
 
   // 未提交的输入文本是瞬时 UI（组件局部 $state）；与 URL 后退/前进同步。
   let draft = $state("");
@@ -38,12 +50,11 @@
     draft = committedQuery;
   });
 
-  // home Tab 渲染时按需拉取源列表（不缓存跨渲染周期、不写 localStorage）。
+  // screen 渲染时按需拉取源列表（不缓存跨渲染周期、不写 localStorage）。
   $effect(() => {
     void loadSources();
   });
 
-  // 卡片合并视图：curated ∪ user。
   const sources = $derived([
     ...repositorySourcesState.builtIn.map((entry) => ({
       id: entry.id,
@@ -83,7 +94,7 @@
     return items.slice(0, 5);
   });
 
-  // 新增自定义源表单（瞬时 $state；提交经 RPC）。
+  // 新增自定义源表单（瞬时 $state；提交经 RPC；https-only 由 server 契约裁决）。
   let adding = $state(false);
   let newLabel = $state("");
   let newUrl = $state("");
@@ -91,23 +102,18 @@
   let addError = $state<string | null>(null);
   let addBusy = $state(false);
 
-  function commitQuery(next: string): void {
-    const trimmed = next.trim();
-    const search = trimmed ? `?q=${encodeURIComponent(trimmed)}` : "";
-    const target = `/repository${search}`;
-    // REPLACE 避免每次按键都堆积历史；提交（blur/Enter）时用 PUSH。
-    void goto(target, { replaceState: true });
-  }
-
-  function submitQuery(): void {
-    const trimmed = draft.trim();
-    const search = trimmed ? `?q=${encodeURIComponent(trimmed)}` : "";
-    void goto(`/repository${search}`);
+  function setRepoSearch(value: string, mode: "REPLACE" | "PUSH"): void {
+    goById(
+      "workspaces.provider",
+      { wsId },
+      { ...search, screen: "repos", reposQ: value.trim() || undefined },
+      mode,
+    );
   }
 
   function openScan(sourceId: string): void {
     // 通过 sourceId 进入扫描实例；RepositoryScan 用 sourceId 反查 gitUrl 触发首扫。
-    void goto(`/repository/scan/${encodeURIComponent(sourceId)}`);
+    void goto(`/w/${wsId}/skills/repos/scan/${encodeURIComponent(sourceId)}`);
   }
 
   function openAdd(): void {
@@ -122,7 +128,7 @@
     const label = newLabel.trim();
     const gitUrl = newUrl.trim();
     if (!label || !gitUrl) {
-      addError = "Label and Git URL are required.";
+      addError = t("reposScreen.addRequired");
       return;
     }
     addBusy = true;
@@ -165,7 +171,7 @@
       const removed = await removeSource(source.id);
       if (removed) {
         removeOpen = false;
-        showToast(`Removed source ${source.label}.`);
+        showToast(t("reposScreen.removedSource", { label: source.label }));
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error));
@@ -175,59 +181,47 @@
   }
 </script>
 
-<div class="flex h-full flex-col overflow-y-auto p-5">
-  <header class="flex shrink-0 items-center gap-3 border-b border-border pb-4">
-    <div class="min-w-0 flex-1">
-      <h1 class="text-lg font-semibold">Repository</h1>
-      <p class="mt-0.5 text-xs text-muted-foreground">
-        Browse curated and custom skill repositories, then scan to install.
-      </p>
-    </div>
-    <button
-      type="button"
-      onclick={openAdd}
-      class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs font-medium transition-colors hover:bg-muted/50"
-    >
-      Add source
-    </button>
-  </header>
-
-  <div class="mx-auto mt-4 w-full max-w-4xl flex-1 space-y-4">
-    <!-- R2 #6：导航叫 Repository，标题也叫 Repository；原「Discover skills」
-         降为源卡 feed 的分组标题（文案不删，层级对调）。 -->
-    <section class="space-y-3" aria-label="Discover skills">
-      <h2 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Discover skills
-      </h2>
-      <div class="flex items-center gap-2">
-        <input
-          type="search"
-          bind:value={draft}
-          oninput={() => commitQuery(draft)}
-          onkeydown={(event) => {
-            if (event.key === "Enter") submitQuery();
-          }}
-          placeholder="Filter sources by name or description…"
-          class="h-9 w-full rounded-md border border-border bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label="Filter sources"
-        />
+<section class="screen" data-screen="repos" aria-label={t("reposScreen.aria")}>
+  <header class="shrink-0 border-b border-border px-4 py-3">
+    <div class="flex min-w-0 items-center gap-2">
+      <h2 class="min-w-0 truncate text-sm font-semibold">{t("reposScreen.title")}</h2>
+      <div class="ml-auto">
+        <button
+          type="button"
+          onclick={openAdd}
+          class="inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-xs font-medium transition-colors hover:bg-muted/50"
+        >
+          {t("reposScreen.addSource")}
+        </button>
       </div>
-
+    </div>
+    <p class="mt-0.5 text-xs text-muted-foreground">{t("reposScreen.subtitle")}</p>
+    <input
+      type="search"
+      bind:value={draft}
+      oninput={(event) => setRepoSearch(draft, "REPLACE")}
+      onkeydown={(event) => {
+        if (event.key === "Enter") setRepoSearch(draft, "PUSH");
+      }}
+      placeholder={t("reposScreen.filterPlaceholder")}
+      class="mt-2 h-7 w-full min-w-0 rounded-md border border-border bg-background px-3 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={t("reposScreen.filterAria")}
+    />
+  </header>
+  <div class="screen-body px-3 py-3">
+    <section class="space-y-2.5" aria-label={t("reposScreen.discoverAria")}>
       {#if repositorySourcesState.loading}
-        <p class="py-8 text-center text-xs text-muted-foreground">Loading sources…</p>
+        <p class="py-6 text-center text-xs text-muted-foreground">
+          {t("reposScreen.loadingSources")}
+        </p>
       {:else if repositorySourcesState.error}
-        <p class="py-8 text-center text-xs text-destructive">{repositorySourcesState.error}</p>
+        <p class="py-6 text-center text-xs text-destructive">{repositorySourcesState.error}</p>
       {:else if filteredSources.length === 0}
-        <p class="py-8 text-center text-xs text-muted-foreground">
-          No sources match “{committedQuery}”.
+        <p class="py-6 text-center text-xs text-muted-foreground">
+          {t("reposScreen.noSources", { query: committedQuery })}
         </p>
       {:else}
-        <!-- R2 #5：卡片数少于 3 时封顶 2 列（lg 3 列只摆 2 卡会留锯齿空位）。 -->
-        <div
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2 {filteredSources.length >= 3
-            ? 'lg:grid-cols-3'
-            : ''}"
-        >
+        <div class="grid grid-cols-1 gap-2.5">
           {#each filteredSources as source (source.id)}
             <SourceCard
               label={source.label}
@@ -246,19 +240,21 @@
     </section>
 
     {#if recentScans.length > 0}
-      <section class="rounded-lg border border-border bg-muted/20 p-3">
-        <h2 class="text-xs font-medium text-muted-foreground">Recent scans</h2>
-        <ul class="mt-2 space-y-1">
+      <section class="mt-3 rounded-lg border border-border bg-muted/20 p-2.5">
+        <h3 class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {t("reposScreen.recentScans")}
+        </h3>
+        <ul class="mt-1.5 space-y-0.5">
           {#each recentScans as recent (recent.id)}
             <li>
               <button
                 type="button"
                 onclick={() => openScan(recent.id)}
-                class="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs transition-colors hover:bg-muted/60"
+                class="flex min-h-9 w-full items-center justify-between rounded px-2 py-1 text-left text-xs transition-colors hover:bg-muted/60"
               >
                 <span class="truncate font-medium text-foreground">{recent.label}</span>
-                <span class="ml-2 shrink-0 text-muted-foreground">
-                  {recent.summary?.skillCount ?? 0} skills
+                <span class="ml-2 shrink-0 text-muted-foreground tabular-nums">
+                  {t("reposScreen.scanCount", { count: recent.summary?.skillCount ?? 0 })}
                 </span>
               </button>
             </li>
@@ -267,26 +263,24 @@
       </section>
     {/if}
   </div>
-</div>
+</section>
 
 {#if adding}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
     <div class="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-lg">
-      <h2 class="text-sm font-semibold">Add custom source</h2>
-      <p class="mt-0.5 text-xs text-muted-foreground">
-        Paste an <code class="font-mono">https</code> Git URL. It persists across restarts.
-      </p>
+      <h2 class="text-sm font-semibold">{t("reposScreen.addTitle")}</h2>
+      <p class="mt-0.5 text-xs text-muted-foreground">{t("reposScreen.addBody")}</p>
       <div class="mt-3 space-y-2">
         <label class="block text-xs">
-          <span class="text-muted-foreground">Label</span>
+          <span class="text-muted-foreground">{t("reposScreen.addLabel")}</span>
           <input
             bind:value={newLabel}
             class="mt-1 h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
-            placeholder="My skills repo"
+            placeholder={t("reposScreen.addLabelPlaceholder")}
           />
         </label>
         <label class="block text-xs">
-          <span class="text-muted-foreground">Git URL (https only)</span>
+          <span class="text-muted-foreground">{t("reposScreen.addUrl")}</span>
           <input
             bind:value={newUrl}
             class="mt-1 h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
@@ -294,11 +288,11 @@
           />
         </label>
         <label class="block text-xs">
-          <span class="text-muted-foreground">Description (optional)</span>
+          <span class="text-muted-foreground">{t("reposScreen.addDescription")}</span>
           <input
             bind:value={newDescription}
             class="mt-1 h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
-            placeholder="What kind of skills?"
+            placeholder={t("reposScreen.addDescriptionPlaceholder")}
           />
         </label>
         {#if addError}
@@ -309,17 +303,17 @@
         <button
           type="button"
           onclick={() => (adding = false)}
-          class="h-8 rounded-md border border-border px-3 text-xs hover:bg-muted/50"
+          class="h-9 rounded-md border border-border px-3 text-xs hover:bg-muted/50"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           type="button"
-          onclick={submitAdd}
+          onclick={() => void submitAdd()}
           disabled={addBusy}
-          class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          class="h-9 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          {addBusy ? "Adding…" : "Add"}
+          {addBusy ? t("reposScreen.adding") : t("reposScreen.addConfirm")}
         </button>
       </div>
     </div>
@@ -328,11 +322,9 @@
 
 <ConfirmDialog
   bind:open={removeOpen}
-  title="Remove custom source"
-  description={removingSource
-    ? `Remove ${removingSource.label} from your Discover feed? Installed skills stay on disk.`
-    : ""}
-  confirmLabel="Remove"
+  title={t("reposScreen.removeTitle")}
+  description={removingSource ? t("reposScreen.removeBody", { label: removingSource.label }) : ""}
+  confirmLabel={t("reposScreen.removeConfirm")}
   busy={removeBusy}
   onConfirm={() => void confirmRemove()}
 />
