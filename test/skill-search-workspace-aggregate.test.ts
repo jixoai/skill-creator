@@ -377,4 +377,61 @@ describe("skills.listWorkspace aggregate (duplicates bounded projection)", () =>
     expect(otherOutput.duplicates.groups.map((group) => group.contentHash)).toEqual([hash(999)]);
     expect(otherOutput.duplicates.groupsTruncated).toBe(false);
   });
+
+  it("projects mixed-workspace groups without leaking other-ws installations (Codex r8)", async () => {
+    const otherWs = WorkspaceIdSchema.parse("ws_0123456789abcdef01234567");
+    const groups: SkillDuplicateGroup[] = [
+      // 混合组：member 0/3 仅 Global、member 1/2 仅 otherWs（1 装与多装混合）。
+      {
+        contentHash: hash(10),
+        members: [
+          member(10, 0, 1, GLOBAL),
+          member(10, 1, 2, otherWs),
+          member(10, 2, 3, otherWs),
+          member(10, 3, 4, GLOBAL),
+        ],
+      },
+      // 全员仅 otherWs：Global 侧过滤后单成员 → 整组不返回。
+      {
+        contentHash: hash(11),
+        members: [member(11, 0, 1, GLOBAL), member(11, 1, 1, otherWs), member(11, 2, 1, otherWs)],
+      },
+    ];
+    const service = aggregator({
+      importedPaths: { ws_0123456789abcdef01234567: "/nonexistent/workspace/root" },
+      duplicates: () => groups,
+    });
+
+    const output = await service.listWorkspace({ wsId: GLOBAL, limit: 200 });
+    // 单成员组（hash 11）整组丢弃：本 ws 投影下不再是重复组。
+    expect(output.duplicates.groups.map((group) => group.contentHash)).toEqual([hash(10)]);
+    const group = output.duplicates.groups[0]!;
+    // member B/C（无 Global 安装）不进入响应；成员序沿用冻结排序。
+    expect(group.members.map((entry) => entry.name)).toEqual(["member-10-0", "member-10-3"]);
+    // 零跨 ws 泄露：所有安装记录的 workspaceId/providerId 都属于本 ws。
+    const allInstallations = group.members.flatMap((entry) => entry.installations.items);
+    expect(allInstallations.length).toBeGreaterThan(0);
+    for (const installation of allInstallations) {
+      expect(installation.workspaceId).toBe(GLOBAL);
+    }
+    // 本 ws 安装超过 8 的成员按过滤后数量计算截断（member-10-3 = 4 安装未截断）。
+    expect(group.members[1]!.installations).toEqual({
+      items: Array.from({ length: 4 }, (_, index) => installation(GLOBAL, `10-3-${index}`)),
+      truncated: false,
+    });
+    expect(SkillsListWorkspaceOutputSchema.safeParse(output).success).toBe(true);
+
+    // 对称断言：otherWs 侧看到 hash 10 的 B/C 成员与 hash 11 整组（3 成员），
+    // 且零 Global 安装记录。
+    const otherOutput = await service.listWorkspace({ wsId: otherWs, limit: 200 });
+    expect(otherOutput.duplicates.groups.map((group) => group.contentHash)).toEqual([
+      hash(10),
+      hash(11),
+    ]);
+    const otherGroup10 = otherOutput.duplicates.groups[0]!;
+    expect(otherGroup10.members.map((entry) => entry.name)).toEqual(["member-10-1", "member-10-2"]);
+    for (const installation of otherGroup10.members.flatMap((entry) => entry.installations.items)) {
+      expect(installation.workspaceId).toBe(otherWs);
+    }
+  });
 });

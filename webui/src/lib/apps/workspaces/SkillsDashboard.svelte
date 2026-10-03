@@ -123,11 +123,14 @@
      2×minmax 轨道 + 1×gap = 692px 时显式降档 span 1（阈值与轨道/间距联动，
      见 skills-dashboard-css 契约测试）。 */
 
-  /* screen 隐喻：固定高（--screen-h 自定义属性，未来可拖拽调高）、内部滚动、
-     自带 header；网格换行高度不塌（不随内容长高）。 */
+  /* screen 隐喻：弹性固定高（--screen-h 自定义属性，未来可拖拽调高）+ 内部滚动
+     + 自带 header；网格换行高度不塌（不随内容长高）。默认下限 = max(480px,
+     100dvh - 240px)：真实目录规模（多行 header chips + Global 页脚）下 480px 会把
+     master-detail 挤到 0px（走查 13-fix）——大视口按视口高度分配更多 screen 高，
+     小视口退回 480px 桌面下限；「固定高、内部滚动、换行不塌」语义不变。 */
   .dashboard-grid :global(.screen) {
-    height: var(--screen-h, 480px);
-    min-height: var(--screen-h, 480px);
+    height: var(--screen-h, max(480px, calc(100dvh - 240px)));
+    min-height: var(--screen-h, max(480px, calc(100dvh - 240px)));
     overflow: hidden;
     display: flex;
     flex-direction: column;

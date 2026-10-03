@@ -36,7 +36,9 @@ async function main(): Promise<void> {
     ...(process.env.SKILL_CREATOR_DEV_WEB_TOKEN
       ? { webToken: process.env.SKILL_CREATOR_DEV_WEB_TOKEN }
       : {}),
-    withTray: true,
+    // 沙箱/CI 走查隔离铁律：dev 入口同样尊重 DISABLE_TRAY（走查 P2-3——
+    // 硬编码 true 会在测试沙箱弹原生窗口）。main.ts 同判式。
+    withTray: process.env.SKILL_CREATOR_DISABLE_TRAY !== "1",
     enableDevtools: true,
     ...(appLaunch === undefined ? {} : { appLaunch }),
   });

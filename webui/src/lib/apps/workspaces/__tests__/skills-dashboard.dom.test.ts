@@ -441,6 +441,28 @@ describe("SkillsDashboard 三屏网格", () => {
     expect(url.searchParams.get("skill")).toBeNull();
   });
 
+  it("clears detail identity (?view/skill) when an Agents card is clicked from detail state", async () => {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(log, listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]));
+    // detail 态（?provider&skill&view=detail）下点 Agents 卡片（走查 14-fix）：
+    // 切 provider 过滤 = 回主屏列表态——不得残留无身份 ?view=detail。
+    const root = mountDashboard({ provider: "claude-code", skill: SK_A, view: "detail" });
+    await settle();
+
+    const card = [
+      ...root.querySelectorAll<HTMLButtonElement>('[data-screen="agents"] button[aria-pressed]'),
+    ].find((button) => textOf(button).includes("ZCode"));
+    expect(card).toBeDefined();
+    click(card);
+    expect(log.navigate).toHaveLength(1);
+    const url = new URL(log.navigate[0] as string, "https://skill-creator.invalid");
+    expect(url.pathname).toBe("/w/~/skills");
+    expect(url.searchParams.get("provider")).toBe("zcode");
+    expect(url.searchParams.get("skill")).toBeNull();
+    expect(url.searchParams.get("view")).toBeNull();
+  });
+
   it("appends the next cursor page via load-more", async () => {
     const log = makeRpcLog();
     activeLog = log;

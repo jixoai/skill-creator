@@ -144,13 +144,20 @@ export function createWorkspaceSkillsAggregator(deps: WorkspaceSkillsAggregateDe
     groups: SkillDuplicateGroup[],
     wsId: WorkspaceId,
   ): SkillsListWorkspaceOutput["duplicates"] => {
-    // 组判定与 skills.duplicates 数据同源：仅按 workspace 作用域过滤（该 ws 至少
-    // 持有一份该 contentHash 的安装），成员/组序沿用冻结排序。
-    const scoped = groups.filter((group) =>
-      group.members.some((member) =>
-        member.installations.some((installation) => installation.workspaceId === wsId),
-      ),
-    );
+    // 组判定与 skills.duplicates 数据同源，但按 workspace 作用域收窄（Codex r8
+    // 处方）：每成员只保留 installation.workspaceId === wsId 的安装记录（跨 ws
+    // 的 workspaceId/providerId/绝对路径不进入本 ws 响应），过滤后无本 ws 安装
+    // 的成员丢弃；成员 <2 的组整体丢弃（单 ws 投影下不再是重复组）。三层有界
+    // 包装在过滤后计算——上限语义只作用于本 ws 可见的成员/安装。
+    const scoped = groups.flatMap((group) => {
+      const members = group.members.flatMap((member) => {
+        const installations = member.installations.filter(
+          (installation) => installation.workspaceId === wsId,
+        );
+        return installations.length === 0 ? [] : [{ ...member, installations }];
+      });
+      return members.length >= 2 ? [{ contentHash: group.contentHash, members }] : [];
+    });
     return {
       groups: scoped.slice(0, DUPLICATE_GROUPS_MAX).map((group) => ({
         contentHash: group.contentHash,

@@ -110,7 +110,9 @@
       <h3 class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         {t("dashboard.importedWorkspaces")}
       </h3>
-      <ul class="mt-1.5 space-y-0.5">
+      <!-- 列表内滚上限（走查 13-fix）：页脚默认高度收紧——多 workspace 不再撑高
+           页脚挤塌主屏 master-detail；Remove 入口保持常驻可达（AGENTS §7.2）。 -->
+      <ul class="imported-list mt-1.5 space-y-0.5">
         {#each importedWorkspaces as ws (ws.id)}
           {@const removable = ws.kind === "directory" ? ws : null}
           <li class="flex min-h-9 items-center gap-2">
@@ -151,3 +153,12 @@
   busy={removeBusy}
   onConfirm={() => void confirmRemove()}
 />
+
+<style>
+  .imported-list {
+    max-height: 6.75rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+</style>

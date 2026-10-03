@@ -342,8 +342,10 @@
         {searchFallbackError}
       </p>
     {/if}
-    <!-- provider chips：All + 每 provider 计数（联动 Agents screen 的选中态真相） -->
-    <div class="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={t("skillsScreen.chipsAria")}>
+    <!-- provider chips：All + 每 provider 计数（联动 Agents screen 的选中态真相）。
+         单行横滚（走查 13-fix）：真实目录 76 chips wrap 九行会把 master-detail 挤到
+         0px——不换行、横向内滚，header 高度退回单行。 -->
+    <div class="chips-row mt-2 flex gap-1.5" role="group" aria-label={t("skillsScreen.chipsAria")}>
       <button
         type="button"
         class="flex min-h-7 items-center gap-1 rounded-full border px-2.5 text-xs transition-colors
@@ -557,6 +559,14 @@
   }
   .skills-detail-pane {
     min-width: 0;
+  }
+  /* provider chips 单行横滚（走查 13-fix）：不换行 + overflow-x + 收窄滚动条 +
+     内滚不冒泡——header 高度与 provider 数量解耦，master-detail 不再被挤塌。 */
+  .chips-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
   }
   /* 窄屏（屏容器 < 560px）：list/detail 栈式切换（?view 参数驱动）；
      宽屏两类都渲染——master-detail 并列，隐藏类 inert（ProviderView 同族样板）。 */

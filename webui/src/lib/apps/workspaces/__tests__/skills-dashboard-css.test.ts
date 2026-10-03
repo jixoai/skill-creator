@@ -22,6 +22,16 @@ const dashboardSrc = readFileSync(
   "utf-8",
 );
 
+const skillsScreenSrc = readFileSync(
+  fileURLToPath(new URL("../screens/skills-screen.svelte", import.meta.url)),
+  "utf-8",
+);
+
+const footerSrc = readFileSync(
+  fileURLToPath(new URL("../screens/dashboard-footer.svelte", import.meta.url)),
+  "utf-8",
+);
+
 function styleBlock(source: string): string {
   const match = source.match(/<style>([\s\S]*?)<\/style>/);
   if (!match) throw new Error("style block not found");
@@ -68,8 +78,14 @@ describe("mobileScreen 网格壳 CSS 契约", () => {
   });
 
   it("screens are fixed-height, header-owning, internally scrolling (no bubble)", () => {
-    expect(css).toMatch(/height:\s*var\(--screen-h,\s*480px\)/);
-    expect(css).toMatch(/min-height:\s*var\(--screen-h,\s*480px\)/);
+    // 弹性下限（走查 13-fix）：默认高 = max(480px, 100dvh - 240px)——固定高语义
+    // 不变（不随内容长高），但大视口按视口分配更多高度，480px 不再挤塌
+    // master-detail。--screen-h 显式赋值仍优先（拖拽调高入口保留）。
+    const elasticFloor = /max\(480px,\s*calc\(100dvh - 240px\)\)/;
+    expect(css).toMatch(new RegExp(`height:\\s*var\\(--screen-h,\\s*${elasticFloor.source}\\)`));
+    expect(css).toMatch(
+      new RegExp(`min-height:\\s*var\\(--screen-h,\\s*${elasticFloor.source}\\)`),
+    );
     expect(css).toMatch(/:global\(\.screen\)[\s\S]*?overflow:\s*hidden/);
     expect(css).toMatch(/:global\(\.screen > \.screen-body\)[\s\S]*?overflow-y:\s*auto/);
     expect(css).toMatch(/:global\(\.screen > \.screen-body\)[\s\S]*?min-height:\s*0/);
@@ -82,6 +98,28 @@ describe("mobileScreen 网格壳 CSS 契约", () => {
     // CSS 前提——溢出只能来自隐式列或内容 min-width，两处都已钉死）。
     expect(css).toMatch(/\.dashboard-grid\s*\{[\s\S]*?min-width:\s*0/);
     expect(css).toMatch(/\.grid-item\s*\{[\s\S]*?min-width:\s*0/);
+  });
+});
+
+describe("真实目录规模防塌机制契约（走查 13-fix）", () => {
+  const screenCss = skillsScreenSrc.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+  const footerCss = footerSrc.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+
+  it("provider chips render as a single-row horizontal scroller, never multi-line wrap", () => {
+    // header 高度与 provider 数量解耦：76 chips wrap 九行曾把 master-detail 挤到
+    // 0px。机制 = chips 容器 nowrap + overflow-x（jsdom 无布局，钉 CSS 契约）。
+    expect(skillsScreenSrc).toMatch(/class="chips-row[^"]*"\s+role="group"/);
+    expect(screenCss).toMatch(/\.chips-row\s*\{[\s\S]*?flex-wrap:\s*nowrap/);
+    expect(screenCss).toMatch(/\.chips-row\s*\{[\s\S]*?overflow-x:\s*auto/);
+    // 源头不再出现 wrap 版 chips 容器（回归钉：防 flex-wrap 复活）。
+    expect(skillsScreenSrc).not.toMatch(/class="mt-2 flex flex-wrap gap-1\.5"\s+role="group"/);
+  });
+
+  it("caps the Global footer imported-workspaces list with internal scrolling", () => {
+    // 页脚默认高度上限收紧：多 workspace 列表 max-h + 内滚，Remove 入口仍可达。
+    expect(footerSrc).toMatch(/class="imported-list[^"]*"/);
+    expect(footerCss).toMatch(/\.imported-list\s*\{[\s\S]*?max-height:/);
+    expect(footerCss).toMatch(/\.imported-list\s*\{[\s\S]*?overflow-y:\s*auto/);
   });
 });
 

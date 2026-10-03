@@ -21,6 +21,8 @@
   } from "./tab-session.svelte.js";
 
   let addOpen = $state(false);
+  // ＋菜单 fixed 坐标（走查 P1-2：absolute 版被后继兄弟层叠覆盖）。
+  let addPosition = $state({ x: 0, y: 0 });
   let contextWorkspace = $state<ImportedWorkspace | null>(null);
   let contextPosition = $state({ x: 0, y: 0 });
   let removingWorkspace = $state<ImportedWorkspace | null>(null);
@@ -173,19 +175,27 @@
         </button>
       </div>
     {/if}
-    <div class="relative shrink-0" data-shell-menu>
+    <div class="shrink-0" data-shell-menu>
       <button
         class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
         aria-label="Open workspace tab menu"
         aria-expanded={addOpen}
         title="Open workspace tab"
-        onclick={() => (addOpen = !addOpen)}
+        onclick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          addPosition = { x: rect.left, y: rect.bottom + 4 };
+          addOpen = !addOpen;
+        }}
       >
         <IconPlus class="h-4 w-4" />
       </button>
       {#if addOpen}
+        <!-- fixed 定位复用下方右键菜单模式：absolute 在 tab strip 的层叠
+             上下文内会被 omnibox 行与 dashboard 覆盖（走查 P1-2）。 -->
         <div
-          class="absolute left-0 top-8 z-50 w-64 rounded border border-border bg-popover p-1 shadow-lg"
+          class="fixed z-[100] w-64 rounded border border-border bg-popover p-1 shadow-lg"
+          style:left="{addPosition.x}px"
+          style:top="{addPosition.y}px"
         >
           {#each unopenedWorkspaces as workspace (workspace.id)}
             <button

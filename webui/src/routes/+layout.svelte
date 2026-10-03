@@ -38,7 +38,7 @@
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
   import AgentPanel from "$lib/components/agent/AgentPanel.svelte";
   import { agentPanel } from "$lib/stores/agent.svelte";
-  import { resolveShellRoute } from "$lib/shell/route-hygiene.js";
+  import { resolveShellRoute, sanitizeShellLocation } from "$lib/shell/route-hygiene.js";
   import {
     consumeExpectedNavigation,
     initializeTabSession,
@@ -111,7 +111,21 @@
       .filter((workspace) => workspace.kind === "directory")
       .map((workspace) => workspace.id);
     const redirect = initializeTabSession(importedIds, page.url.pathname, page.url.search);
-    if (redirect) navigateTab(redirect, "REPLACE");
+    if (redirect) {
+      // 走查 P2-7 / 修复批 F 诊断：effect 执行上下文内同步启航导航会毒化本
+      // 组件对 page.url 的依赖传播（与 PageOutlet 同族修复）——宏任务推迟 +
+      // 执行时按当前 URL 复核（期间并行守卫可能已修正；过期重定向不覆盖）。
+      const target = redirect;
+      setTimeout(() => {
+        const current = `${page.url.pathname}${page.url.search}`;
+        if (current === target) return;
+        // HygieneDecision 是判别对象（非 nullable）——kind=ok 表示期间并行
+        // 守卫已把 URL 修正合法，过期重定向跳过。
+        const decision = sanitizeShellLocation(page.url.pathname, page.url.search);
+        if (decision.kind === "ok") return;
+        navigateTab(target, "REPLACE");
+      }, 0);
+    }
   });
 
   $effect(() => {
@@ -134,6 +148,16 @@
   const activePageKind = $derived(
     resolveShellRoute(page.url.pathname, page.url.search)?.app.pageKind ?? null,
   );
+
+  // omnibox 每 tab 独立实例（Owner 2026-10-03 裁决）：workspace 页按 wsId、
+  // 其余 Page 按 kind keyed 重建——切换即销毁重建，编辑草稿/焦点/补全面板
+  // 不跨 tab 串扰；URL 显示仍从路由真相派生（本就对当前 tab）。
+  const omniboxTabKey = $derived.by(() => {
+    if (activePageKind !== "workspace") return `page:${activePageKind ?? "none"}`;
+    // workspace 路由恒为 /w/:wsId/…——path 段直取（避免整棵 match 重算）。
+    const wsId = /^\/w\/([^/]+)/.exec(page.url.pathname)?.[1] ?? "~";
+    return `ws:${decodeURIComponent(wsId)}`;
+  });
 </script>
 
 <svelte:head>
@@ -173,7 +197,9 @@
     </WindowDragRegion>
 
     <TabStrip />
-    <Omnibox onToggleNavigation={toggleWorkspaceNavigation} />
+    {#key omniboxTabKey}
+      <Omnibox onToggleNavigation={toggleWorkspaceNavigation} />
+    {/key}
 
     {#if connectionState.status === "disconnected"}
       <div
