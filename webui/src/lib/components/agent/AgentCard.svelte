@@ -14,6 +14,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { connectionState, getRpc } from "$lib/stores/connection.svelte";
+  import { t } from "$lib/i18n";
 
   let {
     resourceUri,
@@ -110,8 +111,12 @@
       style={frameHeight !== null ? `height:${frameHeight}px` : undefined}
     ></iframe>
   {:else if failed}
-    <div class="px-3 py-2 text-[11px] text-muted-foreground">Card unavailable: {title}</div>
+    <div class="px-3 py-2 text-[11px] text-muted-foreground">
+      {t("agentCard.unavailable", { title })}
+    </div>
   {:else}
-    <div class="px-3 py-2 text-[11px] text-muted-foreground" role="status">Loading card…</div>
+    <div class="px-3 py-2 text-[11px] text-muted-foreground" role="status">
+      {t("agentCard.loading")}
+    </div>
   {/if}
 </div>

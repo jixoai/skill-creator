@@ -17,7 +17,7 @@ import {
   setAppearanceTheme,
   toggleAppearanceSidebar,
 } from "../appearance.svelte";
-import { readDevicePrefs } from "../device-prefs";
+import { readDevicePrefs, updateDevicePrefs } from "../device-prefs";
 
 beforeEach(() => {
   localStorage.clear();
@@ -47,5 +47,17 @@ describe("appearance store (shell-settings-ui)", () => {
     expect(readDevicePrefs().sidebarCollapsed).toBe(true);
     toggleAppearanceSidebar();
     expect(readDevicePrefs().sidebarCollapsed).toBe(false);
+  });
+
+  it("persists the language preference and defaults legacy payloads to en (webui-i18n-bilingual)", () => {
+    updateDevicePrefs({ language: "zh" });
+    expect(readDevicePrefs().language).toBe("zh");
+    // 旧 v1 存量（无 language 字段）：带默认值加法——safeParse 通过并回落 en。
+    localStorage.setItem(
+      "skill-creator:device-prefs",
+      JSON.stringify({ version: 1, theme: "dark", sidebarCollapsed: true }),
+    );
+    expect(readDevicePrefs().language).toBe("en");
+    updateDevicePrefs({ language: "en" });
   });
 });

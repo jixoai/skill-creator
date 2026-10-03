@@ -18,6 +18,7 @@
   import { queuedOutbox } from "$lib/stores/agent-submission.svelte";
   import { agentQueue, agentSession, updateAgentQueueItem } from "$lib/stores/agent.svelte";
   import { showToast } from "$lib/toast.svelte";
+  import { t } from "$lib/i18n";
 
   let collapsed = $state(false);
 
@@ -46,17 +47,20 @@
     editingId = null;
     if (text.length === 0) return;
     const result = await updateAgentQueueItem({ messageId, action: "edit", text });
-    if (result && "error" in result) showToast(`Queue edit failed: ${result.error}`);
+    if (result && "error" in result)
+      showToast(t("queueDock.toastEditFailed", { error: result.error }));
   }
 
   async function removeItem(messageId: string): Promise<void> {
     const result = await updateAgentQueueItem({ messageId, action: "remove" });
-    if (result && "error" in result) showToast(`Queue remove failed: ${result.error}`);
+    if (result && "error" in result)
+      showToast(t("queueDock.toastRemoveFailed", { error: result.error }));
   }
 
   async function steerItem(messageId: string): Promise<void> {
     const result = await updateAgentQueueItem({ messageId, action: "steer" });
-    if (result && "error" in result) showToast(`Queue steer failed: ${result.error}`);
+    if (result && "error" in result)
+      showToast(t("queueDock.toastSteerFailed", { error: result.error }));
   }
 
   /** 编辑输入的键盘面：Enter 保存、Esc 取消（都不冒泡——面板 Esc 收起不抢）。 */
@@ -78,7 +82,7 @@
 {#if rows.length > 0}
   <div
     class="mx-2.5 mt-2.5 shrink-0 rounded-lg border border-border bg-muted/30"
-    aria-label="Queued messages"
+    aria-label={t("queueDock.dockAria")}
   >
     <button
       type="button"
@@ -87,7 +91,7 @@
       onclick={() => (collapsed = !collapsed)}
     >
       <IconListPlus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span class="font-medium">Queued</span>
+      <span class="font-medium">{t("queueDock.queued")}</span>
       <span class="rounded border border-border bg-background px-1 text-primary">{rows.length}</span
       >
       <span class="flex-1"></span>
@@ -107,7 +111,7 @@
               {#if editingId === row.item.messageId}
                 <input
                   class="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] outline-none focus:border-primary"
-                  aria-label="Edit queued message"
+                  aria-label={t("queueDock.editAria")}
                   bind:value={editingText}
                   onkeydown={(event) => onEditKeydown(event, row.item.messageId)}
                   onblur={() => void saveEdit(row.item.messageId)}
@@ -120,7 +124,7 @@
               {#if row.item.attachments > 0}
                 <span
                   class="shrink-0 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground"
-                  title="{row.item.attachments} attachment(s)"
+                  title={t("queueDock.attachmentsTitle", { count: row.item.attachments })}
                 >
                   +{row.item.attachments}
                 </span>
@@ -128,9 +132,9 @@
               {#if row.item.target === "next-step"}
                 <span
                   class="shrink-0 rounded border border-border bg-background px-1 text-[10px] text-primary"
-                  title="Steers the running turn at the next step boundary"
+                  title={t("queueDock.steerChipTitle")}
                 >
-                  steer
+                  {t("queueDock.steerChip")}
                 </span>
               {/if}
               <span class="flex-1"></span>
@@ -141,8 +145,8 @@
                 <button
                   type="button"
                   class="relative flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
-                  aria-label="Edit queued message"
-                  title="Edit this queued message"
+                  aria-label={t("queueDock.editAria")}
+                  title={t("queueDock.editTitle")}
                   onclick={() => beginEdit(row.item.messageId, row.item.text)}
                 >
                   <IconPencil class="h-3 w-3" aria-hidden="true" />
@@ -150,10 +154,10 @@
                 <button
                   type="button"
                   class="relative flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                  aria-label="Steer with this message"
+                  aria-label={t("queueDock.steerAria")}
                   title={running
-                    ? "Steer the current turn with this message"
-                    : "Steering unlocks while a turn is running"}
+                    ? t("queueDock.steerRunningTitle")
+                    : t("queueDock.steerLockedTitle")}
                   disabled={!running || row.item.target !== "next-turn"}
                   onclick={() => void steerItem(row.item.messageId)}
                 >
@@ -163,8 +167,8 @@
               <button
                 type="button"
                 class="relative flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-destructive"
-                aria-label="Remove queued message"
-                title="Remove from queue"
+                aria-label={t("queueDock.removeAria")}
+                title={t("queueDock.removeTitle")}
                 onclick={() => void removeItem(row.item.messageId)}
               >
                 <IconX class="h-3 w-3" aria-hidden="true" />
@@ -176,7 +180,9 @@
                 {row.text}
               </span>
               <span class="flex-1"></span>
-              <span class="shrink-0 text-[10px] text-muted-foreground/60">sending…</span>
+              <span class="shrink-0 text-[10px] text-muted-foreground/60"
+                >{t("queueDock.sending")}</span
+              >
             </li>
           {/if}
         {/each}

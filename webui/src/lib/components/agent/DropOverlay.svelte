@@ -15,6 +15,7 @@
   import { onMount } from "svelte";
   import IconFileUp from "@lucide/svelte/icons/file-up";
   import { handleComposerDrop } from "$lib/stores/agent-composer.svelte";
+  import { t } from "$lib/i18n";
 
   let dragging = $state(false);
   let depth = 0;
@@ -66,14 +67,14 @@
   <div
     class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-primary/5 backdrop-blur-[1px]"
     role="status"
-    aria-label="Drop files to attach"
+    aria-label={t("dropOverlay.aria")}
   >
     <div
       class="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-primary/50 bg-background/90 px-8 py-6 shadow-lg"
     >
       <IconFileUp class="h-7 w-7 text-primary" aria-hidden="true" />
-      <p class="text-sm font-medium text-foreground">Drop to attach</p>
-      <p class="text-xs text-muted-foreground">Images and files go to this message</p>
+      <p class="text-sm font-medium text-foreground">{t("dropOverlay.title")}</p>
+      <p class="text-xs text-muted-foreground">{t("dropOverlay.body")}</p>
     </div>
   </div>
 {/if}

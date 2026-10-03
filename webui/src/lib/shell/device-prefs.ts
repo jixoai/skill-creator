@@ -1,5 +1,6 @@
 /**
  * 用户原始需求 [2026-07-27]：「前端 Storage 只能用来存储和设备有关的一些偏好，比如 Theme」。
+ * 修订 [2026-10-03]（webui-i18n-bilingual）：新增 language 偏好（UI 语言，i18n locale store 消费）。
  * 正交意图：
  *   [1] 定义设备偏好 schema（versioned + zod）。
  *   [2] 统一 localStorage 读写入口（safeParse 降级，incompatible → 默认值）。
@@ -9,11 +10,16 @@ import { z } from "zod";
 
 const STORAGE_KEY = "skill-creator:device-prefs";
 
-/** 设备偏好 schema（当前 v1）。 */
+/** UI 语言（webui-i18n-bilingual）：en 为默认；词典消费见 lib/i18n。 */
+export const PREF_LANGUAGE_VALUES = ["en", "zh"] as const;
+export type PrefLanguage = (typeof PREF_LANGUAGE_VALUES)[number];
+
+/** 设备偏好 schema（当前 v1；language 为带默认值加法，旧存量直接通过）。 */
 export const DevicePrefsSchema = z.object({
   version: z.literal(1),
   theme: z.enum(["light", "dark", "system"]).default("system"),
   sidebarCollapsed: z.boolean().default(false),
+  language: z.enum(PREF_LANGUAGE_VALUES).default("en"),
 });
 /** 设备偏好。 */
 export type DevicePrefs = z.infer<typeof DevicePrefsSchema>;
@@ -23,6 +29,7 @@ export const DEFAULT_DEVICE_PREFS: DevicePrefs = {
   version: 1,
   theme: "system",
   sidebarCollapsed: false,
+  language: "en",
 };
 
 /** 读取设备偏好。incompatible 旧数据 → 默认值（不迁移不报错）。 */

@@ -10,6 +10,7 @@
   import { Button } from "$lib/components/ui/button";
   import { requireRpc } from "$lib/stores/connection.svelte";
   import { showToast } from "$lib/toast.svelte";
+  import { t } from "$lib/i18n";
 
   let {
     proposalId,
@@ -48,9 +49,9 @@
       showToast(
         decision === "approve"
           ? currentStatus === "executed"
-            ? `Proposal executed: ${capability}`
-            : `Proposal failed: ${capability}`
-          : `Proposal rejected: ${capability}`,
+            ? t("agentProposal.toastExecuted", { capability })
+            : t("agentProposal.toastFailed", { capability })
+          : t("agentProposal.toastRejected", { capability }),
       );
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error));
@@ -63,10 +64,10 @@
 <div
   class="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-xs"
   role="group"
-  aria-label="Mutation proposal"
+  aria-label={t("agentProposal.groupAria")}
 >
   <div class="mb-1.5 flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
-    Proposal — {currentStatus}
+    {t("agentProposal.title", { status: currentStatus })}
   </div>
   <div class="font-mono text-[11px]">{capability}</div>
   <pre
@@ -74,9 +75,11 @@
   {#if currentStatus === "pending"}
     <div class="mt-2 flex justify-end gap-1.5">
       <Button size="sm" variant="outline" disabled={deciding} onclick={() => void decide("reject")}>
-        Reject
+        {t("agentProposal.reject")}
       </Button>
-      <Button size="sm" disabled={deciding} onclick={() => void decide("approve")}>Approve</Button>
+      <Button size="sm" disabled={deciding} onclick={() => void decide("approve")}>
+        {t("agentProposal.approve")}
+      </Button>
     </div>
   {/if}
 </div>

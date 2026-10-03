@@ -16,6 +16,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { useParams } from "$lib/shell";
+  import { t, type MessageKey } from "$lib/i18n";
   import {
     appendWikiFragment,
     loadWiki,
@@ -64,7 +65,7 @@
   const scope = $derived(WorkspaceIdSchema.parse(wsId ?? "~"));
   const scopeLabel = $derived.by(() => {
     const match = workspaceState.workspaces.find((workspace) => workspace.id === scope);
-    return match?.label ?? (scope === "~" ? "Global" : scope);
+    return match?.label ?? (scope === "~" ? t("wikiScope.globalScopeLabel") : scope);
   });
 
   let filterQuery = $state("");
@@ -122,9 +123,9 @@
       const result = await appendWikiFragment(scope, { title, body });
       if (result === null) return;
       if (result.deduplicated) {
-        showToast(`Already captured as “${result.item.title}”.`);
+        showToast(t("wikiScope.toastDeduplicated", { title: result.item.title }));
       } else {
-        showToast(`Added “${result.item.title}” to the wiki.`);
+        showToast(t("wikiScope.toastAdded", { title: result.item.title }));
       }
       formOpen = false;
       draftTitle = "";
@@ -161,25 +162,25 @@
 
   /* ---------- 蒸馏入口（tasks 1.6；投影与代次纪律在 wiki-distill store） ---------- */
 
-  /** RunState 徽标文案（六态穷尽；无 phase 字段——RunState 即阶段真相）。 */
-  const RUN_STATE_LABELS: Record<RunState, string> = {
-    collecting: "collecting",
-    "kernel-running": "running model",
-    "awaiting-approval": "awaiting approval",
-    completed: "completed",
-    failed: "failed",
-    cancelled: "cancelled",
+  /** RunState 徽标 key（六态穷尽；无 phase 字段——RunState 即阶段真相）。 */
+  const RUN_STATE_KEYS: Record<RunState, MessageKey> = {
+    collecting: "wikiScope.runStateCollecting",
+    "kernel-running": "wikiScope.runStateKernelRunning",
+    "awaiting-approval": "wikiScope.runStateAwaitingApproval",
+    completed: "wikiScope.runStateCompleted",
+    failed: "wikiScope.runStateFailed",
+    cancelled: "wikiScope.runStateCancelled",
   };
 
-  /** DistillFailReason 的人读文案（仅 failed/cancelled 终态携带；null = 用户主动取消）。 */
-  const FAIL_REASON_LABELS: Record<DistillFailReason, string> = {
-    "no-valid-proposals": "The model produced no valid proposals, so nothing was generalized.",
-    capacity: "The proposal store was at capacity; every proposal was refused.",
-    io: "A disk error interrupted the run.",
-    timeout: "The model run timed out.",
-    "kernel-unavailable": "The agent kernel is unavailable right now.",
-    restarted: "The daemon restarted and the run was cancelled.",
-    "cancelled-by-shutdown": "The daemon stopped and the run was cancelled.",
+  /** DistillFailReason 的人读 key（仅 failed/cancelled 终态携带；null = 用户主动取消）。 */
+  const FAIL_REASON_KEYS: Record<DistillFailReason, MessageKey> = {
+    "no-valid-proposals": "wikiScope.failNoValidProposals",
+    capacity: "wikiScope.failCapacity",
+    io: "wikiScope.failIo",
+    timeout: "wikiScope.failTimeout",
+    "kernel-unavailable": "wikiScope.failKernelUnavailable",
+    restarted: "wikiScope.failRestarted",
+    "cancelled-by-shutdown": "wikiScope.failCancelledByShutdown",
   };
 
   /** counters 摘要的稳定键序（全键枚举的 canonical 顺序）。 */
@@ -243,8 +244,8 @@
           variant="ghost"
           size="icon"
           class="h-8 w-8 shrink-0 max-[720px]:h-11 max-[720px]:w-11"
-          title="Back to wiki scopes"
-          aria-label="Back to wiki scopes"
+          title={t("wikiScope.backTitle")}
+          aria-label={t("wikiScope.backTitle")}
           onclick={() => void goto("/wiki")}
         >
           <IconArrowLeft class="h-4 w-4" />
@@ -254,17 +255,17 @@
           bind:this={headingEl}
           class="min-w-0 flex-1 truncate text-lg font-semibold outline-none"
         >
-          {scopeLabel} wiki
+          {t("wikiScope.heading", { scope: scopeLabel })}
         </h1>
       </div>
       <p class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
         {#if scope === "~"}
-          <Badge variant="secondary" class="shrink-0">~ global</Badge>
+          <Badge variant="secondary" class="shrink-0">{t("wikiHome.globalBadge")}</Badge>
         {:else}
-          <Badge variant="secondary" class="shrink-0">workspace</Badge>
+          <Badge variant="secondary" class="shrink-0">{t("wikiScope.workspaceBadge")}</Badge>
         {/if}
         <span class="min-w-0 max-[720px]:truncate">
-          Persistent notes for {scopeLabel} — fragments collected here feed skill evolution.
+          {t("wikiScope.subtitle", { scope: scopeLabel })}
         </span>
       </p>
     </div>
@@ -273,8 +274,8 @@
         variant="ghost"
         size="icon"
         class="h-9 w-9 max-[720px]:h-11 max-[720px]:w-11"
-        title="Refresh wiki"
-        aria-label="Refresh wiki"
+        title={t("wikiScope.refreshTitle")}
+        aria-label={t("wikiScope.refreshTitle")}
         disabled={wikiState.loading}
         onclick={() => void refresh()}
       >
@@ -289,17 +290,17 @@
           size="sm"
           variant="outline"
           class="max-[720px]:h-11"
-          title="Distill this workspace's fragments into the global wiki"
+          title={t("wikiScope.distillButtonTitle")}
           disabled={distillBusy}
           onclick={() => void beginDistill()}
         >
           <IconSparkles class="h-4 w-4" />
-          Distill to global
+          {t("wikiScope.distillButton")}
         </Button>
       {/if}
       <Button size="sm" class="max-[720px]:h-11" onclick={openForm}>
         <IconPlus class="h-4 w-4" />
-        Add fragment
+        {t("wikiScope.addFragment")}
       </Button>
     </div>
   </header>
@@ -307,31 +308,35 @@
   <div class="mx-auto mt-5 w-full max-w-3xl space-y-4">
     {#if showDistillCard}
       <section
-        aria-label="Distill to global"
+        aria-label={t("wikiScope.distillSectionAria")}
         class="rounded-lg border border-border bg-background p-4"
       >
         <div class="flex flex-wrap items-center gap-2">
           {#if wikiDistillState.starting}
             <IconLoader class="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
             <span class="min-w-0 flex-1 text-sm font-medium">
-              Distilling fragments to the global wiki…
+              {t("wikiScope.distillStarting")}
             </span>
           {:else if wikiDistillState.runId === null && wikiDistillState.error !== null}
             <IconAlert class="h-4 w-4 shrink-0 text-destructive" />
             <span class="min-w-0 flex-1 text-sm font-medium text-destructive">
-              Couldn't start the distillation
+              {t("wikiScope.distillStartFailed")}
             </span>
           {:else if wikiDistillState.state === "failed"}
             <IconAlert class="h-4 w-4 shrink-0 text-destructive" />
-            <span class="min-w-0 flex-1 text-sm font-medium">Distillation failed</span>
+            <span class="min-w-0 flex-1 text-sm font-medium">{t("wikiScope.distillFailed")}</span>
           {:else if wikiDistillState.state === "completed"}
             <IconCheck class="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <span class="min-w-0 flex-1 text-sm font-medium">Distillation completed</span>
+            <span class="min-w-0 flex-1 text-sm font-medium">
+              {t("wikiScope.distillCompleted")}
+            </span>
           {:else if wikiDistillState.state === "cancelled"}
-            <span class="min-w-0 flex-1 text-sm font-medium">Distillation cancelled</span>
+            <span class="min-w-0 flex-1 text-sm font-medium">
+              {t("wikiScope.distillCancelled")}
+            </span>
           {:else if wikiDistillState.state !== null}
             <IconLoader class="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-            <span class="min-w-0 flex-1 text-sm font-medium">Distilling to the global wiki…</span>
+            <span class="min-w-0 flex-1 text-sm font-medium">{t("wikiScope.distillRunning")}</span>
           {/if}
           {#if wikiDistillState.state !== null}
             <Badge
@@ -344,7 +349,7 @@
                     ? "outline"
                     : "secondary"}
             >
-              {RUN_STATE_LABELS[wikiDistillState.state]}
+              {t(RUN_STATE_KEYS[wikiDistillState.state])}
             </Badge>
           {/if}
         </div>
@@ -352,27 +357,31 @@
         <div class="mt-1 min-w-0 space-y-1 text-xs text-muted-foreground">
           {#if wikiDistillState.starting}
             <p>
-              Collecting this workspace's fragments and asking the model for generalizations — this
-              can take up to two minutes.
+              {t("wikiScope.distillStartingBody")}
             </p>
           {:else if wikiDistillState.runId === null && wikiDistillState.error !== null}
             <p class="break-words text-destructive/90">{wikiDistillState.error}</p>
           {:else if wikiDistillState.state === "awaiting-approval"}
             <p>
-              {wikiDistillState.proposalRefs.length}
-              {wikiDistillState.proposalRefs.length === 1 ? "proposal" : "proposals"}
-              ready for review ({pendingProposalCount} pending). Nothing is written to the global wiki
-              until you approve.
+              {t(
+                wikiDistillState.proposalRefs.length === 1
+                  ? "wikiScope.proposalsReadyOne"
+                  : "wikiScope.proposalsReadyMany",
+                {
+                  count: wikiDistillState.proposalRefs.length,
+                  pending: pendingProposalCount,
+                },
+              )}
             </p>
           {:else if wikiDistillState.state === "failed"}
             {#if wikiDistillState.reason !== null}
-              <p>{FAIL_REASON_LABELS[wikiDistillState.reason]}</p>
+              <p>{t(FAIL_REASON_KEYS[wikiDistillState.reason])}</p>
             {/if}
           {:else if wikiDistillState.state === "cancelled"}
             {#if wikiDistillState.reason !== null}
-              <p>{FAIL_REASON_LABELS[wikiDistillState.reason]}</p>
+              <p>{t(FAIL_REASON_KEYS[wikiDistillState.reason])}</p>
             {:else}
-              <p>Cancelled — no proposal was applied.</p>
+              <p>{t("wikiScope.cancelledNoApply")}</p>
             {/if}
           {/if}
           {#if countersSummary !== ""}
@@ -380,7 +389,7 @@
           {/if}
           {#if wikiDistillState.pollError !== null}
             <p class="break-words text-destructive/90" role="alert">
-              Status polling stopped: {wikiDistillState.pollError}
+              {t("wikiScope.pollStopped", { error: wikiDistillState.pollError })}
             </p>
           {/if}
         </div>
@@ -391,7 +400,9 @@
               size="sm"
               onclick={() => setWikiDistillProposalsOpen(!wikiDistillProposals.open)}
             >
-              {wikiDistillProposals.open ? "Hide proposals" : "View proposals"}
+              {wikiDistillProposals.open
+                ? t("wikiScope.hideProposals")
+                : t("wikiScope.viewProposals")}
             </Button>
           {/if}
           {#if wikiDistillState.runId !== null && wikiDistillState.state !== null && !isTerminalWikiDistillState(wikiDistillState.state)}
@@ -404,7 +415,7 @@
               {#if wikiDistillState.cancelling}
                 <IconLoader class="h-4 w-4 animate-spin" />
               {/if}
-              Cancel run
+              {t("wikiScope.cancelRun")}
             </Button>
           {/if}
           {#if !distillBusy}
@@ -412,7 +423,7 @@
               size="sm"
               variant="ghost"
               class="max-[720px]:h-11"
-              onclick={() => resetWikiDistill()}>Dismiss</Button
+              onclick={() => resetWikiDistill()}>{t("common.dismiss")}</Button
             >
           {/if}
         </div>
@@ -421,14 +432,15 @@
           <div class="mt-3 space-y-2 border-t border-border/60 pt-3">
             {#if wikiDistillProposals.loading && wikiDistillProposals.proposals.length === 0}
               <p class="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-                <IconLoader class="h-3.5 w-3.5 animate-spin" /> Loading proposals…
+                <IconLoader class="h-3.5 w-3.5 animate-spin" />
+                {t("wikiScope.loadingProposals")}
               </p>
             {:else if wikiDistillProposals.error !== null}
               <p class="break-words text-xs text-destructive" role="alert">
                 {wikiDistillProposals.error}
               </p>
             {:else if wikiDistillProposals.proposals.length === 0}
-              <p class="text-xs text-muted-foreground">No proposals found for this run.</p>
+              <p class="text-xs text-muted-foreground">{t("wikiScope.noProposals")}</p>
             {/if}
             {#each wikiDistillProposals.proposals as row (row.view.id)}
               <AgentProposalCard
@@ -445,17 +457,17 @@
 
     {#if formOpen}
       <section
-        aria-label="Add a fragment"
+        aria-label={t("wikiScope.formAria")}
         class="rounded-lg border border-border bg-background p-4"
       >
         <div class="flex items-center justify-between gap-2">
-          <h2 class="text-sm font-medium">New fragment</h2>
+          <h2 class="text-sm font-medium">{t("wikiScope.newFragment")}</h2>
           <Button
             variant="ghost"
             size="icon"
             class="h-8 w-8"
-            title="Cancel"
-            aria-label="Cancel adding a fragment"
+            title={t("wikiScope.cancelAddTitle")}
+            aria-label={t("wikiScope.cancelAddAria")}
             onclick={() => (formOpen = false)}
           >
             <IconX class="h-4 w-4" />
@@ -463,23 +475,28 @@
         </div>
         <div class="mt-3 space-y-3">
           <label class="block space-y-1.5">
-            <span class="text-xs font-medium text-muted-foreground">Title</span>
+            <span class="text-xs font-medium text-muted-foreground">
+              {t("wikiScope.fieldTitle")}
+            </span>
             <Input
               bind:value={draftTitle}
-              placeholder="One-line insight, e.g. Pin exit codes"
+              placeholder={t("wikiScope.titlePlaceholder")}
               maxlength={120}
             />
           </label>
           <label class="block space-y-1.5">
-            <span class="text-xs font-medium text-muted-foreground">Note</span>
+            <span class="text-xs font-medium text-muted-foreground">{t("wikiScope.fieldNote")}</span
+            >
             <Textarea
               bind:value={draftBody}
               rows={4}
-              placeholder="What should the agent remember next time?"
+              placeholder={t("wikiScope.notePlaceholder")}
             />
           </label>
           <div class="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onclick={() => (formOpen = false)}>Cancel</Button>
+            <Button variant="outline" size="sm" onclick={() => (formOpen = false)}>
+              {t("common.cancel")}
+            </Button>
             <Button
               size="sm"
               disabled={draftTitle.trim() === "" || appending}
@@ -488,7 +505,7 @@
               {#if appending}
                 <IconLoader class="h-4 w-4 animate-spin" />
               {/if}
-              Add to wiki
+              {t("wikiScope.addToWiki")}
             </Button>
           </div>
         </div>
@@ -502,34 +519,36 @@
       >
         <IconAlert class="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
         <div class="min-w-0 flex-1">
-          <p class="text-sm font-medium text-destructive">Couldn't load the wiki</p>
+          <p class="text-sm font-medium text-destructive">{t("wikiScope.loadErrorTitle")}</p>
           <p class="mt-1 break-words text-xs text-destructive/90">{wikiState.error}</p>
         </div>
-        <Button variant="outline" size="sm" onclick={() => void refresh()}>Retry</Button>
+        <Button variant="outline" size="sm" onclick={() => void refresh()}>
+          {t("common.retry")}
+        </Button>
       </div>
     {:else if wikiState.loading && wikiState.patterns.length === 0}
-      <div class="space-y-3" aria-label="Loading wiki">
+      <div class="space-y-3" aria-label={t("wikiScope.loadingAria")}>
         <div class="h-16 animate-pulse rounded-lg border border-border bg-muted/50"></div>
         <div class="h-16 animate-pulse rounded-lg border border-border bg-muted/50"></div>
       </div>
     {:else if wikiState.patterns.length === 0}
       <div class="rounded-lg border border-dashed border-border p-8 text-center">
         <IconBookOpen class="mx-auto h-8 w-8 text-muted-foreground" />
-        <p class="mt-3 text-sm font-medium">No fragments yet</p>
+        <p class="mt-3 text-sm font-medium">{t("wikiScope.emptyTitle")}</p>
         <p class="mt-1 text-xs text-muted-foreground">
-          Capture recurring insights here; they become the input for skill evolution.
+          {t("wikiScope.emptyBody")}
         </p>
         <Button class="mt-4" size="sm" onclick={openForm}>
           <IconPlus class="h-4 w-4" />
-          Add the first fragment
+          {t("wikiScope.addFirst")}
         </Button>
       </div>
     {:else}
       {#if wikiState.patterns.length > 0}
         <Input
           bind:value={filterQuery}
-          placeholder="Filter fragments…"
-          aria-label="Filter wiki fragments"
+          placeholder={t("wikiScope.filterPlaceholder")}
+          aria-label={t("wikiScope.filterAria")}
         />
       {/if}
       <ul class="divide-y divide-border rounded-lg border border-border">
@@ -548,7 +567,9 @@
                 </span>
               </span>
               {#if pattern.promotedFrom}
-                <Badge variant="outline" class="shrink-0 text-xs">promoted</Badge>
+                <Badge variant="outline" class="shrink-0 text-xs">
+                  {t("wikiScope.promotedBadge")}
+                </Badge>
               {/if}
               <span class="shrink-0 text-xs text-muted-foreground"
                 >{pattern.updated.slice(0, 10)}</span
@@ -558,7 +579,8 @@
               <div class="border-t border-border/60 px-3 py-2.5">
                 {#if state.loading}
                   <p class="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-                    <IconLoader class="h-3.5 w-3.5 animate-spin" /> Loading…
+                    <IconLoader class="h-3.5 w-3.5 animate-spin" />
+                    {t("wikiScope.loadingPattern")}
                   </p>
                 {:else if state.error}
                   <p class="text-xs text-destructive" role="alert">{state.error}</p>
@@ -571,7 +593,7 @@
           </li>
         {:else}
           <li class="px-3 py-6 text-center text-xs text-muted-foreground">
-            No fragments match “{filterQuery.trim()}”.
+            {t("wikiScope.noMatch", { query: filterQuery.trim() })}
           </li>
         {/each}
       </ul>

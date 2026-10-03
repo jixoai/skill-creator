@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { paintSegments, type ChipOccurrence, type SkillChipSpan } from "./composer-chips.js";
+  import { t } from "$lib/i18n";
 
   let {
     text,
@@ -44,13 +45,13 @@
         data-composer-chip={segment.reference.kind}
         title={segment.reference.kind === "file"
           ? segment.reference.target
-          : `session: ${segment.reference.label}`}>{segment.text}</span
+          : t("chipPaint.sessionTitle", { label: segment.reference.label })}>{segment.text}</span
       >
     {:else if segment.kind === "skill"}
       <span
         class="rounded-[4px] bg-muted [box-decoration-break:clone]"
         data-composer-chip="skill"
-        title={`skill: ${segment.name}`}>{segment.text}</span
+        title={t("chipPaint.skillTitle", { name: segment.name })}>{segment.text}</span
       >
     {:else}
       <span>{segment.text}</span>

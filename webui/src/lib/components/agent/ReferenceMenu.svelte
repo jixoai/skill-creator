@@ -19,6 +19,7 @@
   import type { AgentFilesEntry } from "$shared/contracts/agent.js";
   import { agentSession, agentSessionsList, loadAgentSessions } from "$lib/stores/agent.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
+  import { t } from "$lib/i18n";
 
   /** 选中落点：token 进稿文 + 引用进 registry（ComposerCard 接线）。token 与
    * reference.token 冗余携带（调用方不重算）。 */
@@ -76,7 +77,7 @@
     for (const session of agentSessionsList.sessions) {
       if (session.sessionId === agentSession.sessionId) continue;
       const label = sessionLabel(session.title, session.sessionId);
-      out.push({ value: `@${label}`, group: "Sessions" });
+      out.push({ value: `@${label}`, group: t("referenceMenu.groupSessions") });
     }
     return out;
   });
@@ -142,7 +143,7 @@
       out.push({
         value:
           entry.kind === "dir" ? `${browsePrefix}${entry.name}/` : `${browsePrefix}${entry.name}`,
-        group: "Files",
+        group: t("referenceMenu.groupFiles"),
       });
     }
     return out;
@@ -160,12 +161,12 @@
 
   /** 来源副标题：浏览目录（canonical）或加载态。 */
   const sourceLabel = $derived.by(() => {
-    if (loading) return "Loading directory…";
+    if (loading) return t("referenceMenu.loadingDir");
     const cached = dirCache.get(browsePrefix);
     if (cached === undefined || cached.dir.length === 0) {
-      return getRpc() === null ? "Not connected" : "Files from: home";
+      return getRpc() === null ? t("referenceMenu.notConnected") : t("referenceMenu.filesFromHome");
     }
-    return `Files from: ${cached.dir}`;
+    return t("referenceMenu.filesFrom", { dir: cached.dir });
   });
 
   let menu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
@@ -217,10 +218,10 @@
   {caretOnFirstLine}
   {suppress}
   {pinned}
-  menuLabel="References — files and sessions"
+  menuLabel={t("referenceMenu.menuAria")}
   {sourceLabel}
   dataSlot="reference-menu"
-  emptyMessage="No matching file or session"
+  emptyMessage={t("referenceMenu.empty")}
   {onSelect}
   bind:this={menu}
 />

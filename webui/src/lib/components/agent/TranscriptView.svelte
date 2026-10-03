@@ -30,6 +30,7 @@
   import { showToast } from "$lib/toast.svelte";
   import { agentSession, sendAgentPrompt } from "$lib/stores/agent.svelte";
   import { beginComposerEdit } from "$lib/stores/agent-composer.svelte";
+  import { t } from "$lib/i18n";
   import { DSH_AGENT_MODES } from "$shared/contracts/dsh-runtime.js";
   import AgentApprovalCard from "./AgentApprovalCard.svelte";
   import AgentToolRow from "./AgentToolRow.svelte";
@@ -96,16 +97,15 @@
         if (copiedSeq === seq) copiedSeq = null;
       }, 1000);
     } catch {
-      showToast("Copy failed — clipboard unavailable.");
+      showToast(t("transcript.toastCopyFailed"));
     }
   }
 
   function editIntoComposer(text: string): void {
     // §4.3：编辑重发不截断历史（append-only）——注记条 + placeholder 由 editing 态表达。
     beginComposerEdit(text);
-    document
-      .querySelector<HTMLTextAreaElement>('aside[aria-label="Agent panel"] textarea')
-      ?.focus();
+    // locale 无关锚点（aria-label 文案随语言变化，data 属性稳定）。
+    document.querySelector<HTMLTextAreaElement>("aside[data-agent-panel] textarea")?.focus();
   }
 
   function retryPrompt(text: string): void {
@@ -184,10 +184,10 @@
         data-empty-state="new-session"
       >
         <p class="max-w-[280px] text-xs text-muted-foreground">
-          Send a message to start a session.
+          {t("transcript.emptyPrimary")}
         </p>
         <p class="max-w-[280px] text-xs text-muted-foreground">
-          Pick how the agent works with the mode selector below.
+          {t("transcript.emptySecondary")}
         </p>
       </div>
     {:else}
@@ -198,7 +198,7 @@
             class="flow-item flex h-6 items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground"
           >
             <span class="h-px flex-1 bg-border"></span>
-            {item.label ?? "Turn"}
+            {item.label ?? t("transcript.turnDefault")}
             <span class="h-px flex-1 bg-border"></span>
           </div>
         {:else if item.kind === "turn-end"}
@@ -216,10 +216,15 @@
           <div
             class="flow-item flex h-6 items-center gap-2 text-xs text-muted-foreground"
             role="separator"
-            aria-label={`Mode switched from ${modeLabel(item.from)} to ${modeLabel(item.to)}`}
+            aria-label={t("transcript.modeAria", {
+              from: modeLabel(item.from),
+              to: modeLabel(item.to),
+            })}
           >
             <span class="h-px flex-1 bg-border"></span>
-            <span class="rounded bg-muted px-1 text-[10px] uppercase">mode</span>
+            <span class="rounded bg-muted px-1 text-[10px] uppercase"
+              >{t("transcript.modeTag")}</span
+            >
             {modeLabel(item.from)} → {modeLabel(item.to)}
             <span class="h-px flex-1 bg-border"></span>
           </div>
@@ -232,7 +237,9 @@
             role="note"
           >
             <span class="h-px flex-1 bg-border"></span>
-            <span class="rounded bg-muted px-1 text-[10px] uppercase">compact</span>
+            <span class="rounded bg-muted px-1 text-[10px] uppercase"
+              >{t("transcript.compactTag")}</span
+            >
             <span class="truncate">{item.text}</span>
             <span class="h-px flex-1 bg-border"></span>
           </div>
@@ -242,11 +249,11 @@
           <div
             class="flow-item flex h-6 items-center gap-2 px-3 text-[10px] text-muted-foreground"
             role="status"
-            aria-label={`Subagent spawned: ${item.label} (${item.mode})`}
+            aria-label={t("transcript.subagentAria", { label: item.label, mode: item.mode })}
           >
             <span class="h-px flex-1 bg-border"></span>
             <IconBot class="h-3 w-3 shrink-0" aria-hidden="true" />
-            <span class="rounded bg-muted px-1 uppercase">agent</span>
+            <span class="rounded bg-muted px-1 uppercase">{t("transcript.agentTag")}</span>
             <span class="truncate">{item.label}</span>
             <span class="rounded bg-primary/10 px-1 text-primary">{item.mode}</span>
             <span class="h-px flex-1 bg-border"></span>
@@ -300,13 +307,13 @@
                 ? 'opacity-100'
                 : 'opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100'}"
               role="toolbar"
-              aria-label="Message actions"
+              aria-label={t("transcript.actionsAria")}
             >
               <button
                 type="button"
                 class="relative flex h-5 w-5 items-center justify-center rounded text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-accent hover:text-foreground"
-                title="Copy"
-                aria-label="Copy message"
+                title={t("transcript.copyTitle")}
+                aria-label={t("transcript.copyAria")}
                 onclick={() => void copyText(item.text, item.seq)}
               >
                 {#if copiedSeq === item.seq}
@@ -318,8 +325,8 @@
               <button
                 type="button"
                 class="relative flex h-5 w-5 items-center justify-center rounded text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-accent hover:text-foreground"
-                title="Edit & resend — resends as a new message, keeps history"
-                aria-label="Edit and resend — resends as a new message, keeps history"
+                title={t("transcript.editTitle")}
+                aria-label={t("transcript.editAria")}
                 onclick={() => editIntoComposer(item.text)}
               >
                 <IconPen class="h-3.5 w-3.5" />
@@ -327,8 +334,8 @@
               <button
                 type="button"
                 class="relative flex h-5 w-5 items-center justify-center rounded text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-accent hover:text-foreground disabled:opacity-50"
-                title="Resend — keeps history"
-                aria-label="Resend message — keeps history"
+                title={t("transcript.resendTitle")}
+                aria-label={t("transcript.resendAria")}
                 disabled={agentSession.sending}
                 onclick={() => retryPrompt(item.text)}
               >
@@ -342,7 +349,7 @@
           <div class="flow-item">
             <DisclosureRow
               icon={IconSparkles}
-              title="Thinking"
+              title={t("transcript.thinking")}
               summary={thinkingSummary(item.text, item.streaming)}
               open={item.streaming ? true : (openItems[item.seq] ?? false)}
               running={item.streaming}
@@ -369,13 +376,13 @@
                 ? 'opacity-100'
                 : 'opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100'}"
               role="toolbar"
-              aria-label="Message actions"
+              aria-label={t("transcript.actionsAria")}
             >
               <button
                 type="button"
                 class="relative flex h-5 w-5 items-center justify-center rounded text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:bg-accent hover:text-foreground"
-                title="Copy"
-                aria-label="Copy message"
+                title={t("transcript.copyTitle")}
+                aria-label={t("transcript.copyAria")}
                 onclick={() => void copyText(item.text, item.seq)}
               >
                 {#if copiedSeq === item.seq}
@@ -406,7 +413,9 @@
         <!-- TurnStatus（§3.2）：扫光「Working」；15s 后追加计时（1s tick）。 -->
         <div class="flow-item flex h-6 items-center" role="status">
           <span class="sweep rounded-md px-1 text-xs text-muted-foreground">
-            Working{workingSeconds >= 15 ? ` · ${Math.floor(workingSeconds)}s` : ""}
+            {t("transcript.working")}{workingSeconds >= 15
+              ? ` · ${Math.floor(workingSeconds)}s`
+              : ""}
           </span>
         </div>
       {/if}
@@ -417,8 +426,8 @@
     <button
       type="button"
       class="absolute top-3 right-3 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-popover text-muted-foreground shadow-md transition-colors hover:text-foreground"
-      title="Back to bottom"
-      aria-label="Back to bottom"
+      title={t("transcript.backToBottom")}
+      aria-label={t("transcript.backToBottom")}
       onclick={backToBottom}
     >
       <IconArrowDown class="h-3.5 w-3.5" />

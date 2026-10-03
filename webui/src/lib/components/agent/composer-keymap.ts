@@ -9,8 +9,10 @@
  *       compositionend 后 10ms 窗口——Safari 关键事件晚于 compositionend）。
  *   [2] 粘贴文本消毒：剥离官方芯片占位字符（U+E100–E11D、U+FFFC）——外部
  *       文本不得伪造芯片。
- *   [3] 占位符优先级链：owner > disconnected > unavailable > mode > default。
+ *   [3] 占位符优先级链：owner > disconnected > unavailable > mode > default
+ *       （文案经 i18n 词典，webui-i18n-bilingual）。
  */
+import { t } from "$lib/i18n";
 
 /** compositionend 后的 Enter 宽限期（官方 keymap.ts 同值：Safari 时序补偿）。 */
 export const COMPOSITION_GRACE_MS = 10;
@@ -65,8 +67,10 @@ export function composerPlaceholder(input: ComposerPlaceholderInput): string {
   if (input.owner !== undefined && input.owner !== null && input.owner.length > 0) {
     return input.owner;
   }
-  if (input.disconnected) return "Reconnecting…";
-  if (input.unavailable) return "Agent unavailable";
-  if (input.modeLabel) return `Message the ${input.modeLabel.toLowerCase()} agent…`;
-  return "Message the agent…";
+  if (input.disconnected) return t("composer.placeholderReconnecting");
+  if (input.unavailable) return t("composer.placeholderUnavailable");
+  if (input.modeLabel) {
+    return t("composer.placeholderMode", { mode: input.modeLabel.toLowerCase() });
+  }
+  return t("composer.placeholderDefault");
 }

@@ -21,6 +21,7 @@
 -->
 <script module lang="ts">
   import { z } from "zod";
+  import { t } from "$lib/i18n";
 
   /**
    * 工具 payload 三面的最小消费 schema（2026-09-12 codex 阻塞 5：外部输入
@@ -158,7 +159,7 @@
         if (checked.success) {
           return {
             resourceUri: checked.data.uiCard.resourceUri,
-            title: checked.data.uiCard.title ?? "Card",
+            title: checked.data.uiCard.title ?? t("agentTool.cardTitle"),
           };
         }
       } catch {
@@ -182,7 +183,10 @@
       if (parsed.success && parsed.data.status === "completed") done += 1;
     }
     const total = todos.length;
-    return `${total} todo${total === 1 ? "" : "s"} · ${done} done`;
+    return t(total === 1 ? "agentTool.todoSummaryOne" : "agentTool.todoSummaryMany", {
+      total,
+      done,
+    });
   }
 
   /**
@@ -349,7 +353,7 @@
   const headerLabel = $derived.by(() => {
     const parts = [displayName];
     if (elapsedLabel) parts.push(elapsedLabel);
-    if (phase === "error") parts.push("error");
+    if (phase === "error") parts.push(t("agentTool.errorTag"));
     return parts.join(" · ");
   });
 </script>
@@ -386,7 +390,9 @@
       <div class="tool-card mt-1 overflow-hidden border-border bg-[#0c1016] text-zinc-200">
         <div class="flex items-center justify-between px-2 py-1 text-[10px] text-zinc-400">
           <span>{headerLabel}</span>
-          {#if running && phase === "calling"}<span class="sweep px-1">running</span>{/if}
+          {#if running && phase === "calling"}<span class="sweep px-1"
+              >{t("agentTool.running")}</span
+            >{/if}
         </div>
         <pre
           class="max-h-[260px] overflow-auto border-t border-white/10 px-2 py-1.5 whitespace-pre-wrap">{command.length >
@@ -423,7 +429,7 @@
         {#if argsPretty.length > 0}
           <div class="tool-card max-h-[150px] overflow-auto">
             <div class="sticky top-0 bg-muted px-2 py-1 text-[10px] text-muted-foreground">
-              Input
+              {t("agentTool.input")}
             </div>
             <pre class="px-2 py-1.5 whitespace-pre-wrap">{argsPretty}</pre>
           </div>
@@ -431,12 +437,14 @@
         {#if resultText.length > 0}
           <div class="tool-card max-h-[150px] overflow-auto">
             <div class="sticky top-0 bg-muted px-2 py-1 text-[10px] text-muted-foreground">
-              Output
+              {t("agentTool.output")}
             </div>
             <pre class="px-2 py-1.5 whitespace-pre-wrap">{resultText}</pre>
           </div>
         {:else if phase === "calling"}
-          <div class="tool-card sweep px-2 py-1.5 text-muted-foreground">running…</div>
+          <div class="tool-card sweep px-2 py-1.5 text-muted-foreground">
+            {t("agentTool.runningEllipsis")}
+          </div>
         {/if}
       </div>
     {/if}

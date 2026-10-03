@@ -130,6 +130,7 @@
   import { INPUT_TAKING_TOKENS } from "./SlashMenu.svelte";
   import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { showToast } from "$lib/toast.svelte";
+  import { t } from "$lib/i18n";
   import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import ContextMeter from "./ContextMeter.svelte";
   import QueueDock from "./QueueDock.svelte";
@@ -228,7 +229,7 @@
    *  连接态来自 shell 级 connection store（断线时输入面给出人话提示）。 */
   const placeholder = $derived(
     composerPlaceholder({
-      owner: editing ? "Edit your message — sending will resend it as a new message" : null,
+      owner: editing ? t("composer.placeholderOwner") : null,
       disconnected: connectionState.status === "disconnected",
       unavailable: agentSession.error !== null && agentSession.sessionId === null,
       modeLabel: modeLabel ?? null,
@@ -306,7 +307,7 @@
       showToast(result.message);
       return;
     }
-    showToast(`Active model → ${provider} · ${model}`);
+    showToast(t("composer.toastModelSwitched", { provider, model }));
   }
 
   function submit(accelerated = false): void {
@@ -324,7 +325,7 @@
     // W2 发送门控（官方 still-uploading 语义的适配面）：附件 base64 读入进行
     // 中时保持提交（读入完成即可重发），草稿与附件原样保留。
     if (attachmentReads.pending > 0) {
-      showToast("Attachments are still being read — try again in a moment.");
+      showToast(t("composer.busyAttachmentReads"));
       return;
     }
     // W4（官方 submission-policy）：running 中手势解析——plain = 偏好，
@@ -425,7 +426,7 @@
     if (command === "/queue" || command === "/steer") {
       const mode = command === "/queue" ? "queue" : "steer";
       setBusyEnterPreference(mode);
-      showToast(`Busy-Enter preference → ${mode}`);
+      showToast(t("composer.toastBusyPref", { mode }));
       agentComposer.text = "";
       return;
     }
@@ -613,19 +614,19 @@
   {#if agentComposer.files.length > 0 || agentComposer.images.length > 0}
     <!-- 附件条：与转录 UserMessage 附件行同视觉语言（56×56 缩略 / 文件 chip）；
          path 通道无缩略（webp/gif）时以图标 tile 占位（R17-B）。 -->
-    <div class="flex flex-wrap gap-1.5 px-3 pt-3" aria-label="Pending attachments">
+    <div class="flex flex-wrap gap-1.5 px-3 pt-3" aria-label={t("composer.attachmentsAria")}>
       {#each agentComposer.images as attachment, index (index)}
         <div class="group relative h-14 w-14 overflow-hidden rounded-lg border border-border">
           {#if attachment.preview}
             <img
               src={attachment.preview}
-              alt={attachment.name ?? "image"}
+              alt={attachment.name ?? t("composer.imageFallback")}
               class="h-full w-full object-cover"
             />
           {:else}
             <div
               class="flex h-full w-full items-center justify-center bg-muted/40"
-              title={attachment.path ?? attachment.name ?? "image"}
+              title={attachment.path ?? attachment.name ?? t("composer.imageFallback")}
             >
               <IconImage class="h-5 w-5 text-muted-foreground" aria-hidden="true" />
             </div>
@@ -633,7 +634,7 @@
           <button
             type="button"
             class="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 text-muted-foreground opacity-0 transition-opacity after:absolute after:-inset-1 after:content-[''] group-hover:opacity-100 hover:text-destructive"
-            aria-label="Remove attachment"
+            aria-label={t("composer.removeAttachment")}
             onclick={() =>
               (agentComposer.images = agentComposer.images.filter((_, i) => i !== index))}
           >
@@ -649,7 +650,7 @@
           <button
             type="button"
             class="relative flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground after:absolute after:-inset-1 after:content-[''] hover:text-destructive"
-            aria-label="Remove file {file.name}"
+            aria-label={t("composer.removeFile", { name: file.name })}
             onclick={() =>
               (agentComposer.files = agentComposer.files.filter((_, i) => i !== index))}
           >
@@ -686,7 +687,7 @@
         oncompositionend={onCompositionEnd}
         data-composer-composing={composing ? "true" : undefined}
         class="msg-body relative z-10 max-h-40 w-full resize-none border-0 bg-transparent px-3.5 py-2.5 outline-none focus:outline-none focus-visible:ring-0 placeholder:text-muted-foreground disabled:opacity-50"
-        aria-label="Message"></textarea>
+        aria-label={t("composer.messageAria")}></textarea>
     {/key}
   </div>
   <div class="flex h-11 items-center gap-1 px-2.5">
@@ -695,11 +696,11 @@
       <DropdownMenu.Trigger
         class="flex h-7 max-w-[130px] items-center gap-1.5 rounded-full border border-border px-2.5 text-[11px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
         title={running
-          ? "Switch after the current turn ends"
+          ? t("composer.modeChipTitleRunning")
           : agentSession.sessionId
-            ? "Switch this session's mode"
-            : "Pick the mode for your next session"}
-        aria-label="Session mode"
+            ? t("composer.modeChipTitleSession")
+            : t("composer.modeChipTitlePending")}
+        aria-label={t("composer.modeChipAria")}
         disabled={running}
         onkeydown={(event) => {
           // 鼠标打开的 bits-ui 菜单焦点留在 trigger：Esc 在此（target 层）先占，
@@ -710,7 +711,7 @@
           }
         }}
       >
-        <span class="truncate">{modeLabel ?? "Mode"}</span>
+        <span class="truncate">{modeLabel ?? t("composer.modeChipFallback")}</span>
         <IconChevronDown class="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
       </DropdownMenu.Trigger>
       <!-- Content 仅在本菜单 open 时挂载（bits-ui 本就如此；显式门控让菜单内容
@@ -749,8 +750,8 @@
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-      title="Commands and skills"
-      aria-label="Commands and skills"
+      title={t("composer.launcherTitle")}
+      aria-label={t("composer.launcherTitle")}
       aria-expanded={launcherOpen}
       onclick={() => {
         // W3 `+` 编程式启动器：无 query 全量展开；再点切换关闭（官方同语义）。
@@ -763,8 +764,8 @@
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-      title="Attach images (paste or pick, ≤4 MiB each)"
-      aria-label="Attach images (paste or pick, ≤4 MiB each)"
+      title={t("composer.attachImages")}
+      aria-label={t("composer.attachImages")}
       aria-busy={picking === "image"}
       disabled={picking !== null}
       onclick={() => void openPicker("image")}
@@ -779,8 +780,8 @@
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground disabled:opacity-50"
-      title="Attach files (text inlined, binary as refs, ≤512 KiB each)"
-      aria-label="Attach files (text inlined, binary as refs, ≤512 KiB each)"
+      title={t("composer.attachFiles")}
+      aria-label={t("composer.attachFiles")}
       aria-busy={picking === "file"}
       disabled={picking !== null}
       onclick={() => void openPicker("file")}
@@ -802,13 +803,13 @@
             ? 'border-amber-500/60 text-amber-700 dark:text-amber-300'
             : 'border-border text-muted-foreground hover:text-foreground'}"
           title={modelChip.dangling
-            ? `${modelChip.label} — active model is outside your configured Model Routes (amber). Pick a routed model here or manage routes in Settings → Model`
+            ? t("composer.modelDanglingTitle", { label: modelChip.label })
             : running
-              ? `${modelChip.label} — switch after the current turn ends`
-              : `${modelChip.label} — switch the active model (route configuration lives in Settings → Model)`}
+              ? t("composer.modelRunningTitle", { label: modelChip.label })
+              : t("composer.modelTitle", { label: modelChip.label })}
           aria-label={modelChip.dangling
-            ? `Switch active model — current model ${modelChip.label} is outside your configured Model Routes`
-            : "Switch active model"}
+            ? t("composer.modelDanglingAria", { label: modelChip.label })
+            : t("composer.modelAria")}
           disabled={running}
           onkeydown={(event) => {
             // 同模式 chip：Esc 在 trigger（target 层）先占，不冒泡收起整个面板。
@@ -822,7 +823,7 @@
           {#if modelChip.effort}
             <span
               class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
-              title={`Reasoning effort: ${modelChip.effort}`}
+              title={t("composer.effortTitle", { effort: modelChip.effort })}
             ></span>
           {/if}
           <IconChevronDown class="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
@@ -846,7 +847,7 @@
               data-dangling="true"
               class="px-2 py-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
             >
-              {modelChip.label} — outside Routes
+              {t("composer.danglingLabel", { label: modelChip.label })}
             </DropdownMenu.Label>
             <DropdownMenu.Separator />
           {/if}
@@ -882,7 +883,7 @@
             <DropdownMenu.Separator />
           {/each}
           <DropdownMenu.Item onclick={() => openSettings("model")}>
-            Open settings →
+            {t("composer.openSettings")}
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.DropdownMenu>
@@ -897,19 +898,19 @@
           ? 'bg-primary/85 text-primary-foreground hover:bg-primary'
           : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'}"
       aria-label={primaryMode === "stop"
-        ? "Cancel current activity"
+        ? t("composer.stopAria")
         : primaryMode === "queue"
-          ? "Queue message after the current turn"
+          ? t("composer.queueAria")
           : primaryMode === "steer"
-            ? "Steer the current turn with this message"
-            : "Send message"}
+            ? t("composer.steerAria")
+            : t("composer.sendAria")}
       title={primaryMode === "stop"
-        ? "Cancel current activity"
+        ? t("composer.stopTitle")
         : primaryMode === "queue"
-          ? "Queue (Enter) · Steer (⌘/Ctrl+Enter)"
+          ? t("composer.queueTitle")
           : primaryMode === "steer"
-            ? "Steer (Enter) · Queue (⌘/Ctrl+Enter)"
-            : "Send (Enter)"}
+            ? t("composer.steerTitle")
+            : t("composer.sendTitle")}
       disabled={primaryMode !== "stop" && (!hasDraft || agentSession.sending)}
       onclick={() =>
         primaryMode === "stop"

@@ -10,6 +10,7 @@
 <script lang="ts">
   import IconChevron from "@lucide/svelte/icons/chevron-right";
   import type { Component } from "svelte";
+  import { t } from "$lib/i18n";
 
   let {
     icon: Icon,
@@ -48,8 +49,8 @@
     {#if error}
       <span
         class="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive"
-        title="Tool error"
-        aria-label="Tool error"
+        title={t("disclosureRow.toolError")}
+        aria-label={t("disclosureRow.toolError")}
       ></span>
     {/if}
   </span>

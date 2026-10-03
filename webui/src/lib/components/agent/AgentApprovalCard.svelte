@@ -11,6 +11,7 @@
   import { Input } from "$lib/components/ui/input";
   import { answerAgentApproval } from "$lib/stores/agent.svelte";
   import type { PanelApprovalQuestion } from "$lib/stores/agent.svelte";
+  import { t } from "$lib/i18n";
 
   let {
     seq,
@@ -60,10 +61,10 @@
 <div
   class="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-xs"
   role="group"
-  aria-label={resolved ? "Answered question" : "Pending question"}
+  aria-label={resolved ? t("agentApproval.answeredAria") : t("agentApproval.pendingAria")}
 >
   <div class="mb-2 flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
-    {resolved ? "Answered" : "Your decision"}
+    {resolved ? t("agentApproval.answered") : t("agentApproval.yourDecision")}
   </div>
   {#each questions as question (question.id)}
     <div class="mb-2 space-y-1.5">
@@ -96,18 +97,20 @@
         </div>
       {/if}
       <Input
-        placeholder="Custom answer (optional)"
+        placeholder={t("agentApproval.customPlaceholder")}
         disabled={resolved}
         value={customs[question.id] ?? ""}
         onchange={(event) => (customs[question.id] = event.currentTarget.value)}
         class="h-7 text-xs"
-        aria-label="Custom answer for {question.question}"
+        aria-label={t("agentApproval.customAria", { question: question.question })}
       />
     </div>
   {/each}
   {#if !resolved}
     <div class="flex justify-end">
-      <Button size="sm" disabled={!canSubmit()} onclick={submit}>Submit answer</Button>
+      <Button size="sm" disabled={!canSubmit()} onclick={submit}>
+        {t("agentApproval.submit")}
+      </Button>
     </div>
   {/if}
 </div>

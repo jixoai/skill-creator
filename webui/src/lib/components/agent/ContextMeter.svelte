@@ -29,6 +29,7 @@
 
 <script lang="ts">
   import { agentRuntimeConfig, agentSession, sendAgentPrompt } from "$lib/stores/agent.svelte";
+  import { t } from "$lib/i18n";
   import { formatTokens } from "./format";
 
   /** 回退上下文窗口常量（131072 = 128k；路由 contextWindow 未命中时使用并标注）。 */
@@ -52,8 +53,12 @@
 
   const tooltip = $derived(
     usage
-      ? `${percent}% of context used · last turn ${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out`
-      : "No turns yet — context usage appears after the first turn",
+      ? t("contextMeter.tooltipUsed", {
+          percent,
+          input: formatTokens(usage.inputTokens),
+          output: formatTokens(usage.outputTokens),
+        })
+      : t("contextMeter.tooltipIdle"),
   );
 
   function compact(): void {
@@ -77,7 +82,7 @@
   <button
     type="button"
     class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-    aria-label="Context usage"
+    aria-label={t("contextMeter.aria")}
     title={tooltip}
     aria-expanded={open}
     disabled={!agentSession.sessionId}
@@ -102,42 +107,46 @@
   {#if open}
     <div
       role="dialog"
-      aria-label="Context usage details"
+      aria-label={t("contextMeter.dialogAria")}
       class="absolute right-0 bottom-full z-20 mb-1.5 w-56 rounded-lg border border-border bg-popover p-2.5 text-xs shadow-md"
     >
-      <div class="mb-1.5 text-[11px] font-medium text-muted-foreground">Context</div>
+      <div class="mb-1.5 text-[11px] font-medium text-muted-foreground">
+        {t("contextMeter.context")}
+      </div>
       {#if usage}
         <div class="flex items-center justify-between">
-          <span>Used</span>
+          <span>{t("contextMeter.used")}</span>
           <span class="tabular-nums {warn ? 'text-amber-600 dark:text-amber-400' : ''}">
             {percent}%
           </span>
         </div>
         <div class="mt-0.5 flex items-center justify-between text-muted-foreground">
-          <span>Last turn</span>
+          <span>{t("contextMeter.lastTurn")}</span>
           <span class="tabular-nums">
             ↑ {formatTokens(usage.inputTokens)} · ↓ {formatTokens(usage.outputTokens)}
           </span>
         </div>
         <div class="mt-0.5 flex items-center justify-between text-muted-foreground">
-          <span>Capacity</span>
+          <span>{t("contextMeter.capacity")}</span>
           <span class="tabular-nums">
-            {formatTokens(capacity)}{resolvedCapacity === null ? " · assumed 128k" : ""}
+            {formatTokens(capacity)}{resolvedCapacity === null
+              ? ` ${t("contextMeter.assumedSuffix")}`
+              : ""}
           </span>
         </div>
       {:else}
-        <div class="text-muted-foreground">No turns yet.</div>
+        <div class="text-muted-foreground">{t("contextMeter.noTurns")}</div>
       {/if}
       <button
         type="button"
         class="mt-2 w-full rounded-md border border-border px-2 py-1 text-[11px] transition-colors hover:bg-muted disabled:opacity-50"
-        title="Compact the conversation history (kernel /compact)"
+        title={t("contextMeter.compactTitle")}
         disabled={agentSession.sending ||
           agentSession.status === "running" ||
           !agentSession.sessionId}
         onclick={compact}
       >
-        compact
+        {t("contextMeter.compactButton")}
       </button>
     </div>
   {/if}

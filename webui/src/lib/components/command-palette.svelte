@@ -13,6 +13,7 @@
   import * as Command from "$lib/components/ui/command";
   import { goto } from "$app/navigation";
   import { goById } from "$lib/shell";
+  import { t } from "$lib/i18n";
   import {
     installationScopeLabel,
     openSkillSearchConfig,
@@ -119,44 +120,44 @@
      挂在 Command.Input 的 value 上——query 必须绑 Input，绑 Root 会让检索永不
      触发且选中条目污染 query（走查 Case C P1）。 -->
 <Command.Dialog bind:open>
-  <Command.Input bind:value={query} placeholder="Search navigation, workspaces and skills…" />
+  <Command.Input bind:value={query} placeholder={t("palette.placeholder")} />
   <Command.List>
     <!-- 全局 Empty 只在空输入时参与（bits-ui 的 filtered.count 不计 forceMount
          行；非空输入的空态由 Skills 组自带行承载，避免双空态并存）。 -->
     {#if !trimmedQuery}
-      <Command.Empty>No matching destination.</Command.Empty>
+      <Command.Empty>{t("palette.empty")}</Command.Empty>
     {/if}
 
-    <Command.Group heading="Navigate">
+    <Command.Group heading={t("palette.groupNavigate")}>
       <Command.Item
         onSelect={() => run(() => goto("/workspaces"))}
         value="go workspaces manage locations"
       >
         <IconGrid class="h-4 w-4" />
-        Workspaces
+        {t("palette.navWorkspaces")}
       </Command.Item>
       <Command.Item onSelect={() => run(() => goto("/creator"))} value="go creator new skill">
         <IconPen class="h-4 w-4" />
-        Creator
+        {t("palette.navCreator")}
       </Command.Item>
       <Command.Item
         onSelect={() => run(() => goto("/repository"))}
         value="go repository browse remote"
       >
         <IconGlobe class="h-4 w-4" />
-        Repository
+        {t("palette.navRepository")}
       </Command.Item>
       <Command.Item
         onSelect={() => run(() => void openSkillSearchConfig())}
         value="go search config toml"
       >
         <IconSliders class="h-4 w-4" />
-        Open search config
+        {t("palette.navSearchConfig")}
       </Command.Item>
     </Command.Group>
 
     {#if workspaceState.workspaces.length > 0}
-      <Command.Group heading="Workspaces">
+      <Command.Group heading={t("palette.groupWorkspaces")}>
         {#each workspaceState.workspaces as ws (ws.id)}
           <Command.Item
             value={`workspace ${ws.label} ${ws.path}`}
@@ -173,24 +174,26 @@
     <!-- Skills 全局检索组：forceMount 绕过面板的本地前缀过滤——中文/typo 查询
          的召回与排序由 daemon BM25 裁决，面板只做分组渲染。 -->
     {#if !trimmedQuery}
-      <Command.Group heading="Skills" value="skills" forceMount>
+      <Command.Group heading={t("palette.groupSkills")} value="skills" forceMount>
         <div class="px-2.5 py-1.5 text-xs text-muted-foreground">
-          Type to search skills across workspaces…
+          {t("palette.typeToSearch")}
         </div>
       </Command.Group>
     {:else if searchPending}
-      <Command.Group heading="Skills" value="skills" forceMount>
-        <Command.Loading>Searching skills…</Command.Loading>
+      <Command.Group heading={t("palette.groupSkills")} value="skills" forceMount>
+        <Command.Loading>{t("palette.searching")}</Command.Loading>
       </Command.Group>
     {:else if searchFresh && searchState.error}
-      <Command.Group heading="Skills" value="skills" forceMount>
+      <Command.Group heading={t("palette.groupSkills")} value="skills" forceMount>
         <div class="px-2.5 py-1.5 text-xs text-destructive">
-          Skill search failed — {searchState.error}
+          {t("palette.searchFailed", { error: searchState.error })}
         </div>
       </Command.Group>
     {:else if skillGroups.length === 0}
-      <Command.Group heading="Skills" value="skills" forceMount>
-        <div class="px-2.5 py-1.5 text-xs text-muted-foreground">No matching skill.</div>
+      <Command.Group heading={t("palette.groupSkills")} value="skills" forceMount>
+        <div class="px-2.5 py-1.5 text-xs text-muted-foreground">
+          {t("palette.noMatchingSkill")}
+        </div>
       </Command.Group>
     {:else}
       {#each skillGroups as group (group.scope)}

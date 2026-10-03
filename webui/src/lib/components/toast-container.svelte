@@ -4,6 +4,7 @@
    * 正交意图：[1] 渲染全局 toast 队列；[2] 提供 action 与关闭操作。
    */
   import { toasts, dismissToast } from "$lib/toast.svelte";
+  import { t } from "$lib/i18n";
   import IconX from "@lucide/svelte/icons/x";
 </script>
 
@@ -30,8 +31,8 @@
       {/if}
       <button
         class="text-muted-foreground hover:text-foreground"
-        aria-label="Dismiss notification"
-        title="Dismiss notification"
+        aria-label={t("toast.dismiss")}
+        title={t("toast.dismiss")}
         onclick={() => dismissToast(toast.id)}
       >
         <IconX class="h-3.5 w-3.5" />

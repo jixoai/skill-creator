@@ -11,6 +11,7 @@
 <script lang="ts">
   import IconCheckCircle from "@lucide/svelte/icons/circle-check";
   import IconChevron from "@lucide/svelte/icons/chevron-right";
+  import { t } from "$lib/i18n";
 
   let {
     todos,
@@ -39,16 +40,20 @@
     class="disclosure-row disclosure-row-tall w-full rounded-lg border border-border bg-card px-2 shadow-sm"
     data-open={expanded}
     aria-expanded={expanded}
-    aria-label="Tasks"
+    aria-label={t("todoDock.tasks")}
     onclick={() => (expanded = !expanded)}
   >
     <span class="flex items-center justify-center text-muted-foreground" aria-hidden="true">
       <IconCheckCircle class="h-3.5 w-3.5" />
     </span>
-    <span class="truncate text-left font-medium text-foreground">Tasks</span>
+    <span class="truncate text-left font-medium text-foreground">{t("todoDock.tasks")}</span>
     <span class="text-center text-muted-foreground/70" aria-hidden="true">·</span>
     <span class="disclosure-summary tabular-nums">
-      done {counts.done} · active {counts.active} · pending {counts.pending}
+      {t("todoDock.counts", {
+        done: counts.done,
+        active: counts.active,
+        pending: counts.pending,
+      })}
     </span>
     <IconChevron class="disclosure-chevron h-3.5 w-3.5 shrink-0 text-muted-foreground" />
   </button>

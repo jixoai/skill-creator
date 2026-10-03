@@ -29,6 +29,7 @@
   } from "$lib/stores/agent.svelte";
   import { connectionState } from "$lib/stores/connection.svelte";
   import { agentComposer, addComposerReference } from "$lib/stores/agent-composer.svelte";
+  import { t } from "$lib/i18n";
   import AgentHeader from "./AgentHeader.svelte";
   import TranscriptView from "./TranscriptView.svelte";
   import DropOverlay from "./DropOverlay.svelte";
@@ -118,7 +119,8 @@
     ? 'border-l border-border'
     : 'border-l-0 max-[720px]:translate-x-full max-[720px]:invisible'}"
   style="--agent-panel-width: {agentPanel.open ? agentPanel.width : 0}px"
-  aria-label="Agent panel"
+  aria-label={t("agentPanel.panelAria")}
+  data-agent-panel="true"
 >
   <!-- W2：document 级拖放（覆盖层 + 全窗落点）接管附件拖放；面板级 ondrop 移除。 -->
   <DropOverlay />
@@ -128,7 +130,7 @@
     class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 min-[720px]:block"
     role="separator"
     aria-orientation="vertical"
-    aria-label="Resize agent panel"
+    aria-label={t("agentPanel.resizeAria")}
     onpointerdown={startResize}
   ></div>
 
@@ -155,12 +157,12 @@
       class="mx-3 mb-1.5 flex h-7 shrink-0 items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-2.5 text-[11px] text-amber-700 dark:text-amber-400"
       role="status"
     >
-      <span class="truncate"> Editing — resending keeps your full history (append-only) </span>
+      <span class="truncate"> {t("agentPanel.editingNote")} </span>
       <button
         type="button"
         class="relative shrink-0 rounded p-0.5 text-amber-700/80 after:absolute after:-inset-1.5 after:content-[''] hover:text-amber-700 dark:text-amber-400/80 dark:hover:text-amber-400"
-        title="Cancel edit"
-        aria-label="Cancel edit"
+        title={t("agentPanel.cancelEdit")}
+        aria-label={t("agentPanel.cancelEdit")}
         onclick={() => {
           if (agentComposer.editing !== null) agentComposer.text = "";
           agentComposer.editing = null;

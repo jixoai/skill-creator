@@ -15,6 +15,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { loadWikiScopes, resetWikiScopes, wikiScopesState } from "$lib/stores/wiki.svelte";
+  import { t } from "$lib/i18n";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
   import IconGlobe from "@lucide/svelte/icons/globe";
@@ -63,9 +64,9 @@
 <div class="flex h-full flex-col overflow-y-auto p-5">
   <header class="flex shrink-0 items-start justify-between gap-3 border-b border-border pb-4">
     <div>
-      <h1 class="text-lg font-semibold">Wiki</h1>
+      <h1 class="text-lg font-semibold">{t("wikiHome.title")}</h1>
       <p class="mt-0.5 text-xs text-muted-foreground">
-        Fragment insights collected per wiki — global notes and workspace-local knowledge.
+        {t("wikiHome.subtitle")}
       </p>
     </div>
     <div class="flex shrink-0 items-center gap-1.5">
@@ -73,8 +74,8 @@
         variant="ghost"
         size="icon"
         class="h-9 w-9"
-        title="Refresh wiki scopes"
-        aria-label="Refresh wiki scopes"
+        title={t("wikiHome.refreshTitle")}
+        aria-label={t("wikiHome.refreshTitle")}
         disabled={wikiScopesState.loading}
         onclick={() => void refresh()}
       >
@@ -95,28 +96,31 @@
       >
         <IconAlert class="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
         <div class="min-w-0 flex-1">
-          <p class="text-sm font-medium text-destructive">Couldn't load wiki scopes</p>
+          <p class="text-sm font-medium text-destructive">{t("wikiHome.loadErrorTitle")}</p>
           <p class="mt-1 break-words text-xs text-destructive/90">{wikiScopesState.error}</p>
         </div>
-        <Button variant="outline" size="sm" onclick={() => void refresh()}>Retry</Button>
+        <Button variant="outline" size="sm" onclick={() => void refresh()}>
+          {t("common.retry")}
+        </Button>
       </div>
     {:else if wikiScopesState.loading && wikiScopesState.scopes.length === 0}
-      <div class="space-y-3" aria-label="Loading wiki scopes">
+      <div class="space-y-3" aria-label={t("wikiHome.loadingAria")}>
         <div class="h-16 animate-pulse rounded-lg border border-border bg-muted/50"></div>
         <div class="h-16 animate-pulse rounded-lg border border-border bg-muted/50"></div>
       </div>
     {:else if wikiScopesState.scopes.length === 0}
       <div class="rounded-lg border border-dashed border-border p-8 text-center">
         <IconBookOpen class="mx-auto h-8 w-8 text-muted-foreground" />
-        <p class="mt-3 text-sm font-medium">No wiki scopes yet</p>
+        <p class="mt-3 text-sm font-medium">{t("wikiHome.emptyTitle")}</p>
         <p class="mt-1 text-xs text-muted-foreground">
-          The global wiki appears once the daemon is reachable.
+          {t("wikiHome.emptyBody")}
         </p>
       </div>
     {:else}
       {#if wikiScopesState.loading}
         <p class="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-          <IconLoader class="h-3.5 w-3.5 animate-spin" /> Updating…
+          <IconLoader class="h-3.5 w-3.5 animate-spin" />
+          {t("wikiHome.updating")}
         </p>
       {/if}
       <ul class="divide-y divide-border rounded-lg border border-border">
@@ -136,18 +140,24 @@
                 <span class="flex items-center gap-2">
                   <span class="truncate text-sm font-medium">{scope.label}</span>
                   {#if scope.id === "~"}
-                    <Badge variant="secondary" class="shrink-0 text-xs">~ global</Badge>
+                    <Badge variant="secondary" class="shrink-0 text-xs">
+                      {t("wikiHome.globalBadge")}
+                    </Badge>
                   {/if}
                 </span>
                 {#if scope.exists}
                   <span class="block truncate text-xs text-muted-foreground">
-                    {scope.patternCount}
-                    {scope.patternCount === 1 ? "fragment" : "fragments"} captured{#if scope.lastUpdated}
-                      · updated {scope.lastUpdated.slice(0, 10)}{/if}
+                    {t(
+                      scope.patternCount === 1
+                        ? "wikiHome.fragmentsCapturedOne"
+                        : "wikiHome.fragmentsCapturedMany",
+                      { count: scope.patternCount },
+                    )}{#if scope.lastUpdated}
+                      · {t("wikiHome.updatedOn", { date: scope.lastUpdated.slice(0, 10) })}{/if}
                   </span>
                 {:else}
                   <span class="block truncate text-xs text-muted-foreground/80">
-                    Not initialized — opens empty, first fragment creates it
+                    {t("wikiHome.notInitialized")}
                   </span>
                 {/if}
               </span>

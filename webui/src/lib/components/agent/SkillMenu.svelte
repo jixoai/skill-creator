@@ -27,6 +27,7 @@
     searchState,
   } from "$lib/stores/skills.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
+  import { t } from "$lib/i18n";
   import type { SkillId } from "$shared/contracts/skills.js";
   import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
 
@@ -175,14 +176,17 @@
   }
 
   const sourceLabel = $derived.by(() => {
-    if (!needle) return "输入关键词检索技能";
+    if (!needle) return t("skillMenu.typeToSearch");
     if (menuFailure !== null) return menuFailure;
-    if (searchPending) return "Searching skills…";
+    if (searchPending) return t("skillMenu.searching");
     if (searchFresh && searchState.results.length > 0) {
       const groups = new Set(rows.map((row) => row.entry.group)).size;
-      return `${searchState.results.length} skills · ${groups} provider groups`;
+      return t("skillMenu.resultsSummary", {
+        count: searchState.results.length,
+        groups,
+      });
     }
-    return "Skills across workspaces";
+    return t("skillMenu.acrossWorkspaces");
   });
 </script>
 
@@ -193,16 +197,16 @@
   {caretOnFirstLine}
   {suppress}
   matcher={(menuQuery) => !/\s/.test(menuQuery.slice(1))}
-  menuLabel="Skills — across workspaces"
+  menuLabel={t("skillMenu.menuAria")}
   {sourceLabel}
   dataSlot="skill-menu"
   emptyMessage={menuFailure !== null
-    ? "Search unavailable"
+    ? t("skillMenu.searchUnavailable")
     : searchPending
-      ? "Searching skills…"
+      ? t("skillMenu.searching")
       : needle
-        ? "No matching skill"
-        : "输入关键词检索技能…"}
+        ? t("skillMenu.noMatchingSkill")
+        : t("skillMenu.typeToSearchEmpty")}
   {onSelect}
   bind:this={menu}
 />

@@ -19,6 +19,7 @@
     selectAgentSession,
     setAgentPanelOpen,
   } from "$lib/stores/agent.svelte";
+  import { t } from "$lib/i18n";
 
   /** 当前会话在列表中的完整身份（select 的 title 提示）。 */
   const selectedSessionTitle = $derived.by(() => {
@@ -30,26 +31,28 @@
 </script>
 
 <header class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
-  <span class="px-1 text-xs font-medium text-muted-foreground">Agent</span>
+  <span class="px-1 text-xs font-medium text-muted-foreground">{t("agentHeader.agentLabel")}</span>
   <!-- 选项文本刻意短化（原生 select 无省略号，长文本会被硬裁）；完整身份走
        title 提示（design §7 妥协：本轮不换自定义下拉）。 -->
   <select
     class="h-8 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 py-0 text-xs"
-    aria-label="Session"
+    aria-label={t("agentHeader.sessionAria")}
     title={selectedSessionTitle}
     value={agentSession.sessionId ?? ""}
     onchange={(event) => selectAgentSession(event.currentTarget.value)}
   >
     {#if agentSession.sessionId === null}
-      <option value="">New session…</option>
+      <option value="">{t("agentHeader.newSessionOption")}</option>
     {/if}
     {#if agentSessionsList.sessions.length === 0 && agentSession.sessionId !== null}
-      <option value="">No sessions</option>
+      <option value="">{t("agentHeader.noSessions")}</option>
     {/if}
     {#each agentSessionsList.sessions as session (session.sessionId)}
       <option value={session.sessionId}>
         {session.title || session.sessionId.slice(0, 14)}
-        {session.status === "disposed" ? "· ended" : `· ${session.status}`}
+        {session.status === "disposed"
+          ? t("agentHeader.endedSuffix")
+          : t("agentHeader.statusSuffix", { status: session.status })}
       </option>
     {/each}
   </select>
@@ -60,8 +63,8 @@
     <button
       type="button"
       class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
-      title="New session"
-      aria-label="New session"
+      title={t("agentHeader.newSession")}
+      aria-label={t("agentHeader.newSession")}
       onclick={() => beginNewAgentSession()}
     >
       <IconPlus class="h-4 w-4" />
@@ -70,8 +73,8 @@
   <button
     type="button"
     class="relative flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground"
-    title="Close panel"
-    aria-label="Close panel"
+    title={t("agentHeader.closePanel")}
+    aria-label={t("agentHeader.closePanel")}
     onclick={() => setAgentPanelOpen(false)}
   >
     <IconX class="h-4 w-4" />

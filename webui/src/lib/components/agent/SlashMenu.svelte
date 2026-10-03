@@ -15,20 +15,22 @@
   妥协声明：无（交互语法与渲染见 TriggerMenu 模块）。
 -->
 <script module lang="ts">
+  import { t, type MessageKey } from "$lib/i18n";
+
   /** 斜杠命令条目（后续命令在 SLASH_COMMANDS 注册表追加即可）。 */
   export interface SlashCommand {
     command: string;
-    description: string;
+    descriptionKey: MessageKey;
     /** 命令类别（W3）：action = 选中即执行发送；input-taking = claim 后带参
      *  提交（claim 机见 composer-trigger；首版目录无此类命令，结构就绪）。 */
     kind?: "action" | "input-taking";
   }
 
   export const SLASH_COMMANDS: readonly SlashCommand[] = [
-    { command: "/compact", description: "Summarize the transcript to reclaim context" },
+    { command: "/compact", descriptionKey: "slashMenu.cmdCompact" },
     // W4：忙碌 Enter 偏好（客户端命令——选中即本地生效，不发送）。
-    { command: "/queue", description: "While busy, Enter queues after the current turn" },
-    { command: "/steer", description: "While busy, Enter steers the current turn" },
+    { command: "/queue", descriptionKey: "slashMenu.cmdQueue" },
+    { command: "/steer", descriptionKey: "slashMenu.cmdSteer" },
   ];
 
   /** input-taking 命令 token 集（含尾随空格；claim 机的命令目录）。 */
@@ -70,12 +72,12 @@
   const entries = $derived.by(() => {
     const commandEntries: MenuEntry[] = SLASH_COMMANDS.map((entry) => ({
       value: entry.command,
-      group: "Commands",
-      ...(entry.description.length > 0 ? { description: entry.description } : {}),
+      group: t("slashMenu.groupCommands"),
+      description: t(entry.descriptionKey),
     }));
     const skillEntries: MenuEntry[] = skillsState.skills.map((skill) => ({
       value: `/${skill.name}`,
-      group: "Skills",
+      group: t("slashMenu.groupSkills"),
       ...(skill.description.length > 0 ? { description: skill.description } : {}),
     }));
     return [...commandEntries, ...skillEntries];
@@ -84,8 +86,8 @@
   /** 来源副标题：技能候选沿用最近一次加载的 Provider——来源显式标注。 */
   const sourceLabel = $derived(
     skillsState.target
-      ? `skills from provider: ${skillsState.target.providerId}`
-      : "Open a Workspace provider to load skills",
+      ? t("slashMenu.sourceFromProvider", { provider: skillsState.target.providerId })
+      : t("slashMenu.sourceNoProvider"),
   );
 
   /** URL 剔除（W3，官方 carve-outs）：`//` 协议相对或 `://` scheme 的首行
@@ -119,10 +121,10 @@
   suppress={suppress || carvedOut}
   {forcedOpen}
   {onForceClose}
-  menuLabel="Slash commands and skills"
+  menuLabel={t("slashMenu.menuAria")}
   {sourceLabel}
   dataSlot="slash-menu"
-  emptyMessage="No matching command or skill"
+  emptyMessage={t("slashMenu.empty")}
   {onSelect}
   bind:this={menu}
 />
