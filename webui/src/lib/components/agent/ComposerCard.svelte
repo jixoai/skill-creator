@@ -974,7 +974,7 @@
       <ContextMeter />
       <button
         type="button"
-        class="relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full transition-colors after:absolute after:-inset-0.5 after:content-[''] {primaryMode ===
+        class="relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full transition-colors after:absolute after:-inset-[5px] after:content-[''] {primaryMode ===
         'stop'
           ? 'bg-destructive text-white hover:bg-destructive/90'
           : primaryMode === 'queue' || primaryMode === 'steer'
