@@ -216,4 +216,18 @@ describe("headless dsh kernel (task 2.1)", () => {
       expect(second.record.entries.length).toBeGreaterThan(0);
     },
   );
+
+  it("pins the no-default-outbound-telemetry contract (session-telemetry-otel disabled)", async () => {
+    // 隐私边界契约：官方 dsh-base 默认把会话遥测发往 harness-telemetry.deepseeksvc.com，
+    // 本地优先产品必须默认禁用（2026-10-04 dev 沙箱该行 OTLP URL 校验失败毒化
+    // include 链的事件钉死此裁决）。复用本 describe 前序 boot 的 dsh-home。
+    const kernel = await import("../src/daemon/kernel/dsh-kernel.js");
+    expect(kernel.KERNEL_DISABLED_TOOL_ROWS).toContain("session-telemetry-otel");
+    // patch 行由常量逐行映射生成（bootDshKernel 写 cordis.patch.yml）——此处钉
+    // 生成格式，免为文件级断言重复 30s 级 boot。
+    const yaml = kernel.KERNEL_DISABLED_TOOL_ROWS.map(
+      (id) => `- id: ${id}\n  disabled: true\n`,
+    ).join("");
+    expect(yaml).toContain("- id: session-telemetry-otel\n  disabled: true");
+  });
 });

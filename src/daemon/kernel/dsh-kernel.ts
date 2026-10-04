@@ -63,14 +63,19 @@ const repoRoot = sourceMode
  * skill-filesystem/tool-skill 同步收窄：宿主机个人 skills 目录的自动发现注入
  * （system-reminder catalog）越出 Manager 的技能真相边界——技能目录由
  * skill-creator-mcp + 提示词最佳实践供给（task 4.x）。
+ * session-telemetry-otel：官方 dsh-base 默认把会话遥测发往
+ * harness-telemetry.deepseeksvc.com（OTLP，env 可覆盖但默认开启）——本地
+ * 优先产品不做默认外发（隐私边界；2026-10-04 dev 沙箱因该行 OTLP URL
+ * 校验失败毒化 include 链致 kernel 降级，暴露此默认）。
  */
-const KERNEL_DISABLED_TOOL_ROWS = [
+export const KERNEL_DISABLED_TOOL_ROWS = [
   "tool-fs",
   "tool-fs-search",
   "tool-jobs",
   "tool-web",
   "skill-filesystem",
   "tool-skill",
+  "session-telemetry-otel",
 ] as const;
 
 /**
