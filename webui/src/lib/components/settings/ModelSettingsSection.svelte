@@ -21,6 +21,7 @@
   import RouteTabContent from "./RouteTabContent.svelte";
   import { isLetterAvatar, resolveRouteIcon, routeAvatarColor, routeLetter } from "./route-icon.js";
   import { routeDisplayLabel } from "./route-naming.js";
+  import { t } from "$lib/i18n";
   import { agentRuntimeConfig, updateAgentSettings } from "$lib/stores/agent.svelte";
   import { getConnectionGeneration, getRpc } from "$lib/stores/connection.svelte";
   import { createRequestGenerationGate } from "$lib/stores/request-generation.js";
@@ -75,7 +76,7 @@
     try {
       const rpc = getRpc();
       if (!rpc) {
-        catalogError = "daemon not connected";
+        catalogError = t("settings.model.catalogDisconnected");
         return;
       }
       const result = await rpc.agent.models.catalog({});
@@ -216,27 +217,28 @@
 <div class="flex h-full min-h-0 flex-col space-y-3">
   <div class="flex items-start justify-between gap-2">
     <div>
-      <h3 class="text-sm font-medium">Model</h3>
+      <h3 class="text-sm font-medium">{t("settingsPage.sectionModel")}</h3>
       <p class="mt-0.5 text-[11px] text-muted-foreground">
-        Changes apply immediately to your agent sessions — no restart needed.
+        {t("settings.model.subtitle")}
       </p>
     </div>
     {#if activeOutsideRoutes && view}
       <button
         type="button"
         class="mt-0.5 shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 transition-colors hover:bg-amber-500/25"
-        title="Your active model ({view.settings.model
-          .provider}) comes from an environment variable and is not listed under Routes — click to register it here."
+        title={t("settings.model.outsideTitle", { provider: view.settings.model.provider })}
         onclick={addEnvActiveRoute}
       >
-        active outside tabs
+        {t("settings.model.outsideBadge")}
       </button>
     {/if}
   </div>
   {#if activeOutsideRoutes && view}
     <p class="text-[10px] text-amber-700">
-      {view.settings.model.provider} · {view.settings.model.model} is active via an environment variable
-      and isn't in your route list yet — add it as a route to manage it here.
+      {t("settings.model.outsideHint", {
+        provider: view.settings.model.provider,
+        model: view.settings.model.model,
+      })}
     </p>
   {/if}
 
@@ -249,7 +251,7 @@
           bind:this={stripEl}
           onscroll={refreshScrollState}
           role="tablist"
-          aria-label="Model routes"
+          aria-label={t("settings.model.tablistAria")}
         >
           {#each routes as route, index (route.provider)}
             {@const entry = catalog?.providers.find((p) => p.provider === route.provider)}
@@ -268,7 +270,12 @@
               selected === route.provider
                 ? 'text-foreground'
                 : 'text-muted-foreground hover:text-foreground'}"
-              title="{displayLabel} ({route.provider}){ownsActive ? ' · active route' : ''}"
+              title={ownsActive
+                ? t("settings.model.tabTitleActive", {
+                    label: displayLabel,
+                    provider: route.provider,
+                  })
+                : t("settings.model.tabTitle", { label: displayLabel, provider: route.provider })}
               bind:this={tabRefs[route.provider]}
               onclick={() => {
                 selected = route.provider;
@@ -295,7 +302,7 @@
                   {#if !keyReady}
                     <span
                       class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
-                      title="API key missing"
+                      title={t("settings.model.keyMissing")}
                     ></span>
                   {/if}
                 </span>
@@ -309,7 +316,7 @@
                   {#if !keyReady}
                     <span
                       class="absolute -right-1 -top-0.5 h-1 w-1 rounded-full bg-amber-500"
-                      title="API key missing"
+                      title={t("settings.model.keyMissing")}
                     ></span>
                   {/if}
                 </span>
@@ -319,7 +326,8 @@
               {#if ownsActive}
                 <span
                   class="rounded bg-primary/10 px-1 py-px text-[9px] font-medium leading-tight text-primary"
-                  title="Active model's route">active</span
+                  title={t("settings.model.activeBadgeTitle")}
+                  >{t("settings.model.activeBadge")}</span
                 >
               {/if}
             </button>
@@ -345,7 +353,7 @@
           : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
         onclick={() => (routes.length === 0 ? openNew("form") : openNew("pick"))}
       >
-        + New
+        {t("settings.model.newTab")}
       </button>
     </div>
 
@@ -378,10 +386,9 @@
         <div
           class="flex flex-col items-center gap-2.5 rounded-md border border-dashed p-6 text-center"
         >
-          <p class="text-xs font-medium">Add your first model route</p>
+          <p class="text-xs font-medium">{t("settings.model.emptyTitle")}</p>
           <p class="max-w-[320px] text-[10px] leading-snug text-muted-foreground">
-            Pick a provider and its models from the built-in catalog, or point at any custom
-            OpenAI/Anthropic-compatible endpoint.
+            {t("settings.model.emptyBody")}
           </p>
           <div class="mt-1 flex gap-2">
             <Button
@@ -390,19 +397,19 @@
               class="h-8 px-3 text-xs"
               onclick={() => openNew("pick")}
             >
-              Browse providers
+              {t("settings.model.emptyBrowse")}
             </Button>
             <Button size="sm" class="h-8 px-3 text-xs" onclick={() => openNew("form")}>
-              Custom endpoint
+              {t("settings.model.emptyCustom")}
             </Button>
           </div>
         </div>
       {/if}
     </div>
   {:else if agentRuntimeConfig.loading}
-    <div class="text-xs text-muted-foreground">Loading…</div>
+    <div class="text-xs text-muted-foreground">{t("settings.loading")}</div>
   {:else}
-    <div class="text-xs text-muted-foreground">Model settings unavailable</div>
+    <div class="text-xs text-muted-foreground">{t("settings.model.unavailable")}</div>
   {/if}
 
   {#if agentRuntimeConfig.error}
@@ -415,9 +422,8 @@
 
 <ConfirmDialog
   bind:open={removeOpen}
-  title="Remove route"
-  description="Remove the “{removeTarget ??
-    ''}” route? Its stored key is kept; if it held the active model, that reference is left outside Routes."
+  title={t("settings.model.removeRoute")}
+  description={t("settings.model.removeBody", { provider: removeTarget ?? "" })}
   busy={removing}
   onConfirm={() => void confirmRemove()}
 />

@@ -143,6 +143,21 @@ creator/eval-view.svelte` 已删除（B 类行退役）——迁移源文案全�
   B 类 creator 面标记完成（apps/creator/** 全量 + sub-view-tabs）；components/creator
   其余子视图残留文案仍为 B，留后续小批。
 
+## 2b. B 线收尾批（2026-10-04 三线并行，词典拆分后域文件零冲突）
+
+| 线 | 域文件 | 新 key | 面 |
+| --- | --- | --- | --- |
+| α settings | domains/settings.ts | **201** | settings 全组件（appName/General/Agent/Sessions/Model 族 105/IconPicker 29）+ **语言切换 segmented control**（General→Appearance：English/中文，即时切换+DevicePrefs 持久化+document.lang） |
+| β shell | domains/shell-extra.ts | **59** | shell.* 34（+layout/TabStrip 19/WorkspaceNavigation/AppShell/window-drag-region；app-sidebar 已随 IA 退役，后继面即 TabStrip/WorkspaceNavigation）/ omnibox.* 14（Omnibox.svelte；omnibox.ts 纯逻辑零文案）/ importDialog.* 11 |
+| γ creator 残留 | domains/creator-extra.ts | **115** | creatorEditor 28（file-browser/markdown-editor）/ creatorLog 10 / creatorPreview 6 / creatorValidation 7 / intelligence 58（IntelligenceView 全量 + toast 6）/ skillDetail 6；creator-draft store 校验错误值改 key 联合（store 纯数据）；toast B 调用点四向核对（17 迁入/已双语/daemon 透传留 4.5/域外不碰） |
+
+合计 **+375 key**（en=zh；三线各自脚本核验成对+无死键）。B 类面全数清零（§2 表收口）。
+
+### 遗留（后续批）
+- `DSH_AGENT_MODES` 模式卡 label/description 属 $shared/contracts 词条面（settings 卡 + Sessions modeLabel + composer 模式 chip 同源）——shared-contract 词条面独立小批。
+- `manifest.name` 经 t() 在模块加载时求值：运行时切语言不刷新已注册 manifest 名（当前无可见消费面）。
+- daemon 错误原文透传（IntelligenceView/file-browser/skill-detail 等 8 处）→ task 4.5。
+
 ## 6. 计数汇总
 
 ```text

@@ -89,12 +89,12 @@
   const pathSuggestions = $derived.by(() => {
     const workspaceId = currentWorkspaceId();
     const paths: PathCompletion[] = [
-      { path: `/w/${encodeURIComponent(workspaceId)}/skills`, label: "Skills" },
-      { path: `/w/${encodeURIComponent(workspaceId)}/creator`, label: "Creator" },
-      { path: `/w/${encodeURIComponent(workspaceId)}/wiki`, label: "Wiki" },
-      { path: `/w/${encodeURIComponent(workspaceId)}/evaluating`, label: "Evaluating" },
-      { path: "/agent", label: "Agent" },
-      { path: "/settings", label: "Settings" },
+      { path: `/w/${encodeURIComponent(workspaceId)}/skills`, label: t("shell.navSkills") },
+      { path: `/w/${encodeURIComponent(workspaceId)}/creator`, label: t("shell.navCreator") },
+      { path: `/w/${encodeURIComponent(workspaceId)}/wiki`, label: t("shell.navWiki") },
+      { path: `/w/${encodeURIComponent(workspaceId)}/evaluating`, label: t("shell.navEvaluating") },
+      { path: "/agent", label: t("shell.tabAgent") },
+      { path: "/settings", label: t("shell.tabSettings") },
     ];
     return paths;
   });
@@ -391,26 +391,26 @@
     <button
       type="button"
       class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground min-[720px]:hidden"
-      aria-label="Open workspace navigation"
-      title="Workspace navigation"
+      aria-label={t("omnibox.openNavigationAria")}
+      title={t("omnibox.navigationTitle")}
       onclick={() => onToggleNavigation?.()}><IconMenu class="h-4 w-4" /></button
     >
   {/if}
   <button
     type="button"
     class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-35"
-    aria-label="Back in this tab"
+    aria-label={t("omnibox.backAria")}
     aria-keyshortcuts="Meta+["
-    title="Back in this tab (⌘[)"
+    title={t("omnibox.backTitle")}
     disabled={!history.back}
     onclick={() => navigateTabHistory(-1)}><IconArrowLeft class="h-3.5 w-3.5" /></button
   >
   <button
     type="button"
     class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-35"
-    aria-label="Forward in this tab"
+    aria-label={t("omnibox.forwardAria")}
     aria-keyshortcuts="Meta+]"
-    title="Forward in this tab (⌘])"
+    title={t("omnibox.forwardTitle")}
     disabled={!history.forward}
     onclick={() => navigateTabHistory(1)}><IconArrowRight class="h-3.5 w-3.5" /></button
   >
@@ -436,11 +436,11 @@
           type="text"
           role="combobox"
           class="h-full min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground"
-          aria-label="Address and command input"
+          aria-label={t("omnibox.inputAria")}
           aria-autocomplete="list"
           aria-expanded={shownCompletions.length > 0}
           aria-controls="omnibox-completions"
-          placeholder="Search pages, workspaces and skills; use > for commands"
+          placeholder={t("omnibox.placeholder")}
           onkeydown={handleInputKeydown}
           onblur={() => {
             if (input.trim().length === 0) stopEditing();
@@ -453,7 +453,7 @@
           id="omnibox-completions"
           class="absolute top-8 left-0 z-[90] max-h-72 w-full min-w-64 overflow-y-auto rounded border border-border bg-popover p-1 shadow-lg"
           role="listbox"
-          aria-label={commandMode ? "Commands" : "Suggestions"}
+          aria-label={commandMode ? t("omnibox.commandsAria") : t("omnibox.suggestionsAria")}
         >
           {#each shownCompletions as completion, index (completion.key)}
             <button
@@ -483,7 +483,7 @@
       <button
         type="button"
         class="flex h-7 w-full min-w-0 items-center gap-2 rounded border border-transparent px-2 text-left hover:border-border hover:bg-muted/40"
-        aria-label="Edit address"
+        aria-label={t("omnibox.editAddressAria")}
         title={formatOmniboxUrl(currentPath)}
         onclick={beginEditing}
       >
@@ -499,8 +499,8 @@
     <button
       type="button"
       class="hidden h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground min-[720px]:flex"
-      aria-label="Open settings"
-      title="Settings"
+      aria-label={t("omnibox.openSettingsAria")}
+      title={t("omnibox.settingsLabel")}
       onclick={() => navigateTab("/settings")}><IconSettings class="h-4 w-4" /></button
     >
     {#each availablePageActions as action (action.id)}
@@ -528,9 +528,9 @@
         <button
           type="button"
           class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground min-[720px]:hidden"
-          aria-label="More page actions"
+          aria-label={t("omnibox.moreActionsAria")}
           aria-expanded={overflowOpen}
-          title="More page actions"
+          title={t("omnibox.moreActionsAria")}
           onclick={() => (overflowOpen = !overflowOpen)}><IconChevronDown class="h-4 w-4" /></button
         >
         {#if overflowOpen}
@@ -543,7 +543,7 @@
               onclick={() => navigate("/settings")}
             >
               <IconSettings class="h-4 w-4" />
-              Settings
+              {t("omnibox.settingsLabel")}
             </button>
             {#each availablePageActions as action (action.id)}
               <button

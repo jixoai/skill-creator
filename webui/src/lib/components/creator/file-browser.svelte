@@ -36,6 +36,7 @@
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import { getConnectionGeneration } from "$lib/store.svelte";
   import { ORPCError } from "@orpc/client";
+  import { t } from "$lib/i18n";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
@@ -159,7 +160,7 @@
           body: draft.body,
         });
         editor.advanceRevision(result.document.revision);
-        showToast("Saved.");
+        showToast(t("creatorEditor.toastSaved"));
       } catch (error) {
         handleSaveError(error);
       } finally {
@@ -171,7 +172,7 @@
     submittedAttempt = true;
     const parsed = SkillDirectoryNameSchema.safeParse(draft.directoryName);
     if (!parsed.success) {
-      showToast("Directory name must be lowercase letters, numbers, and hyphens.");
+      showToast(t("creatorEditor.toastDirectoryRule"));
       return;
     }
     saving = true;
@@ -194,7 +195,7 @@
         cacheCreatorDraft(createdKey, snapshotCreatorDraft(draft));
         markDraftHydrated(createdKey);
       }
-      showToast("Skill created.");
+      showToast(t("creatorEditor.toastCreated"));
       // WS4 走查 B2：就地转编辑态路由（标题/draftKey 与 Test tab 门槛随身份
       // 对齐；草稿经卸载缓存以 edit 身份恢复，不重拉不丢内容）。
       goById(
@@ -218,11 +219,11 @@
     if (error instanceof ORPCError && error.code === "CONFLICT") {
       if (draft.mode === "new") {
         // create 的 CONFLICT = 目录已存在（WS4 走查：不得误报 changed elsewhere）。
-        showToast("A skill with this directory name already exists.");
+        showToast(t("creatorEditor.toastDirectoryExists"));
         return;
       }
-      showToast("This skill changed elsewhere. Reload to view the latest.", {
-        label: "Reload",
+      showToast(t("creatorEditor.toastChangedView"), {
+        label: t("creatorEditor.reload"),
         run: reloadCurrent,
       });
       return;
@@ -247,7 +248,7 @@
     try {
       await removeSkill({ target: draft.target, skillId, expectedRevision: revision });
       deleteOpen = false;
-      showToast("Skill deleted.");
+      showToast(t("creatorEditor.toastDeleted"));
       // 身份已消亡：清掉跨卸载缓存与 hydration 标记，防止重开残留死草稿。
       const deletedKey = creatorDraftKey(draft.target, "edit", skillId);
       if (deletedKey !== null) {
@@ -258,8 +259,8 @@
     } catch (error) {
       if (error instanceof ORPCError && error.code === "CONFLICT") {
         deleteOpen = false;
-        showToast("This skill changed elsewhere. Reload before deleting.", {
-          label: "Reload",
+        showToast(t("creatorEditor.toastChangedDelete"), {
+          label: t("creatorEditor.reload"),
           run: reloadCurrent,
         });
       } else {
@@ -274,7 +275,7 @@
 <div class="flex h-full flex-col">
   <div class="flex shrink-0 items-center border-b border-border px-4 py-2">
     <span class="text-xs font-medium">
-      {draft.mode === "new" ? "New SKILL.md" : "SKILL.md"}
+      {draft.mode === "new" ? t("creatorEditor.newFileTitle") : t("creatorEditor.fileTitle")}
     </span>
     <div class="ml-auto flex items-center gap-1.5">
       {#if draft.mode === "edit" && draft.skillId}
@@ -286,14 +287,14 @@
           disabled={loading}
         >
           <IconRotate class="h-3.5 w-3.5" />
-          Reload
+          {t("creatorEditor.reload")}
         </Button>
       {/if}
       <Button size="sm" class="h-7 gap-1.5" onclick={handleSave} disabled={!canSave}>
         {#if saving}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconSave
             class="h-3.5 w-3.5"
           />{/if}
-        {draft.mode === "new" ? "Create" : "Save"}
+        {draft.mode === "new" ? t("creatorEditor.create") : t("creatorEditor.save")}
       </Button>
       {#if draft.mode === "edit"}
         <!-- R2 #3：危险操作隔离——分隔线后右置 Delete（confirm 链路不动）。 -->
@@ -302,12 +303,12 @@
           variant="ghost"
           size="sm"
           class="h-7 gap-1.5 px-2 text-destructive hover:text-destructive"
-          title="Delete this skill"
+          title={t("creatorEditor.deleteTitle")}
           disabled={!canDelete || deleting}
           onclick={() => (deleteOpen = true)}
         >
           <IconTrash class="h-3.5 w-3.5" />
-          <span class="hidden sm:inline">Delete</span>
+          <span class="hidden sm:inline">{t("creatorEditor.delete")}</span>
         </Button>
       {/if}
     </div>
@@ -338,7 +339,9 @@
     <div class="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
       <p class="text-xs text-destructive">{loadError}</p>
       {#if draft.mode === "edit" && draft.skillId}
-        <Button variant="outline" size="sm" onclick={reloadCurrent}>Retry</Button>
+        <Button variant="outline" size="sm" onclick={reloadCurrent}>
+          {t("common.retry")}
+        </Button>
       {/if}
     </div>
   {:else}
@@ -348,58 +351,65 @@
     <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
       {#if draft.mode === "new"}
         <label class="block space-y-1">
-          <span class="text-[11px] font-medium text-muted-foreground">Directory name</span>
+          <span class="text-[11px] font-medium text-muted-foreground">
+            {t("creatorEditor.directoryName")}
+          </span>
           <Input
             bind:value={draft.directoryName}
             onblur={() => (touched.directoryName = true)}
             class="h-8 font-mono text-xs"
-            placeholder="my-skill"
+            placeholder={t("creatorEditor.directoryPlaceholder")}
           />
           {#if showDirectoryError}
             <span class="text-[11px] text-destructive" data-testid="directory-name-error">
-              {newDraftErrors.directoryName ?? "Use lowercase letters, numbers, and hyphens."}
+              {t(newDraftErrors.directoryName ?? "creatorEditor.directoryRule")}
             </span>
           {:else}
             <!-- 规则 helper 常态 muted（P1-3）：pristine 期只提示规则，不红错。 -->
             <span class="text-[11px] text-muted-foreground" data-testid="directory-name-helper">
-              Use lowercase letters, numbers, and hyphens.
+              {t("creatorEditor.directoryRule")}
             </span>
           {/if}
         </label>
       {/if}
 
       <label class="block space-y-1">
-        <span class="text-[11px] font-medium text-muted-foreground">Name</span>
+        <span class="text-[11px] font-medium text-muted-foreground">{t("creatorEditor.name")}</span>
         <Input
           bind:value={draft.name}
           onblur={() => (touched.name = true)}
           class="h-8 text-sm"
-          placeholder="Skill name"
+          placeholder={t("creatorEditor.namePlaceholder")}
         />
         {#if showNameError}
-          <span class="text-[11px] text-destructive">{newDraftErrors.name}</span>
+          <span class="text-[11px] text-destructive">
+            {newDraftErrors.name ? t(newDraftErrors.name) : ""}
+          </span>
         {/if}
       </label>
 
       <label class="block space-y-1">
-        <span class="text-[11px] font-medium text-muted-foreground">Description</span>
+        <span class="text-[11px] font-medium text-muted-foreground">
+          {t("creatorEditor.description")}
+        </span>
         <textarea
           bind:value={draft.description}
           onblur={() => (touched.description = true)}
           rows="2"
           class="w-full resize-y rounded-md border border-input bg-input/20 px-2 py-1 text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-          placeholder="What this skill does"></textarea>
+          placeholder={t("creatorEditor.descriptionPlaceholder")}></textarea>
         {#if showDescriptionError}
-          <span class="text-[11px] text-destructive">{newDraftErrors.description}</span>
+          <span class="text-[11px] text-destructive">
+            {newDraftErrors.description ? t(newDraftErrors.description) : ""}
+          </span>
         {/if}
       </label>
 
       <label class="flex min-h-64 flex-1 flex-col gap-1">
-        <span class="text-[11px] font-medium text-muted-foreground">Body (Markdown)</span>
-        <MarkdownEditor
-          bind:value={draft.body}
-          placeholder="## When to Use&#10;&#10;Describe when this skill should be invoked."
-        />
+        <span class="text-[11px] font-medium text-muted-foreground">
+          {t("creatorEditor.body")}
+        </span>
+        <MarkdownEditor bind:value={draft.body} placeholder={t("creatorEditor.bodyPlaceholder")} />
       </label>
     </div>
   {/if}
@@ -407,9 +417,9 @@
 
 <ConfirmDialog
   bind:open={deleteOpen}
-  title="Delete skill"
-  description={`Delete this skill from ${draft.target.providerId}? Its SKILL.md directory is removed from disk.`}
-  confirmLabel="Delete"
+  title={t("creatorEditor.deleteConfirmTitle")}
+  description={t("creatorEditor.deleteConfirmBody", { provider: draft.target.providerId })}
+  confirmLabel={t("creatorEditor.delete")}
   busy={deleting}
   onConfirm={() => void handleDelete()}
 />

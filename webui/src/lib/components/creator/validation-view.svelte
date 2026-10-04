@@ -11,6 +11,7 @@
   import { requireRpc } from "$lib/store.svelte";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import { getConnectionGeneration } from "$lib/store.svelte";
+  import { t } from "$lib/i18n";
   import { Button } from "$lib/components/ui/button";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconShield from "@lucide/svelte/icons/shield-alert";
@@ -62,7 +63,7 @@
 
 <div class="flex h-full flex-col">
   <div class="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-    <span class="text-xs font-medium">Validation</span>
+    <span class="text-xs font-medium">{t("creatorValidation.title")}</span>
     {#if draft.mode === "edit" && draft.skillId}
       <Button
         variant="outline"
@@ -74,7 +75,7 @@
         {#if loading}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconShield
             class="h-3.5 w-3.5"
           />{/if}
-        Re-validate
+        {t("creatorValidation.revalidate")}
       </Button>
     {/if}
   </div>
@@ -83,17 +84,20 @@
     <div
       class="flex flex-1 items-center justify-center px-8 text-center text-xs text-muted-foreground"
     >
-      Save the skill first to validate it.
+      {t("creatorValidation.saveFirst")}
     </div>
   {:else if loading && result === null}
     <div class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
-      <IconLoader class="h-4 w-4 animate-spin" /> Validating…
+      <IconLoader class="h-4 w-4 animate-spin" />
+      {t("creatorValidation.loading")}
     </div>
   {:else if error}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
       <p class="text-xs text-destructive">{error}</p>
       {#if draft.skillId}
-        <Button variant="outline" size="sm" onclick={revalidateCurrent}>Retry</Button>
+        <Button variant="outline" size="sm" onclick={revalidateCurrent}>
+          {t("common.retry")}
+        </Button>
       {/if}
     </div>
   {:else if result}
@@ -101,13 +105,13 @@
       {#if result.success && result.errors.length === 0 && result.warnings.length === 0}
         <div class="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300">
           <IconCheck class="h-4 w-4" />
-          Skill passes all checks.
+          {t("creatorValidation.passes")}
         </div>
       {:else}
         {#if result.errors.length > 0}
           <section>
             <h3 class="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-destructive">
-              Errors ({result.errors.length})
+              {t("creatorValidation.errors", { count: result.errors.length })}
             </h3>
             <ul class="space-y-1">
               {#each result.errors as issue, i (i)}
@@ -126,7 +130,7 @@
             <h3
               class="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300"
             >
-              Warnings ({result.warnings.length})
+              {t("creatorValidation.warnings", { count: result.warnings.length })}
             </h3>
             <ul class="space-y-1">
               {#each result.warnings as issue, i (i)}

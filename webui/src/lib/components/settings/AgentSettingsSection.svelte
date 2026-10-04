@@ -10,6 +10,7 @@
 -->
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
+  import { t } from "$lib/i18n";
   import { DSH_AGENT_MODES } from "$shared/contracts/dsh-runtime.js";
   import {
     agentRuntimeConfig,
@@ -27,9 +28,21 @@
   const presetOptions = ["deterministic", "live"] as const;
   const policyOptions = ["ask", "never"] as const;
   /** C3：忙碌 Enter 偏好行（与 /queue //steer 同源）。 */
-  const busyEnterOptions: Array<{ mode: BusyEnterMode; label: string; hint: string }> = [
-    { mode: "queue", label: "Queue", hint: "after the current turn" },
-    { mode: "steer", label: "Steer", hint: "into the current turn" },
+  const busyEnterOptions: Array<{
+    mode: BusyEnterMode;
+    labelKey: Parameters<typeof t>[0];
+    hintKey: Parameters<typeof t>[0];
+  }> = [
+    {
+      mode: "queue",
+      labelKey: "settings.agent.busyQueue",
+      hintKey: "settings.agent.busyQueueHint",
+    },
+    {
+      mode: "steer",
+      labelKey: "settings.agent.busySteer",
+      hintKey: "settings.agent.busySteerHint",
+    },
   ];
 
   const view = $derived(agentRuntimeConfig.view);
@@ -49,15 +62,17 @@
 
 <div class="space-y-4">
   <div>
-    <h3 class="text-sm font-medium">Agent</h3>
+    <h3 class="text-sm font-medium">{t("settingsPage.sectionAgent")}</h3>
     <p class="mt-0.5 text-[11px] text-muted-foreground">
-      Defaults for new sessions; the panel header switches an existing session's mode.
+      {t("settings.agent.subtitle")}
     </p>
   </div>
 
   {#if view}
-    <section class="space-y-1.5" aria-label="Default mode">
-      <span class="text-[11px] font-medium text-muted-foreground">Default mode</span>
+    <section class="space-y-1.5" aria-label={t("settings.agent.defaultMode")}>
+      <span class="text-[11px] font-medium text-muted-foreground"
+        >{t("settings.agent.defaultMode")}</span
+      >
       <div class="grid grid-cols-2 gap-1.5">
         {#each DSH_AGENT_MODES as entry (entry.id)}
           <button
@@ -78,10 +93,12 @@
       </div>
     </section>
 
-    <section class="space-y-1.5" aria-label="Behavior">
-      <span class="text-[11px] font-medium text-muted-foreground">Behavior</span>
+    <section class="space-y-1.5" aria-label={t("settings.agent.behavior")}>
+      <span class="text-[11px] font-medium text-muted-foreground"
+        >{t("settings.agent.behavior")}</span
+      >
       <div class="space-y-1">
-        <span class="text-[10px] text-muted-foreground">LLM preset</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.agent.llmPreset")}</span>
         <div class="flex gap-1.5">
           {#each presetOptions as preset (preset)}
             <button
@@ -99,7 +116,7 @@
         </div>
       </div>
       <div class="space-y-1">
-        <span class="text-[10px] text-muted-foreground">Approval policy</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.agent.approvalPolicy")}</span>
         <div class="flex gap-1.5">
           {#each policyOptions as policy (policy)}
             <button
@@ -116,10 +133,8 @@
           {/each}
         </div>
       </div>
-      <div class="space-y-1" aria-label="Busy Enter">
-        <span class="text-[10px] text-muted-foreground"
-          >Busy Enter — what a plain Enter does while the agent is working</span
-        >
+      <div class="space-y-1" aria-label={t("settings.agent.busyEnterAria")}>
+        <span class="text-[10px] text-muted-foreground">{t("settings.agent.busyEnterLabel")}</span>
         <div class="flex gap-1.5">
           {#each busyEnterOptions as option (option.mode)}
             <button
@@ -130,20 +145,20 @@
               aria-pressed={busyEnter.mode === option.mode}
               onclick={() => setBusyEnterPreference(option.mode)}
             >
-              {option.label}
-              <span class="ml-1 text-[9px] text-muted-foreground">{option.hint}</span>
+              {t(option.labelKey)}
+              <span class="ml-1 text-[9px] text-muted-foreground">{t(option.hintKey)}</span>
             </button>
           {/each}
         </div>
       </div>
     </section>
   {:else if agentRuntimeConfig.loading}
-    <div class="text-xs text-muted-foreground">Loading…</div>
+    <div class="text-xs text-muted-foreground">{t("settings.loading")}</div>
   {:else}
     <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-      Agent settings unavailable
+      {t("settings.agent.unavailable")}
       <Button size="sm" class="h-7 px-2.5 text-xs" onclick={() => void loadAgentSettings()}>
-        Retry
+        {t("common.retry")}
       </Button>
     </div>
   {/if}

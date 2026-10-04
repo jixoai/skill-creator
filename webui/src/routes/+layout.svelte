@@ -48,6 +48,7 @@
     syncExternalLocation,
   } from "$lib/shell/tab-session.svelte.js";
   import { workspaceState } from "$lib/stores/workspaces.svelte";
+  import { t } from "$lib/i18n";
 
   // 顶层注册（在任何 $derived 之前执行，确保 appRegistry 在首次渲染时已填充）。
   registerApps();
@@ -172,14 +173,14 @@
     <!-- 顶部栏（原生拖拽区域 + 工具栏） -->
     <WindowDragRegion variant="main">
       {#snippet left()}
-        <span class="px-1 text-xs font-medium text-muted-foreground">Skill Creator</span>
+        <span class="px-1 text-xs font-medium text-muted-foreground">{t("shell.brandName")}</span>
       {/snippet}
       {#snippet right()}
         <button
           class="no-drag flex h-6 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground max-[720px]:h-11 max-[720px]:w-11"
-          aria-label="Open command palette"
+          aria-label={t("shell.openCommandPalette")}
           aria-keyshortcuts="Meta+K"
-          title="Command palette (Cmd+K)"
+          title={t("shell.commandPaletteTitle")}
           onclick={() =>
             globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
         >
@@ -187,8 +188,8 @@
         </button>
         <button
           class="no-drag flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground max-[720px]:h-11 max-[720px]:w-11"
-          aria-label="Reload app"
-          title="Reload"
+          aria-label={t("shell.reloadApp")}
+          title={t("shell.reload")}
           onclick={() => globalThis.location.reload()}
         >
           <IconRefresh class="h-3.5 w-3.5" />

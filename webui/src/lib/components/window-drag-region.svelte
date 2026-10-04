@@ -9,6 +9,7 @@
    * 3. 在普通浏览器中提供无副作用降级。
    */
   import { onMount, type Snippet } from "svelte";
+  import { t } from "$lib/i18n";
 
   type Variant = "main" | "bare";
 
@@ -75,7 +76,7 @@
   class="drag-strip no-drag shrink-0"
   style="padding-left: {safeLeft}px; padding-right: {safeRight}px"
   role="banner"
-  aria-label="window titlebar"
+  aria-label={t("shell.titlebarAria")}
 >
   {#if variant === "main" && left}
     {@render left()}

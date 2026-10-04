@@ -21,6 +21,7 @@
   import IconPencil from "@lucide/svelte/icons/pencil";
   import IconUpload from "@lucide/svelte/icons/upload";
   import { showToast } from "$lib/toast.svelte";
+  import { t } from "$lib/i18n";
   import {
     ICON_EXTENSION_MIME,
     hueAvatarColor,
@@ -164,18 +165,20 @@
     const expectedMime = ICON_EXTENSION_MIME[extension] ?? "";
     if (expectedMime.length === 0) {
       showToast(
-        `Unsupported icon type “${file.type || extension || file.name}” — use .svg, .png or .webp.`,
+        t("settings.icon.unsupportedType", {
+          type: file.type || extension || file.name,
+        }),
       );
       return;
     }
     const reader = new FileReader();
     reader.onerror = () => {
-      showToast(`Could not read “${file.name}” — try another file.`);
+      showToast(t("settings.icon.readFailed", { name: file.name }));
     };
     reader.onload = () => {
       const raw = typeof reader.result === "string" ? reader.result : "";
       if (raw.length === 0) {
-        showToast(`Could not read “${file.name}” — try another file.`);
+        showToast(t("settings.icon.readFailed", { name: file.name }));
         return;
       }
       // MIME 重写：File.type 缺失（Figma/下载来源的 svg 常见）时 readAsDataURL 产出
@@ -184,11 +187,11 @@
         ? raw
         : withDataUrlMime(raw, expectedMime);
       if (dataUrl === null) {
-        showToast(`Could not read “${file.name}” as an image.`);
+        showToast(t("settings.icon.readAsImageFailed", { name: file.name }));
         return;
       }
       if (dataUrl.length > MAX_ICON_CHARS) {
-        showToast("Icon too large — pick an image under 64 KiB.");
+        showToast(t("settings.icon.tooLarge"));
         return;
       }
       pickIcon(dataUrl);
@@ -212,7 +215,7 @@
     class="group relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-md border border-border bg-background transition-colors hover:border-primary/50 {disabled
       ? 'pointer-events-none opacity-50'
       : ''}"
-    aria-label="Change route icon"
+    aria-label={t("settings.icon.changeAria")}
     aria-expanded={open}
     {disabled}
     onclick={() => (open = !open)}
@@ -244,7 +247,7 @@
     <div
       class="absolute left-0 top-[calc(100%+4px)] z-30 w-[280px] space-y-2 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-md"
       role="dialog"
-      aria-label="Route icon and avatar choices"
+      aria-label={t("settings.icon.dialogAria")}
     >
       <div class="flex items-center gap-2">
         {#if icon}
@@ -267,24 +270,26 @@
           <p class="text-[10px] text-muted-foreground">
             {icon
               ? isLetterAvatar(icon)
-                ? "Legacy letter avatar"
-                : "Icon override"
-              : "Letter avatar"}
+                ? t("settings.icon.legacyLetter")
+                : t("settings.icon.iconOverride")
+              : t("settings.icon.letterAvatar")}
           </p>
         </div>
       </div>
 
       {#if gridIcons.length > 0}
         <div class="space-y-1">
-          <span class="text-[10px] font-medium text-muted-foreground">Icon</span>
+          <span class="text-[10px] font-medium text-muted-foreground"
+            >{t("settings.icon.sectionIcon")}</span
+          >
           <div class="grid grid-cols-7 place-items-center gap-1">
             <button
               type="button"
               class="flex h-6 w-6 items-center justify-center rounded border {icon === null
                 ? 'border-primary/50 bg-primary/5'
                 : 'border-border hover:bg-muted'}"
-              title="No icon — letter avatar with the color below (suppresses the catalog icon)"
-              aria-label="No icon (letter avatar)"
+              title={t("settings.icon.noIconTitle")}
+              aria-label={t("settings.icon.noIconAria")}
               onclick={() => {
                 // codex R7 B3：No icon = 显式抑制（目录 provider 也走 Letter 头像），
                 // 不再是「清除覆盖后回退目录图标」的隐式语义。
@@ -311,9 +316,10 @@
                   ? 'border border-primary/60 bg-primary/5'
                   : 'hover:bg-muted'}"
                 title={group.providers.join(", ")}
-                aria-label="Use icon shared by {group.providers.length > 1
-                  ? group.providers.join(', ')
-                  : group.providers[0]}"
+                aria-label={t("settings.icon.useSharedAria", {
+                  providers:
+                    group.providers.length > 1 ? group.providers.join(", ") : group.providers[0],
+                })}
                 onclick={() => pickIcon(group.icon)}
               >
                 <!-- 图标着色（codex R7 B3）：iconColor 同时作用于图片图标——
@@ -330,7 +336,7 @@
           </div>
           {#if hasOwnIcon}
             <p class="text-[9px] text-muted-foreground">
-              Duplicate catalog icons are merged; hover shows sharing providers.
+              {t("settings.icon.dedupeHint")}
             </p>
           {/if}
         </div>
@@ -341,8 +347,8 @@
           null
             ? 'text-primary'
             : 'text-muted-foreground'}"
-          title="No icon — letter avatar with the color below"
-          aria-label="No icon (letter avatar)"
+          title={t("settings.icon.noIconPlainTitle")}
+          aria-label={t("settings.icon.noIconAria")}
           onclick={() => pickIcon(undefined)}
         >
           <span
@@ -352,19 +358,19 @@
           >
             {letter.slice(0, 1)}
           </span>
-          No icon — use the letter avatar
+          {t("settings.icon.noIconUseLetter")}
         </button>
       {/if}
 
       <div class="flex items-center justify-between gap-2 border-t border-border pt-1.5">
-        <span class="text-[10px] text-muted-foreground">Custom image · ≤64 KiB</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.icon.customImageLimit")}</span>
         <button
           type="button"
           class="flex h-6 items-center gap-1 rounded px-1.5 text-[10px] hover:bg-muted"
           onclick={() => fileInput?.click()}
         >
           <IconUpload class="h-3 w-3" />
-          Upload
+          {t("settings.icon.upload")}
         </button>
       </div>
       <input
@@ -373,12 +379,14 @@
         class="hidden"
         bind:this={fileInput}
         onchange={onUploadChange}
-        aria-label="Upload custom icon"
+        aria-label={t("settings.icon.uploadAria")}
       />
 
       {#if onColor !== undefined}
         <div class="space-y-1 border-t border-border pt-1.5">
-          <span class="text-[10px] font-medium text-muted-foreground">Avatar color</span>
+          <span class="text-[10px] font-medium text-muted-foreground"
+            >{t("settings.icon.avatarColor")}</span
+          >
           <div class="flex flex-wrap items-center gap-1">
             <button
               type="button"
@@ -386,8 +394,8 @@
               hueAvatarColor(provider)
                 ? 'border-primary/50 bg-primary/5'
                 : 'border-border hover:bg-muted'}"
-              title="Auto — deterministic hue from the route name"
-              aria-label="Auto avatar color"
+              title={t("settings.icon.autoColorTitle")}
+              aria-label={t("settings.icon.autoColorAria")}
               onclick={() => onColor?.(undefined)}
             >
               <span
@@ -406,7 +414,7 @@
                   ? 'border-primary/60 bg-primary/5'
                   : 'border-border hover:bg-muted'}"
                 title={hex}
-                aria-label="Avatar color {hex}"
+                aria-label={t("settings.icon.paletteSwatchAria", { hex })}
                 onclick={() => onColor?.(hex)}
               >
                 <span class="h-4 w-4 rounded" style="background: {hex}" aria-hidden="true"></span>
@@ -418,7 +426,7 @@
               class="h-6 w-24 rounded border bg-background px-1.5 font-mono text-[10px] outline-none focus:border-primary/60 {hexInvalid
                 ? 'border-destructive'
                 : 'border-border'}"
-              aria-label="Avatar color hex"
+              aria-label={t("settings.icon.hexAria")}
               placeholder="#3b82f6"
               bind:value={hexDraft}
               {disabled}
@@ -428,7 +436,9 @@
               }}
             />
             {#if hexInvalid}
-              <span class="text-[9px] text-destructive" role="alert">invalid hex</span>
+              <span class="text-[9px] text-destructive" role="alert"
+                >{t("settings.icon.invalidHex")}</span
+              >
             {/if}
           </div>
         </div>
@@ -436,11 +446,13 @@
 
       {#if onLetter !== undefined}
         <div class="space-y-1 border-t border-border pt-1.5">
-          <span class="text-[10px] font-medium text-muted-foreground">Letter</span>
+          <span class="text-[10px] font-medium text-muted-foreground"
+            >{t("settings.icon.letterSection")}</span
+          >
           <div class="flex items-center gap-1.5">
             <input
               class="h-6 w-12 rounded border border-border bg-background px-1.5 text-center text-[11px] font-semibold uppercase outline-none focus:border-primary/60"
-              aria-label="Avatar letter"
+              aria-label={t("settings.icon.letterAria")}
               maxlength="2"
               bind:value={letterDraft}
               {disabled}
@@ -452,10 +464,10 @@
             <button
               type="button"
               class="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title="Reset to the first letter of the display name"
+              title={t("settings.icon.resetTitle")}
               onclick={resetLetter}
             >
-              Reset
+              {t("settings.icon.reset")}
             </button>
           </div>
         </div>

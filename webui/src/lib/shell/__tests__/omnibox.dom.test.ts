@@ -57,10 +57,13 @@ vi.mock("$lib/stores/connection.svelte", () => ({
 }));
 vi.mock("$lib/stores/skills.svelte", () => ({ openSkillSearchConfig: vi.fn() }));
 vi.mock("$lib/stores/workspaces.svelte", () => ({ workspaceState: harness.workspaceState }));
-vi.mock("$lib/i18n", () => ({
-  t: (key: string) =>
-    key === "agentPage.toggleTerminal" ? "Toggle terminal" : "Toggle extension panel",
-}));
+// shell 批（webui-i18n-bilingual task 4.1）：Omnibox 文案已 t() 化——mock 换成
+// 真 en 词典直通（en = 事实源，测试锚点走英文原文；runAction 的 agentPage.*
+// 查询标签同样由词典供值）。
+vi.mock("$lib/i18n", async () => {
+  const { en } = await import("$lib/i18n/catalogs/en.js");
+  return { t: (key: string) => en[key as keyof typeof en] ?? key };
+});
 
 import Omnibox from "../Omnibox.svelte";
 import { flushSync, mount, unmount } from "../../__tests__/svelte-client";

@@ -83,7 +83,7 @@
 
 <div class="flex h-full flex-col">
   <div class="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-    <span class="text-xs font-medium">Change history</span>
+    <span class="text-xs font-medium">{t("creatorLog.title")}</span>
     {#if draft.mode === "edit" && draft.skillId}
       <Button
         variant="outline"
@@ -93,7 +93,7 @@
         disabled={loading}
       >
         <IconRotate class="h-3.5 w-3.5" />
-        Refresh
+        {t("creatorLog.refresh")}
       </Button>
     {/if}
   </div>
@@ -102,11 +102,12 @@
     <div
       class="flex flex-1 items-center justify-center px-8 text-center text-xs text-muted-foreground"
     >
-      Save the skill first to see its change history.
+      {t("creatorLog.saveFirst")}
     </div>
   {:else if loading}
     <div class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
-      <IconLoader class="h-4 w-4 animate-spin" /> Loading history…
+      <IconLoader class="h-4 w-4 animate-spin" />
+      {t("creatorLog.loading")}
     </div>
   {:else if connectionState.status !== "connected" && entries.length === 0}
     <!-- 连接窗口期（2.2 处置批 P1-2）：显示重连中而非错误；连接转 ready 由加载
@@ -123,14 +124,16 @@
     <div class="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
       <p class="text-xs text-destructive">{error}</p>
       {#if draft.skillId}
-        <Button variant="outline" size="sm" onclick={refreshCurrent}>Retry</Button>
+        <Button variant="outline" size="sm" onclick={refreshCurrent}>
+          {t("common.retry")}
+        </Button>
       {/if}
     </div>
   {:else if entries.length === 0}
     <div
       class="flex flex-1 items-center justify-center px-8 text-center text-xs text-muted-foreground"
     >
-      No revisions recorded yet.
+      {t("creatorLog.empty")}
     </div>
   {:else}
     <ol class="min-h-0 flex-1 divide-y divide-border overflow-y-auto">
@@ -155,11 +158,13 @@
                   <span
                     class="rounded-sm bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
                   >
-                    latest
+                    {t("creatorLog.latest")}
                   </span>
                 {/if}
                 {#if entry.content === null}
-                  <span class="text-[10px] text-muted-foreground/70">snapshot pruned</span>
+                  <span class="text-[10px] text-muted-foreground/70">
+                    {t("creatorLog.snapshotPruned")}
+                  </span>
                 {/if}
               </div>
               <p class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
@@ -175,7 +180,7 @@
                   <p
                     class="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
                   >
-                    Diff vs previous
+                    {t("creatorLog.diffVsPrevious")}
                   </p>
                   <pre
                     class="overflow-x-auto rounded-md border border-border bg-muted/30 p-2 font-mono text-[10px] leading-4">{entry.diff}</pre>
@@ -186,7 +191,7 @@
                   <p
                     class="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
                   >
-                    Full snapshot
+                    {t("creatorLog.fullSnapshot")}
                   </p>
                   <pre
                     class="max-h-72 overflow-auto rounded-md border border-border bg-muted/30 p-2 font-mono text-[10px] leading-4">{entry.content}</pre>
@@ -194,7 +199,7 @@
               {/if}
               {#if entry.diff === null && entry.content === null}
                 <p class="text-[10px] text-muted-foreground/70">
-                  Initial revision — no diff and no persisted snapshot.
+                  {t("creatorLog.initialRevision")}
                 </p>
               {/if}
             </div>

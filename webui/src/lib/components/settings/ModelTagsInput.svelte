@@ -12,6 +12,8 @@
      × 删除只认对自身按钮的直接点击，chip 主体点击/聚焦/失焦永不删除。
 -->
 <script lang="ts">
+  import { t } from "$lib/i18n";
+
   interface Props {
     selected: string[];
     candidates: Array<{ id: string; name?: string; image?: boolean }>;
@@ -20,13 +22,7 @@
     disabled?: boolean;
   }
 
-  let {
-    selected,
-    candidates,
-    placeholder = "Add model…",
-    onchange,
-    disabled = false,
-  }: Props = $props();
+  let { selected, candidates, placeholder, onchange, disabled = false }: Props = $props();
 
   let input = $state("");
   let open = $state(false);
@@ -92,14 +88,14 @@
   <div
     class="flex min-h-8 flex-wrap items-center gap-1 rounded-md border border-border bg-background px-1.5 py-1 text-xs focus-within:border-primary/60"
     role="group"
-    aria-label="Model ids"
+    aria-label={t("settings.model.tagsGroupAria")}
   >
     <!-- R12-A1：input 在 DOM 里先于 chips（labelable 顺序）——若本组件未来再次被
          <label> 包裹，label 激活只会聚焦输入框而不是合成点击第一枚 × 误删 chip；
          视觉顺序由 order-last 保持「chips 在前、输入收尾」不变。 -->
     <input
       class="order-last h-6 min-w-24 flex-1 bg-transparent text-xs outline-none"
-      {placeholder}
+      placeholder={placeholder ?? t("settings.model.addModelPlaceholder")}
       {disabled}
       bind:value={input}
       onkeydown={onKeydown}
@@ -119,7 +115,7 @@
         <button
           type="button"
           class="rounded px-0.5 text-muted-foreground hover:text-destructive"
-          aria-label="Remove {id}"
+          aria-label={t("settings.model.removeTagAria", { id })}
           {disabled}
           onclick={() => remove(id)}
         >
@@ -132,7 +128,7 @@
     <ul
       class="absolute z-10 mt-1 max-h-44 w-full overflow-y-auto rounded-md border border-border bg-popover p-1 text-xs shadow-md"
       role="listbox"
-      aria-label="Model suggestions"
+      aria-label={t("settings.model.suggestionsAria")}
     >
       {#each filtered as entry, index (entry.id)}
         <li>

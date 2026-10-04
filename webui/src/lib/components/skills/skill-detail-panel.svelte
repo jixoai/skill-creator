@@ -142,6 +142,8 @@
     if (!current || toggling) return;
     toggling = true;
     const mode = current.disabled ? "enable" : "disable";
+    const modeLabel =
+      mode === "enable" ? t("skillDetail.modeEnable") : t("skillDetail.modeDisable");
     try {
       const summary = await toggleSkills([current.id], mode);
       if (!summary) return; // 请求已被取代（断线/切 provider），不投影结果
@@ -149,17 +151,29 @@
       if (entry) {
         // mutation 反馈区分 succeeded/skipped/conflict/failed（AGENTS §7.2）。
         if (entry.status === "conflict") {
-          showToast(`${entry.name}: ${mode} conflict${entry.error ? ` — ${entry.error}` : "."}`);
+          showToast(
+            entry.error
+              ? t("skillDetail.toastConflict", {
+                  name: entry.name,
+                  mode: modeLabel,
+                  error: entry.error,
+                })
+              : t("skillDetail.toastConflictPlain", { name: entry.name, mode: modeLabel }),
+          );
         } else if (entry.status === "failed") {
           showToast(
-            `${entry.name}: ${mode} failed — ${entry.error ?? t("skillDetail.unknownError")}`,
+            t("skillDetail.toastFailed", {
+              name: entry.name,
+              mode: modeLabel,
+              error: entry.error ?? t("skillDetail.unknownError"),
+            }),
           );
         } else if (entry.status === "skipped") {
           showToast(
             `${entry.name}: ${mode === "enable" ? t("skillDetail.alreadyEnabled") : t("skillDetail.alreadyDisabled")}`,
           );
         } else {
-          showToast(`${entry.name} ${entry.status}.`);
+          showToast(t("skillDetail.toastStatus", { name: entry.name, status: entry.status }));
         }
       }
       await loadDetail(target, current.id);

@@ -30,6 +30,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
+  import { t } from "$lib/i18n";
   import ModelTagsInput from "./ModelTagsInput.svelte";
   import IconPencil from "@lucide/svelte/icons/pencil";
   import IconPlugZap from "@lucide/svelte/icons/plug-zap";
@@ -142,7 +143,8 @@
   const effortPool = $derived(effortCandidates(routeModels, catalogMatch));
   const draftKey = $derived(draftKeyText.trim());
   const headerName = $derived(
-    model.name ?? (model.id.length > 0 ? readableModelName(model.id) : "New model"),
+    model.name ??
+      (model.id.length > 0 ? readableModelName(model.id) : t("settings.model.newModel")),
   );
   const testDisabled = $derived(
     disabled ||
@@ -319,15 +321,18 @@
   }
 </script>
 
-<div class="space-y-1.5 rounded-md border border-border p-2" aria-label="Model {model.id}">
+<div
+  class="space-y-1.5 rounded-md border border-border p-2"
+  aria-label={t("settings.model.itemAria", { id: model.id })}
+>
   <!-- 折叠 header 行（R10-2）：dirty 点 + 名称 + test/edit/remove（44px 命中区）。 -->
   <div class="flex items-center justify-between gap-2">
     <div class="flex min-w-0 flex-1 items-center gap-1.5">
       {#if dirty}
         <span
           class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
-          title="Unsaved changes"
-          aria-label="Unsaved changes"
+          title={t("settings.model.unsavedChanges")}
+          aria-label={t("settings.model.unsavedChanges")}
         ></span>
       {/if}
       <span class="min-w-0 truncate text-xs font-medium" title={model.id} data-header-name="true"
@@ -343,11 +348,11 @@
           data-header-status="true"
         >
           {#if testing}
-            testing…
+            {t("settings.model.testing")}
           {:else if testResult?.outcome === "ok"}
-            ok · {testResult.latencyMs} ms
+            {t("settings.model.testOk", { latency: testResult.latencyMs })}
           {:else if testResult?.outcome === "failed"}
-            failed · {testResult.detail}
+            {t("settings.model.testFailed", { detail: testResult.detail })}
           {/if}
         </span>
       {/if}
@@ -356,12 +361,12 @@
       <button
         type="button"
         class="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-        aria-label="Test connection for {model.id || 'new model'}"
+        aria-label={t("settings.model.testForAria", { id: model.id || "new model" })}
         title={hasFormKey
-          ? "Send a minimal probe with the route key (saved on add)"
+          ? t("settings.model.probeTitleFormKey")
           : apiKeyConfigured
-            ? "Send a minimal probe request"
-            : "Expand and paste a key to test (not saved)"}
+            ? t("settings.model.probeTitleStored")
+            : t("settings.model.probeTitleNone")}
         disabled={testDisabled}
         onclick={() => void runTest()}
       >
@@ -370,8 +375,8 @@
       <button
         type="button"
         class="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-        aria-label="Edit model {model.id || 'new model'}"
-        title={expanded ? "Collapse model form" : "Edit model fields"}
+        aria-label={t("settings.model.editModelAria", { id: model.id || "new model" })}
+        title={expanded ? t("settings.model.collapseModel") : t("settings.model.editModelFields")}
         {disabled}
         onclick={() => (expanded = !expanded)}
       >
@@ -380,8 +385,8 @@
       <button
         type="button"
         class="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
-        aria-label="Remove model {model.id}"
-        title="Remove model"
+        aria-label={t("settings.model.removeModelAria", { id: model.id })}
+        title={t("settings.model.removeModel")}
         {disabled}
         onclick={() => onremove()}
       >
@@ -393,10 +398,10 @@
   {#if expanded}
     <div class="grid grid-cols-2 gap-1.5">
       <label class="min-w-0 space-y-0.5">
-        <span class="text-[10px] text-muted-foreground">Model id</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.model.modelId")}</span>
         <Input
           class="h-8 font-mono text-xs"
-          aria-label="Model id"
+          aria-label={t("settings.model.modelId")}
           placeholder="glm-5.3-flash"
           list={listId}
           bind:value={idText}
@@ -410,10 +415,10 @@
         </datalist>
       </label>
       <label class="min-w-0 space-y-0.5">
-        <span class="text-[10px] text-muted-foreground">Name</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.model.nameLabel")}</span>
         <Input
           class="h-8 text-xs"
-          aria-label="Model name"
+          aria-label={t("settings.model.modelNameAria")}
           placeholder={readableModelName(idText.trim() || model.id)}
           bind:value={nameText}
           {disabled}
@@ -426,11 +431,11 @@
          激活会把 chip 主体的点击转发成第一枚 × 的合成 click（误删第一枚 chip）。
          标题用 span，点击面语义不变。 -->
     <div class="block space-y-0.5">
-      <span class="text-[10px] text-muted-foreground">Efforts</span>
+      <span class="text-[10px] text-muted-foreground">{t("settings.model.efforts")}</span>
       <ModelTagsInput
         selected={model.efforts ?? []}
         candidates={effortPool.candidates.map((id) => ({ id }))}
-        placeholder="Add effort (e.g. low)…"
+        placeholder={t("settings.model.addEffortPlaceholder")}
         {disabled}
         onchange={(next) => {
           // 手选 effort = 显式配置：目录预填不再覆盖（除非换 modelId）。
@@ -439,18 +444,20 @@
         }}
       />
       {#if effortPool.hint !== null}
-        <p class="text-[10px] text-muted-foreground" role="note">{effortPool.hint}</p>
+        <p class="text-[10px] text-muted-foreground" role="note">
+          {t("settings.model.effortUnsupportedHint")}
+        </p>
       {/if}
     </div>
 
     <div class="grid grid-cols-2 gap-1.5">
       <label class="min-w-0 space-y-0.5">
-        <span class="text-[10px] text-muted-foreground">Context window</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.model.contextWindow")}</span>
         <Input
           class="h-8 text-xs {contextInvalid
             ? 'border-destructive focus-visible:ring-destructive'
             : ''}"
-          aria-label="Context window (tokens)"
+          aria-label={t("settings.model.contextWindowAria")}
           placeholder="200k / 0.5M / 131072"
           bind:value={contextText}
           {disabled}
@@ -461,12 +468,12 @@
         />
       </label>
       <label class="min-w-0 space-y-0.5">
-        <span class="text-[10px] text-muted-foreground">Max output tokens</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.model.maxOutputTokens")}</span>
         <Input
           class="h-8 text-xs {maxOutInvalid
             ? 'border-destructive focus-visible:ring-destructive'
             : ''}"
-          aria-label="Max output tokens"
+          aria-label={t("settings.model.maxOutputTokens")}
           placeholder="32k / 131072"
           bind:value={maxOutText}
           {disabled}
@@ -479,7 +486,7 @@
     </div>
     {#if contextInvalid || maxOutInvalid}
       <p class="text-[10px] text-destructive" role="alert">
-        Invalid token value — use numbers, or shorthand like 253k / 0.5M.
+        {t("settings.model.invalidToken")}
       </p>
     {/if}
 
@@ -489,10 +496,10 @@
          image 可切换持久化。 -->
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex flex-wrap items-center gap-1">
-        <span class="text-[10px] text-muted-foreground">Inputs:</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.model.inputsLabel")}</span>
         <span
           class="rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground"
-          title="Text is always required"
+          title={t("settings.model.textInputRequired")}
           data-input-chip="text">text</span
         >
         {#each OPTIONAL_INPUT_TYPES as kind (kind)}
@@ -512,10 +519,10 @@
         {/each}
       </div>
       <div class="flex items-center gap-1">
-        <span class="text-[10px] text-muted-foreground">Outputs:</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.model.outputsLabel")}</span>
         <span
           class="rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground"
-          title="Text output is always required"
+          title={t("settings.model.textOutputRequired")}
           data-output-chip="text">text</span
         >
         <button
@@ -526,7 +533,7 @@
             ? 'border-primary bg-primary text-primary-foreground'
             : 'border-border bg-background text-muted-foreground hover:bg-muted'}"
           aria-pressed={currentOutputTypes.has("image")}
-          title="Image output (image-generation models)"
+          title={t("settings.model.imageOutputTitle")}
           {disabled}
           onclick={() => toggleOutputType("image")}
           data-output-chip="image"
@@ -546,15 +553,15 @@
         data-form-status="true"
       >
         {#if testResult?.outcome === "ok"}
-          ok · {testResult.latencyMs} ms
+          {t("settings.model.testOk", { latency: testResult.latencyMs })}
         {:else if testResult?.outcome === "failed"}
-          failed · {testResult.detail}
+          {t("settings.model.testFailed", { detail: testResult.detail })}
         {:else if hasFormKey}
-          Probing with the route key above (saved on add).
+          {t("settings.model.statusFormKey")}
         {:else if !apiKeyConfigured}
-          No saved key for this route — paste one to test (never stored).
+          {t("settings.model.statusNoKey")}
         {:else}
-          Probe this endpoint with a minimal request.
+          {t("settings.model.statusReady")}
         {/if}
       </span>
       <span class="flex shrink-0 items-center gap-1.5">
@@ -562,8 +569,8 @@
           <Input
             type="password"
             class="h-6 w-44 font-mono text-[10px]"
-            aria-label="API key (test only)"
-            placeholder="API key (test only)"
+            aria-label={t("settings.model.testOnlyKey")}
+            placeholder={t("settings.model.testOnlyKey")}
             autocomplete="off"
             bind:value={draftKeyText}
             {disabled}
@@ -575,13 +582,13 @@
           class="h-6 shrink-0 px-2 text-[10px]"
           disabled={testDisabled}
           title={hasFormKey
-            ? "Send a minimal probe with the route key above (saved on add)"
+            ? t("settings.model.probeBtnTitleFormKey")
             : apiKeyConfigured
-              ? "Send a minimal probe request"
-              : "Send a minimal probe with the pasted key (not saved)"}
+              ? t("settings.model.probeBtnTitleStored")
+              : t("settings.model.probeBtnTitlePasted")}
           onclick={() => void runTest()}
         >
-          {testing ? "Testing…" : "Test connection"}
+          {testing ? t("settings.model.testingButton") : t("settings.model.testConnection")}
         </Button>
       </span>
     </div>

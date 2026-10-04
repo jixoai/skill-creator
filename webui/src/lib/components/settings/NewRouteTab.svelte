@@ -32,6 +32,7 @@
   import IconEyeOff from "@lucide/svelte/icons/eye-off";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
+  import { t } from "$lib/i18n";
   import IconPicker from "./IconPicker.svelte";
   import ModelListItem from "./ModelListItem.svelte";
   import { hueAvatarColor, routeLetter } from "./route-icon.js";
@@ -312,7 +313,7 @@
       if (credResult == null || credResult.outcome === "rejected") {
         rejection =
           credResult == null
-            ? "Could not save the API key — connection unavailable. The route was not created."
+            ? t("settings.model.keySaveDisconnected")
             : `${credResult.code}: ${credResult.detail}`;
         return;
       }
@@ -336,8 +337,8 @@
     <div class="flex items-center gap-2">
       <Input
         class="h-8 flex-1 text-xs"
-        aria-label="Search providers"
-        placeholder="Search providers…"
+        aria-label={t("settings.model.searchAria")}
+        placeholder={t("settings.model.searchPlaceholder")}
         ref={searchInput}
         bind:value={filter}
       />
@@ -348,7 +349,7 @@
           class="h-8 shrink-0 px-2 text-[11px]"
           onclick={() => onclose?.()}
         >
-          Cancel
+          {t("common.cancel")}
         </Button>
       {/if}
       <Button
@@ -357,7 +358,7 @@
         class="h-8 shrink-0 px-2 text-[11px]"
         onclick={startFromScratch}
       >
-        Start from scratch →
+        {t("settings.model.scratch")}
       </Button>
     </div>
 
@@ -370,7 +371,9 @@
       <p class="text-[10px] text-destructive" role="alert">{catalogError}</p>
     {:else if catalog === null}
       <p class="py-3 text-center text-[10px] text-muted-foreground">
-        {catalogLoading ? "Loading catalog…" : "Catalog unavailable."}
+        {catalogLoading
+          ? t("settings.model.catalogLoading")
+          : t("settings.model.catalogUnavailable")}
       </p>
     {:else}
       <!-- C2 滚动所有权：画廊自然流式——滚动只属于 Model 分区的 tab 内容容器
@@ -378,7 +381,9 @@
       <div class="space-y-2">
         {#if filteredPresets.length > 0}
           <div class="space-y-1">
-            <span class="text-[10px] font-medium text-muted-foreground">Your presets</span>
+            <span class="text-[10px] font-medium text-muted-foreground"
+              >{t("settings.model.yourPresets")}</span
+            >
             <div class="grid grid-cols-1 gap-1.5 min-[520px]:grid-cols-2">
               {#each filteredPresets as preset (preset.provider)}
                 <div class="group relative">
@@ -415,7 +420,7 @@
                     </span>
                     <span
                       class="mr-0.5 shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground"
-                      title="{preset.models.length} saved models"
+                      title={t("settings.model.presetCount", { count: preset.models.length })}
                     >
                       {preset.models.length}
                     </span>
@@ -423,7 +428,7 @@
                   <button
                     type="button"
                     class="absolute right-1 top-1 hidden rounded bg-popover/80 p-0.5 text-muted-foreground hover:text-destructive group-hover:block"
-                    aria-label="Delete preset {preset.label}"
+                    aria-label={t("settings.model.deletePresetAria", { label: preset.label })}
                     onclick={() => deleteProviderPreset(preset.provider)}
                   >
                     ×
@@ -436,15 +441,19 @@
 
         <div class="space-y-1">
           <span class="text-[10px] font-medium text-muted-foreground">
-            Catalog ({catalog.providers.length} providers, from zcode Registry)
+            {t("settings.model.catalogHeading", { count: catalog.providers.length })}
           </span>
           <div class="grid grid-cols-1 gap-1.5 min-[520px]:grid-cols-2">
             {#each filteredProviders as entry (entry.provider)}
               {@const copies = copyCount(entry.provider)}
               {@const cardTitle =
                 copies > 0
-                  ? `${entry.baseURL} · ${entry.api} · ${copies} copies added — click to add another`
-                  : `${entry.baseURL} · ${entry.api}`}
+                  ? t("settings.model.cardTitleAdded", {
+                      url: entry.baseURL,
+                      api: entry.api,
+                      count: copies,
+                    })
+                  : t("settings.model.cardTitle", { url: entry.baseURL, api: entry.api })}
               <button
                 type="button"
                 class="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left transition-colors hover:border-primary/50 hover:bg-primary/5"
@@ -477,16 +486,18 @@
                   {#if copies > 0}
                     <span
                       class="rounded bg-primary/10 px-1 text-[9px] text-primary"
-                      title="{copies} cop{copies === 1
-                        ? 'y'
-                        : 'ies'} of this provider already added — you can add another"
+                      title={copies === 1
+                        ? t("settings.model.addedTitleOne", { count: copies })
+                        : t("settings.model.addedTitleMany", { count: copies })}
                     >
-                      Added ✓{copies > 1 ? ` ×${copies}` : ""}
+                      {copies > 1
+                        ? t("settings.model.addedBadgeCount", { count: copies })
+                        : t("settings.model.addedBadge")}
                     </span>
                   {/if}
                   <span
                     class="rounded bg-muted px-1 text-[9px] text-muted-foreground"
-                    title="{entry.models.length} models in catalog"
+                    title={t("settings.model.modelsInCatalog", { count: entry.models.length })}
                   >
                     {entry.models.length}
                   </span>
@@ -495,7 +506,7 @@
             {/each}
             {#if filteredProviders.length === 0}
               <p class="col-span-full py-3 text-center text-[10px] text-muted-foreground">
-                No providers match “{filter}”.
+                {t("settings.model.noProviders", { filter })}
               </p>
             {/if}
           </div>
@@ -525,10 +536,10 @@
         onLetter={(iconLetter) => (draftIconLetter = iconLetter)}
       />
       <label class="min-w-0 flex-1 space-y-0.5">
-        <span class="text-[10px] text-muted-foreground">Route name</span>
+        <span class="text-[10px] text-muted-foreground">{t("settings.model.routeName")}</span>
         <Input
           class="h-8 text-xs"
-          aria-label="Route name"
+          aria-label={t("settings.model.routeName")}
           placeholder="my-provider"
           bind:value={draftProvider}
           disabled={agentRuntimeConfig.updating}
@@ -538,18 +549,18 @@
     </div>
     {#if duplicate}
       <p class="text-[10px] text-amber-700" role="alert">
-        Route “{providerName}” already exists.
+        {t("settings.model.duplicateError", { provider: providerName })}
       </p>
     {:else if nameTouched && providerName.length === 0}
-      <p class="text-[10px] text-amber-700" role="alert">Custom route needs a name.</p>
+      <p class="text-[10px] text-amber-700" role="alert">{t("settings.model.nameRequired")}</p>
     {/if}
 
     <!-- 2 · Endpoint（baseURL + api Select 统一字段） -->
     <label class="block space-y-0.5">
-      <span class="text-[10px] text-muted-foreground">Base URL</span>
+      <span class="text-[10px] text-muted-foreground">{t("settings.model.baseUrl")}</span>
       <Input
         class="h-8 font-mono text-xs"
-        aria-label="Base URL"
+        aria-label={t("settings.model.baseUrl")}
         placeholder="https://api.example.com/v1"
         bind:value={draftBaseURL}
         disabled={agentRuntimeConfig.updating}
@@ -557,13 +568,13 @@
       />
     </label>
     {#if urlTouched && !urlValid}
-      <p class="text-[10px] text-amber-700" role="alert">Custom route needs an http(s) base URL.</p>
+      <p class="text-[10px] text-amber-700" role="alert">{t("settings.model.urlRequired")}</p>
     {/if}
     <label class="block space-y-0.5">
-      <span class="text-[10px] text-muted-foreground">API protocol</span>
+      <span class="text-[10px] text-muted-foreground">{t("settings.model.apiProtocol")}</span>
       <select
         class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
-        aria-label="API protocol"
+        aria-label={t("settings.model.apiProtocol")}
         bind:value={draftApi}
         disabled={agentRuntimeConfig.updating}
       >
@@ -577,23 +588,25 @@
          无法做 api-test」）——password + eye；连接测试优先直传此值；Create route
          成功后写入凭据存储。 -->
     <div class="block space-y-0.5">
-      <span class="text-[10px] text-muted-foreground">API key</span>
+      <span class="text-[10px] text-muted-foreground">{t("settings.model.apiKey")}</span>
       <div class="relative">
         <Input
           class="h-8 pr-9 text-xs"
           type={formKeyVisible ? "text" : "password"}
           autocomplete="off"
-          aria-label="API key"
-          placeholder={apiKeyConfigured ? "stored — this key overrides for add & test" : "API key"}
+          aria-label={t("settings.model.apiKey")}
+          placeholder={apiKeyConfigured
+            ? t("settings.model.keyStoredOverride")
+            : t("settings.model.apiKey")}
           bind:value={formKeyText}
           disabled={agentRuntimeConfig.updating}
         />
         <button
           type="button"
           class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-2.5 after:content-[''] hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          aria-label={formKeyVisible ? "Hide API key" : "Show API key"}
+          aria-label={formKeyVisible ? t("settings.model.hideKey") : t("settings.model.showKey")}
           aria-pressed={formKeyVisible}
-          title={formKeyVisible ? "Hide API key" : "Show API key"}
+          title={formKeyVisible ? t("settings.model.hideKey") : t("settings.model.showKey")}
           disabled={agentRuntimeConfig.updating}
           onmousedown={(event) => event.preventDefault()}
           onclick={() => (formKeyVisible = !formKeyVisible)}
@@ -610,7 +623,9 @@
     <!-- 3 · Models（ModelListItem 列表；R7 8.7） -->
     <div class="space-y-1.5">
       <div class="flex items-center justify-between">
-        <span class="text-[10px] font-medium text-muted-foreground">Models</span>
+        <span class="text-[10px] font-medium text-muted-foreground"
+          >{t("settings.model.models")}</span
+        >
         <Button
           size="sm"
           variant="ghost"
@@ -618,14 +633,14 @@
           disabled={agentRuntimeConfig.updating}
           onclick={addModel}
         >
-          + Add model
+          {t("settings.model.addModel")}
         </Button>
       </div>
       {#if draftModels.length === 0}
         <p
           class="rounded-md border border-dashed p-2 text-center text-[10px] text-muted-foreground"
         >
-          No models yet — add one to enable the route.
+          {t("settings.model.noModels")}
         </p>
       {/if}
       <div class="space-y-1.5">
@@ -656,7 +671,7 @@
     <!-- 4 · 底部动作 -->
     <div class="flex items-center justify-between border-t border-border pt-2">
       <Button size="sm" variant="ghost" class="h-7 px-2 text-xs" onclick={() => (mode = "pick")}>
-        Back
+        {t("settings.model.back")}
       </Button>
       <Button
         size="sm"
@@ -664,7 +679,7 @@
         disabled={!canSubmit}
         onclick={() => void addRoute()}
       >
-        Create route
+        {t("settings.model.createRoute")}
       </Button>
     </div>
   </div>

@@ -33,6 +33,7 @@
   import { tick } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
+  import { t } from "$lib/i18n";
   import IconPicker from "./IconPicker.svelte";
   import ModelListItem from "./ModelListItem.svelte";
   import IconEye from "@lucide/svelte/icons/eye";
@@ -199,7 +200,7 @@
   async function saveAll(): Promise<void> {
     const baseURL = baseURLDraft.trim();
     if (!/^https?:\/\//.test(baseURL)) {
-      rejection = "Custom route needs an http(s) base URL.";
+      rejection = t("settings.model.urlRequired");
       return;
     }
     const ok = await patchRoute({
@@ -294,21 +295,33 @@
       <div class="min-w-0">
         <p
           class="truncate text-sm font-semibold"
-          title="{displayName} ({route.provider}) — route name keys the credential mapping; duplicate this route to rename it."
+          title={t("settings.model.routeNameTitle", {
+            label: displayName,
+            provider: route.provider,
+          })}
         >
           {displayName}
         </p>
         <p class="mt-0.5 truncate text-[10px] text-muted-foreground" title={route.baseURL}>
-          {route.provider} · {route.baseURL.replace(/^https?:\/\//, "")} · {route.models.length}
-          {route.models.length === 1 ? "model" : "models"}
+          {route.models.length === 1
+            ? t("settings.model.metaOne", {
+                provider: route.provider,
+                url: route.baseURL.replace(/^https?:\/\//, ""),
+                count: route.models.length,
+              })
+            : t("settings.model.metaMany", {
+                provider: route.provider,
+                url: route.baseURL.replace(/^https?:\/\//, ""),
+                count: route.models.length,
+              })}
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-2.5">
         <button
           type="button"
           class="relative flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors after:absolute after:-inset-2 after:content-[''] hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
-          aria-label="Remove route"
-          title="Remove route"
+          aria-label={t("settings.model.removeRoute")}
+          title={t("settings.model.removeRoute")}
           disabled={agentRuntimeConfig.updating}
           onclick={() => onremove?.()}
         >
@@ -321,7 +334,7 @@
           disabled={saveDisabled}
           onclick={() => void saveAll()}
         >
-          {savedFlash ? "Saved ✓" : "Save"}
+          {savedFlash ? t("settings.model.savedFlash") : t("settings.save")}
         </Button>
       </div>
     </div>
@@ -331,22 +344,26 @@
        样式并入本区标签行（用户裁决：Identity 的 key pill 与 Save as preset 删除，
        标题行右端只留 [Remove][Save]）。 -->
   <!-- 块 3 · Endpoint（baseURL + api Select；脏态由标题行全局 Save 持久化）。 -->
-  <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Endpoint">
-    <span class="text-[11px] font-medium text-muted-foreground">Endpoint</span>
+  <section
+    class="space-y-1.5 rounded-md border border-border p-2"
+    aria-label={t("settings.model.endpoint")}
+  >
+    <span class="text-[11px] font-medium text-muted-foreground">{t("settings.model.endpoint")}</span
+    >
     <div class="flex gap-1.5">
       <Input
         class="h-8 flex-1 font-mono text-xs"
-        aria-label="Base URL"
+        aria-label={t("settings.model.baseUrl")}
         placeholder="https://api.example.com/v1"
         bind:value={baseURLDraft}
         disabled={agentRuntimeConfig.updating}
       />
     </div>
     <label class="block space-y-0.5">
-      <span class="text-[10px] text-muted-foreground">API protocol</span>
+      <span class="text-[10px] text-muted-foreground">{t("settings.model.apiProtocol")}</span>
       <select
         class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
-        aria-label="API protocol"
+        aria-label={t("settings.model.apiProtocol")}
         bind:value={apiDraft}
         disabled={agentRuntimeConfig.updating}
       >
@@ -358,10 +375,13 @@
   </section>
 
   <!-- 块 2 · Credential（R16：移至 Endpoint 下方；key 客观回显，无状态 chip）。 -->
-  <section class="space-y-1.5 rounded-md border border-border p-2" aria-label="Credential">
+  <section
+    class="space-y-1.5 rounded-md border border-border p-2"
+    aria-label={t("settings.model.credential")}
+  >
     {#if addedHint}
       <p class="text-[11px] font-medium text-primary">
-        Route “{route.provider}” added — paste its API key to finish connecting.
+        {t("settings.model.routeAddedHint", { provider: route.provider })}
       </p>
     {/if}
     <div class="flex gap-1.5">
@@ -370,8 +390,8 @@
           class="h-8 pr-9 font-mono text-xs"
           type={keyVisible ? "text" : "password"}
           autocomplete="off"
-          aria-label="API key"
-          placeholder="API key"
+          aria-label={t("settings.model.apiKey")}
+          placeholder={t("settings.model.apiKey")}
           bind:ref={credInput}
           bind:value={apiKeyDraft}
           disabled={agentRuntimeConfig.updating}
@@ -386,9 +406,9 @@
         <button
           type="button"
           class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-2.5 after:content-[''] hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          aria-label={keyVisible ? "Hide API key" : "Show API key"}
+          aria-label={keyVisible ? t("settings.model.hideKey") : t("settings.model.showKey")}
           aria-pressed={keyVisible}
-          title={keyVisible ? "Hide API key" : "Show API key"}
+          title={keyVisible ? t("settings.model.hideKey") : t("settings.model.showKey")}
           disabled={agentRuntimeConfig.updating}
           onmousedown={(event) => event.preventDefault()}
           onclick={() => (keyVisible = !keyVisible)}
@@ -408,22 +428,23 @@
           disabled={agentRuntimeConfig.updating}
           onclick={() => void clearCredential()}
         >
-          Clear
+          {t("settings.model.clearKey")}
         </Button>
       {/if}
     </div>
     <span class="text-[10px] text-muted-foreground">
-      Stored locally (0600), shown as typed (password-masked), applies on blur/Enter.
+      {t("settings.model.keyStorageHint")}
     </span>
   </section>
 
   <!-- 块 4 · Models（ModelListItem 列表 + Add model；R7 8.7 + R12-A3 滚入视野）。 -->
-  <section class="space-y-1.5" aria-label="Models">
+  <section class="space-y-1.5" aria-label={t("settings.model.models")}>
     <div class="flex items-center justify-between">
-      <span class="text-[11px] font-medium text-muted-foreground">Models</span>
+      <span class="text-[11px] font-medium text-muted-foreground">{t("settings.model.models")}</span
+      >
       <div class="flex items-center gap-1.5">
         {#if modelsDraft.length === 0}
-          <span class="text-[10px] text-amber-700">A route needs at least one model id.</span>
+          <span class="text-[10px] text-amber-700">{t("settings.model.needsModel")}</span>
         {/if}
         <Button
           size="sm"
@@ -432,7 +453,7 @@
           disabled={agentRuntimeConfig.updating}
           onclick={() => void addModel()}
         >
-          + Add model
+          {t("settings.model.addModel")}
         </Button>
       </div>
     </div>

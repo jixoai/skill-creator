@@ -13,6 +13,7 @@
   } from "$lib/stores/workspaces.svelte";
   import type { ImportedWorkspace } from "$lib/types";
   import { showToast } from "$lib/toast.svelte";
+  import { t } from "$lib/i18n";
   import {
     activateTabAndNavigate,
     closeImportedTab,
@@ -75,9 +76,9 @@
     contextWorkspace = null;
     try {
       await navigator.clipboard.writeText(workspace.path);
-      showToast("Workspace path copied.");
+      showToast(t("shell.pathCopiedToast"));
     } catch {
-      showToast("Could not copy workspace path.");
+      showToast(t("shell.pathCopyFailedToast"));
     }
   }
 
@@ -98,7 +99,9 @@
       removeOpen = false;
     } catch (error) {
       showToast(
-        `Could not remove workspace: ${error instanceof Error ? error.message : String(error)}`,
+        t("shell.removeFailedToast", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
       );
     } finally {
       removeBusy = false;
@@ -107,30 +110,33 @@
 </script>
 
 <div class="shrink-0 border-b border-border bg-background">
-  <div class="flex h-9 items-center gap-1 overflow-x-auto px-2" aria-label="Open pages">
+  <div
+    class="flex h-9 items-center gap-1 overflow-x-auto px-2"
+    aria-label={t("shell.openPagesAria")}
+  >
     <button
       class="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-xs transition-colors {tabSession
         .navigation.activeId === '~'
         ? 'bg-primary/10 text-primary'
         : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-      aria-label="Global workspace tab"
+      aria-label={t("shell.globalTabAria")}
       aria-current={tabSession.navigation.activeId === "~" ? "page" : undefined}
       onclick={() => openWorkspace("~")}
     >
       <IconGlobe class="h-3.5 w-3.5" />
-      <span>Global</span>
+      <span>{t("shell.tabGlobal")}</span>
     </button>
     <button
       class="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-xs transition-colors {tabSession
         .navigation.activeId === 'agent'
         ? 'bg-primary/10 text-primary'
         : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-      aria-label="Agent tab"
+      aria-label={t("shell.agentTabAria")}
       aria-current={tabSession.navigation.activeId === "agent" ? "page" : undefined}
       onclick={() => openWorkspace("agent")}
     >
       <IconMessage class="h-3.5 w-3.5" />
-      <span>Agent</span>
+      <span>{t("shell.tabAgent")}</span>
     </button>
     {#each importedTabs as tab (tab.id)}
       <div
@@ -153,8 +159,8 @@
         </button>
         <button
           class="flex h-full w-6 items-center justify-center rounded-r opacity-65 hover:bg-background/70 hover:opacity-100"
-          aria-label={`Close ${tab.workspace?.label ?? tab.id} tab`}
-          title="Close tab"
+          aria-label={t("shell.closeTabAria", { label: tab.workspace?.label ?? tab.id })}
+          title={t("shell.closeTab")}
           onclick={() => closeTab(tab.id)}
         >
           <IconX class="h-3 w-3" />
@@ -164,11 +170,11 @@
     {#if tabSession.navigation.activeId === "settings"}
       <div class="flex h-7 shrink-0 items-center rounded bg-primary/10 text-xs text-primary">
         <button class="px-2" aria-current="page" onclick={() => openWorkspace("settings")}
-          >Settings</button
+          >{t("shell.tabSettings")}</button
         >
         <button
           class="flex h-full w-6 items-center justify-center"
-          aria-label="Close Settings tab"
+          aria-label={t("shell.closeSettingsTabAria")}
           onclick={() => openWorkspace("~")}
         >
           <IconX class="h-3 w-3" />
@@ -178,9 +184,9 @@
     <div class="shrink-0" data-shell-menu>
       <button
         class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-        aria-label="Open workspace tab menu"
+        aria-label={t("shell.openTabMenuAria")}
         aria-expanded={addOpen}
-        title="Open workspace tab"
+        title={t("shell.openTabTitle")}
         onclick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
           addPosition = { x: rect.left, y: rect.bottom + 4 };
@@ -215,7 +221,7 @@
               requestImportWorkspace();
             }}
           >
-            Import directory…
+            {t("shell.importDirectory")}
           </button>
         </div>
       {/if}
@@ -236,29 +242,29 @@
       role="menuitem"
       onclick={() => copyWorkspacePath(contextWorkspace!)}
     >
-      Copy workspace path
+      {t("shell.copyWorkspacePath")}
     </button>
     <button
       class="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
       role="menuitem"
       onclick={() => closeTab(contextWorkspace!.id)}
     >
-      Close tab
+      {t("shell.closeTab")}
     </button>
     <button
       class="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
       role="menuitem"
       onclick={() => requestRemove(contextWorkspace!)}
     >
-      Remove workspace…
+      {t("shell.removeWorkspace")}
     </button>
   </div>
 {/if}
 
 <ConfirmDialog
   bind:open={removeOpen}
-  title="Remove workspace?"
-  description="This removes the workspace from Skill Creator. Files in the directory remain untouched."
+  title={t("shell.removeConfirmTitle")}
+  description={t("shell.removeConfirmBody")}
   busy={removeBusy}
   onConfirm={() => void confirmRemove()}
 />

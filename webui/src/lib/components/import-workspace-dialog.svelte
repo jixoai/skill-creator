@@ -16,6 +16,7 @@
   import { goto } from "$app/navigation";
   import IconFolder from "@lucide/svelte/icons/folder-open";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
+  import { t } from "$lib/i18n";
 
   // 打开状态由全局 store 拥有（sidebar 与 Workspaces home 共享同一实例）。
   let open = $state(false);
@@ -61,7 +62,7 @@
 
   async function submit(): Promise<void> {
     if (!dirPath.trim()) {
-      error = "A directory path is required.";
+      error = t("importDialog.pathRequired");
       return;
     }
     busy = true;
@@ -83,10 +84,11 @@
   <Dialog.Content class="sm:max-w-[460px]">
     <Dialog.Header>
       <Dialog.Title class="flex items-center gap-2">
-        <IconFolder class="h-4 w-4" /> Import workspace
+        <IconFolder class="h-4 w-4" />
+        {t("importDialog.title")}
       </Dialog.Title>
       <Dialog.Description>
-        Import a directory as a skill workspace. Its skills will be discovered and managed here.
+        {t("importDialog.description")}
       </Dialog.Description>
     </Dialog.Header>
 
@@ -100,12 +102,12 @@
 
     <div class="space-y-3">
       <div class="space-y-1.5">
-        <Label for="ws-path">Directory path</Label>
+        <Label for="ws-path">{t("importDialog.pathLabel")}</Label>
         <div class="flex gap-2">
           <Input
             id="ws-path"
             bind:value={dirPath}
-            placeholder="/Users/me/.claude/skills"
+            placeholder={t("importDialog.pathPlaceholder")}
             class="font-mono text-xs"
           />
           {#if browseSupported}
@@ -117,25 +119,28 @@
               onclick={() => void browse()}
             >
               {#if browsing}<IconLoader class="h-3.5 w-3.5 animate-spin" />{/if}
-              Browse…
+              {t("importDialog.browse")}
             </Button>
           {/if}
         </div>
         <p class="text-xs text-muted-foreground">
-          Absolute path to a directory containing skill folders.
+          {t("importDialog.pathHint")}
         </p>
       </div>
       <div class="space-y-1.5">
         <Label for="ws-label"
-          >Display name <span class="text-muted-foreground">(optional)</span></Label
+          >{t("importDialog.nameLabel")}
+          <span class="text-muted-foreground">{t("importDialog.optional")}</span></Label
         >
-        <Input id="ws-label" bind:value={label} placeholder="My Skills" />
+        <Input id="ws-label" bind:value={label} placeholder={t("importDialog.namePlaceholder")} />
       </div>
       <div class="flex justify-end gap-2 pt-1">
-        <Button variant="outline" size="sm" onclick={() => (open = false)}>Cancel</Button>
+        <Button variant="outline" size="sm" onclick={() => (open = false)}
+          >{t("common.cancel")}</Button
+        >
         <Button size="sm" disabled={busy} onclick={submit}>
           {#if busy}<IconLoader class="h-3.5 w-3.5 animate-spin" />{/if}
-          Import
+          {t("importDialog.import")}
         </Button>
       </div>
     </div>

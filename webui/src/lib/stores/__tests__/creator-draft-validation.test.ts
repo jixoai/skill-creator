@@ -18,11 +18,11 @@ const target = {
 };
 
 describe("validateNewDraft (creator-editor-polish)", () => {
-  it("flags all empty new-mode fields with per-field messages", () => {
+  it("flags all empty new-mode fields with per-field error keys", () => {
     const errors = validateNewDraft(emptyDraft(target));
-    expect(errors.directoryName).toContain("lowercase");
-    expect(errors.name).toBe("Name is required.");
-    expect(errors.description).toBe("Description is required.");
+    expect(errors.directoryName).toBe("creatorEditor.directoryRule");
+    expect(errors.name).toBe("creatorEditor.nameRequired");
+    expect(errors.description).toBe("creatorEditor.descriptionRequired");
     expect(hasNewDraftErrors(errors)).toBe(true);
   });
 
@@ -32,7 +32,7 @@ describe("validateNewDraft (creator-editor-polish)", () => {
     draft.description = "  ";
     const errors = validateNewDraft(draft);
     expect(errors.directoryName).toBeNull();
-    expect(errors.description).toBe("Description is required.");
+    expect(errors.description).toBe("creatorEditor.descriptionRequired");
     expect(hasNewDraftErrors(errors)).toBe(true);
 
     draft.description = "reviews code";
@@ -44,7 +44,7 @@ describe("validateNewDraft (creator-editor-polish)", () => {
     draft.name = "a";
     draft.description = "b";
     const errors = validateNewDraft(draft);
-    expect(errors.directoryName).toContain("lowercase");
+    expect(errors.directoryName).toBe("creatorEditor.directoryRule");
     expect(errors.name).toBeNull();
     expect(errors.description).toBeNull();
     expect(hasNewDraftErrors(errors)).toBe(true);

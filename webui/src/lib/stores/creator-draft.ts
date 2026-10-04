@@ -3,7 +3,8 @@
  * 正交意图：
  *   [1] Creator 草稿的纯数据形状与构造器（不依赖 svelte 运行时，可单测）。
  *   [2] 草稿 → SkillFrontmatter 的投影（必填字段覆盖、未知字段透传）。
- *   [3] new 模式草稿结构化校验（creator-editor-polish Ch5；字段级错误文案）。
+ *   [3] new 模式草稿结构化校验（creator-editor-polish Ch5；错误值为 i18n 词典 key，
+ *       展示文案归消费组件 t() 渲染——webui-i18n-bilingual 4.1）。
  * 妥协声明：无。context 生命周期（provide/use）留在 creator-editor.svelte.ts。
  */
 import { SkillDirectoryNameSchema } from "$shared/contracts/creator.js";
@@ -96,11 +97,19 @@ export function draftToFrontmatter(draft: CreatorDraft): SkillFrontmatter {
   };
 }
 
-/** new 模式草稿的字段级校验结果（null = 该字段通过）。 */
+/**
+ * new 模式草稿的字段级校验错误（值为 i18n 词典 key——store 保持纯数据，展示层
+ * t() 渲染；webui-i18n-bilingual 4.1）。null = 该字段通过。
+ */
+export type NewDraftErrorKey =
+  | "creatorEditor.directoryRule"
+  | "creatorEditor.nameRequired"
+  | "creatorEditor.descriptionRequired";
+
 export interface NewDraftErrors {
-  directoryName: string | null;
-  name: string | null;
-  description: string | null;
+  directoryName: NewDraftErrorKey | null;
+  name: NewDraftErrorKey | null;
+  description: NewDraftErrorKey | null;
 }
 
 const NEW_DRAFT_CLEAN: NewDraftErrors = {
@@ -112,15 +121,16 @@ const NEW_DRAFT_CLEAN: NewDraftErrors = {
 /**
  * new 模式草稿结构化校验（creator-editor-polish Ch5）：directoryName 规则 +
  * name/description 修剪后非空；edit 模式恒通过（revision 语义由服务端契约约束）。
+ * 错误值为词典 key（webui-i18n-bilingual 4.1：错误文案归 creatorEditor.* 域）。
  */
 export function validateNewDraft(draft: CreatorDraft): NewDraftErrors {
   if (draft.mode !== "new") return NEW_DRAFT_CLEAN;
   return {
     directoryName: SkillDirectoryNameSchema.safeParse(draft.directoryName).success
       ? null
-      : "Use lowercase letters, numbers, and hyphens.",
-    name: draft.name.trim().length > 0 ? null : "Name is required.",
-    description: draft.description.trim().length > 0 ? null : "Description is required.",
+      : "creatorEditor.directoryRule",
+    name: draft.name.trim().length > 0 ? null : "creatorEditor.nameRequired",
+    description: draft.description.trim().length > 0 ? null : "creatorEditor.descriptionRequired",
   };
 }
 

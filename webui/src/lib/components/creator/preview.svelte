@@ -8,6 +8,7 @@
 <script lang="ts">
   import { useCreatorEditor, draftToFrontmatter } from "$lib/stores/creator-editor.svelte";
   import { renderSkillBody } from "$lib/render-skill-md";
+  import { t } from "$lib/i18n";
 
   const editor = useCreatorEditor();
   const draft = editor.draft;
@@ -21,17 +22,21 @@
 
 <div class="flex h-full flex-col overflow-y-auto p-4">
   <section class="mb-4">
-    <h1 class="text-base font-semibold">{draft.name || "Untitled skill"}</h1>
+    <h1 class="text-base font-semibold">
+      {draft.name || t("creatorPreview.untitled")}
+    </h1>
     <p class="mt-0.5 text-xs leading-5 text-muted-foreground">
-      {draft.description || "No description yet."}
+      {draft.description || t("creatorPreview.noDescription")}
     </p>
   </section>
 
   <section class="mb-4">
-    <h2 class="mb-2 text-[11px] font-medium text-muted-foreground">Frontmatter</h2>
+    <h2 class="mb-2 text-[11px] font-medium text-muted-foreground">
+      {t("creatorPreview.frontmatter")}
+    </h2>
     {#if entries.length === 0}
       <p class="text-[11px] text-muted-foreground/70">
-        Only name and description — no additional metadata.
+        {t("creatorPreview.onlyCore")}
       </p>
     {:else}
       <dl class="overflow-x-auto rounded-md border border-border">
@@ -50,9 +55,9 @@
   </section>
 
   <section class="min-h-0 flex-1">
-    <h2 class="mb-2 text-[11px] font-medium text-muted-foreground">Body</h2>
+    <h2 class="mb-2 text-[11px] font-medium text-muted-foreground">{t("creatorPreview.body")}</h2>
     {#if draft.body.trim().length === 0}
-      <p class="text-xs text-muted-foreground/70">Nothing to preview yet.</p>
+      <p class="text-xs text-muted-foreground/70">{t("creatorPreview.nothingYet")}</p>
     {:else}
       <!-- pre 代码块约束进内容列（2.2 处置批 P2-5）：pre 的 min-content 会把整列
            撑出 pane 右缘——pre-wrap + break-words 让代码在列内折行（与

@@ -8,12 +8,13 @@
 import IconSettings from "@lucide/svelte/icons/settings";
 import { defineApp, defineActivity, defineRoute, leafRoute } from "$lib/shell";
 import { SETTINGS_SECTION_IDS } from "$lib/stores/settings-ui.svelte";
+import { t } from "$lib/i18n";
 import { z } from "zod";
 
 /** Settings App：全局设置页面面板（General / Model / Agent / Sessions 分区）。 */
 export const settingsApp = defineApp({
   id: "settings",
-  name: "Settings",
+  name: t("settings.appName"),
   icon: IconSettings,
   pageKind: "settings",
   activities: [

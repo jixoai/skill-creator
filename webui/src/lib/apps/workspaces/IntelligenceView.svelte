@@ -36,6 +36,7 @@
     type FindingProposeAction,
   } from "$lib/apps/workspaces/finding-propose-templates.js";
   import { showToast } from "$lib/toast.svelte";
+  import { t } from "$lib/i18n";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import type {
     AnalyzeFailure,
@@ -61,6 +62,14 @@
   import IconSparkles from "@lucide/svelte/icons/sparkles";
 
   type IntelligenceSearch = { severity?: "all" | "error" | "warning" | "info" };
+
+  /** severity 过滤按钮的显示词典 key（URL/query 仍用枚举原文；显示层可双语）。 */
+  const SEVERITY_LABEL_KEYS = {
+    all: "intelligence.severityAll",
+    error: "intelligence.severityError",
+    warning: "intelligence.severityWarning",
+    info: "intelligence.severityInfo",
+  } as const;
 
   const getParams = useParams<{ wsId: string; providerId: string }>();
   const getSearch = useSearch<IntelligenceSearch>();
@@ -114,7 +123,7 @@
     if (!target || analyzing) return;
     const skills = untrack(() => skillsState.skills);
     if (skills.length === 0) {
-      showToast("No skills discovered in this provider.");
+      showToast(t("intelligence.toastNoSkills"));
       return;
     }
     analyzing = true;
@@ -128,7 +137,11 @@
       if (result.report) {
         const counts = countBySeverity(result.report.findings);
         showToast(
-          `Analyzed ${result.report.snapshots.length} skills · ${counts.error} errors · ${counts.warning} warnings.`,
+          t("intelligence.toastAnalyzed", {
+            skills: result.report.snapshots.length,
+            errors: counts.error,
+            warnings: counts.warning,
+          }),
         );
       }
     } finally {
@@ -222,7 +235,7 @@
   /** 行标题：si 草稿 = rationale 摘要（finding.summary）；mcp = capability 名。 */
   function titleOf(proposal: UnifiedProposalView): string {
     return proposal.source === "skill-intelligence"
-      ? (proposal.finding?.summary ?? "skill-intelligence draft")
+      ? (proposal.finding?.summary ?? t("intelligence.siDraftFallback"))
       : (proposal.capability ?? proposal.kind);
   }
 
@@ -276,16 +289,20 @@
       if (!decided) return; // 请求已被取代
       approveOutcome = { proposalId: proposal.id, view: decided };
       if (decided.status === "rejected" && decided.rejectCause === "stale") {
-        showToast("This proposal is stale. Re-analyze, then create a fresh proposal.", {
-          label: "Re-analyze",
+        showToast(t("intelligence.staleProposal"), {
+          label: t("intelligence.reAnalyze"),
           run: () => void runAnalysis(),
         });
       } else if (decided.status === "failed") {
-        showToast(`Proposal failed${decided.result?.error ? `: ${decided.result.error}` : "."}`);
+        showToast(
+          decided.result?.error
+            ? t("intelligence.toastProposalFailed", { error: decided.result.error })
+            : t("intelligence.toastProposalFailedPlain"),
+        );
       } else if (decided.status === "executed") {
-        showToast("Proposal applied.");
+        showToast(t("intelligence.toastApplied"));
       } else {
-        showToast(`Proposal decided: ${decided.status}.`);
+        showToast(t("intelligence.toastDecided", { status: decided.status }));
       }
       await refreshProposals();
       await loadSkillsRefresh();
@@ -344,9 +361,7 @@
   let hoveredSkillId = $state<string | null>(null);
   const graphDense = $derived.by(() => (report?.snapshots.length ?? 0) > DENSE_LABEL_THRESHOLD);
   // 图注后缀（前导空格在字符串内，绕开 Svelte 块边界空白折叠）。
-  const graphCaptionSuffix = $derived(
-    graphDense ? " Dense graph — hover a node to reveal its label." : "",
-  );
+  const graphCaptionSuffix = $derived(graphDense ? ` ${t("intelligence.graphDenseHint")}` : "");
   const graph = $derived.by(() => {
     const snapshots = report?.snapshots ?? [];
     if (snapshots.length < 2) return null;
@@ -392,14 +407,16 @@
     <div class="flex flex-wrap items-center gap-3">
       <IconSparkles class="h-5 w-5 text-primary" />
       <div class="min-w-0 flex-1">
-        <h1 class="truncate text-base font-semibold">Skill Intelligence</h1>
+        <h1 class="truncate text-base font-semibold">{t("intelligence.title")}</h1>
         <p class="mt-0.5 text-xs text-muted-foreground">
-          {providerId ?? "—"} · read-only analysis with revision-locked review.
+          {t("intelligence.subtitle", { provider: providerId ?? "—" })}
         </p>
       </div>
       <Button size="sm" class="h-8 gap-1.5" disabled={analyzing} onclick={() => void runAnalysis()}>
-        {#if analyzing}<IconLoader class="h-3.5 w-3.5 animate-spin" /> Analyzing…{:else}
-          <IconGraph class="h-3.5 w-3.5" /> Analyze {skillsState.skills.length || ""}
+        {#if analyzing}<IconLoader class="h-3.5 w-3.5 animate-spin" />
+          {t("intelligence.analyzing")}{:else}
+          <IconGraph class="h-3.5 w-3.5" />
+          {t("intelligence.analyze", { count: skillsState.skills.length || "" })}
         {/if}
       </Button>
     </div>
@@ -408,7 +425,8 @@
   <div class="min-h-0 flex-1 px-5 py-4">
     {#if skillsState.loading}
       <div class="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-        <IconLoader class="h-3.5 w-3.5 animate-spin" /> Loading skills…
+        <IconLoader class="h-3.5 w-3.5 animate-spin" />
+        {t("intelligence.loadingSkills")}
       </div>
     {:else if skillsState.error}
       <div class="flex flex-col items-start gap-2 py-6 text-xs text-destructive">
@@ -420,7 +438,7 @@
             class="h-7 text-xs"
             onclick={() => void loadSkills(providerTarget)}
           >
-            Retry
+            {t("common.retry")}
           </Button>
         {/if}
       </div>
@@ -428,42 +446,56 @@
       <div class="flex flex-col items-start gap-2 py-6 text-xs text-destructive">
         <p class="break-words">{analyzeError}</p>
         <Button variant="outline" size="sm" class="h-7 text-xs" onclick={() => void runAnalysis()}>
-          Retry analysis
+          {t("intelligence.retryAnalysis")}
         </Button>
       </div>
     {:else if !report}
       <div class="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
         <IconShield class="h-8 w-8 opacity-50" />
-        <p class="text-sm font-medium text-foreground">No report yet</p>
+        <p class="text-sm font-medium text-foreground">{t("intelligence.noReportTitle")}</p>
         <p class="max-w-xs text-xs">
-          Run a read-only analysis to surface duplicates, conflicts, shared resources, and
-          structural findings with evidence.
+          {t("intelligence.noReportBody")}
         </p>
       </div>
     {:else}
       {@const severityCounts = countBySeverity(report.findings)}
       <!-- 摘要 -->
-      <section class="mb-4 flex flex-wrap items-center gap-2 text-xs" aria-label="Report summary">
-        <Badge variant="outline">{report.snapshots.length} skills</Badge>
+      <section
+        class="mb-4 flex flex-wrap items-center gap-2 text-xs"
+        aria-label={t("intelligence.summaryAria")}
+      >
+        <Badge variant="outline"
+          >{t("intelligence.skillsCount", { count: report.snapshots.length })}</Badge
+        >
         <!-- 零值计数用中性色（WS5 走查小项 6）：0 errors 不制造告警红。 -->
         <Badge variant={severityCounts.error > 0 ? "destructive" : "secondary"}>
-          {severityCounts.error} errors</Badge
+          {t("intelligence.errorsCount", { count: severityCounts.error })}</Badge
         >
-        <Badge variant="secondary">{severityCounts.warning} warnings</Badge>
-        <Badge variant="outline">{severityCounts.info} info</Badge>
+        <Badge variant="secondary">
+          {t("intelligence.warningsCount", { count: severityCounts.warning })}</Badge
+        >
+        <Badge variant="outline"
+          >{t("intelligence.infoCount", { count: severityCounts.info })}</Badge
+        >
         {#if analyzeFailures.length > 0}
-          <Badge variant="destructive">{analyzeFailures.length} failed to analyze</Badge>
+          <Badge variant="destructive">
+            {t("intelligence.failedCount", { count: analyzeFailures.length })}</Badge
+          >
         {/if}
         <span class="flex-1"></span>
-        <div class="flex items-center gap-1" role="group" aria-label="Severity filter">
-          {#each ["all", "error", "warning", "info"] as option (option)}
+        <div
+          class="flex items-center gap-1"
+          role="group"
+          aria-label={t("intelligence.severityFilterAria")}
+        >
+          {#each Object.entries(SEVERITY_LABEL_KEYS) as [option, labelKey] (option)}
             <Button
               variant={severityFilter === option ? "default" : "outline"}
               size="sm"
               class="h-7 px-2 text-xs capitalize"
               onclick={() => setSeverityFilter(option as "all" | "error" | "warning" | "info")}
             >
-              {option}
+              {t(labelKey)}
             </Button>
           {/each}
         </div>
@@ -472,9 +504,9 @@
       {#if analyzeFailures.length > 0}
         <section
           class="mb-4 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs"
-          aria-label="Analysis failures"
+          aria-label={t("intelligence.failuresAria")}
         >
-          <p class="font-medium text-destructive">Some skills could not be analyzed:</p>
+          <p class="font-medium text-destructive">{t("intelligence.someFailed")}</p>
           <ul class="mt-1 space-y-0.5">
             {#each analyzeFailures as failure (failure.message)}
               <li class="text-muted-foreground">{failure.code}: {failure.message}</li>
@@ -485,12 +517,14 @@
 
       <!-- 关系图 -->
       {#if graph}
-        <section class="mb-4" aria-label="Skill relations graph">
-          <h2 class="mb-2 text-xs font-medium text-muted-foreground">Relations</h2>
+        <section class="mb-4" aria-label={t("intelligence.relationsAria")}>
+          <h2 class="mb-2 text-xs font-medium text-muted-foreground">
+            {t("intelligence.relations")}
+          </h2>
           <div class="overflow-x-auto rounded-md border border-border bg-muted/20">
             <svg
               role="img"
-              aria-label="Skill relation graph"
+              aria-label={t("intelligence.graphAria")}
               width={graph.width}
               height={graph.height}
               class="mx-auto block"
@@ -515,7 +549,7 @@
                   class="cursor-pointer"
                   role="button"
                   tabindex="0"
-                  aria-label="Open {node.name} detail"
+                  aria-label={t("intelligence.openDetailAria", { name: node.name })}
                   onclick={() => openSkillDetail(node.skillId)}
                   onkeydown={(e) => e.key === "Enter" && openSkillDetail(node.skillId)}
                   onpointerenter={() => (hoveredSkillId = node.skillId)}
@@ -545,17 +579,18 @@
             </svg>
           </div>
           <p class="mt-1 text-[10px] text-muted-foreground">
-            Solid red = conflict · solid blue = overlap · dashed gray = shared resource. Click a
-            node to open its detail.{graphCaptionSuffix}
+            {t("intelligence.graphLegend")}{graphCaptionSuffix}
           </p>
         </section>
       {/if}
 
       <!-- findings -->
-      <section aria-label="Findings">
-        <h2 class="mb-2 text-xs font-medium text-muted-foreground">Findings</h2>
+      <section aria-label={t("intelligence.findingsAria")}>
+        <h2 class="mb-2 text-xs font-medium text-muted-foreground">
+          {t("intelligence.findings")}
+        </h2>
         {#if visibleFindings.length === 0}
-          <p class="py-6 text-xs text-muted-foreground">No findings at this severity.</p>
+          <p class="py-6 text-xs text-muted-foreground">{t("intelligence.noFindings")}</p>
         {:else}
           <ul class="space-y-2">
             {#each visibleFindings as finding (finding.id)}
@@ -603,7 +638,8 @@
                         disabled={proposing}
                         onclick={() => seedFindingProposeAction("edit", finding)}
                       >
-                        <IconSparkles class="h-3 w-3" /> Ask agent: edit
+                        <IconSparkles class="h-3 w-3" />
+                        {t("intelligence.askEdit")}
                       </Button>
                     {/if}
                     <Button
@@ -613,7 +649,8 @@
                       disabled={proposing}
                       onclick={() => seedFindingProposeAction("split", finding)}
                     >
-                      <IconSparkles class="h-3 w-3" /> Ask agent: split
+                      <IconSparkles class="h-3 w-3" />
+                      {t("intelligence.askSplit")}
                     </Button>
                     <Button
                       variant="outline"
@@ -622,7 +659,8 @@
                       disabled={proposing}
                       onclick={() => seedFindingProposeAction("merge", finding)}
                     >
-                      <IconSparkles class="h-3 w-3" /> Ask agent: merge
+                      <IconSparkles class="h-3 w-3" />
+                      {t("intelligence.askMerge")}
                     </Button>
                     <Button
                       variant="outline"
@@ -631,7 +669,8 @@
                       disabled={proposing}
                       onclick={() => seedFindingProposeAction("disable", finding)}
                     >
-                      <IconPowerOff class="h-3 w-3" /> Ask agent: disable
+                      <IconPowerOff class="h-3 w-3" />
+                      {t("intelligence.askDisable")}
                     </Button>
                   </div>
                 </div>
@@ -643,9 +682,9 @@
     {/if}
 
     <!-- proposals 审查（统一审批面：mcp: + si: 双源） -->
-    <section class="mt-6" aria-label="Proposal review">
+    <section class="mt-6" aria-label={t("intelligence.proposalsAria")}>
       <div class="mb-2 flex items-center gap-2">
-        <h2 class="text-xs font-medium text-muted-foreground">Proposals</h2>
+        <h2 class="text-xs font-medium text-muted-foreground">{t("intelligence.proposals")}</h2>
         {#if proposalsLoading}
           <IconLoader class="h-3 w-3 animate-spin text-muted-foreground" />
         {/if}
@@ -656,13 +695,13 @@
           class="h-7 gap-1 px-2 text-xs"
           onclick={() => void refreshProposals()}
         >
-          <IconRefresh class="h-3 w-3" /> Refresh
+          <IconRefresh class="h-3 w-3" />
+          {t("intelligence.refresh")}
         </Button>
       </div>
       {#if proposals.length === 0}
         <p class="py-4 text-xs text-muted-foreground">
-          No proposals yet. Propose a fix from any finding above or via an agent tool call; nothing
-          is applied until you approve it here.
+          {t("intelligence.noProposals")}
         </p>
       {:else}
         <ul class="space-y-2">
@@ -696,11 +735,15 @@
                   variant={proposal.source === "mcp" ? "secondary" : "outline"}
                   class="text-[10px]"
                 >
-                  {proposal.source === "mcp" ? (proposal.capability ?? proposal.kind) : "si draft"}
+                  {proposal.source === "mcp"
+                    ? (proposal.capability ?? proposal.kind)
+                    : t("intelligence.siDraft")}
                 </Badge>
                 {#if !pending}
                   <Badge variant="outline" class="text-[10px]">
-                    {proposal.status}{proposal.rejectCause === "stale" ? " · stale" : ""}
+                    {proposal.status}{proposal.rejectCause === "stale"
+                      ? ` · ${t("evaluating.staleTag")}`
+                      : ""}
                   </Badge>
                 {/if}
                 <Button
@@ -711,7 +754,7 @@
                   onclick={() => void handleReject(proposal)}
                 >
                   {#if rejectingId === proposal.id}<IconLoader class="h-3 w-3 animate-spin" />{/if}
-                  Reject
+                  {t("intelligence.reject")}
                 </Button>
                 <Button
                   size="sm"
@@ -720,7 +763,7 @@
                   onclick={() => void handleApprove(proposal)}
                 >
                   {#if approvingId === proposal.id}<IconLoader class="h-3 w-3 animate-spin" />{/if}
-                  Approve
+                  {t("intelligence.approve")}
                 </Button>
               </div>
 
@@ -737,7 +780,7 @@
                   </p>
                   {#if outcome.status === "rejected" && outcome.rejectCause === "stale"}
                     <p class="mt-1 text-destructive">
-                      This proposal is stale. Re-analyze, then create a fresh proposal.
+                      {t("intelligence.staleProposal")}
                     </p>
                   {/if}
                 </div>
@@ -747,13 +790,17 @@
                 <div class="space-y-2 px-3 py-2 text-[11px]">
                   <p class="text-muted-foreground">{titleOf(proposal)}</p>
                   <p class="text-muted-foreground">
-                    Created {new Date(proposal.createdAt).toLocaleString()} · origin
-                    {proposal.origin}.
+                    {t("intelligence.createdLine", {
+                      time: new Date(proposal.createdAt).toLocaleString(),
+                      origin: proposal.origin,
+                    })}
                   </p>
                   {#if siPayload !== null}
                     {@const affected = affectedOf(proposal)}
                     {@const revisions = revisionsOf(proposal)}
-                    <p class="text-muted-foreground">Affects {affected.length} skill(s).</p>
+                    <p class="text-muted-foreground">
+                      {t("intelligence.affects", { count: affected.length })}
+                    </p>
                     <ul class="space-y-1">
                       {#each affected as selection, index (selection.skillId)}
                         <li class="flex flex-wrap items-baseline gap-1">
@@ -778,15 +825,17 @@
                       {@const before = first ? beforeDocs[first.selection.skillId] : undefined}
                       <div class="grid gap-2 md:grid-cols-2">
                         <div class="rounded border border-border bg-muted/20 p-2">
-                          <p class="mb-1 font-medium">Before</p>
+                          <p class="mb-1 font-medium">{t("intelligence.before")}</p>
                           {#if before}
                             <p class="leading-4 text-muted-foreground">{before.description}</p>
                           {:else}
-                            <p class="text-muted-foreground">Loading current document…</p>
+                            <p class="text-muted-foreground">
+                              {t("intelligence.loadingDocument")}
+                            </p>
                           {/if}
                         </div>
                         <div class="rounded border border-border bg-muted/20 p-2">
-                          <p class="mb-1 font-medium">After (proposal)</p>
+                          <p class="mb-1 font-medium">{t("intelligence.after")}</p>
                           <p class="leading-4 text-muted-foreground">
                             {first?.frontmatter.description}
                           </p>
@@ -795,7 +844,7 @@
                       {#if first}
                         <details>
                           <summary class="cursor-pointer text-muted-foreground"
-                            >Preview body</summary
+                            >{t("intelligence.previewBody")}</summary
                           >
                           <pre
                             class="mt-1 max-h-48 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">{first.body}</pre>
@@ -803,7 +852,7 @@
                       {/if}
                     {:else if siPayload.kind === "disable"}
                       <p class="rounded border border-border bg-muted/20 p-2 leading-4">
-                        Reason: {siPayload.reason}
+                        {t("intelligence.reason", { reason: siPayload.reason })}
                       </p>
                     {:else if siPayload.kind === "split"}
                       <ul class="space-y-1">
@@ -824,7 +873,7 @@
                         >
                       </p>
                       <p class="text-muted-foreground">
-                        Merges {siPayload.sources.length} sources; approving removes them revision-safely.
+                        {t("intelligence.mergeSources", { count: siPayload.sources.length })}
                       </p>
                     {/if}
                   {:else}

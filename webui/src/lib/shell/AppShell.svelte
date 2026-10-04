@@ -18,6 +18,7 @@
   } from "./portal-context.svelte";
   import { page } from "$app/state";
   import { untrack } from "svelte";
+  import { t } from "$lib/i18n";
   import { parseSearchString } from "./search";
   import type { ZodSchema } from "zod";
   import type { Component } from "svelte";
@@ -133,14 +134,14 @@
 
 <div class="app-shell">
   {#if leafError}
-    <div class="app-shell-error">Failed to load: {leafError}</div>
+    <div class="app-shell-error">{t("shell.failedToLoad", { error: leafError })}</div>
   {:else if leafComponent}
     {@const View = leafComponent}
     <View />
   {:else if leafChain.length > 0}
-    <div class="app-shell-loading" aria-label="Loading"></div>
+    <div class="app-shell-loading" aria-label={t("shell.loadingAria")}></div>
   {:else}
-    <div class="app-shell-empty">No route matched</div>
+    <div class="app-shell-empty">{t("shell.noRouteMatched")}</div>
   {/if}
   <div class="app-portal-root" bind:this={portalRoot}></div>
 </div>

@@ -32,6 +32,7 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
+  import { t } from "$lib/i18n";
 
   let {
     value = $bindable(""),
@@ -130,7 +131,7 @@
     class="w-full min-h-0 flex-1 resize-y rounded-md border border-input bg-input/20 px-2 py-1.5 font-mono text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
   ></textarea>
   {#if !failed}
-    <span class="sr-only">Loading editor…</span>
+    <span class="sr-only">{t("creatorEditor.loadingEditor")}</span>
   {/if}
 {/if}
 

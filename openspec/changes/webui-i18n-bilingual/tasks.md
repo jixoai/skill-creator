@@ -48,13 +48,17 @@
 
 ## 4. IA 后批任务（本轮不做，占位防丢）
 
-- [ ] 4.1 B 类面接入（shell / workspaces / creator / repository / settings
+- [x] 4.1 B 类面接入（shell / workspaces / creator / repository / settings
       manifest / eval-view / import-workspace-dialog 等 IA 落定后按 design §6
-      约定迁移；检查点见 inventory）
-- [ ] 4.2 语言切换 UI（Settings → General segmented control；IA settings
+      约定迁移；检查点见 inventory）（2026-10-04 B 线收尾：三线并行 +375 key
+      ——α settings 201（含 4.2 语言切换）/β shell+omnibox+import 59/γ creator
+      残留+intelligence 115；词典拆分 domains/ 后零写冲突；全量 2228 绿）
+- [x] 4.2 语言切换 UI（Settings → General segmented control；IA settings
       tab 化落定后）
-- [ ] 4.3 SettingsPage / components/settings/** 文案词典化（A-deferred，
+- [x] 4.3 SettingsPage / components/settings/** 文案词典化（A-deferred，
       边界裁决见 design §1）
-- [ ] 4.4 C 类新面出生即 i18n（dashboard / SkillsAgentPage / evaluating /
-      terminal / omnibox）
+- [x] 4.4 C 类新面出生即 i18n（dashboard / SkillsAgentPage / evaluating /
+      terminal / omnibox）（2026-10-04 盘点：各 C 类面已随本 change 出生即双语
+      （dashboard 130/agent 47/evaluating 113/terminal 14），omnibox 本批 14——
+      C 类全数出生，勾选成立）
 - [ ] 4.5 daemon 侧错误消息翻译（错误透传面，独立批任务）

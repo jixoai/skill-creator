@@ -16,6 +16,7 @@
   import { Input } from "$lib/components/ui/input";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import IconTrash from "@lucide/svelte/icons/trash-2";
+  import { t } from "$lib/i18n";
   import { DSH_AGENT_MODES } from "$shared/contracts/dsh-runtime.js";
   import type { AgentSessionSummary } from "$shared/contracts/agent.js";
   import {
@@ -65,10 +66,10 @@
     return [...byDay.entries()];
   });
 
-  /** ISO → 本地 YYYY-MM-DD（分组键；无效日期落 "Unknown date"）。 */
+  /** ISO → 本地 YYYY-MM-DD（分组键；无效日期落 Unknown date 词条）。 */
   function dateKey(iso: string): string {
     const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return "Unknown date";
+    if (Number.isNaN(date.getTime())) return t("settings.sessions.unknownDate");
     const y = String(date.getFullYear()).padStart(4, "0");
     const m = String(date.getMonth() + 1).padStart(2, "0");
     const d = String(date.getDate()).padStart(2, "0");
@@ -95,7 +96,7 @@
   async function saveDays(): Promise<void> {
     const days = parsedDays();
     if (days === null) {
-      daysError = "Retention must be a whole number of days between 1 and 365.";
+      daysError = t("settings.sessions.retentionError");
       return;
     }
     daysError = null;
@@ -117,7 +118,7 @@
   async function cleanNow(): Promise<void> {
     const days = parsedDays();
     if (days === null) {
-      daysError = "Retention must be a whole number of days between 1 and 365.";
+      daysError = t("settings.sessions.retentionError");
       return;
     }
     daysError = null;
@@ -131,7 +132,13 @@
         return;
       }
       rejection = null;
-      cleanSummary = `Deleted ${result.deleted} session${result.deleted === 1 ? "" : "s"} · kept ${result.kept}`;
+      cleanSummary =
+        result.deleted === 1
+          ? t("settings.sessions.cleanSummaryOne", { deleted: result.deleted, kept: result.kept })
+          : t("settings.sessions.cleanSummaryMany", {
+              deleted: result.deleted,
+              kept: result.kept,
+            });
     } finally {
       cleaning = false;
     }
@@ -155,7 +162,7 @@
       }
       rejection = null;
       if (result.deleted === 0) {
-        rejection = `Session ${target.sessionId} was not removed (running or already gone).`;
+        rejection = t("settings.sessions.removeFailed", { id: target.sessionId });
       }
       confirmOpen = false;
     } finally {
@@ -166,18 +173,20 @@
 
 <div class="space-y-4">
   <div>
-    <h3 class="text-sm font-medium">Sessions</h3>
+    <h3 class="text-sm font-medium">{t("settingsPage.sectionSessions")}</h3>
     <p class="mt-0.5 text-[11px] text-muted-foreground">
-      Manage agent panel sessions and transcript retention.
+      {t("settings.sessions.subtitle")}
     </p>
   </div>
 
-  <section class="space-y-1.5" aria-label="Cleanup policy">
-    <span class="text-[11px] font-medium text-muted-foreground">Cleanup policy</span>
+  <section class="space-y-1.5" aria-label={t("settings.sessions.cleanupPolicy")}>
+    <span class="text-[11px] font-medium text-muted-foreground"
+      >{t("settings.sessions.cleanupPolicy")}</span
+    >
     <div class="flex items-end gap-1.5">
       <label class="flex-1 space-y-1">
         <span class="block text-[10px] text-muted-foreground">
-          Delete transcripts older than (days)
+          {t("settings.sessions.cleanupDaysLabel")}
         </span>
         <Input
           type="number"
@@ -187,7 +196,7 @@
           bind:value={cleanupDaysInput}
           oninput={() => (daysDirty = true)}
           disabled={savingDays}
-          aria-label="Session retention days"
+          aria-label={t("settings.sessions.cleanupDaysAria")}
         />
       </label>
       <Button
@@ -196,20 +205,22 @@
         disabled={savingDays || !daysDirty || parsedDays() === null}
         onclick={() => void saveDays()}
       >
-        {savingDays ? "Saving…" : "Save"}
+        {savingDays ? t("settings.sessions.saving") : t("settings.save")}
       </Button>
     </div>
     <p class="text-[10px] text-muted-foreground">
-      Auto-cleaned at daemon startup (default 30 days); kernel-side session logs are untouched.
+      {t("settings.sessions.cleanupHint")}
     </p>
     {#if daysError}
       <p class="text-[10px] text-destructive" role="alert">{daysError}</p>
     {/if}
   </section>
 
-  <section class="space-y-1.5" aria-label="Session list">
+  <section class="space-y-1.5" aria-label={t("settings.sessions.listLabel")}>
     <div class="flex items-center justify-between">
-      <span class="text-[11px] font-medium text-muted-foreground">Session list</span>
+      <span class="text-[11px] font-medium text-muted-foreground"
+        >{t("settings.sessions.listLabel")}</span
+      >
       <Button
         size="sm"
         variant="outline"
@@ -217,7 +228,7 @@
         disabled={cleaning || parsedDays() === null}
         onclick={() => void cleanNow()}
       >
-        {cleaning ? "Cleaning…" : "Clean now"}
+        {cleaning ? t("settings.sessions.cleaning") : t("settings.sessions.cleanNow")}
       </Button>
     </div>
     {#if cleanSummary}
@@ -225,17 +236,17 @@
     {/if}
 
     {#if agentSessionsList.loading && !agentSessionsList.loaded}
-      <div class="text-xs text-muted-foreground">Loading…</div>
+      <div class="text-xs text-muted-foreground">{t("settings.loading")}</div>
     {:else if agentSessionsList.error}
       <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <span class="text-destructive" role="alert">{agentSessionsList.error}</span>
         <Button size="sm" class="h-7 px-2.5 text-xs" onclick={() => void loadAgentSessions()}>
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     {:else if groups.length === 0}
       <p class="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
-        Sessions started from the agent panel appear here for review or individual removal.
+        {t("settings.sessions.emptyHint")}
       </p>
     {:else}
       {#each groups as [day, sessions] (day)}
@@ -250,7 +261,7 @@
                   class="min-w-0 flex-1 truncate text-xs"
                   title={session.title || session.sessionId}
                 >
-                  {session.title || "Untitled session"}
+                  {session.title || t("settings.sessions.untitled")}
                 </span>
                 <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground">
                   {timeOf(session.createdAt)}
@@ -270,20 +281,22 @@
                 {#if session.hasTranscript === false}
                   <span
                     class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                    title="Kernel/steward session without a product transcript — managed by the kernel, not deletable here"
-                    >kernel-only</span
+                    title={t("settings.sessions.kernelOnlyTitle")}
+                    >{t("settings.sessions.kernelOnly")}</span
                   >
                 {/if}
                 <Button
                   size="icon"
                   variant="ghost"
                   class="h-6 w-6 shrink-0"
-                  aria-label="Delete session {session.title || session.sessionId}"
+                  aria-label={t("settings.sessions.deleteAria", {
+                    title: session.title || session.sessionId,
+                  })}
                   title={session.status === "running"
-                    ? "Running sessions cannot be deleted"
+                    ? t("settings.sessions.deleteBlockedRunning")
                     : session.hasTranscript === false
-                      ? "Kernel-only session — nothing to clean in the product layer"
-                      : "Delete session"}
+                      ? t("settings.sessions.deleteBlockedKernel")
+                      : t("settings.sessions.deleteTitle")}
                   disabled={session.status === "running" ||
                     session.hasTranscript === false ||
                     removing}
@@ -306,9 +319,10 @@
 
 <ConfirmDialog
   bind:open={confirmOpen}
-  title="Delete session"
-  description="Delete the transcript of “{removeTarget?.title ||
-    (removeTarget?.sessionId ?? '')}”? This cannot be undone."
+  title={t("settings.sessions.deleteTitle")}
+  description={t("settings.sessions.deleteConfirmBody", {
+    title: removeTarget?.title || (removeTarget?.sessionId ?? ""),
+  })}
   busy={removing}
   onConfirm={() => void confirmRemove()}
 />

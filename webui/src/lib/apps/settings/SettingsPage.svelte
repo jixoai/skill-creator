@@ -19,6 +19,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { useParams } from "$lib/shell";
+  import { t } from "$lib/i18n";
   import { loadAgentSettings } from "$lib/stores/agent.svelte";
   import { SETTINGS_SECTION_IDS, type SettingsSectionId } from "$lib/stores/settings-ui.svelte";
   import AgentSettingsSection from "$lib/components/settings/AgentSettingsSection.svelte";
@@ -32,13 +33,13 @@
 
   const sections: ReadonlyArray<{
     id: SettingsSectionId;
-    label: string;
+    labelKey: Parameters<typeof t>[0];
     icon: typeof IconCpu;
   }> = [
-    { id: "general", label: "General", icon: IconSettings2 },
-    { id: "model", label: "Model", icon: IconCpu },
-    { id: "agent", label: "Agent", icon: IconBot },
-    { id: "sessions", label: "Sessions", icon: IconHistory },
+    { id: "general", labelKey: "settingsPage.sectionGeneral", icon: IconSettings2 },
+    { id: "model", labelKey: "settingsPage.sectionModel", icon: IconCpu },
+    { id: "agent", labelKey: "settingsPage.sectionAgent", icon: IconBot },
+    { id: "sessions", labelKey: "settingsPage.sectionSessions", icon: IconHistory },
   ];
 
   // shell 路由 params（section 子路由经 zod enum 收窄；home 路由无 params → 默认 general）。
@@ -65,9 +66,9 @@
     class="flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 pb-4 pt-5"
   >
     <div>
-      <h1 class="text-lg font-semibold">Settings</h1>
+      <h1 class="text-lg font-semibold">{t("settingsPage.title")}</h1>
       <p class="mt-0.5 text-xs text-muted-foreground">
-        General, model routes, agent defaults, and session retention.
+        {t("settingsPage.subtitle")}
       </p>
     </div>
   </header>
@@ -80,7 +81,7 @@
     >
       <nav
         class="no-scrollbar flex flex-col gap-0.5 p-2 max-[720px]:flex-row max-[720px]:gap-1 max-[720px]:overflow-x-auto max-[720px]:[mask-image:linear-gradient(to_right,black_calc(100%-14px),transparent)]"
-        aria-label="Settings sections"
+        aria-label={t("settingsPage.navAria")}
       >
         {#each sections as item (item.id)}
           {@const Icon = item.icon}
@@ -89,12 +90,12 @@
             item.id
               ? 'bg-primary/10 text-primary'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-            aria-label={item.label}
+            aria-label={t(item.labelKey)}
             aria-current={section === item.id ? "true" : undefined}
             onclick={() => switchSection(item.id)}
           >
             <Icon class="h-3.5 w-3.5" />
-            {item.label}
+            {t(item.labelKey)}
           </button>
         {/each}
       </nav>
