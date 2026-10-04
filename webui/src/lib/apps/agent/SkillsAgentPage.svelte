@@ -567,7 +567,11 @@
     {/if}
 
     <main class="flex min-w-0 flex-1 flex-col" data-agent-chat-region="true">
-      <SessionFace onOpenFilePreview={openFilePreview} onOpenBashOutput={openBashOutput} />
+      <SessionFace
+        showStartDirections
+        onOpenFilePreview={openFilePreview}
+        onOpenBashOutput={openBashOutput}
+      />
     </main>
 
     {#if rightPanelVisible}

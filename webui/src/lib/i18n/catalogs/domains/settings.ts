@@ -48,10 +48,8 @@ export const settingsEn = {
   "settings.general.languageEnglish": "English",
   "settings.general.languageChinese": "中文",
 
-  /** ---------- Agent 分区（默认模式 + 行为 + Busy Enter） ---------- */
-  "settings.agent.subtitle":
-    "Defaults for new sessions; the panel header switches an existing session's mode.",
-  "settings.agent.defaultMode": "Default mode",
+  /** ---------- Agent 分区（行为 + Busy Enter） ---------- */
+  "settings.agent.subtitle": "Configure the agent's behavior and busy-session input policy.",
   "settings.agent.behavior": "Behavior",
   "settings.agent.llmPreset": "LLM preset",
   "settings.agent.approvalPolicy": "Approval policy",
@@ -295,9 +293,8 @@ export const settingsZh: Record<keyof typeof settingsEn, string> = {
   "settings.general.languageEnglish": "English",
   "settings.general.languageChinese": "中文",
 
-  /** ---------- Agent 分区（默认模式 + 行为 + Busy Enter） ---------- */
-  "settings.agent.subtitle": "新会话的默认值；已有会话经面板顶栏切换模式。",
-  "settings.agent.defaultMode": "默认模式",
+  /** ---------- Agent 分区（行为 + Busy Enter） ---------- */
+  "settings.agent.subtitle": "配置 agent 行为与忙碌会话的输入策略。",
   "settings.agent.behavior": "行为",
   "settings.agent.llmPreset": "LLM 预设",
   "settings.agent.approvalPolicy": "审批策略",

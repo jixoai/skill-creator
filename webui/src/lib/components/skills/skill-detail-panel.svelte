@@ -25,7 +25,7 @@
     clearUpdateReport,
     skillsUpdateState,
   } from "$lib/stores/skills-update.svelte";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
   import { SkillIdSchema, type SkillId } from "$shared/contracts/skills.js";
   import type { WorkspaceProviderTarget } from "$shared/contracts/workspaces.js";
@@ -151,17 +151,20 @@
       if (entry) {
         // mutation 反馈区分 succeeded/skipped/conflict/failed（AGENTS §7.2）。
         if (entry.status === "conflict") {
-          showToast(
-            entry.error
-              ? t("skillDetail.toastConflict", {
-                  name: entry.name,
-                  mode: modeLabel,
-                  error: entry.error,
-                })
-              : t("skillDetail.toastConflictPlain", { name: entry.name, mode: modeLabel }),
-          );
+          // 冲突态带 daemon 原文（entry.error）→ 错误 toast 叠加宽泛提示。
+          if (entry.error) {
+            showErrorToast(
+              t("skillDetail.toastConflict", {
+                name: entry.name,
+                mode: modeLabel,
+                error: entry.error,
+              }),
+            );
+          } else {
+            showToast(t("skillDetail.toastConflictPlain", { name: entry.name, mode: modeLabel }));
+          }
         } else if (entry.status === "failed") {
-          showToast(
+          showErrorToast(
             t("skillDetail.toastFailed", {
               name: entry.name,
               mode: modeLabel,
@@ -178,7 +181,7 @@
       }
       await loadDetail(target, current.id);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error));
+      showErrorToast(error instanceof Error ? error.message : String(error));
     } finally {
       toggling = false;
     }

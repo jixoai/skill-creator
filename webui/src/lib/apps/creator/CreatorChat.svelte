@@ -29,7 +29,7 @@
   import IconSparkles from "@lucide/svelte/icons/sparkles";
   import { goById } from "$lib/shell";
   import { t } from "$lib/i18n";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { requireRpc } from "$lib/stores/connection.svelte";
   import { agentComposer, handleComposerDrop } from "$lib/stores/agent-composer.svelte";
   import { agentSession, agentSessionsList } from "$lib/stores/agent.svelte";
@@ -140,7 +140,7 @@
           : t("creatorChat.draftRejected"),
       );
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error));
+      showErrorToast(error instanceof Error ? error.message : String(error));
     } finally {
       decidingSeq = null;
     }

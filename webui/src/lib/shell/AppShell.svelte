@@ -19,6 +19,7 @@
   import { page } from "$app/state";
   import { untrack } from "svelte";
   import { t } from "$lib/i18n";
+  import { classifyErrorHint } from "$lib/i18n/error-hints.js";
   import { parseSearchString } from "./search";
   import type { ZodSchema } from "zod";
   import type { Component } from "svelte";
@@ -134,7 +135,19 @@
 
 <div class="app-shell">
   {#if leafError}
-    <div class="app-shell-error">{t("shell.failedToLoad", { error: leafError })}</div>
+    <!-- 错误分层（task 4.5 δ 线）：宽泛家族提示主显 + 原文次行（调试关键，永不丢弃）；
+         未命中家族 = 原单行原样（零降级）。 -->
+    {@const leafHintKey = classifyErrorHint(leafError)}
+    <div class="app-shell-error app-shell-error-stack" role="alert">
+      {#if leafHintKey}
+        <p data-error-hint>{t(leafHintKey)}</p>
+        <p class="app-shell-error-detail" data-error-raw>
+          {t("shell.failedToLoad", { error: leafError })}
+        </p>
+      {:else}
+        <p>{t("shell.failedToLoad", { error: leafError })}</p>
+      {/if}
+    </div>
   {:else if leafComponent}
     {@const View = leafComponent}
     <View />
@@ -169,6 +182,18 @@
     height: 100%;
     color: var(--muted-foreground, gray);
     font-size: 0.875rem;
+  }
+  /* 错误分层（task 4.5）：原文次行弱化但不隐藏（调试关键）。 */
+  .app-shell-error-stack {
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem;
+    text-align: center;
+  }
+  .app-shell-error-detail {
+    font-size: 0.75rem;
+    opacity: 0.75;
+    overflow-wrap: anywhere;
   }
   .app-shell-loading {
     width: 100%;

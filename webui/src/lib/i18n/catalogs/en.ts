@@ -5,8 +5,23 @@
  *       公共类型（EnCatalog/MessageKey）在此拥有——消费面零改动。
  */
 import { enBase } from "./base/en.js";
-import { settingsEn, shellExtraEn, creatorExtraEn } from "./domains.js";
+import {
+  settingsEn,
+  shellExtraEn,
+  creatorExtraEn,
+  dashCountsEn,
+  errorHintsEn,
+  slashModesEn,
+} from "./domains.js";
 
-export const en = { ...enBase, ...settingsEn, ...shellExtraEn, ...creatorExtraEn } as const;
+export const en = {
+  ...enBase,
+  ...settingsEn,
+  ...shellExtraEn,
+  ...creatorExtraEn,
+  ...dashCountsEn,
+  ...errorHintsEn,
+  ...slashModesEn,
+} as const;
 export type EnCatalog = typeof en;
 export type MessageKey = keyof EnCatalog;

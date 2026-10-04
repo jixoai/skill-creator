@@ -1,20 +1,18 @@
 // @vitest-environment jsdom
 /**
- * Agent 面板 New Session 态验收测试（R12-B 6/7/8）。
+ * Agent 面板 New Session 态验收测试（R12-B 7/8 + 模式卡词条面退化）。
  *
  * 用户原始需求 [2026-09-12]（R12-B 走查）：
- * 「Pick a way to work with your skill library: 默认选中 General，底下 Mode 也
- * 默认选中 General，二者要同步」；「在 New Session 的模式下，顶部不该显示 +
- * 按钮」；「点击 + 不是立刻创建 Session，而是跳转到 New Session 的状态页。
+ * 「在 New Session 的模式下，顶部不该显示 + 按钮」；「点击 + 不是立刻创建
+ * Session，而是跳转到 New Session 的状态页。
  * 所以要区分清楚」。
  *
- * 修订 [2026-10-02]（design-critique R1 Gap 3）：空态模式选择卡删除——模式选择
- * 唯一入口 = composer 模式 chip（同一 pendingMode 数据源）。同步语义不变，
- * 测试从「卡片/chip 双向」改为「chip ↔ pendingMode 双向」。
+ * 修订 [2026-10-05]（Owner 裁决）：空态模式选择卡、composer 模式 chip/menu 与
+ * Settings 模式卡全部退役；四个模式作为 Agent 页空态 slash 起步方向展示。
+ * 候选点击只注入 command 文本；运行模式仍由 sendAgentPrompt 与内核负责。
  *
  * 正交意图：
- *   [1] 模式同步（6）：New Session 态 composer 模式 chip 默认 General
- *       （pendingMode=free）；chip ↔ pendingMode 双向同步（同一数据源）。
+ *   [1] 模式面退役：ComposerCard 不再渲染模式 chip，pendingMode 保持内核默认。
  *   [2] 两态渲染（7/8）：newSession 态（无 sessionId：空态提示 + composer 可输入，
  *       无 + 按钮，select 显示 New session…）vs session 态（+ 显示，转录流）；
  *       + 点击 = 回空态不建会话；会话创建只发生在首条消息（lazy，恰好一次）。
@@ -216,12 +214,6 @@ function emptyStateHint(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-empty-state="new-session"]');
 }
 
-function modeChip(): HTMLButtonElement {
-  const chip = document.querySelector<HTMLButtonElement>('button[aria-label="Session mode"]');
-  if (!chip) throw new Error("mode chip not rendered");
-  return chip;
-}
-
 function plusButton(): HTMLButtonElement | null {
   return document.querySelector<HTMLButtonElement>('button[aria-label="New session"]');
 }
@@ -230,28 +222,6 @@ function composer(): HTMLTextAreaElement {
   const textarea = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']");
   if (!textarea) throw new Error("composer textarea not rendered");
   return textarea;
-}
-
-async function openModeMenu(): Promise<void> {
-  modeChip().click();
-  await vi.waitFor(() => {
-    if (document.querySelector('[data-slot="dropdown-menu-content"]') === null) {
-      throw new Error("mode menu content not rendered");
-    }
-  });
-}
-
-function modeMenuItems(): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]')];
-}
-
-/** 经 composer 模式 chip 菜单选一个模式（R1 减法后空态模式选择的唯一入口）。 */
-async function selectModeViaChip(label: string): Promise<void> {
-  await openModeMenu();
-  const item = modeMenuItems().find((item) => item.textContent?.includes(label));
-  if (!item) throw new Error(`mode menu item ${label} not rendered`);
-  item.click();
-  flushSync();
 }
 
 /** 在 composer 输入草稿（真 store bind:value）并按 Enter 提交。 */
@@ -308,47 +278,24 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-describe("R12-B 6: New Session mode sync (composer chip <-> pendingMode)", () => {
-  it("defaults the composer chip to General in the new-session state and shows the hint", () => {
+describe("mode card retirement", () => {
+  it("does not render a mode chip and keeps the empty-state composer available", () => {
     const ctx = mountPanel();
 
     expect(agentSession.sessionId).toBeNull();
-    expect(modeChip().textContent).toContain("General");
+    expect(document.querySelector('button[aria-label="Session mode"]')).toBeNull();
     expect(agentSession.pendingMode).toBe("free");
     expect(emptyStateHint()?.textContent).toContain("Send a message to start a session");
     ctx.cleanup();
   });
 
-  it("selecting a mode from the composer chip updates pendingMode without creating a session", async () => {
+  it("the first message keeps the existing sendAgentPrompt mode path", async () => {
     const ctx = mountPanel();
 
-    await selectModeViaChip("Create");
-    expect(modeChip().textContent).toContain("Create");
-    expect(modeChip().textContent).not.toContain("General");
-    expect(agentSession.pendingMode).toBe("create");
-    expect(sessionCreate).not.toHaveBeenCalled();
-    ctx.cleanup();
-  });
-
-  it("a programmatic pendingMode change is reflected by the composer chip (same data source)", async () => {
-    const ctx = mountPanel();
-
-    agentSession.pendingMode = "explore";
-    flushSync();
-    expect(modeChip().textContent).toContain("Explore");
-    expect(modeChip().textContent).not.toContain("General");
-    expect(sessionCreate).not.toHaveBeenCalled();
-    ctx.cleanup();
-  });
-
-  it("the first message creates the session with the selected mode (lazy, exactly once)", async () => {
-    const ctx = mountPanel();
-
-    await selectModeViaChip("Create");
     submitDraft("hello");
 
     await vi.waitFor(() => expect(sessionCreate).toHaveBeenCalledTimes(1));
-    expect(sessionCreate).toHaveBeenCalledWith({ mode: "create" });
+    expect(sessionCreate).toHaveBeenCalledWith({ mode: "free" });
     await vi.waitFor(() =>
       expect(sessionPrompt).toHaveBeenCalledWith({
         sessionId: "agent-s2",
@@ -396,7 +343,6 @@ describe("R12-B 7/8: two-state rendering and the + entry", () => {
 
     expect(plusButton()).not.toBeNull();
     expect(emptyStateHint()).toBeNull();
-    expect(modeChip().textContent).toContain("General");
     ctx.cleanup();
   });
 
@@ -415,7 +361,6 @@ describe("R12-B 7/8: two-state rendering and the + entry", () => {
     // 空态复位：提示可见且默认回到 General。
     expect(emptyStateHint()).not.toBeNull();
     expect(agentSession.pendingMode).toBe("free");
-    expect(modeChip().textContent).toContain("General");
     // 回空态后 + 消失（7）。
     expect(plusButton()).toBeNull();
     ctx.cleanup();

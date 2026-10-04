@@ -15,7 +15,8 @@
   import { useSearch, goById } from "$lib/shell";
   import SourceCard from "$lib/components/source-card.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
-  import { showToast } from "$lib/toast.svelte";
+  import ErrorHint from "$lib/components/error-hint.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
   import {
     addSource,
@@ -174,7 +175,7 @@
         showToast(t("reposScreen.removedSource", { label: source.label }));
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error));
+      showErrorToast(error instanceof Error ? error.message : String(error));
     } finally {
       removeBusy = false;
     }
@@ -215,7 +216,9 @@
           {t("reposScreen.loadingSources")}
         </p>
       {:else if repositorySourcesState.error}
-        <p class="py-6 text-center text-xs text-destructive">{repositorySourcesState.error}</p>
+        <div class="py-6 text-center text-xs text-destructive">
+          <ErrorHint error={repositorySourcesState.error} />
+        </div>
       {:else if filteredSources.length === 0}
         <p class="py-6 text-center text-xs text-muted-foreground">
           {t("reposScreen.noSources", { query: committedQuery })}

@@ -28,6 +28,10 @@
 
   export const SLASH_COMMANDS: readonly SlashCommand[] = [
     { command: "/compact", descriptionKey: "slashMenu.cmdCompact" },
+    { command: "/general", descriptionKey: "slashMenu.cmdGeneral" },
+    { command: "/create", descriptionKey: "slashMenu.cmdCreate" },
+    { command: "/manage", descriptionKey: "slashMenu.cmdManage" },
+    { command: "/explore", descriptionKey: "slashMenu.cmdExplore" },
     // W4：忙碌 Enter 偏好（客户端命令——选中即本地生效，不发送）。
     { command: "/queue", descriptionKey: "slashMenu.cmdQueue" },
     { command: "/steer", descriptionKey: "slashMenu.cmdSteer" },

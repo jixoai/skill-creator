@@ -340,11 +340,59 @@ describe("SkillsDashboard 三屏网格", () => {
     expect(textOf(rowA as HTMLElement)).toContain("alpha");
     expect(textOf(rowA as HTMLElement)).toContain("claude-code");
 
-    // provider chips：All 3 + Claude Code 2 + ZCode 1。
+    // provider chips：All（ε 线收敛：不带已载行数——与 header 窗口数字冗余）
+    // + Claude Code 2 + ZCode 1（per-provider facet 计数保留）。
     const chips = [...root.querySelectorAll('[aria-label="Filter by provider"] button')];
     expect(chips.map((chip) => textOf(chip as HTMLElement))).toEqual(
-      expect.arrayContaining(["All 3", "Claude Code 2", "ZCode 1"]),
+      expect.arrayContaining(["All", "Claude Code 2", "ZCode 1"]),
     );
+  });
+
+  it("converges the header count on the workspace total (window form only when fewer visible)", async () => {
+    // ε 线计数收敛（2026-10-05「少即是多」）：header 主显 providers 摘要聚合的
+    // workspace 总量（q/分页无关）；可见行数 < 总量（分页/筛选窗口）才以
+    // 「Showing N of M」窗口式表达；相等时总量单显（单复数由 key 承担）。
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(
+      log,
+      listWorkspaceOutput([
+        { id: SK_A, providerId: "claude-code", name: "alpha" },
+        { id: SK_B, providerId: "claude-code", name: "beta" },
+        { id: SK_C, providerId: "zcode", name: "gamma" },
+      ]),
+    );
+    const root = mountDashboard();
+    await settle();
+
+    // header 计数 = 标题行 Badge（chips 的计数 span 嵌套在 button 内，不在此选择器）。
+    const headerCountOf = (scope: HTMLElement) =>
+      textOf(scope.querySelector('[data-screen="skills"] header > div > span') as HTMLElement);
+    // providers 摘要 2 + 1 = 3，可见 3：总量单显（复数）。
+    expect(headerCountOf(root)).toBe("3 skills");
+
+    // 单技能 workspace：单数 key（"1 skill"，不落 "1 skills" 语法缺陷）。
+    const one = makeRpcLog();
+    activeLog = one;
+    installRpc(one, listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]));
+    const rootOne = mountDashboard();
+    await settle();
+    expect(headerCountOf(rootOne)).toBe("1 skill");
+
+    // 分页窗口：providers 总量（2+3=5）> 已载 1 行 → 窗口式表达。
+    const windowed = listWorkspaceOutput(
+      [{ id: SK_A, providerId: "claude-code", name: "alpha" }],
+      "cur-1",
+    );
+    const windowProviders = windowed.providers as Array<{ skillCount: number }>;
+    windowProviders[0]!.skillCount = 2;
+    windowProviders[1]!.skillCount = 3;
+    const paged = makeRpcLog();
+    activeLog = paged;
+    installRpc(paged, windowed);
+    const rootPaged = mountDashboard();
+    await settle();
+    expect(headerCountOf(rootPaged)).toBe("Showing 1 of 5 skills");
   });
 
   it("navigates master-detail identity ?provider=&skill= on row click (dual params)", async () => {

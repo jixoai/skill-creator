@@ -58,6 +58,7 @@ vi.mock("../DisclosureRow.svelte", async () => ({
 }));
 
 import { agentSession, type PanelItem } from "$lib/stores/agent.svelte";
+import { agentComposer } from "$lib/stores/agent-composer.svelte";
 import TranscriptView from "../TranscriptView.svelte";
 
 type TranscriptViewProps = ComponentProps<typeof TranscriptView>;
@@ -156,6 +157,28 @@ describe("TranscriptView", () => {
     expect(status?.className).toContain("text-destructive");
     expect(host.textContent).toContain("↑ 9");
     expect(host.textContent?.match(/interrupted/g)).toHaveLength(1);
+  });
+
+  it("offers four slash directions in the Agent empty state and injects one into the composer", () => {
+    agentSession.sessionId = null;
+    agentSession.items = [];
+    agentComposer.text = "";
+    const focusComposer = vi.fn();
+    const host = mountView({ showStartDirections: true, focusComposer });
+    flushSync();
+
+    const buttons = [...host.querySelectorAll<HTMLButtonElement>("[data-start-direction]")];
+    expect(buttons.map((button) => button.dataset.startDirection)).toEqual([
+      "/general",
+      "/create",
+      "/manage",
+      "/explore",
+    ]);
+
+    buttons[1]?.click();
+    flushSync();
+    expect(agentComposer.text).toBe("/create ");
+    expect(focusComposer).toHaveBeenCalledTimes(1);
   });
 
   it("does not repeat a failure reason when the turn has no usage metrics", () => {

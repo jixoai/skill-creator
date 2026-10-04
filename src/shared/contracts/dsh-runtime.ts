@@ -162,11 +162,10 @@ export const DshAgentModeSchema = z.enum(["create", "manage", "explore", "free"]
 /** Agent 会话模式。 */
 export type DshAgentMode = z.infer<typeof DshAgentModeSchema>;
 
-/** 模式目录条目（browser-safe：UI 渲染卡/chip 的单一事实源）。 */
+/** 模式目录条目（browser-safe：历史会话事实行的单一事实源）。 */
 export interface DshAgentModeCatalogEntry {
   id: DshAgentMode;
   label: string;
-  description: string;
 }
 
 /** 模式目录（顺序即 UI 展示序；与 daemon kernel 注册表对齐，单测校验一致性）。 */
@@ -174,25 +173,18 @@ export const DSH_AGENT_MODES: readonly DshAgentModeCatalogEntry[] = [
   {
     id: "create",
     label: "Create",
-    description:
-      "Author new skills: frontmatter law, progressive disclosure, validation-first workflow.",
   },
   {
     id: "manage",
     label: "Manage",
-    description:
-      "Curate the local library: dedupe, merge, optimize, toggle, and update installed skills.",
   },
   {
     id: "explore",
     label: "Explore",
-    description:
-      "Search skill sources, read candidates, and analyze fit against your requirements.",
   },
   {
     id: "free",
     label: "General",
-    description: "One session with everything available; focused modes are one switch away.",
   },
 ];
 

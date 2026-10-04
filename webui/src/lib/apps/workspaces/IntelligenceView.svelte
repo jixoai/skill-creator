@@ -35,7 +35,7 @@
     FINDING_PROPOSE_TEMPLATES,
     type FindingProposeAction,
   } from "$lib/apps/workspaces/finding-propose-templates.js";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import type {
@@ -50,6 +50,7 @@
   import { WorkspaceIdSchema, ProviderIdSchema } from "$shared/contracts/workspaces.js";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
+  import ErrorHint from "$lib/components/error-hint.svelte";
   import IconAlert from "@lucide/svelte/icons/triangle-alert";
   import IconGitMerge from "@lucide/svelte/icons/git-merge";
   import IconGraph from "@lucide/svelte/icons/network";
@@ -283,7 +284,7 @@
     try {
       const { proposal: decided, error } = await approveProposal(proposal.id);
       if (error) {
-        showToast(error);
+        showErrorToast(error);
         return;
       }
       if (!decided) return; // 请求已被取代
@@ -321,7 +322,7 @@
     rejectingId = proposal.id;
     try {
       const { error } = await rejectProposal(proposal.id);
-      if (error) showToast(error);
+      if (error) showErrorToast(error);
       await refreshProposals();
     } finally {
       rejectingId = null;
@@ -430,7 +431,7 @@
       </div>
     {:else if skillsState.error}
       <div class="flex flex-col items-start gap-2 py-6 text-xs text-destructive">
-        <p class="break-words">{skillsState.error}</p>
+        <ErrorHint error={skillsState.error} />
         {#if providerTarget}
           <Button
             variant="outline"

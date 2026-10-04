@@ -3,8 +3,10 @@
   「库快照行/self-skill banner → Global tab skills 屏页脚（冒烟锚点随迁 en 逐字）；
   位置索引区删除（Agents screen 取代）」。
   正交意图：
-  1. 库快照屏读摘要（workspace.list 数据驱动渲染；web-mode 冒烟锚点
-     "skills across N agent locations" en 逐字保留——test/web-mode-smoke.test.ts）。
+  1. 库快照 sr-only 冒烟锚点（workspace.list 数据驱动；web-mode 锚点
+     "skills across N agent locations" en 逐字保留——test/web-mode-smoke.test.ts。
+     ε 线计数收敛，2026-10-05：可见计数行退役——跨全 workspace 的库快照与
+     skills 列表作用域（当前 ws）不符，主显口径迁 skills header；锚点转 sr-only）。
   2. self-skill 冲突 banner 随迁（组件原样复用，见 self-skill-conflict-banner）。
   3. Health check 入口（manage 模式 agent 审计唯一入口，种子 prompt 逐字不变）。
   4. 导入 workspace 管理（Remove 可达性：AGENTS §7.2「Remove Workspace 必须在
@@ -13,7 +15,7 @@
 <script lang="ts">
   import { removeWorkspace, workspaceState } from "$lib/store.svelte";
   import { startAgentAction } from "$lib/stores/agent.svelte";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
   import type { ImportedWorkspace } from "$lib/types";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
@@ -28,10 +30,11 @@
   );
 
   /**
-   * 计数快照（屏读摘要行 + 冒烟锚点，恒复数）。Imported ws tab 上下文 =
-   * 当前 ws 的 providers 计数（专注单 Workspace——同屏数字与过滤视图不打架，
-   * vision P2-6）；Global/缺席 = 跨全部 workspace 的库快照（管理中枢语义）。
-   * 冒烟锚点格式不变（key 同一、仅数值语境化，正则 \\d+ 恒匹配）。
+   * 计数快照（sr-only 冒烟锚点，恒复数）。Imported ws tab 上下文 =
+   * 当前 ws 的 providers 计数（专注单 Workspace）；Global/缺席 = 跨全部
+   * workspace 的库快照（管理中枢语义，仅供读屏/冒烟——可见数字已收敛到
+   * skills header 的 workspace 总量口径）。锚点格式不变（key 同一、仅数值
+   * 语境化，正则 \d+ 恒匹配）。
    */
   let { wsId }: { wsId?: string } = $props();
   const librarySnapshot = $derived.by(() => {
@@ -80,7 +83,7 @@
         showToast(t("dashboard.removedToast", { label: workspace.label }));
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error));
+      showErrorToast(error instanceof Error ? error.message : String(error));
     } finally {
       removeBusy = false;
     }
@@ -88,7 +91,8 @@
 </script>
 
 <footer class="shrink-0 border-t border-border">
-  <!-- 库快照屏读摘要（web-mode 冒烟锚点：en 逐字，test/web-mode-smoke.test.ts）。 -->
+  <!-- 库快照 sr-only 冒烟锚点（web-mode 冒烟：en 逐字，test/web-mode-smoke.test.ts）。
+       可见计数行已退役（ε 线计数收敛）：同屏只保留 header 的总量+窗口两种数字语义。 -->
   <p class="sr-only">
     {t("dashboard.librarySnapshot", {
       skills: librarySnapshot.skills,
@@ -98,12 +102,6 @@
   <div
     class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 text-xs text-muted-foreground"
   >
-    <span class="tabular-nums">
-      {t("dashboard.snapshotCounts", {
-        skills: librarySnapshot.skills,
-        providers: librarySnapshot.providers,
-      })}
-    </span>
     <button
       type="button"
       class="flex min-h-7 items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"

@@ -34,9 +34,11 @@
   let {
     onOpenFilePreview,
     onOpenBashOutput,
+    showStartDirections = false,
   }: {
     onOpenFilePreview?: (path: string) => void;
     onOpenBashOutput?: () => void;
+    showStartDirections?: boolean;
   } = $props();
 
   let root = $state<HTMLElement | null>(null);
@@ -82,7 +84,7 @@
 <DropOverlay />
 
 <div bind:this={root} class="flex h-full min-h-0 flex-1 flex-col" data-session-face="true">
-  <TranscriptView {focusComposer} {onOpenFilePreview} {onOpenBashOutput} />
+  <TranscriptView {focusComposer} {onOpenFilePreview} {onOpenBashOutput} {showStartDirections} />
 
   {#if agentSession.promptError ?? agentSession.error}
     <div

@@ -357,7 +357,7 @@ export const zhBase: Record<keyof typeof enBase, string> = {
 
   /** ---------- 转录流 ---------- */
   "transcript.emptyPrimary": "发送一条消息即可开始会话。",
-  "transcript.emptySecondary": "用下方的模式选择器决定 agent 的工作方式。",
+  "transcript.emptySecondary": "输入消息，或使用斜杠命令开始。",
   "transcript.turnDefault": "轮次",
   "transcript.modeAria": "模式从 {from} 切换为 {to}",
   "transcript.modeTag": "模式",
@@ -535,7 +535,6 @@ export const zhBase: Record<keyof typeof enBase, string> = {
   "dashboard.screenRepos": "Repos",
   "dashboard.switcherAria": "Dashboard 屏幕",
   "dashboard.librarySnapshot": "{skills} 个技能分布在 {providers} 个 agent 位置。",
-  "dashboard.snapshotCounts": "{skills} 个技能 · {providers} 个位置",
   "dashboard.healthCheck": "库健康检查",
   "dashboard.healthCheckTitle": "库健康检查——审计重复、描述含糊与过期技能，然后提出修复建议",
   "dashboard.importedWorkspaces": "已导入工作区",

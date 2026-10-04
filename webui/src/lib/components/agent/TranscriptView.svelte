@@ -2,15 +2,14 @@
   用户原始需求 [2026-09-08]：「我们可以简单理解成，我们在 skill creator 的右侧
   嵌入了一个聊天对话框。」——2026-09-12 redesign §3.2/§3.3：转录流行渲染器集合
   从 AgentPanel 机械拆出（行为零变化），AgentPanel 收敛为容器。
-  修订 [2026-10-02]（design-critique R1 Gap 3/8）：空态模式选择卡删除——模式
-  选择唯一入口收敛到 composer 模式 chip（同一数据源 pendingMode，双向同步
-  语义不变）；空态只留一句提示。
+  修订 [2026-10-05]（模式卡词条面退化）：空态模式选择卡与 composer chip 退役，
+  Agent 页空态只提供四条 slash 起步方向；点击只把 command 注入 composer。
   正交意图：
   1. 转录流（§3.2 DisclosureRow 语法，原子类在 agent-flow.css）：TurnDivider /
      TurnEnd 药丸 / UserMessage（附件上·气泡·hover 操作行下）/ AssistantMessage
      （全宽无气泡 markstream，htmlPolicy=escape 不变）/ ThinkingRow（流式自动
      展开+末行摘要扫光，定稿收起+首行摘要）/ ToolRow（AgentToolRow）/ 审批卡 /
-     ModeRow / TurnStatus（Working 扫光 + 15s 计时）；空会话态 = 单句提示
+     ModeRow / TurnStatus（Working 扫光 + 15s 计时）；空会话态 = 起步方向候选
      （不 eager 建会话）。
   2. 滚动跟随（增高前贴底判定 + ResizeObserver）与 back-to-bottom FAB（>200px）；
      copy → check 1s 反馈；edit 回填 / resend（append-only 语义，§4.3）。
@@ -29,10 +28,11 @@
   import IconBot from "@lucide/svelte/icons/bot";
   import { showToast } from "$lib/toast.svelte";
   import { agentSession, sendAgentPrompt } from "$lib/stores/agent.svelte";
-  import { beginComposerEdit } from "$lib/stores/agent-composer.svelte";
+  import { agentComposer, beginComposerEdit } from "$lib/stores/agent-composer.svelte";
   import { t } from "$lib/i18n";
   import { DSH_AGENT_MODES } from "$shared/contracts/dsh-runtime.js";
   import AgentApprovalCard from "./AgentApprovalCard.svelte";
+  import AgentStartDirections from "./AgentStartDirections.svelte";
   import AgentToolRow from "./AgentToolRow.svelte";
   import DisclosureRow from "./DisclosureRow.svelte";
   import { formatTokens, formatElapsed } from "./format";
@@ -65,10 +65,12 @@
     focusComposer,
     onOpenFilePreview,
     onOpenBashOutput,
+    showStartDirections = false,
   }: {
     focusComposer?: () => void;
     onOpenFilePreview?: (path: string) => void;
     onOpenBashOutput?: () => void;
+    showStartDirections?: boolean;
   } = $props();
 
   let scrollBody = $state<HTMLElement | null>(null);
@@ -250,6 +252,12 @@
       rememberScroll(body, agentSession.sessionId);
     }
   }
+
+  /** 空态方向候选只注入 slash command；模式仍由发送链路与内核负责。 */
+  function injectStartDirection(command: string): void {
+    agentComposer.text = `${command} `;
+    focusComposer?.();
+  }
 </script>
 
 <div class="relative min-h-0 flex-1">
@@ -268,8 +276,7 @@
     }}
   >
     {#if !agentSession.sessionId}
-      <!-- 空态提示（R1 减法后）：模式选择唯一入口 = composer 模式 chip（同一
-           pendingMode 数据源）；会话由首条消息惰性创建，不 eager 建会话。 -->
+      <!-- 会话由首条消息惰性创建；Agent 页提供方向候选作为 composer 起点。 -->
       <div
         class="flex h-full flex-col items-center justify-center gap-2 px-4 text-center"
         data-empty-state="new-session"
@@ -277,9 +284,16 @@
         <p class="max-w-[280px] text-xs text-muted-foreground">
           {t("transcript.emptyPrimary")}
         </p>
-        <p class="max-w-[280px] text-xs text-muted-foreground">
-          {t("transcript.emptySecondary")}
-        </p>
+        {#if showStartDirections}
+          <p class="max-w-[360px] text-xs text-muted-foreground">
+            {t("agentStartDirections.description")}
+          </p>
+          <AgentStartDirections onSelect={injectStartDirection} />
+        {:else}
+          <p class="max-w-[280px] text-xs text-muted-foreground">
+            {t("transcript.emptySecondary")}
+          </p>
+        {/if}
       </div>
     {:else}
       {#each agentSession.items as item (item.seq)}

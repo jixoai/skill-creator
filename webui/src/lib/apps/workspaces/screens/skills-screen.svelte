@@ -5,8 +5,11 @@
   正交意图：
   1. 平铺列表数据面：skills.listWorkspace（q 服务端预过滤 + nextCursor load-more），
      store 纪律 = latest-request-wins + 连接代次门（dashboard-skills store）。
-  2. 筛选投影：provider chips（All + 计数）+ duplicates-only 开关（纯函数投影，
-     URL search 是唯一真相源）。
+  2. 筛选与计数投影（ε 线计数收敛，2026-10-05「少即是多」）：provider chips
+     （per-provider facet 计数；All 不带数——已载行数与 header 窗口语义完全冗余）
+     + duplicates-only 开关（纯函数投影，URL search 是唯一真相源）+ header 主显
+     workspace 技能总量（providers 摘要聚合，q/分页无关；可见行数不等时以
+     「显示 N / 共 M」窗口式表达——一屏至多两种数字语义，每个数字带名词）。
   3. skills.search 补全式搜索：非空 q 去抖触发 BM25 检索，命中投影到当前 ws
      作用域；q 包含式未覆盖的模糊命中以补全条呈现（点击落位或改写 q）。
   4. 虚拟化窗口：>200 行时简单窗口化（computeDashboardWindow 纯数学；只减 DOM）。
@@ -43,6 +46,7 @@
   import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
   import type { SkillId } from "$shared/contracts/skills.js";
   import { Badge } from "$lib/components/ui/badge";
+  import ErrorHint from "$lib/components/error-hint.svelte";
   import SkillDetailPanel from "$lib/components/skills/skill-detail-panel.svelte";
   import DashboardFooter from "./dashboard-footer.svelte";
   import IconArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
@@ -298,7 +302,24 @@
   }
 
   const listCount = $derived(visibleRows.length);
-  const totalLoaded = $derived(dashboardSkillsState.rows.length);
+  /** ε 线计数收敛——屏上唯一主显口径：workspace 技能总量（server provider 摘要
+   *  聚合；q 无关、分页无关——「到底有多少技能」不再被渲染窗口/分页上限冒充）。 */
+  const workspaceSkillTotal = $derived(
+    dashboardSkillsState.providers.reduce((total, provider) => total + provider.skillCount, 0),
+  );
+  /** header 计数文案：总量主显（单复数由 key 承担）；可见行数 < 总量（筛选/分页/
+   *  检索窗口）才出现第二个数字，以「显示 N / 共 M」窗口式表达——一屏至多两种
+   *  数字语义，每个数字带明确名词。 */
+  const headerCountText = $derived.by(() => {
+    if (listCount < workspaceSkillTotal) {
+      return t("skillsScreen.showingOf", { visible: listCount, total: workspaceSkillTotal });
+    }
+    // 防御：providers 摘要缺席/落后于已载行时以可见行数兜底（不显虚假小总量）。
+    const count = Math.max(listCount, workspaceSkillTotal);
+    return count === 1
+      ? t("skillsScreen.totalCountOne", { count })
+      : t("skillsScreen.totalCount", { count });
+  });
 </script>
 
 <section class="screen skills-screen" data-screen="skills" aria-label={t("skillsScreen.aria")}>
@@ -311,7 +332,7 @@
           title={t("skillsScreen.refreshing")}
         />
       {:else}
-        <Badge variant="secondary" class="tabular-nums">{listCount}</Badge>
+        <Badge variant="secondary" class="tabular-nums">{headerCountText}</Badge>
       {/if}
       <div class="ml-auto flex shrink-0 items-center gap-1">
         <button
@@ -356,7 +377,8 @@
         {searchFallbackError}
       </p>
     {/if}
-    <!-- provider chips：All + 每 provider 计数（联动 Agents screen 的选中态真相）。
+    <!-- provider chips：per-provider facet 计数（联动 Agents screen 的选中态真相）。
+         All chip 不带计数（ε 线收敛）：已载行数与 header 窗口数字完全冗余。
          单行横滚（走查 13-fix）：真实目录 76 chips wrap 九行会把 master-detail 挤到
          0px——不换行、横向内滚，header 高度退回单行。零计数折叠（2.2 处置批
          P2-2）：非零 chips 前置，零计数收进「+N providers」溢出项按需展开。 -->
@@ -371,7 +393,6 @@
         onclick={() => setSearch({ provider: undefined })}
       >
         {t("skillsScreen.chipAll")}
-        <span class="tabular-nums opacity-70">{totalLoaded}</span>
       </button>
       {#each nonZeroChips as chip (chip.providerId)}
         <button
@@ -486,7 +507,7 @@
       >
         {#if dashboardSkillsState.error && dashboardSkillsState.rows.length === 0}
           <div class="flex flex-col items-start gap-2 px-4 py-6 text-xs text-destructive">
-            <p class="break-words">{dashboardSkillsState.error}</p>
+            <ErrorHint error={dashboardSkillsState.error} />
             <button
               class="underline underline-offset-2"
               onclick={() => void loadDashboardSkills(wsId, query.trim())}

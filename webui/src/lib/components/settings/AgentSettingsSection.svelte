@@ -1,17 +1,14 @@
 <!--
   设置面 Agent 分区（add-agent-settings-modes 迭代：自 AgentConfigSection 迁入）。
   正交意图：
-  1. 默认模式：四模式卡（shared DSH_AGENT_MODES 目录，单一事实源；free 卡明示
-     token 成本）——新会话继承；当前会话经面板 header 的模式 chip 切换。
-  2. 行为：LLM preset 与 approval policy 的行内切换（ask/never 语义沿用）。
-  3. Busy Enter（C3）：忙碌中 Enter 偏好（queue/steer）的设置行——与 /queue
+  1. 行为：LLM preset 与 approval policy 的行内切换（ask/never 语义沿用）。
+  2. Busy Enter（C3）：忙碌中 Enter 偏好（queue/steer）的设置行——与 /queue
      //steer 命令同键同源（agent-submission 的 $state 镜像 + localStorage），
      选中即生效无需保存。
 -->
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { t } from "$lib/i18n";
-  import { DSH_AGENT_MODES } from "$shared/contracts/dsh-runtime.js";
   import {
     agentRuntimeConfig,
     loadAgentSettings,
@@ -69,30 +66,6 @@
   </div>
 
   {#if view}
-    <section class="space-y-1.5" aria-label={t("settings.agent.defaultMode")}>
-      <span class="text-[11px] font-medium text-muted-foreground"
-        >{t("settings.agent.defaultMode")}</span
-      >
-      <div class="grid grid-cols-2 gap-1.5">
-        {#each DSH_AGENT_MODES as entry (entry.id)}
-          <button
-            class="rounded-md border p-2 text-left transition-colors {view.settings.defaultMode ===
-            entry.id
-              ? 'border-primary bg-primary/10'
-              : 'border-border hover:bg-muted'}"
-            aria-pressed={view.settings.defaultMode === entry.id}
-            disabled={agentRuntimeConfig.updating}
-            onclick={() => void apply({ defaultMode: entry.id })}
-          >
-            <span class="flex items-center gap-1 font-medium">{entry.label}</span>
-            <span class="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
-              {entry.description}
-            </span>
-          </button>
-        {/each}
-      </div>
-    </section>
-
     <section class="space-y-1.5" aria-label={t("settings.agent.behavior")}>
       <span class="text-[11px] font-medium text-muted-foreground"
         >{t("settings.agent.behavior")}</span

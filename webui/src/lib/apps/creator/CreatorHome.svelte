@@ -19,7 +19,7 @@
   agentSession 单例，Agent 页 ?session= 深链已覆盖直达场景）。
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPen from "@lucide/svelte/icons/file-pen-line";
   import IconPlus from "@lucide/svelte/icons/plus";
@@ -39,6 +39,7 @@
   } from "$lib/stores/agent.svelte";
   import { SkillIdSchema } from "$shared/contracts/skills.js";
   import { sessionDisplayName } from "$lib/apps/agent/session-tree.js";
+  import AgentStartDirections from "$lib/components/agent/AgentStartDirections.svelte";
   import { buildCreatorSeedPrompt, creatorSessionsForWorkspace } from "./creator-sessions.js";
   import CreatorChat from "./CreatorChat.svelte";
 
@@ -85,6 +86,7 @@
   let triggerText = $state("");
   let examplesText = $state("");
   let templateId = $state("");
+  let creatorChatHost = $state<HTMLElement | null>(null);
 
   const groupedTemplates = $derived(
     Object.entries(TEMPLATE_CATEGORIES).map(([category, meta]) => ({
@@ -101,6 +103,23 @@
   const importedWorkspaces = $derived(
     workspaceState.workspaces.filter((workspace) => workspace.kind === "directory"),
   );
+
+  // 方向候选切入 Chat 后，把 seed 落点交给新会话 composer，并在真实 textarea
+  // 挂载后聚焦；候选不写 pendingMode，也不切换运行中的会话模式。
+  function startDirection(command: string): void {
+    if (wsId === undefined || isGlobal) return;
+    const workspace = workspaceState.workspaces.find((item) => item.id === wsId);
+    const cwd = workspace?.kind === "directory" ? workspace.path : undefined;
+    beginNewAgentSession({
+      target: { workspaceId: wsId },
+      ...(cwd !== undefined ? { cwd } : {}),
+    });
+    agentPanel.seed = { text: `${command} ` };
+    view = "chat";
+    void tick().then(() =>
+      creatorChatHost?.querySelector<HTMLTextAreaElement>("textarea")?.focus(),
+    );
+  }
 
   /**
    * 「让 agent 起草」（design §2 seed）：结构化 prompt + target/cwd 归属 +
@@ -266,7 +285,7 @@
 
       <!-- 主：capture 引导卡 或 所选会话 Chat。 -->
       {#if view === "chat"}
-        <main class="flex min-w-0 flex-1 flex-col">
+        <main bind:this={creatorChatHost} class="flex min-w-0 flex-1 flex-col">
           <CreatorChat />
         </main>
       {:else}
@@ -274,6 +293,15 @@
           <div class="mx-auto w-full max-w-xl px-5 py-6" data-creator-guide="true">
             <h2 class="text-sm font-medium">{t("creatorHome.guideTitle")}</h2>
             <p class="mt-1 text-xs text-muted-foreground">{t("creatorHome.guideIntro")}</p>
+            <div class="mt-3 space-y-1.5" data-creator-start-directions="true">
+              <p class="text-[11px] font-medium text-muted-foreground">
+                {t("agentStartDirections.title")}
+              </p>
+              <p class="text-[11px] text-muted-foreground">
+                {t("agentStartDirections.description")}
+              </p>
+              <AgentStartDirections onSelect={startDirection} />
+            </div>
             <p
               class="mt-1.5 rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground"
             >

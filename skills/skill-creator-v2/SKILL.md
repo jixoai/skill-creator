@@ -35,6 +35,22 @@ cursor / zcode 等 Agent 的 skills root）两层作用域组织。
 └─ 结构化批量消费（推荐常驻）─────────> 注册 MCP: skill-creator mcp（stdio，只读）
 ```
 
+## 四种起步方向
+
+在 Agent 新会话空态或 Creator capture 引导卡中，可以点选四个方向 chip。它们只是
+把对应的 slash command（带尾随空格）预填到 composer，发送前可以继续补充或修改：
+
+| 方向    | 起步命令   | 用途                                 |
+| ------- | ---------- | ------------------------------------ |
+| General | `/general` | 从完整能力面开始一段通用会话         |
+| Create  | `/create`  | 起草、校验或改写技能                 |
+| Manage  | `/manage`  | 整理本地技能库，处理重复、启停与更新 |
+| Explore | `/explore` | 搜索技能来源并评估候选是否适配       |
+
+命令是会话起点提示，不是全局模式开关；发送仍沿现有 `sendAgentPrompt` 链路携带
+`prompt.mode`。运行中的会话如需切换，继续使用内核已有的 `setMode` 路径。`$` 保留
+技能引用语义（opaque `{workspaceId, providerId, skillId}` 展开），不承载起步方向。
+
 ## 硬规则
 
 - **只读面**：CLI/MCP 通路对技能数据只读；安装、更新、启停、编辑、删除都在

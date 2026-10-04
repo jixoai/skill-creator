@@ -22,7 +22,7 @@ import type {
   WorkspaceProviderTarget,
 } from "../types";
 import { untrack } from "svelte";
-import { showToast } from "$lib/toast.svelte";
+import { showErrorToast } from "$lib/toast.svelte";
 import { getConnectionGeneration, requireRpc } from "./connection.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
 import { workspaceState } from "./workspaces.svelte";
@@ -255,7 +255,7 @@ export async function openSkillSearchConfig(): Promise<void> {
   try {
     await requireRpc().skills.searchConfig.open({});
   } catch (error) {
-    showToast(error instanceof Error ? error.message : String(error));
+    showErrorToast(error instanceof Error ? error.message : String(error));
   } finally {
     openingSearchConfig = false;
   }

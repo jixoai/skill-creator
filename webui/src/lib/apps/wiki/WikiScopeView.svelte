@@ -40,12 +40,13 @@
     wikiDistillState,
   } from "$lib/stores/wiki-distill.svelte";
   import { workspaceState } from "$lib/store.svelte";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
   import { Input } from "$lib/components/ui/input";
   import { Textarea } from "$lib/components/ui/textarea";
   import AgentProposalCard from "$lib/components/agent/AgentProposalCard.svelte";
+  import ErrorHint from "$lib/components/error-hint.svelte";
   import IconBookOpen from "@lucide/svelte/icons/book-open";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconPlus from "@lucide/svelte/icons/plus";
@@ -139,7 +140,7 @@
       draftTitle = "";
       draftBody = "";
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error));
+      showErrorToast(error instanceof Error ? error.message : String(error));
     } finally {
       appending = false;
     }
@@ -419,7 +420,7 @@
               {t("wikiScope.distillStartingBody")}
             </p>
           {:else if wikiDistillState.runId === null && wikiDistillState.error !== null}
-            <p class="break-words text-destructive/90">{wikiDistillState.error}</p>
+            <ErrorHint error={wikiDistillState.error} class="text-destructive/90" />
           {:else if wikiDistillState.state === "awaiting-approval"}
             <p>
               {t(
@@ -579,7 +580,7 @@
         <IconAlert class="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
         <div class="min-w-0 flex-1">
           <p class="text-sm font-medium text-destructive">{t("wikiScope.loadErrorTitle")}</p>
-          <p class="mt-1 break-words text-xs text-destructive/90">{wikiState.error}</p>
+          <ErrorHint error={wikiState.error} class="mt-1 text-xs text-destructive/90" />
         </div>
         <Button variant="outline" size="sm" onclick={() => void refresh()}>
           {t("common.retry")}
@@ -642,7 +643,9 @@
                     {t("wikiScope.loadingPattern")}
                   </p>
                 {:else if state.error}
-                  <p class="text-xs text-destructive" role="alert">{state.error}</p>
+                  <div role="alert">
+                    <ErrorHint error={state.error} class="text-xs text-destructive" />
+                  </div>
                 {:else if state.read}
                   <!-- 最小 markdown 渲染（P2-6）：标题/列表/代码块区分，段落剥
                        原始 # 前缀；纯文本插值无注入面。 -->

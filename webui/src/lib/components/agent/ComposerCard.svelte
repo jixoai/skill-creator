@@ -1,16 +1,12 @@
 <!--
   用户原始需求 [2026-09-12]（redesign §3.4）：「composer 成为 dsh 式卡片
-  （rounded-[22px]，纵排：附件条 → textarea → 工具行）。工具行左：模式 chip +
-  📎 + 📄；右：model chip + ContextMeter + 34px 圆形主按钮（发送↑/停止■形态机）」。
+  （rounded-[22px]，纵排：附件条 → textarea → 工具行）。工具行左：附件与引用；
+  右：model chip + ContextMeter + 34px 圆形主按钮（发送↑/停止■形态机）」。
   修订 [2026-09-12]（PRODUCT_MODEL §5 / codex R1 阻塞 2）：model chip 升级为
   DropdownMenu 按路由分组热切活动模型——只写 settings.model 运行时字段，路由
   配置仍以 Settings→Model 为唯一真源（菜单底部保留跳转入口）。
-  修订 [2026-09-12]（codex R2）：模式 chip 由原生 select 改为同族 DropdownMenu
-  （design §3.4 `General ▾` 规格）；SlashMenu 落地（§3.4 末段，defer 解除）。
-  修订 [2026-09-12]（R12-B 6/8）：New Session 态的显示模式 = agentSession.pendingMode
-  （空态模式选择的唯一入口——2026-10-02 R1 减法后即本 chip；默认 General）；
-  chip 在无会话时只改选择，不再 eager 建会话——首条消息发出时才创建
-  （textarea/附件/发送在空态可用）。
+  修订 [2026-10-05]（模式卡词条面退化）：模式 chip/menu 从 inputGroup 退役；
+  Agent 页空态与 Creator capture 卡提供 slash 起步方向，命令落入 composer 后再发送。
   修订 [2026-09-12]（R14-B 3/4/5）：textarea focus 轮廓显式 reset（UA :focus
   outline 穿透，agent-flow.css `.msg-body` 作者源规则兜底）；附件按钮语义化
   （image/file-up 图标 + 语义 tooltip/aria-label，替代 paperclip/file 混淆）。
@@ -25,8 +21,8 @@
   修订 [2026-10-02]（design-critique R2）：model chip 的 title 在所有态都携带
   完整 `provider · model` 标签——胶囊 max-w 截断后悬停仍见全名（截断本身
   R1 已有 max-w + truncate）。
-  修订 [2026-10-03]（creator-agent-chat 1.7 = design §4）：底排控件三簇分组——
-  左（附件/@/$ 引用族：`+` 启动器 + 图片/文件）/ 中（模式 chip）/ 右（model
+  修订 [2026-10-03]（creator-agent-chat 1.7 = design §4）：底排控件两簇分组——
+  左（附件/@/$ 引用族：`+` 启动器 + 图片/文件）/ 右（model
   胶囊 + ContextMeter + 发送/queue）；模型胶囊截断根治——右簇 min-w-0 可收缩 +
   溢出渐隐（mask，非硬截断）+ title 全名（SessionFace 共用面，Agent 页/Panel
   同步受益）。
@@ -35,9 +31,7 @@
      自动长高 textarea（1 行 44px → 4 行 160px 封顶内滚；Enter 发送 /
      Shift+Enter 换行 / paste 图片沿用）+ SlashMenu/SkillMenu 键盘先占与
      首行光标判定（`$name ` 补全插入 = 替换光标前 token + 尾随空格）。
-  2. 工具行：模式 chip（DropdownMenu 列 DSH_AGENT_MODES、当前项打勾；running
-     置灰 + title「Switch after the current turn ends」；无会话 = 只更新
-     pendingMode（R12：首条消息惰性建会话））、model chip（agentRuntimeConfig 投影 + effort 点 + 悬空 amber；
+  2. 工具行：model chip（agentRuntimeConfig 投影 + effort 点 + 悬空 amber；
      DropdownMenu 按 routes 分组列模型、当前项打勾、选中走
      updateAgentSettings({model}) 只写 model 字段保留 reasoningEffort、running
      整菜单禁用）、ContextMeter（§3.4）、主按钮形态机（空稿禁用 → 发送↑ →
@@ -102,7 +96,6 @@
     agentSessionsList,
     cancelAgentSession,
     sendAgentPrompt,
-    setAgentSessionMode,
     updateAgentSettings,
     pickAgentFiles,
     hydratePickedImagePreviews,
@@ -136,7 +129,6 @@
   import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { showToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
-  import { DSH_AGENT_MODES, type DshAgentMode } from "$shared/contracts/dsh-runtime.js";
   import ContextMeter from "./ContextMeter.svelte";
   import QueueDock from "./QueueDock.svelte";
   import SlashMenu from "./SlashMenu.svelte";
@@ -244,22 +236,14 @@
     return () => window.removeEventListener("keydown", onWindowKeydown);
   });
 
-  /** 显示态模式（R12-B 6）：会话内 = agentSession.mode；New Session 态 =
-   * pendingMode——空态模式选择的唯一数据源（本 chip 即其唯一入口）。 */
-  const activeMode = $derived(
-    agentSession.sessionId ? agentSession.mode : agentSession.pendingMode,
-  );
-
-  const modeLabel = $derived(DSH_AGENT_MODES.find((entry) => entry.id === activeMode)?.label);
-
-  /** 占位符链（W1）：owner（编辑态）> disconnected > unavailable > mode > 默认；
+  /** 占位符链（W1）：owner（编辑态）> disconnected > unavailable > 默认；
    *  连接态来自 shell 级 connection store（断线时输入面给出人话提示）。 */
   const placeholder = $derived(
     composerPlaceholder({
       owner: editing ? t("composer.placeholderOwner") : null,
       disconnected: connectionState.status === "disconnected",
       unavailable: agentSession.error !== null && agentSession.sessionId === null,
-      modeLabel: modeLabel ?? null,
+      modeLabel: null,
     }),
   );
 
@@ -290,7 +274,6 @@
   /** 菜单数据：routes 分组（组头 = catalog label ?? provider id）+ 模型清单。 */
   let catalogLabels = $state<Record<string, string>>({});
   let modelMenuOpen = $state(false);
-  let modeMenuOpen = $state(false);
 
   $effect(() => {
     void fetchCatalogLabels().then((labels) => (catalogLabels = labels));
@@ -441,16 +424,6 @@
     } finally {
       picking = null;
     }
-  }
-
-  /** 模式切换（R12-B 6/8）：无会话 = 预选待建模式（pendingMode，与空态卡同步），
-   * 不建会话——创建只发生在首条消息；有会话 = setMode（running 拒绝沿用）。 */
-  function onModeChange(mode: DshAgentMode): void {
-    if (!agentSession.sessionId) {
-      agentSession.pendingMode = mode;
-      return;
-    }
-    void setAgentSessionMode(mode);
   }
 
   // 传输中断兜底（WS5 走查小项 7）：原生对话框打开期间 WS 断开时，oRPC pending
@@ -758,7 +731,7 @@
     {/key}
   </div>
   <!-- 底排分组（creator-agent-chat 1.7 = design §4）：左（附件/@/$ 引用族）·
-       中（模式 chip）· 右（model 胶囊 + ContextMeter + 发送/queue）。 -->
+       右（model 胶囊 + ContextMeter + 发送/queue）。 -->
   <div class="flex h-11 items-center gap-1 px-2.5" data-composer-toolbar="true">
     <!-- 左簇：附件/@/$ 引用族——`+` 启动器（`/`、`@`、`$` 键入触发的编程式入口）+ 图片/文件附件。 -->
     <div class="flex shrink-0 items-center gap-1" data-composer-group="left">
@@ -810,65 +783,6 @@
       </button>
     </div>
     <div class="min-w-2 flex-1"></div>
-    <!-- 中簇：模式 chip（R12-B 6/8 行为不变——仅位置归中）。 -->
-    <div class="flex shrink-0 items-center" data-composer-group="center">
-      <DropdownMenu.DropdownMenu bind:open={modeMenuOpen}>
-        <DropdownMenu.Trigger
-          class="flex h-7 max-w-[130px] items-center gap-1.5 rounded-full border border-border px-2.5 text-[11px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-          title={running
-            ? t("composer.modeChipTitleRunning")
-            : agentSession.sessionId
-              ? t("composer.modeChipTitleSession")
-              : t("composer.modeChipTitlePending")}
-          aria-label={t("composer.modeChipAria")}
-          disabled={running}
-          onkeydown={(event) => {
-            // 鼠标打开的 bits-ui 菜单焦点留在 trigger：Esc 在此（target 层）先占，
-            // 阻断冒泡到 AgentPanel 的 window-Escape，并受控收起菜单。
-            if (event.key === "Escape" && modeMenuOpen) {
-              event.stopPropagation();
-              modeMenuOpen = false;
-            }
-          }}
-        >
-          <span class="truncate">{modeLabel ?? t("composer.modeChipFallback")}</span>
-          <IconChevronDown class="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
-        </DropdownMenu.Trigger>
-        <!-- Content 仅在本菜单 open 时挂载（bits-ui 本就如此；显式门控让菜单内容
-             的存在与 modeMenuOpen 同步——测试桩的开合态是共享单例，无门控时模式
-             菜单内容会先于 model 菜单落 DOM，干扰既有 model chip 组件测试）。 -->
-        {#if modeMenuOpen}
-          <DropdownMenu.Content
-            align="start"
-            class="max-h-72 w-44 overflow-y-auto"
-            onkeydown={(event) => {
-              // 菜单打开时 Esc 归菜单所有（与 model chip 同语义）：阻止冒泡到
-              // AgentPanel 的 window-Escape，并显式落 open=false 走受控关闭。
-              if (event.key === "Escape") {
-                event.stopPropagation();
-                modeMenuOpen = false;
-              }
-            }}
-          >
-            {#each DSH_AGENT_MODES as entry (entry.id)}
-              <DropdownMenu.Item
-                data-mode-active={activeMode === entry.id ? "true" : undefined}
-                class="gap-1.5"
-                onclick={() => onModeChange(entry.id)}
-              >
-                <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                  {#if activeMode === entry.id}
-                    <IconCheck class="h-3 w-3" aria-hidden="true" />
-                  {/if}
-                </span>
-                <span class="truncate">{entry.label}</span>
-              </DropdownMenu.Item>
-            {/each}
-          </DropdownMenu.Content>
-        {/if}
-      </DropdownMenu.DropdownMenu>
-    </div>
-    <div class="min-w-2 flex-1"></div>
     <!-- 右簇：model 胶囊（min-w 收缩 + 渐隐）+ ContextMeter + 发送/queue 主按钮。 -->
     <div class="flex min-w-0 items-center justify-end gap-1" data-composer-group="right">
       {#if modelChip}
@@ -889,7 +803,7 @@
             disabled={running}
             data-model-capsule="true"
             onkeydown={(event) => {
-              // 同模式 chip：Esc 在 trigger（target 层）先占，不冒泡收起整个面板。
+              // Model chip：Esc 在 trigger（target 层）先占，不冒泡收起整个面板。
               if (event.key === "Escape" && modelMenuOpen) {
                 event.stopPropagation();
                 modelMenuOpen = false;

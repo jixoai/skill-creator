@@ -367,7 +367,7 @@ export const enBase = {
 
   /** ---------- 转录流 ---------- */
   "transcript.emptyPrimary": "Send a message to start a session.",
-  "transcript.emptySecondary": "Pick how the agent works with the mode selector below.",
+  "transcript.emptySecondary": "Type a message or use a slash command to get started.",
   "transcript.turnDefault": "Turn",
   "transcript.modeAria": "Mode switched from {from} to {to}",
   "transcript.modeTag": "mode",
@@ -555,7 +555,6 @@ export const enBase = {
   // 库快照屏读摘要 = web-mode 冒烟锚点（test/web-mode-smoke.test.ts 正则
   // /skills across \d+ agent locations/）；en 值逐字保留，zh 正常翻译（冒烟跑 en）。
   "dashboard.librarySnapshot": "{skills} skills across {providers} agent locations.",
-  "dashboard.snapshotCounts": "{skills} skills · {providers} locations",
   "dashboard.healthCheck": "Health check library",
   "dashboard.healthCheckTitle":
     "Health check library — audit duplicates, vague descriptions, and stale skills, then propose fixes",

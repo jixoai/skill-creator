@@ -168,6 +168,10 @@ describe("ComposerCard unified `/` trigger menu (R14-B 5 + W3)", () => {
     expect(menu).not.toBeNull();
     expect(menu?.textContent).toContain("Commands");
     expect(menu?.textContent).toContain("/compact");
+    expect(menu?.textContent).toContain("/general");
+    expect(menu?.textContent).toContain("/create");
+    expect(menu?.textContent).toContain("/manage");
+    expect(menu?.textContent).toContain("/explore");
     expect(menu?.textContent).toContain("Skills");
     expect(menu?.textContent).toContain("/review");
     expect(menu?.textContent).toContain("Review a skill draft");

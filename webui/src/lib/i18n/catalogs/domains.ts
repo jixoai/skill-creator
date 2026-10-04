@@ -8,7 +8,23 @@
  *       ——新域在 catalogs/domains/ 建独立文件并 import 进本文件，勿改 base。
  */
 import { creatorExtraEn, creatorExtraZh } from "./domains/creator-extra.js";
+import { dashCountsEn, dashCountsZh } from "./domains/dash-counts.js";
+import { errorHintsEn, errorHintsZh } from "./domains/error-hints.js";
 import { settingsEn, settingsZh } from "./domains/settings.js";
 import { shellExtraEn, shellExtraZh } from "./domains/shell-extra.js";
+import { slashModesEn, slashModesZh } from "./domains/slash-modes.js";
 
-export { creatorExtraEn, creatorExtraZh, settingsEn, settingsZh, shellExtraEn, shellExtraZh };
+export {
+  creatorExtraEn,
+  creatorExtraZh,
+  dashCountsEn,
+  dashCountsZh,
+  errorHintsEn,
+  errorHintsZh,
+  settingsEn,
+  settingsZh,
+  shellExtraEn,
+  shellExtraZh,
+  slashModesEn,
+  slashModesZh,
+};

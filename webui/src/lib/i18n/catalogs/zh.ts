@@ -6,11 +6,21 @@
  */
 import type { MessageKey } from "./en.js";
 import { zhBase } from "./base/zh.js";
-import { settingsZh, shellExtraZh, creatorExtraZh } from "./domains.js";
+import {
+  settingsZh,
+  shellExtraZh,
+  creatorExtraZh,
+  dashCountsZh,
+  errorHintsZh,
+  slashModesZh,
+} from "./domains.js";
 
 export const zh: Record<MessageKey, string> = {
   ...zhBase,
   ...settingsZh,
   ...shellExtraZh,
   ...creatorExtraZh,
+  ...dashCountsZh,
+  ...errorHintsZh,
+  ...slashModesZh,
 };

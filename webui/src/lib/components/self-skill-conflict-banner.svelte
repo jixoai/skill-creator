@@ -10,7 +10,7 @@
   import IconAlert from "@lucide/svelte/icons/triangle-alert";
   import { Button } from "$lib/components/ui/button";
   import { Checkbox } from "$lib/components/ui/checkbox";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import {
     keepSelfSkillUserVersion,
     resolveSelfSkillConflict,
@@ -49,12 +49,12 @@
       if (result.agentsMd?.kind === "injected" || result.agentsMd?.kind === "updated") {
         showToast("Agent guidance block injected into ~/.agents/AGENTS.md");
       } else if (result.agentsMd?.kind === "failed") {
-        showToast(`Guidance block failed: ${result.agentsMd.reason}`);
+        showErrorToast(`Guidance block failed: ${result.agentsMd.reason}`);
       } else if (result.agentsMd?.kind === "multiple") {
         showToast("Multiple guidance blocks found; refresh the first — clean up the rest.");
       }
     } else {
-      showToast(`Self skill install failed: ${result.reason}`);
+      showErrorToast(`Self skill install failed: ${result.reason}`);
     }
   }
 
@@ -63,11 +63,11 @@
     keeping = true;
     const result = await keepSelfSkillUserVersion();
     keeping = false;
-    showToast(
-      result.ok
-        ? "Kept your version; we will remind you again only if the entry changes."
-        : `Keep failed: ${result.reason}`,
-    );
+    if (result.ok) {
+      showToast("Kept your version; we will remind you again only if the entry changes.");
+    } else {
+      showErrorToast(`Keep failed: ${result.reason}`);
+    }
   }
 </script>
 

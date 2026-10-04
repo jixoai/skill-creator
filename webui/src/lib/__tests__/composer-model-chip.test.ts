@@ -300,7 +300,7 @@ describe("ComposerCard model chip dropdown (B2)", () => {
 });
 
 describe("ComposerCard bottom toolbar regrouping (creator-agent-chat 1.7)", () => {
-  it("groups the toolbar into left/center/right with the mode chip centered", () => {
+  it("keeps only attachment and model groups after mode chip retirement", () => {
     resetAgentStoreStub(view(ROUTES, { provider: "zai", model: "glm-4.7" }));
     const ctx = mountComposer();
 
@@ -309,9 +309,9 @@ describe("ComposerCard bottom toolbar regrouping (creator-agent-chat 1.7)", () =
     const groups = [...toolbar!.querySelectorAll("[data-composer-group]")].map((node) =>
       node.getAttribute("data-composer-group"),
     );
-    expect(groups).toEqual(["left", "center", "right"]);
+    expect(groups).toEqual(["left", "right"]);
 
-    // 左簇 = 引用族（+ 启动器 + 图片/文件附件）；模式 chip 归中。
+    // 左簇 = 引用族（+ 启动器 + 图片/文件附件）；模式方向由空态起步 chip 提供。
     const left = toolbar!.querySelector("[data-composer-group='left']")!;
     const leftArias = [...left.querySelectorAll("button[aria-label]")].map((n) =>
       n.getAttribute("aria-label"),
@@ -320,8 +320,7 @@ describe("ComposerCard bottom toolbar regrouping (creator-agent-chat 1.7)", () =
     expect(leftArias.some((label) => label?.startsWith("Attach files"))).toBe(true);
     expect(left.querySelector("button[aria-label='Session mode']")).toBeNull();
 
-    const center = toolbar!.querySelector("[data-composer-group='center']")!;
-    expect(center.querySelector("button[aria-label='Session mode']")).not.toBeNull();
+    expect(toolbar!.querySelector("button[aria-label='Session mode']")).toBeNull();
 
     // 右簇 = model 胶囊 + 发送主按钮。
     const right = toolbar!.querySelector("[data-composer-group='right']")!;
