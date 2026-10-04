@@ -163,18 +163,30 @@ describe("Omnibox interactions", () => {
     expect(document.querySelector('[aria-label="Address and command input"]')).toBeNull();
   });
 
-  it("shares command registration with the palette", async () => {
+  it("resolves ws-scoped commands against the active tab workspace", async () => {
+    // workspace-page-polish V2：`>` 命令的目的地跟随激活 tab（旧实现硬编码 /w/~/，
+    // 从 Alpha tab 执行「Creator」会跳去 Global 的 creator）。
+    const alphaId = `ws_${"b".repeat(24)}`;
+    harness.tabSession.navigation.activeId = alphaId;
+    mountOmnibox();
+    editButton().click();
+    await tick();
+    typeInto(inputElement(), "> creator");
+    await tick();
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+    inputElement().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await tick();
+    expect(harness.navigate).toHaveBeenCalledWith(`/w/${alphaId}/creator`);
+    expect(document.querySelector('[aria-label="Address and command input"]')).toBeNull();
+  });
+
+  it("no longer registers the retired Repository command", async () => {
     mountOmnibox();
     editButton().click();
     await tick();
     typeInto(inputElement(), "> repo");
     await tick();
-    expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
-    expect(document.querySelector('[role="option"]')?.textContent).toContain("Repository");
-    inputElement().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await tick();
-    expect(harness.navigate).toHaveBeenCalledWith("/w/~/skills?screen=repos");
-    expect(document.querySelector('[aria-label="Address and command input"]')).toBeNull();
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
   });
 
   it("retains invalid local paths for correction", async () => {

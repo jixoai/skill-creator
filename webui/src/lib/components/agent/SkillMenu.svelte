@@ -7,11 +7,16 @@
   修订 [2026-09-17]（skill-search-gui）：去全量拉取与前端子序列匹配——非空
   needle 经 debounce 走 `skills.search`（BM25 + 中文分词 + typo 容忍）；行从
   结果 installations 派生；空 needle 显示占位（916+ 技能不可浏览也不该拉）。
+  修订 [2026-10-04]（workspace-page-polish V5）：分组重组——当前激活 tab 的 ws
+  置顶（保留 workspace/provider 详细组头），其他 ws 的行合并为单一
+  「Other workspaces」组（检索仍全局；跨 ws 引用能力保留，页面内其他 ws 数据
+  收敛为折叠组）。
   正交意图：
     [1] 数据面：`$` 态 + 非空 needle → debounce(~150ms) `skills.search`；
         fetchSession 令牌在离开 `$` 态 / 清空 needle 时失效在途回调。
-    [2] 分组与行：结果 × installations 派生（组头 = `Workspace label /
-        provider label` 反查；同一技能多安装 = 多行同引用，key 唯一）；
+    [2] 分组与行：结果 × installations 派生（当前 ws 行组头 = `Workspace
+        label / provider label` 反查，置顶；其余行共组 otherWorkspaces；
+        同一技能多安装 = 多行同引用，key 唯一）；
         TriggerMenu 的 matcher 只承担「尾随空白即收起」的自然关闭语义。
   妥协声明：跨组同名技能并列不去重（occurrence 配对已消歧义）；检索错误保留
     已提交结果，sourceLabel 提示失败（菜单不渲染错误占位行）。
@@ -27,6 +32,7 @@
     searchState,
   } from "$lib/stores/skills.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
+  import { tabSession } from "$lib/shell/tab-session.svelte.js";
   import { t } from "$lib/i18n";
   import type { SkillId } from "$shared/contracts/skills.js";
   import type { ProviderId, WorkspaceId } from "$shared/contracts/workspaces.js";
@@ -119,15 +125,26 @@
     needle !== "" && menuFailure === null && (!searchFresh || searchState.searching),
   );
 
-  /** 结果 × installations 派生行（组头 = workspace/provider label 反查兜底 id）。 */
+  /** 当前激活 tab 的 ws id（与 Omnibox pathSuggestions 同源派生：非 ws tab = Global）。 */
+  const activeWorkspaceId = $derived.by(() => {
+    const tabId = tabSession.navigation.activeId;
+    return tabId.startsWith("ws_") ? tabId : "~";
+  });
+
+  /**
+   * 结果 × installations 派生行，按当前 tab 分区重排（V5）：当前 ws 行置顶且
+   * 保留 `Workspace label / provider label` 详细组头；其他 ws 行合并为单一
+   * 「Other workspaces」组（label 反查兜底 id 不变）。BM25 相对序在分区内保留。
+   */
   const rows = $derived.by(() => {
     if (!needle || !searchFresh) return [];
-    const out: SkillRow[] = [];
+    const own: SkillRow[] = [];
+    const other: SkillRow[] = [];
     for (const result of searchState.results) {
       for (const installation of result.installations) {
         const key = `${installation.workspaceId}:${installation.providerId}:${result.id}`;
         const token = `$${result.name}`;
-        out.push({
+        const row: SkillRow = {
           key,
           name: result.name,
           token,
@@ -142,10 +159,16 @@
             providerId: installation.providerId,
             skillId: result.id,
           },
-        });
+        };
+        (installation.workspaceId === activeWorkspaceId ? own : other).push(row);
       }
     }
-    return out;
+    if (other.length === 0) return own;
+    const otherGroup = t("skillMenu.otherWorkspaces");
+    return [
+      ...own,
+      ...other.map((row) => ({ ...row, entry: { ...row.entry, group: otherGroup } })),
+    ];
   });
 
   const entries = $derived(rows.map((row) => row.entry));

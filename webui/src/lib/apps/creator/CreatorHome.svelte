@@ -12,8 +12,9 @@
     2. 新会话引导卡（主，capture 阶段）：三输入（意图/触发/例子）+ 模板 seed
        选项；「让 agent 起草」= 首条结构化 prompt（seed）+ pendingMode=create
        （creatorPreset 沿现有 mode 机制）+ target/cwd 归属（Imported ws root）。
-    3. Global 空态（1.8）：~ 无写入目标——引导切换 Imported（列出可写 ws 的
-       Creator 入口；无 Imported 时说明），不承载创作表单。
+    3. Global 空态（1.8）：~ 无写入目标——单焦点引导切换 Imported（顶栏 tab 是
+       唯一 ws 切换面，页内不列 ws 清单；workspace-page-polish V3 收敛），不承载
+       创作表单。
   妥协声明：视图态（guide/chat）为页面本地态（不进 URL——会话选择真相在
   agentSession 单例，Agent 页 ?session= 深链已覆盖直达场景）。
 -->
@@ -161,20 +162,9 @@
         <h2 class="mt-2 text-sm font-medium">{t("creatorHome.globalTitle")}</h2>
         <p class="mt-1 text-xs leading-5 text-muted-foreground">{t("creatorHome.globalBody")}</p>
         {#if importedWorkspaces.length > 0}
-          <div class="mt-4 flex flex-col gap-1.5 text-left">
-            {#each importedWorkspaces as workspace (workspace.id)}
-              <button
-                type="button"
-                class="relative flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm transition-colors after:absolute after:-inset-1 after:content-[''] hover:bg-muted/50"
-                onclick={() => goById("creator.home", { wsId: workspace.id })}
-              >
-                <span class="min-w-0 truncate">{workspace.label}</span>
-                <span class="ml-2 shrink-0 font-mono text-[10px] text-muted-foreground">
-                  {workspace.id}
-                </span>
-              </button>
-            {/each}
-          </div>
+          <p class="mt-3 text-xs text-muted-foreground/80">
+            {t("creatorHome.globalSwitchHint")}
+          </p>
         {:else}
           <p class="mt-3 text-xs text-muted-foreground/80">{t("creatorHome.globalNone")}</p>
         {/if}

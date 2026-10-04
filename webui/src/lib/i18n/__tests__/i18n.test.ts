@@ -41,13 +41,11 @@ describe("t() interpolation", () => {
   });
 
   it("keeps unsubstituted placeholders verbatim (visible defect, no swallowing)", () => {
-    expect(t("wikiHome.fragmentsCapturedMany")).toBe("{count} fragments captured");
+    expect(t("wikiScope.noMatch")).toBe("No fragments match “{query}”.");
   });
 
   it("returns the en literal verbatim under the default locale", () => {
-    expect(t("wikiHome.notInitialized")).toBe(
-      "Not initialized — opens empty, first fragment creates it",
-    );
+    expect(t("wikiScope.noMatch")).toBe("No fragments match “{query}”.");
   });
 });
 
@@ -60,7 +58,7 @@ describe("locale lifecycle", () => {
   it("switches to zh at runtime: t() flips, DevicePrefs persists, document.lang syncs", () => {
     setLocale("zh");
     expect(currentLocale()).toBe("zh");
-    expect(t("wikiHome.notInitialized")).toContain("未初始化");
+    expect(t("wikiScope.noMatch")).toContain("没有匹配");
     expect(readDevicePrefs().language).toBe("zh");
     expect(document.documentElement.lang).toBe("zh");
   });

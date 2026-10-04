@@ -5,6 +5,9 @@
   路由迁 /w/:wsId/skills/repos/scan/:sourceId（pinned-clone → preview/install 状态机
   原样）；安装目标按当前 tab wsId 预填（Imported 才可选；Global 只读空态引导）；
   文案出生即 i18n（C 类面）。
+  修订 [2026-10-04]（workspace-page-polish V4）：安装目标默认仅列当前 tab ws 的
+  providers；其他 ws 收进「Show other workspaces」折叠区（保留跨 ws 多选能力，
+  但页面不再默认露出其他 ws 清单——页内跨 ws 切换器痕迹收敛）。
   正交意图：
     1. 从 URL path param sourceId 解析源 gitUrl（curated 静态目录或 user 源 RPC list），
        首扫自动触发。
@@ -102,6 +105,16 @@
   });
 
   const targets = $derived(writableWorkspaceProviders());
+
+  // 安装目标分区（V4）：当前 tab ws 默认露出；其他 ws 折叠（跨 ws 安装走展开区）。
+  const onGlobalTab = $derived(wsId === null || wsId === ("~" as const));
+  const currentTabTargets = $derived(
+    onGlobalTab ? [] : targets.filter((entry) => entry.target.workspaceId === wsId),
+  );
+  const otherTabTargets = $derived(
+    onGlobalTab ? targets : targets.filter((entry) => entry.target.workspaceId !== wsId),
+  );
+  let showOtherTargets = $state(false);
 
   // 安装目标预填（skills-dashboard 1.5）：当前 tab 是 Imported ws → 预勾选其全部
   // 可写 provider（一次 latch；用户此后可自由增删）；Global tab → 不预填 + 引导。
@@ -440,28 +453,48 @@
           {#if targets.length === 0}
             <p class="mt-2 text-xs text-muted-foreground">{t("reposScan.noTargets")}</p>
           {:else}
-            <ul class="mt-2 space-y-1">
-              {#each targets as target (target.target.workspaceId + ":" + target.target.providerId)}
-                <li>
-                  <label class="flex min-h-7 items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={isTargetSelected(target.target)}
-                      onchange={() => toggleTarget(target.target)}
-                      class="h-3.5 w-3.5"
-                    />
-                    <span class="truncate">{target.label}</span>
-                    {#if target.target.workspaceId === wsId}
-                      <span
-                        class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                      >
-                        {t("reposScan.currentTab")}
-                      </span>
-                    {/if}
-                  </label>
-                </li>
-              {/each}
-            </ul>
+            {#snippet targetRow(target: (typeof targets)[number])}
+              <li>
+                <label class="flex min-h-7 items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={isTargetSelected(target.target)}
+                    onchange={() => toggleTarget(target.target)}
+                    class="h-3.5 w-3.5"
+                  />
+                  <span class="truncate">{target.label}</span>
+                </label>
+              </li>
+            {/snippet}
+            {#if currentTabTargets.length > 0}
+              <ul class="mt-2 space-y-1" data-testid="current-tab-targets">
+                {#each currentTabTargets as target (target.target.workspaceId + ":" + target.target.providerId)}
+                  {@render targetRow(target)}
+                {/each}
+              </ul>
+            {/if}
+            {#if otherTabTargets.length > 0}
+              <div class="mt-2">
+                <button
+                  type="button"
+                  class="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  aria-expanded={showOtherTargets}
+                  data-testid="other-workspaces-toggle"
+                  onclick={() => (showOtherTargets = !showOtherTargets)}
+                >
+                  {showOtherTargets
+                    ? t("reposScan.hideOtherWorkspaces")
+                    : t("reposScan.showOtherWorkspaces", { count: otherTabTargets.length })}
+                </button>
+                {#if showOtherTargets}
+                  <ul class="mt-1 space-y-1" data-testid="other-workspace-targets">
+                    {#each otherTabTargets as target (target.target.workspaceId + ":" + target.target.providerId)}
+                      {@render targetRow(target)}
+                    {/each}
+                  </ul>
+                {/if}
+              </div>
+            {/if}
           {/if}
           <div class="mt-2 flex gap-2">
             <button

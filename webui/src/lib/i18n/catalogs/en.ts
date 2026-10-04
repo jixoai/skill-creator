@@ -15,24 +15,10 @@ export const en = {
   "common.cancel": "Cancel",
   "common.dismiss": "Dismiss",
 
-  /** ---------- Wiki 首页（scope 索引） ---------- */
-  "wikiHome.title": "Wiki",
-  "wikiHome.subtitle":
-    "Fragment insights collected per wiki — global notes and workspace-local knowledge.",
-  "wikiHome.refreshTitle": "Refresh wiki scopes",
-  "wikiHome.loadErrorTitle": "Couldn't load wiki scopes",
-  "wikiHome.loadingAria": "Loading wiki scopes",
-  "wikiHome.emptyTitle": "No wiki scopes yet",
-  "wikiHome.emptyBody": "The global wiki appears once the daemon is reachable.",
-  "wikiHome.updating": "Updating…",
+  /** ---------- Wiki（wikiHome.* 仅存 globalBadge——scope 索引首页已随 IA 平行化退役） ---------- */
   "wikiHome.globalBadge": "~ global",
-  "wikiHome.fragmentsCapturedOne": "{count} fragment captured",
-  "wikiHome.fragmentsCapturedMany": "{count} fragments captured",
-  "wikiHome.updatedOn": "updated {date}",
-  "wikiHome.notInitialized": "Not initialized — opens empty, first fragment creates it",
 
-  /** ---------- Wiki scope detail（碎片追加 + 蒸馏） ---------- */
-  "wikiScope.backTitle": "Back to wiki scopes",
+  /** ---------- Wiki scope（碎片追加 + 蒸馏） ---------- */
   "wikiScope.heading": "{scope} wiki",
   "wikiScope.workspaceBadge": "workspace",
   "wikiScope.subtitle":
@@ -324,6 +310,7 @@ export const en = {
   "skillMenu.menuAria": "Skills — across workspaces",
   "skillMenu.resultsSummary": "{count} skills · {groups} provider groups",
   "skillMenu.acrossWorkspaces": "Skills across workspaces",
+  "skillMenu.otherWorkspaces": "Other workspaces",
 
   /** ---------- `@` 文件/会话引用菜单 ---------- */
   "referenceMenu.loadingDir": "Loading directory…",
@@ -368,7 +355,8 @@ export const en = {
   "transcript.backToBottom": "Back to bottom",
   "transcript.toastCopyFailed": "Copy failed — clipboard unavailable.",
 
-  /** ---------- Evaluating 区块（总览 + 详情；evaluating-dashboard C 类出生即 i18n） ---------- */
+  /** ---------- Evaluating 区块（总览 + 详情；C 类出生即 i18n；evaluating-world-class
+   * 重做：健康卡/时间线/run 报告/diff 双栏文案）。 ---------- */
   "evaluating.title": "Evaluating",
   "evaluating.refresh": "Refresh",
   "evaluating.refreshTitle": "Refresh evaluation overview",
@@ -377,22 +365,28 @@ export const en = {
   "evaluating.loadErrorTitle": "Couldn't load the evaluation overview",
   "evaluating.emptyTitle": "No evaluation corpora yet",
   "evaluating.emptyBody":
-    "Open a skill's evaluating page from the Creator editor to add its first case.",
+    "Add the first case on a skill's evaluating page to start tracking its health — draft the wording in Creator.",
+  "evaluating.emptyAction": "Open Creator",
   "evaluating.targetsHeading": "Corpus targets",
   "evaluating.recentRunsHeading": "Recent runs",
   "evaluating.noRuns": "No runs recorded in this workspace yet.",
   "evaluating.loadMore": "Load more",
   "evaluating.loadingMore": "Loading…",
+  "evaluating.caseTargetOne": "{count} skill",
+  "evaluating.caseTargetMany": "{count} skills",
   "evaluating.caseCountOne": "{count} case",
   "evaluating.caseCountMany": "{count} cases",
   "evaluating.staleShare": "{percent}% stale",
-  "evaluating.lastRunAt": "last run {time}",
   "evaluating.notRunYet": "never run",
   "evaluating.passedCount": "{count} passed",
   "evaluating.failedCount": "{count} failed",
   "evaluating.errorCountOne": "{count} error",
   "evaluating.errorCount": "{count} errors",
   "evaluating.unavailableCount": "{count} unavailable",
+  "evaluating.failingLine": "{count} failing",
+  "evaluating.erroredLine": "{count} errored",
+  "evaluating.liveProgress": "{done}/{total} cases",
+  "evaluating.liveProgressCount": "{done} cases",
   "evaluating.targetError": "unreadable corpus",
   "evaluating.openDetailTitle": "Open the evaluating detail for {skill}",
   "evaluating.runStatusQueued": "queued",
@@ -429,14 +423,13 @@ export const en = {
   "evaluating.runCancelFailedToast": "Couldn't cancel the run: {error}",
   "evaluating.runCancelledToast": "Run cancelled.",
 
-  /** 详情屏（三段路由 /w/:wsId/evaluating/:providerId/:skillId）。 */
+  /** 详情屏（三段路由 /w/:wsId/evaluating/:providerId/:skillId；run 报告式）。 */
   "evaluating.backTitle": "Back to the evaluating overview",
   "evaluating.readonlyBadge": "read-only",
   "evaluating.readonlyNote":
     "Global workspace corpora are read-only — open the skill in an imported workspace to run or edit.",
   "evaluating.cancelAction": "Cancel run",
   "evaluating.newCase": "New case",
-  "evaluating.casesHeading": "Cases",
   "evaluating.loadingDetail": "Loading evaluation…",
   "evaluating.detailErrorTitle": "Couldn't load the evaluation corpus",
   "evaluating.noCasesTitle": "No cases for this skill yet",
@@ -445,22 +438,37 @@ export const en = {
     "Global workspace corpora are read-only — cases can only be added in an imported workspace.",
   "evaluating.skillUnavailable":
     "This skill can no longer be resolved — its corpus is shown read-only below.",
-  "evaluating.notRun": "not run",
+  "evaluating.casesButton": "Cases",
+  "evaluating.closeTreeDrawerTitle": "Close the cases drawer",
+  "evaluating.backToTreeTitle": "Back to cases",
+  "evaluating.caseTreeAria": "Cases",
+  "evaluating.selectCaseHint": "Select a case to inspect its assertions.",
+  "evaluating.disabledShort": "off",
+  "evaluating.notInRun": "not in run",
+  "evaluating.notInRunDetail":
+    "This case has no result in the selected run — pick another run or start a new one.",
+  "evaluating.outcomeError": "error",
+  "evaluating.outcomeUnavailable": "unavailable",
+  "evaluating.staleDetail":
+    "The skill revision drifted away from this case's bound revision — rebind the case and run again.",
+  "evaluating.noRunsSkill": "No runs for this skill yet.",
+  "evaluating.manageHeading": "Manage cases ({count})",
   "evaluating.enabled": "enabled",
   "evaluating.disabled": "disabled",
   "evaluating.assertionCountOne": "{count} assertion",
   "evaluating.assertionCountMany": "{count} assertions",
-  "evaluating.boundRev": "bound {rev}…",
   "evaluating.observedRev": "rev {rev}…",
   "evaluating.staleTag": "stale",
-  "evaluating.assertionFailedOne": "{failed}/{total} assertion failed",
-  "evaluating.assertionFailedMany": "{failed}/{total} assertions failed",
-  "evaluating.expandAssertionsTitle": "Show assertion detail",
   "evaluating.assertionExpected": "expected",
   "evaluating.assertionObserved": "observed",
+  "evaluating.observedEmpty": "(empty)",
   "evaluating.assertionOutcomePassed": "passed",
   "evaluating.assertionOutcomeFailed": "failed",
-  "evaluating.assertionOutcomeError": "error",
+  "evaluating.expectTriggered": "expect triggered",
+  "evaluating.expectNotTriggered": "expect not triggered",
+  "evaluating.observedTriggered": "triggered",
+  "evaluating.observedNotTriggered": "not triggered",
+  "evaluating.promptDetail": "Prompt",
   "evaluating.kindContains": "contains",
   "evaluating.kindNotContains": "not-contains",
   "evaluating.kindFindingKind": "finding kind",
@@ -606,9 +614,10 @@ export const en = {
   "reposScan.previewEmpty": "Select a skill to preview.",
   "reposScan.installTargets": "Install targets ({count})",
   "reposScan.globalHint":
-    "You are on the Global tab — installs target imported workspaces. Pick one below.",
+    "You are on the Global tab — installs target imported workspaces. Expand other workspaces below to pick a target.",
   "reposScan.noTargets": "No writable workspace providers. Import a directory workspace first.",
-  "reposScan.currentTab": "this tab",
+  "reposScan.showOtherWorkspaces": "Show other workspaces ({count})",
+  "reposScan.hideOtherWorkspaces": "Hide other workspaces",
   "reposScan.dryRun": "Dry-run",
   "reposScan.install": "Install",
   "reposScan.installing": "Installing…",
@@ -677,6 +686,7 @@ export const en = {
   "creatorHome.globalTitle": "Create skills in an imported workspace",
   "creatorHome.globalBody":
     "The Global workspace is read-only for creation. Switch to an imported workspace to start a creation session.",
+  "creatorHome.globalSwitchHint": "Switch to your workspace from the tab strip at the top.",
   "creatorHome.globalNone":
     "No imported workspaces yet — import a directory from the Workspaces tab first.",
 

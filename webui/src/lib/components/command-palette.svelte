@@ -34,7 +34,6 @@
   import IconPen from "@lucide/svelte/icons/file-pen-line";
   import IconBook from "@lucide/svelte/icons/book-open";
   import IconChart from "@lucide/svelte/icons/chart-no-axes-column-increasing";
-  import IconGlobe from "@lucide/svelte/icons/globe";
   import IconMessage from "@lucide/svelte/icons/message-square";
   import IconSettings from "@lucide/svelte/icons/settings";
   import IconSliders from "@lucide/svelte/icons/sliders-horizontal";
@@ -44,7 +43,6 @@
     creator: IconPen,
     wiki: IconBook,
     evaluating: IconChart,
-    repository: IconGlobe,
     agent: IconMessage,
     settings: IconSettings,
     "search-config": IconSliders,

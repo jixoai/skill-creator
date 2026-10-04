@@ -5,14 +5,22 @@
  * 用户原始需求 [2026-09-16]：「Chat 输入框要支持 `$` 引用 skill，基于 Workspace
  * 分组 + 模糊搜索」；修订 [2026-09-17]：去全量拉取——非空 needle 经 debounce
  * 走 `skills.search`，行从 installations 派生，空 needle 占位。
+ * 修订 [2026-10-04]（workspace-page-polish V5）：分组重组——当前激活 tab 的 ws
+ * 置顶（详细组头），其他 ws 合并为「Other workspaces」单组；检索仍全局。
  *
  * 正交意图：
  *   [1] 懒加载门：空 needle 只显示占位、不发 RPC；非空 needle 去抖后发检索。
  *   [2] 行派生：result × installations（组头 label 反查；多安装多行）。
  *   [3] 选中路由：`$name` token + skill 三元组引用（从 installation 派生）。
  *   [4] 断线：getRpc() null → sourceLabel failure 提示（优雅失败先例）。
+ *   [5] V5 分组：行序/组头随激活 tab 解析（tab-session 替身注入 activeId）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// V5：激活 tab 是分组投影的唯一输入——以可变替身注入（默认 Global）。
+const tabs = vi.hoisted(() => ({ navigation: { activeId: "~" } }));
+
+vi.mock("$lib/shell/tab-session.svelte.js", () => ({ tabSession: tabs }));
 
 let rpcClient: Record<string, unknown> | null = null;
 
@@ -115,6 +123,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   document.body.innerHTML = "";
   rpcClient = null;
+  tabs.navigation.activeId = "~";
   resetSkillSearch();
 });
 
@@ -155,9 +164,40 @@ describe("SkillMenu (skill-search-gui C4)", () => {
 
     const labels = ctx.rows().map((row) => row.textContent ?? "");
     expect(labels.filter((label) => label.includes("$code-review"))).toHaveLength(2);
+    // V5：激活 Global tab → 当前 ws（Global）保留详细组头并置顶；Lab 行合并进
+    // 「Other workspaces」单组（不再逐 ws 展开）。
     const groupLabels = ctx.groups().map((group) => group.dataset.menuGroup);
-    expect(groupLabels).toContain("Global / Claude Code");
-    expect(groupLabels).toContain("Lab / Codex");
+    expect(groupLabels).toEqual(["Global / Claude Code", "Other workspaces"]);
+    ctx.cleanup();
+  });
+
+  it("pins the active tab's workspace group on top when an imported tab is active (V5)", async () => {
+    rpcClient = {
+      skills: { search: vi.fn().mockResolvedValue({ results: [dualInstallationResult()] }) },
+    };
+    tabs.navigation.activeId = "ws_" + "1".repeat(24);
+    const ctx = mountMenu("$code");
+    await vi.advanceTimersByTimeAsync(200);
+    flushSync();
+
+    // 激活 Lab tab → Lab 详细组头置顶；Global 行落入「Other workspaces」组。
+    const groupLabels = ctx.groups().map((group) => group.dataset.menuGroup);
+    expect(groupLabels).toEqual(["Lab / Codex", "Other workspaces"]);
+    // 行序随分区：首行 = Lab 安装（当前 tab 置顶），次行 = Global 安装。
+    const rows = ctx.rows().filter((row) => (row.textContent ?? "").includes("$code-review"));
+    expect(rows).toHaveLength(2);
+    rows[0]?.click();
+    rows[1]?.click();
+    expect(ctx.onPick).toHaveBeenNthCalledWith(1, {
+      token: "$code-review",
+      reference: expect.objectContaining({
+        skill: expect.objectContaining({ workspaceId: "ws_" + "1".repeat(24) }),
+      }),
+    });
+    expect(ctx.onPick).toHaveBeenNthCalledWith(2, {
+      token: "$code-review",
+      reference: expect.objectContaining({ skill: expect.objectContaining({ workspaceId: "~" }) }),
+    });
     ctx.cleanup();
   });
 

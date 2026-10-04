@@ -5,16 +5,18 @@
   平移至第四个一级 Wiki 面板的 detail（/wiki/:wsId）。
   用户原始需求 [2026-09-25]（skill-wiki-maintainer tasks 1.6）：「WikiScopeView
   workspace scope『Distill to global』：start→进度→跳 proposal 面」。
+  修订 [2026-10-04]（workspace-page-polish V1）：wiki 随 IA 平行化收编为 ws 页
+  区块（/w/:wsId/wiki 直接挂本视图，pattern 行内展开、无二级路由）——「返回
+  scope 索引」上级已不存在，返回按钮删除（旧 /wiki 全局路由退役）。
   正交意图：
-  1. 双级 scope 的 pattern 列表（前端过滤 + 惰性展开正文）。
+  1. 单 scope 的 pattern 列表（前端过滤 + 惰性展开正文）。
   2. 碎片追加表单（幂等提交：deduplicated 有独立反馈；失败 toast 可区分）。
-  3. 进入 detail 聚焦语义标题（窄屏单屏列表/详情切换法则；返回恢复由 WikiHome 承担）。
+  3. 进入视图聚焦语义标题（窄屏单屏法则；区块上级导航由 ws 页壳承担）。
   4. 加载 / 空 / 错误三态可区分；断线保留草稿（store 列表门不重置表单态）。
   5. workspace scope 的蒸馏入口（进度/终态/typed 错误可区分 + awaiting-approval
      决定面；状态投影与代次纪律在 wiki-distill store——global scope 无入口）。
 -->
 <script lang="ts">
-  import { goto } from "$app/navigation";
   import { useParams } from "$lib/shell";
   import { t, type MessageKey } from "$lib/i18n";
   import {
@@ -40,7 +42,6 @@
   import { Input } from "$lib/components/ui/input";
   import { Textarea } from "$lib/components/ui/textarea";
   import AgentProposalCard from "$lib/components/agent/AgentProposalCard.svelte";
-  import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconBookOpen from "@lucide/svelte/icons/book-open";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconPlus from "@lucide/svelte/icons/plus";
@@ -240,16 +241,6 @@
   >
     <div class="min-w-0 max-[720px]:w-full">
       <div class="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          class="h-8 w-8 shrink-0 max-[720px]:h-11 max-[720px]:w-11"
-          title={t("wikiScope.backTitle")}
-          aria-label={t("wikiScope.backTitle")}
-          onclick={() => void goto("/wiki")}
-        >
-          <IconArrowLeft class="h-4 w-4" />
-        </Button>
         <h1
           tabindex="-1"
           bind:this={headingEl}
