@@ -36,9 +36,25 @@
   import AgentToolRow from "./AgentToolRow.svelte";
   import DisclosureRow from "./DisclosureRow.svelte";
   import { formatTokens, formatElapsed } from "./format";
+  import {
+    readTranscriptScrollSnapshot,
+    resolveTranscriptScrollTop,
+    saveTranscriptScrollSnapshot,
+    type TranscriptScrollSnapshot,
+  } from "./transcript-scroll-memory";
   import MarkdownRender from "markstream-svelte";
   import "markstream-svelte/index.css";
   import "./agent-flow.css";
+
+  const TURN_FAILURE_REASONS = new Set([
+    "error",
+    "failed",
+    "failure",
+    "interrupted",
+    "cancelled",
+    "canceled",
+    "aborted",
+  ]);
 
   /**
    * 会话呈现面注入（skills-agent-page 1.4 session-face 组件族）：编辑回填后
@@ -67,18 +83,58 @@
   // 落地后继续长高气泡，且单个代码块的一次性增高可超过 160px 跟随门，故判定
   // 改用「增高前是否贴底」：贴底即钉住，手动上滚（scrollTop 变小）自然脱离。
   let lastContentHeight = 0;
+  let observedSessionId: string | null = null;
+  let pendingSessionRestore: { sessionId: string; snapshot: TranscriptScrollSnapshot } | null =
+    null;
+
+  function rememberScroll(body: HTMLElement, sessionId: string | null): void {
+    if (!sessionId) return;
+    const distanceToBottom = body.scrollHeight - body.scrollTop - body.clientHeight;
+    saveTranscriptScrollSnapshot(sessionId, {
+      scrollTop: body.scrollTop,
+      scrollHeight: body.scrollHeight,
+      viewportHeight: body.clientHeight,
+      pinnedToBottom: distanceToBottom < 160,
+    });
+  }
+
   $effect(() => {
     void agentSession.items.length;
     void agentSession.status;
+    void agentSession.sessionId;
     const body = scrollBody;
     if (!body) return;
+    const sessionId = agentSession.sessionId;
+    if (sessionId !== observedSessionId) {
+      observedSessionId = sessionId;
+      const snapshot = sessionId ? readTranscriptScrollSnapshot(sessionId) : null;
+      pendingSessionRestore = snapshot && sessionId ? { sessionId, snapshot } : null;
+      if (!pendingSessionRestore) body.scrollTop = body.scrollHeight;
+    }
     const follow = (): void => {
+      if (pendingSessionRestore?.sessionId === sessionId) {
+        if (agentSession.items.length === 0) {
+          lastContentHeight = body.scrollHeight;
+          awayFromBottom = false;
+          return;
+        }
+        const { snapshot } = pendingSessionRestore;
+        body.scrollTop = snapshot.pinnedToBottom
+          ? body.scrollHeight
+          : resolveTranscriptScrollTop(snapshot, body);
+        pendingSessionRestore = null;
+        lastContentHeight = body.scrollHeight;
+        awayFromBottom = body.scrollHeight - body.scrollTop - body.clientHeight > 200;
+        rememberScroll(body, sessionId);
+        return;
+      }
       const wasNearBottom = lastContentHeight - body.scrollTop - body.clientHeight < 160;
       lastContentHeight = body.scrollHeight;
       if (wasNearBottom || body.scrollHeight - body.scrollTop - body.clientHeight < 160) {
         body.scrollTop = body.scrollHeight;
       }
       awayFromBottom = body.scrollHeight - body.scrollTop - body.clientHeight > 200;
+      rememberScroll(body, sessionId);
     };
     follow();
     const observer = new ResizeObserver(follow);
@@ -181,19 +237,34 @@
     openItems = { ...openItems, [seq]: !(openItems[seq] ?? false) };
   }
 
+  function isTurnFailureReason(reason: string): boolean {
+    return TURN_FAILURE_REASONS.has(reason.trim().toLowerCase().replaceAll("_", "-"));
+  }
+
   function backToBottom(): void {
     const body = scrollBody;
-    if (body) body.scrollTop = body.scrollHeight;
+    if (body) {
+      body.scrollTop = body.scrollHeight;
+      lastContentHeight = body.scrollHeight;
+      awayFromBottom = false;
+      rememberScroll(body, agentSession.sessionId);
+    }
   }
 </script>
 
 <div class="relative min-h-0 flex-1">
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -- Scroll viewport must be keyboard reachable. -->
   <div
     bind:this={scrollBody}
-    class="h-full overflow-y-auto px-4 py-3"
+    class="h-full overflow-y-auto px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    role="region"
+    aria-label={t("agentPanel.panelAria")}
+    tabindex="0"
     onscroll={(event) => {
       const body = event.currentTarget;
       awayFromBottom = body.scrollHeight - body.scrollTop - body.clientHeight > 200;
+      lastContentHeight = body.scrollHeight;
+      rememberScroll(body, agentSession.sessionId);
     }}
   >
     {#if !agentSession.sessionId}
@@ -222,11 +293,20 @@
             <span class="h-px flex-1 bg-border"></span>
           </div>
         {:else if item.kind === "turn-end"}
-          <!-- TurnEnd 药丸行（§3.2）：↑ in · ↓ out · 时长；reason 进 title。 -->
+          <!-- TurnEnd 药丸行：终态原因在有指标时也保持可见。 -->
           <div class="flow-item flex h-5 items-center gap-1.5" title={item.reason}>
+            {#if item.reason.trim().toLowerCase() !== "completed"}
+              <span
+                class="text-[10px] text-muted-foreground"
+                class:text-destructive={isTurnFailureReason(item.reason)}
+                role="status"
+              >
+                {t("transcript.turnDefault")} · {item.reason}
+              </span>
+            {/if}
             {#if turnEndPills(item).length > 0}
               <span class="turn-pill">{turnEndPills(item).join(" · ")}</span>
-            {:else}
+            {:else if item.reason.trim().toLowerCase() === "completed"}
               <span class="turn-pill">{item.reason}</span>
             {/if}
           </div>
@@ -316,7 +396,8 @@
             {/if}
             {#if item.text.length > 0}
               <div
-                class="bubble-user max-h-40 overflow-y-auto px-3.5 py-2 text-[13px] leading-5 whitespace-pre-wrap"
+                class="bubble-user max-h-40 overflow-y-auto px-3.5 py-2 text-[13px] leading-5 whitespace-pre-wrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                tabindex="0"
               >
                 {item.text}
               </div>
