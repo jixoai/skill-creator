@@ -27,7 +27,7 @@ describe("i18n catalogs (webui-i18n-bilingual)", () => {
   });
 
   it("keeps every en value a non-empty string", () => {
-    for (const [key, value] of Object.entries(en)) {
+    for (const [key, value] of Object.entries(en) as [string, string][]) {
       expect(value.length, key).toBeGreaterThan(0);
     }
   });
