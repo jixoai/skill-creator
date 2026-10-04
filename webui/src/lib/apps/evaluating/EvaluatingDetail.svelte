@@ -200,6 +200,10 @@
   });
 
   // ---- 三尺寸（design §3）：≥1024 双栏 / 720-1024 抽屉 / <720 单列 push ----
+  // 批评环 R3：测量源从视口换成页面容器（.evaluating-page-shell）——Agent 面板
+  // 挤压时视口仍 ≥1024 但容器可能仅 ~400px，双栏会把断言面板压到逐字换行；
+  // 容器口径下挤压自动落 drawer/stack，树收抽屉、断言面板保底可读宽。无
+  // ResizeObserver 环境（jsdom）回退视口 matchMedia（dom 测试桩路径）。
   const wideQuery = typeof matchMedia !== "undefined" ? matchMedia("(min-width: 1024px)") : null;
   const midQuery = typeof matchMedia !== "undefined" ? matchMedia("(min-width: 720px)") : null;
   let wideMatch = $state(wideQuery?.matches ?? false);
@@ -214,7 +218,23 @@
       midQuery?.removeEventListener("change", onMid);
     };
   });
-  const layoutMode = $derived(wideMatch ? "wide" : midMatch ? "drawer" : "stack");
+  let shellEl = $state<HTMLElement | null>(null);
+  let shellWidth = $state<number | null>(null);
+  $effect(() => {
+    const el = shellEl;
+    if (el === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      shellWidth = entries[0]?.contentRect.width ?? null;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
+  const layoutMode = $derived.by(() => {
+    if (shellWidth !== null) {
+      return shellWidth >= 1024 ? "wide" : shellWidth >= 720 ? "drawer" : "stack";
+    }
+    return wideMatch ? "wide" : midMatch ? "drawer" : "stack";
+  });
 
   /**
    * 批评环 R1 P1-1：抽屉态下无选中 case 时树强制可见——Cases 只切换详情层，
@@ -485,7 +505,10 @@
   }
 </script>
 
-<div class="evaluating-kbd-scope evaluating-page-shell flex h-full flex-col overflow-hidden">
+<div
+  bind:this={shellEl}
+  class="evaluating-kbd-scope evaluating-page-shell flex h-full flex-col overflow-hidden"
+>
   <!-- 顶行：返回总览 + 技能名（人语汇）+ workspace/provider label 次要行 + 动作。 -->
   <header class="flex shrink-0 flex-col gap-1 border-b border-border px-4 py-2">
     <div class="flex items-center justify-between gap-2">

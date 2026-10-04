@@ -218,8 +218,9 @@ interface MountOptions {
   search?: Record<string, unknown>;
 }
 
-/** jsdom matchMedia 恒 false → 默认单列（stack）；wide 测试用 stubMatchMedia。 */
-function stubMatchMedia(matches: (query: string) => boolean): void {
+/** jsdom matchMedia 恒 false → 默认单列（stack）；wide 测试用 stubMatchMedia。 */ function stubMatchMedia(
+  matches: (query: string) => boolean,
+): void {
   vi.stubGlobal("matchMedia", (query: string) => {
     const listeners = new Set<() => void>();
     const mediaQueryList = {
@@ -242,6 +243,25 @@ function stubMatchMedia(matches: (query: string) => boolean): void {
     };
     return mediaQueryList as unknown as MediaQueryList;
   });
+}
+
+/** R3：layoutMode 容器口径的 ResizeObserver 桩——observe 即异步注入宽度。 */
+function stubResizeObserver(width: () => number): void {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      private readonly callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element): void {
+        const entry = { contentRect: { width: width() } };
+        queueMicrotask(() => this.callback([entry as unknown as ResizeObserverEntry], this));
+      }
+      disconnect(): void {}
+      unobserve(): void {}
+    },
+  );
 }
 
 function mountView(options: MountOptions = {}): void {
@@ -533,6 +553,46 @@ describe("EvaluatingDetail keyboard navigation and deep link (1.4/1.6)", () => {
     expect(host.querySelector('[data-testid="evaluating-case-tree-pane"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).not.toBeNull();
     expect(text()).toContain("Select a case");
+  });
+
+  // ---- 批评环 R3：layoutMode 测量源容器化（Agent 面板挤压场景） ----
+
+  function treePaneClass(): string {
+    return host.querySelector('[data-testid="evaluating-case-tree-pane"]')?.className ?? "";
+  }
+
+  it("R3: container-driven layout wins over the viewport (shell 408px squeeze → stack, not wide)", async () => {
+    // 视口 ≥1024（面板展开挤压前），但页面容器仅 408px——旧视口口径会恒 wide 双栏，
+    // 树 319px 吃掉空间把断言面板压到 88px；容器口径应落 stack（树全宽单列）。
+    stubMatchMedia((query) => query === "(min-width: 1024px)");
+    stubResizeObserver(() => 408);
+    seedNoFailures();
+    mountView();
+    await flushAsync();
+    await flushAsync();
+    expect(treePaneClass()).not.toContain("w-80");
+    expect(treePaneClass()).not.toContain("w-72");
+    expect(treePaneClass()).toContain("w-full");
+  });
+
+  it("R3: container ≥1024 keeps the wide two-pane layout", async () => {
+    stubResizeObserver(() => 1100);
+    seedNoFailures();
+    mountView();
+    await flushAsync();
+    await flushAsync();
+    expect(treePaneClass()).toContain("w-80");
+  });
+
+  it("R3: container 720–1024 falls back to the drawer layout (tree overlays)", async () => {
+    stubResizeObserver(() => 850);
+    seedNoFailures();
+    mountView();
+    await flushAsync();
+    await flushAsync();
+    // drawer：树是 absolute 覆盖层（w-72 抽屉），不再挤占断言面板。
+    expect(treePaneClass()).toContain("absolute");
+    expect(treePaneClass()).toContain("w-72");
   });
 });
 
