@@ -36,6 +36,7 @@
   import { getConnectionGeneration, getRpc } from "$lib/stores/connection.svelte";
   import { openSkillSearchConfig } from "$lib/stores/skills.svelte";
   import { agentPanel, setAgentPanelOpen } from "$lib/stores/agent.svelte";
+  import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { workspaceState } from "$lib/stores/workspaces.svelte";
   import { t } from "$lib/i18n";
   import type { SkillSearchResult } from "$lib/types";
@@ -335,9 +336,28 @@
 
   $effect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const shortcut = omniboxShortcut(event);
       if (!shortcut) return;
-      if (shortcut === "focus") {
+      if (shortcut === "open-command-center") {
+        event.preventDefault();
+        globalThis.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "k",
+            code: "KeyK",
+            metaKey: event.metaKey,
+            ctrlKey: event.ctrlKey,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      } else if (shortcut === "open-settings") {
+        event.preventDefault();
+        openSettings();
+      } else if (shortcut === "switch-theme") {
+        event.preventDefault();
+        setAppearanceTheme(theme === "dark" ? "light" : "dark");
+      } else if (shortcut === "focus") {
         event.preventDefault();
         focusOmnibox();
       } else if (shortcut === "back") {

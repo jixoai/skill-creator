@@ -289,6 +289,32 @@ describe("Omnibox interactions", () => {
     ).toBe(false);
   });
 
+  it("forwards Cmd/Ctrl+Shift+P to the existing command palette shortcut", () => {
+    mountOmnibox();
+    const forwarded = vi.fn<(event: KeyboardEvent) => void>();
+    const onKeydown = (event: KeyboardEvent): void => {
+      if (event.key === "k" && (event.metaKey || event.ctrlKey)) forwarded(event);
+    };
+    globalThis.addEventListener("keydown", onKeydown);
+    try {
+      const shortcut = new KeyboardEvent("keydown", {
+        key: "P",
+        code: "KeyP",
+        metaKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      globalThis.dispatchEvent(shortcut);
+
+      expect(shortcut.defaultPrevented).toBe(true);
+      expect(forwarded).toHaveBeenCalledOnce();
+      expect(forwarded.mock.calls[0]?.[0]).toMatchObject({ key: "k", metaKey: true });
+    } finally {
+      globalThis.removeEventListener("keydown", onKeydown);
+    }
+  });
+
   it("brands the editing focus state instead of the forms-plugin default blue (P2-3)", async () => {
     mountOmnibox();
     editButton().click();

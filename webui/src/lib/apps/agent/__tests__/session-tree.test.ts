@@ -20,6 +20,8 @@ import type {
 } from "$shared/contracts/workspaces.js";
 import {
   UNASSIGNED_GROUP_KEY,
+  filterSessionSummaries,
+  groupSessionsByCreatedAt,
   groupSessionsByTarget,
   sessionDisplayName,
   sessionIsUnassigned,
@@ -171,5 +173,51 @@ describe("display helpers", () => {
     expect(sessionIsUnassigned(summary({ sessionId: "x", target: { workspaceId: "~" } }))).toBe(
       false,
     );
+  });
+});
+
+describe("session navigation organizations", () => {
+  it("groups Timeline by createdAt day ranges and sorts newest first", () => {
+    const now = new Date(2026, 9, 4, 12);
+    const groups = groupSessionsByCreatedAt(
+      [
+        summary({ sessionId: "older", createdAt: new Date(2026, 8, 20, 12).toISOString() }),
+        summary({ sessionId: "yesterday", createdAt: new Date(2026, 9, 3, 12).toISOString() }),
+        summary({ sessionId: "today-old", createdAt: new Date(2026, 9, 4, 8).toISOString() }),
+        summary({ sessionId: "today-new", createdAt: new Date(2026, 9, 4, 11).toISOString() }),
+        summary({ sessionId: "unknown", createdAt: "not-a-date" }),
+      ],
+      now,
+    );
+
+    expect(groups.map((group) => group.key)).toEqual(["today", "yesterday", "older", "unknown"]);
+    expect(groups[0]?.sessions.map((session) => session.sessionId)).toEqual([
+      "today-new",
+      "today-old",
+    ]);
+  });
+
+  it("searches title, id, cwd, status, mode, target id and workspace label", () => {
+    const sessions = [
+      summary({
+        sessionId: "session-a",
+        title: "Refactor navigation",
+        cwd: "/repo/alpha",
+        status: "running",
+        mode: "explore",
+        target: { workspaceId: importedId },
+      }),
+      summary({ sessionId: "session-b", title: "Other work" }),
+    ];
+
+    expect(
+      filterSessionSummaries(sessions, [importedWs], "project a").map((item) => item.sessionId),
+    ).toEqual(["session-a"]);
+    expect(
+      filterSessionSummaries(sessions, [importedWs], "running").map((item) => item.sessionId),
+    ).toEqual(["session-a"]);
+    expect(
+      filterSessionSummaries(sessions, [importedWs], "session-b").map((item) => item.sessionId),
+    ).toEqual(["session-b"]);
   });
 });

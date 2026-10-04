@@ -17,6 +17,15 @@
 import type { AgentSessionSummary } from "$shared/contracts/agent.js";
 import type { Workspace, WorkspaceId } from "$shared/contracts/workspaces.js";
 
+export type SessionOrganizationMode = "workspace" | "timeline";
+
+export type SessionTimelineBucket = "today" | "yesterday" | "last-week" | "older" | "unknown";
+
+export interface SessionTimelineGroup {
+  key: SessionTimelineBucket;
+  sessions: AgentSessionSummary[];
+}
+
 /** Unassigned 组的稳定 key（workspace id 域外的哨兵值）。 */
 export const UNASSIGNED_GROUP_KEY = "__unassigned__";
 
@@ -91,6 +100,66 @@ export function sessionsForWorkspace(
   workspaceId: WorkspaceId,
 ): AgentSessionSummary[] {
   return sortSessions(sessions.filter((session) => session.target?.workspaceId === workspaceId));
+}
+
+/** Timeline 以创建时间分段；本仓摘要没有 updatedAt，不能伪装成最近活动时间。 */
+export function groupSessionsByCreatedAt(
+  sessions: readonly AgentSessionSummary[],
+  now: Date = new Date(),
+): SessionTimelineGroup[] {
+  const buckets = new Map<SessionTimelineBucket, AgentSessionSummary[]>([
+    ["today", []],
+    ["yesterday", []],
+    ["last-week", []],
+    ["older", []],
+    ["unknown", []],
+  ]);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  for (const session of sessions) {
+    const createdAt = Date.parse(session.createdAt);
+    const key: SessionTimelineBucket = Number.isNaN(createdAt)
+      ? "unknown"
+      : Math.max(0, Math.floor((today - startOfLocalDay(createdAt)) / 86_400_000)) === 0
+        ? "today"
+        : Math.floor((today - startOfLocalDay(createdAt)) / 86_400_000) === 1
+          ? "yesterday"
+          : Math.floor((today - startOfLocalDay(createdAt)) / 86_400_000) <= 7
+            ? "last-week"
+            : "older";
+    buckets.get(key)!.push(session);
+  }
+  return [...buckets]
+    .filter(([, bucket]) => bucket.length > 0)
+    .map(([key, bucket]) => ({ key, sessions: sortSessions(bucket) }));
+}
+
+/** 按搜索词过滤摘要可用字段和 Workspace 名称。 */
+export function filterSessionSummaries(
+  sessions: readonly AgentSessionSummary[],
+  workspaces: readonly Workspace[],
+  query: string,
+): AgentSessionSummary[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return [...sessions];
+  const workspaceLabels = new Map(workspaces.map((workspace) => [workspace.id, workspace.label]));
+  return sessions.filter((session) => {
+    const workspaceId = session.target?.workspaceId;
+    return [
+      sessionDisplayName(session),
+      session.sessionId,
+      session.status,
+      session.mode,
+      session.cwd,
+      workspaceId ?? "",
+      workspaceId ? (workspaceLabels.get(workspaceId) ?? "") : "",
+      session.seedSkill ?? "",
+    ].some((value) => value.toLocaleLowerCase().includes(needle));
+  });
+}
+
+function startOfLocalDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
 /** 会话显示名（title 缺省回退 sessionId 前缀）。 */

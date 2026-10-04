@@ -82,9 +82,68 @@ describe("omnibox suggestions and shortcuts", () => {
     expect(omniboxShortcut({ key: "]", code: "BracketRight", metaKey: true, ctrlKey: false })).toBe(
       "forward",
     );
+    expect(
+      omniboxShortcut({
+        key: "{",
+        code: "BracketLeft",
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: true,
+      }),
+    ).toBeNull();
     expect(omniboxShortcut({ key: "[", code: "BracketLeft", metaKey: false, ctrlKey: false })).toBe(
       null,
     );
+  });
+
+  it("maps settings and theme shortcuts while reserving shifted brackets for conversation switching", () => {
+    expect(omniboxShortcut({ key: ",", code: "Comma", metaKey: true, ctrlKey: false })).toBe(
+      "open-settings",
+    );
+    expect(
+      omniboxShortcut({
+        key: ",",
+        code: "Comma",
+        metaKey: false,
+        ctrlKey: true,
+      }),
+    ).toBe("open-settings");
+    expect(
+      omniboxShortcut({
+        key: "L",
+        code: "KeyL",
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: true,
+      }),
+    ).toBe("switch-theme");
+    expect(
+      omniboxShortcut({
+        key: "{",
+        code: "BracketLeft",
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: true,
+      }),
+    ).toBeNull();
+    expect(
+      omniboxShortcut({
+        key: "P",
+        code: "KeyP",
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: true,
+      }),
+    ).toBe("open-command-center");
+    expect(
+      omniboxShortcut({
+        key: "p",
+        code: "KeyP",
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: true,
+      }),
+    ).toBe("open-command-center");
   });
 
   it("derives Back and Forward enabled states from the active stack cursor", () => {

@@ -31,7 +31,13 @@ export interface HistoryAvailability {
   readonly forward: boolean;
 }
 
-export type OmniboxShortcut = "focus" | "back" | "forward";
+export type OmniboxShortcut =
+  | "open-command-center"
+  | "focus"
+  | "back"
+  | "forward"
+  | "open-settings"
+  | "switch-theme";
 
 /** Parse omnibox text; the custom scheme is display syntax, never a network URL. */
 export function parseOmniboxInput(input: string): OmniboxInput {
@@ -106,11 +112,18 @@ export function historyAvailability(stack: HistoryStackState | undefined): Histo
 
 /** Shell-local keyboard shortcuts; callers decide whether the event is handled. */
 export function omniboxShortcut(
-  event: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey">,
+  event: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey"> & {
+    altKey?: boolean;
+    shiftKey?: boolean;
+  },
 ): OmniboxShortcut | null {
   if (event.key === "F6") return "focus";
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") return "focus";
-  if (!(event.metaKey || event.ctrlKey)) return null;
+  if (event.altKey || !(event.metaKey || event.ctrlKey)) return null;
+  if (event.shiftKey && event.key.toLowerCase() === "p") return "open-command-center";
+  if (!event.shiftKey && event.key === ",") return "open-settings";
+  if (event.shiftKey && event.key.toLowerCase() === "l") return "switch-theme";
+  if (event.shiftKey) return null;
+  if (event.key.toLowerCase() === "l") return "focus";
   if (event.key === "[" || event.code === "BracketLeft") return "back";
   if (event.key === "]" || event.code === "BracketRight") return "forward";
   return null;

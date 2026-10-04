@@ -1,40 +1,32 @@
 <!--
-  SkillsAgentPage（skills-agent-page 1.2/1.3/1.5/1.8）：固定 Agent tab 的页面壳。
+  SkillsAgentPage（skills-agent-page-zcode-parity 1.3/5.1/5.2）：Agent tab 页面壳。
   用户原始需求 [2026-10-03]（design §1，对标 ZCode）：
   「┌ omnibox 行 actions: [terminal][rightPanel] ┐
     │ workspaces └ sessions 树 │ Chat │ 扩展面板 panelTabs │
     ├ 终端（人类 PTY，xterm.js；可多 tab；可拖高）┤」
   正交意图：
-    [1] 四区布局：左树（~240px，可折叠 ~36px）/ 中部 Chat（SessionFace——
-        1.4 组件族）/ 右扩展面板（~320px，可关可拖）/ 底部终端容器（~200px
-        起，可拖可关）；显隐与尺寸入 DevicePrefs（appearance 域）。
-    [2] 三尺寸降级（<1024）：扩展面板转 overlay drawer、终端转底部 drawer、
-        左树折叠（agent-surface spec「narrow viewport」场景——无水平溢出）。
+    [1] 四区布局：左树（264px 默认/最小，可拖至 50%，折叠 36px）/ 中部 Chat /
+        右扩展面板（45% 默认/65% 最大，Chat 保底 320px）/ 底部终端；几何入 DevicePrefs。
+    [2] 窄屏降级（<1024）：树 rail 可开导航 drawer、扩展面板转 overlay、终端转底部 drawer。
     [3] 深链与会话上下文：/agent?session=<id> 激活会话（workspace 面板「在
         Agent 页打开」入口）；会话切换驱动扩展面板 rebind（1.5 手动记忆重置）；
         双开角标（agentPanel.open 且同会话 = 「也在 workspace 面板打开」）。
     [4] addressBarActions 位（1.8）：toolbar 的 [terminal][rightPanel] 切换钮
         ——Omnibox（shell/page-actions.ts，Codex 批）对 agent 页注册的同名动作
         经 aria-label 桥接到本工具位（页内可达 + omnibox 可达双入口）。
-  妥协声明：无（各分区语义在子组件内自持）。
+  妥协声明：树宽与右栏比例对齐 ZCode WorkspaceShellLayout/sidePaneLayout；低于
+  1024px 时保留 drawer 降级，避免三栏挤压窄屏 Chat。
 -->
 <script lang="ts">
-  import IconPanelLeft from "@lucide/svelte/icons/panel-left";
   import IconPanelLeftClose from "@lucide/svelte/icons/panel-left-close";
   import IconPanelRight from "@lucide/svelte/icons/panel-right";
   import IconTerminalSquare from "@lucide/svelte/icons/terminal-square";
   import IconPlus from "@lucide/svelte/icons/plus";
   import IconPanelsTopLeft from "@lucide/svelte/icons/panels-top-left";
+  import IconPanelLeftOpen from "@lucide/svelte/icons/panel-left-open";
   import { t } from "$lib/i18n";
   import { useSearch } from "$lib/shell";
-  import {
-    AGENT_RIGHT_PANEL_MAX_WIDTH,
-    AGENT_RIGHT_PANEL_MIN_WIDTH,
-    AGENT_TERMINAL_MAX_HEIGHT,
-    AGENT_TERMINAL_MIN_HEIGHT,
-    readDevicePrefs,
-    updateDevicePrefs,
-  } from "$lib/shell/device-prefs.js";
+  import { readDevicePrefs, updateDevicePrefs } from "$lib/shell/device-prefs.js";
   import {
     agentPageActiveSession,
     agentPanel,
@@ -50,7 +42,27 @@
   import SessionFace from "$lib/components/agent/SessionFace.svelte";
   import TerminalDock from "$lib/components/agent/terminal/TerminalDock.svelte";
   import { rebindExtensionPanel } from "./extension-panel.svelte.js";
-  import { sessionDisplayName, sessionIsUnassigned } from "./session-tree.js";
+  import {
+    groupSessionsByCreatedAt,
+    sessionDisplayName,
+    sessionIsUnassigned,
+  } from "./session-tree.js";
+  import {
+    AGENT_LAYOUT_KEYBOARD_STEP,
+    AGENT_RIGHT_PANEL_MIN_WIDTH,
+    AGENT_TREE_COLLAPSED_WIDTH,
+    AGENT_TREE_DEFAULT_WIDTH,
+    agentRightPanelRatio,
+    agentRightPanelWidth as resolveRightPanelWidth,
+    clampAgentTreeWidth,
+    matchAgentShellShortcut,
+    maxAgentTreeWidth,
+    resizeAgentTreeWidth,
+  } from "./agent-layout.js";
+  import {
+    clampTerminalHeightPx,
+    defaultTerminalHeightPx,
+  } from "$lib/components/agent/terminal/terminal-geometry.js";
   import SessionTree from "./SessionTree.svelte";
   import ExtensionPanel from "./ExtensionPanel.svelte";
 
@@ -62,33 +74,41 @@
   // ---- 布局偏好（DevicePrefs appearance 域；design §1「全部显隐状态入
   // DevicePrefs」）----
   let treeCollapsed = $state(readDevicePrefs().agentTreeCollapsed);
+  let treeWidth = $state(readDevicePrefs().agentTreeWidth);
   let rightPanelOpen = $state(readDevicePrefs().agentRightPanelOpen);
-  let rightPanelWidth = $state(clampRightWidth(readDevicePrefs().agentRightPanelWidth));
+  let rightPanelRatio = $state(readDevicePrefs().agentRightPanelExpandedRatio);
   let terminalOpen = $state(readDevicePrefs().agentTerminalOpen);
-  let terminalHeight = $state(clampTerminalHeight(readDevicePrefs().agentTerminalHeight));
+  let terminalHeight = $state(readDevicePrefs().agentTerminalHeight);
+  let pageElement: HTMLElement | null = $state(null);
+  let columnsElement: HTMLElement | null = $state(null);
+  let pageHeight = $state(0);
+  let columnsWidth = $state(0);
 
-  function clampRightWidth(value: number): number {
-    if (!Number.isFinite(value)) return 320;
-    return Math.min(
-      AGENT_RIGHT_PANEL_MAX_WIDTH,
-      Math.max(AGENT_RIGHT_PANEL_MIN_WIDTH, Math.round(value)),
-    );
-  }
-
-  function clampTerminalHeight(value: number): number {
-    if (!Number.isFinite(value)) return 200;
-    return Math.min(
-      AGENT_TERMINAL_MAX_HEIGHT,
-      Math.max(AGENT_TERMINAL_MIN_HEIGHT, Math.round(value)),
-    );
-  }
+  let narrowTreeOpen = $state(false);
+  let narrowRightPanelOpen = $state(false);
+  let narrow = $state(
+    typeof matchMedia !== "undefined" && matchMedia("(max-width: 1023px)").matches,
+  );
 
   function toggleTree(): void {
+    if (narrow) {
+      narrowTreeOpen = !narrowTreeOpen;
+      return;
+    }
     treeCollapsed = !treeCollapsed;
     updateDevicePrefs({ agentTreeCollapsed: treeCollapsed });
   }
 
+  function setTreeWidth(next: number, persist = false): void {
+    treeWidth = clampAgentTreeWidth(next, columnsWidth);
+    if (persist) updateDevicePrefs({ agentTreeWidth: treeWidth });
+  }
+
   function toggleRightPanel(): void {
+    if (narrow) {
+      narrowRightPanelOpen = !narrowRightPanelOpen;
+      return;
+    }
     rightPanelOpen = !rightPanelOpen;
     updateDevicePrefs({ agentRightPanelOpen: rightPanelOpen });
   }
@@ -98,15 +118,55 @@
     updateDevicePrefs({ agentTerminalOpen: terminalOpen });
   }
 
-  function setRightPanelWidth(next: number): void {
-    rightPanelWidth = clampRightWidth(next);
-    updateDevicePrefs({ agentRightPanelWidth: rightPanelWidth });
+  function setRightPanelWidth(next: number, persist = false): void {
+    rightPanelRatio = agentRightPanelRatio(next, rightPanelAvailableWidth);
+    if (persist) {
+      updateDevicePrefs({ agentRightPanelExpandedRatio: rightPanelRatio });
+    }
   }
 
   function setTerminalHeight(next: number): void {
-    terminalHeight = clampTerminalHeight(next);
+    terminalHeight = clampTerminalHeightPx(next, terminalBasisHeight);
     updateDevicePrefs({ agentTerminalHeight: terminalHeight });
   }
+
+  const treeStripMode = $derived(narrow ? !narrowTreeOpen : treeCollapsed);
+  const treeDrawerMode = $derived(narrow && narrowTreeOpen);
+  const treePanelWidth = $derived(
+    treeStripMode
+      ? AGENT_TREE_COLLAPSED_WIDTH
+      : clampAgentTreeWidth(treeWidth, columnsWidth || AGENT_TREE_DEFAULT_WIDTH * 2),
+  );
+  const rightPanelAvailableWidth = $derived(Math.max(0, columnsWidth - treePanelWidth));
+  const rightPanelWidth = $derived(
+    resolveRightPanelWidth(rightPanelRatio, rightPanelAvailableWidth),
+  );
+  const terminalBasisHeight = $derived(
+    pageHeight > 0 ? pageHeight : typeof window === "undefined" ? 0 : window.innerHeight,
+  );
+  const resolvedTerminalHeight = $derived(
+    terminalHeight === 0
+      ? defaultTerminalHeightPx(terminalBasisHeight)
+      : clampTerminalHeightPx(terminalHeight, terminalBasisHeight),
+  );
+  const treeButtonOpen = $derived(narrow ? narrowTreeOpen : !treeCollapsed);
+  const rightPanelVisible = $derived(narrow ? narrowRightPanelOpen : rightPanelOpen);
+
+  $effect(() => {
+    const page = pageElement;
+    const columns = columnsElement;
+    if (!page || !columns || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      pageHeight = page.clientHeight;
+      columnsWidth = columns.clientWidth;
+      treeWidth = clampAgentTreeWidth(treeWidth, columnsWidth);
+    });
+    observer.observe(page);
+    observer.observe(columns);
+    pageHeight = page.clientHeight;
+    columnsWidth = columns.clientWidth;
+    return () => observer.disconnect();
+  });
 
   // ---- 深链（agent-surface spec「deep link opens the agent page」）：?session= 激活会话。 ----
   const search = useSearch<{ session?: string }>();
@@ -153,55 +213,130 @@
       agentPageActiveSession() === agentSession.sessionId,
   );
 
-  // ---- 窄屏态（<1024：树折叠/右面板 overlay/终端底部 overlay 的判定基准）。 ----
-  let narrow = $state(false);
+  // ---- 窄屏态（<1024：树 drawer/右面板 overlay/终端底部 overlay 的判定基准）。 ----
   $effect(() => {
     if (typeof matchMedia === "undefined") return;
     const query = matchMedia("(max-width: 1023px)");
     const update = (): void => {
       narrow = query.matches;
+      if (query.matches) narrowTreeOpen = false;
     };
     update();
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   });
 
-  /** 树的有效折叠态：偏好折叠 或 窄屏强制折叠（spec「narrow viewport」）。 */
-  const treeStripMode = $derived(treeCollapsed || narrow);
-
-  // ---- 右面板拖宽（左缘拖柄；<1024 overlay drawer 无侧栏宽度语义）。 ----
-  let resizing = $state(false);
+  // ---- 左树与右面板拖宽（DevicePrefs 只持设备几何，不改 URL/session）。 ----
+  let resizing = $state<"tree" | "right" | null>(null);
   let resizeStartX = 0;
-  let resizeStartWidth = 0;
+  let resizeStartTreeWidth = 0;
+  let resizeStartRightWidth = 0;
 
-  function startResize(event: PointerEvent): void {
+  function startResize(event: PointerEvent, pane: "tree" | "right"): void {
     if (event.button !== 0) return;
-    resizing = true;
+    resizing = pane;
     resizeStartX = event.clientX;
-    resizeStartWidth = rightPanelWidth;
+    resizeStartTreeWidth = treeWidth;
+    resizeStartRightWidth = rightPanelWidth;
     const target = event.currentTarget;
     if (target instanceof HTMLElement) target.setPointerCapture(event.pointerId);
     document.body.style.userSelect = "none";
     document.body.style.cursor = "col-resize";
   }
 
-  function endResize(): void {
-    if (!resizing) return;
-    resizing = false;
+  function endResize(cancelled = false): void {
+    const activeResize = resizing;
+    if (activeResize === null) return;
+    if (cancelled) {
+      if (activeResize === "tree") treeWidth = resizeStartTreeWidth;
+      else rightPanelRatio = agentRightPanelRatio(resizeStartRightWidth, rightPanelAvailableWidth);
+    } else if (activeResize === "tree") {
+      updateDevicePrefs({ agentTreeWidth: treeWidth });
+    } else {
+      updateDevicePrefs({ agentRightPanelExpandedRatio: rightPanelRatio });
+    }
+    resizing = null;
     document.body.style.userSelect = "";
     document.body.style.cursor = "";
   }
+
+  function handleTreeResizeKeydown(event: KeyboardEvent): void {
+    const nextWidth = resizeAgentTreeWidth(treeWidth, event.key, columnsWidth);
+    if (nextWidth === null) return;
+    event.preventDefault();
+    setTreeWidth(nextWidth, true);
+  }
+
+  function handleRightResizeKeydown(event: KeyboardEvent): void {
+    let nextWidth: number | null = null;
+    const minimum = AGENT_RIGHT_PANEL_MIN_WIDTH;
+    const maximum = resolveRightPanelWidth(0.65, rightPanelAvailableWidth);
+    if (event.key === "ArrowLeft") nextWidth = rightPanelWidth + AGENT_LAYOUT_KEYBOARD_STEP;
+    else if (event.key === "ArrowRight") nextWidth = rightPanelWidth - AGENT_LAYOUT_KEYBOARD_STEP;
+    else if (event.key === "Home") nextWidth = minimum;
+    else if (event.key === "End") nextWidth = maximum;
+    if (nextWidth === null) return;
+    event.preventDefault();
+    setRightPanelWidth(Math.max(minimum, Math.min(maximum, nextWidth)), true);
+  }
+
+  function isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false;
+    if (target.closest("[data-terminal-region]")) return false;
+    return (
+      target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]') !== null
+    );
+  }
+
+  function navigateSession(direction: -1 | 1): void {
+    const sessions = groupSessionsByCreatedAt(agentSessionsList.sessions).flatMap(
+      (group) => group.sessions,
+    );
+    if (sessions.length === 0) return;
+    const currentIndex = sessions.findIndex(
+      (session) => session.sessionId === agentSession.sessionId,
+    );
+    const nextIndex = currentIndex < 0 ? 0 : currentIndex + direction;
+    if (nextIndex < 0 || nextIndex >= sessions.length) return;
+    const nextSession = sessions[nextIndex];
+    if (nextSession) selectAgentSession(nextSession.sessionId);
+  }
+
+  $effect(() => {
+    const handler = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.repeat || isEditableTarget(event.target)) return;
+      const platform = /mac/i.test(navigator.platform ?? "") ? "mac" : "other";
+      const shortcut = matchAgentShellShortcut(event, platform);
+      if (shortcut === null) return;
+      event.preventDefault();
+      if (shortcut === "toggle-sidebar") toggleTree();
+      else if (shortcut === "toggle-terminal") toggleTerminal();
+      else if (shortcut === "toggle-side-pane") toggleRightPanel();
+      else if (shortcut === "new-session") beginNewAgentSession();
+      else if (shortcut === "previous-session") navigateSession(-1);
+      else navigateSession(1);
+    };
+    globalThis.addEventListener("keydown", handler);
+    return () => globalThis.removeEventListener("keydown", handler);
+  });
 </script>
 
 <svelte:window
   onpointermove={(event) => {
-    if (resizing) setRightPanelWidth(resizeStartWidth + (resizeStartX - event.clientX));
+    if (resizing === "tree") setTreeWidth(resizeStartTreeWidth + event.clientX - resizeStartX);
+    else if (resizing === "right") {
+      setRightPanelWidth(resizeStartRightWidth + (resizeStartX - event.clientX));
+    }
   }}
-  onpointerup={endResize}
-  onpointercancel={endResize}
+  onpointerup={() => endResize()}
+  onpointercancel={() => endResize(true)}
 />
 
-<section class="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-agent-page="true">
+<section
+  bind:this={pageElement}
+  class="flex h-full min-h-0 flex-col overflow-hidden bg-background"
+  data-agent-page="true"
+>
   <!-- actionsToolbar（1.8 addressBarActions）：[terminal][rightPanel] 切换钮。
        已接线：Codex 批的 Omnibox（shell/page-actions.ts）对 agent 页注册
        terminal/right-panel 动作，runAction 经 aria-label 定位本工具位按钮
@@ -211,15 +346,15 @@
     <button
       type="button"
       class="relative flex h-6 w-7 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1 after:content-[''] hover:bg-muted hover:text-foreground"
-      title={treeCollapsed ? t("agentPage.showTree") : t("agentPage.hideTree")}
-      aria-label={treeCollapsed ? t("agentPage.showTree") : t("agentPage.hideTree")}
-      aria-pressed={!treeCollapsed}
+      title={treeButtonOpen ? t("agentPage.hideTree") : t("agentPage.showTree")}
+      aria-label={treeButtonOpen ? t("agentPage.hideTree") : t("agentPage.showTree")}
+      aria-pressed={treeButtonOpen}
       onclick={toggleTree}
     >
-      {#if treeCollapsed}
-        <IconPanelLeft class="h-3.5 w-3.5" />
-      {:else}
+      {#if treeButtonOpen}
         <IconPanelLeftClose class="h-3.5 w-3.5" />
+      {:else}
+        <IconPanelLeftOpen class="h-3.5 w-3.5" />
       {/if}
     </button>
     <button
@@ -269,12 +404,12 @@
     </button>
     <button
       type="button"
-      class="relative flex h-6 w-7 items-center justify-center rounded transition-colors after:absolute after:-inset-1 after:content-[''] {rightPanelOpen
+      class="relative flex h-6 w-7 items-center justify-center rounded transition-colors after:absolute after:-inset-1 after:content-[''] {rightPanelVisible
         ? 'bg-primary/10 text-primary'
         : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
       title={t("agentPage.toggleRightPanel")}
       aria-label={t("agentPage.toggleRightPanel")}
-      aria-pressed={rightPanelOpen}
+      aria-pressed={rightPanelVisible}
       onclick={toggleRightPanel}
     >
       <IconPanelRight class="h-3.5 w-3.5" />
@@ -282,11 +417,22 @@
   </div>
 
   <!-- 主行：左树 | Chat | 右扩展面板。<1024：树折叠为窄条、右面板转 overlay drawer。 -->
-  <div class="relative flex min-h-0 flex-1">
+  <div bind:this={columnsElement} class="relative flex min-h-0 flex-1" data-agent-columns="true">
+    {#if treeDrawerMode}
+      <button
+        type="button"
+        class="absolute inset-y-0 right-0 z-20 bg-foreground/15"
+        style="left: {treePanelWidth}px"
+        aria-label={t("agentPage.closeTreeDrawer")}
+        onclick={() => (narrowTreeOpen = false)}
+      ></button>
+    {/if}
     <div
-      class="relative shrink-0 overflow-hidden border-r border-border transition-[width] {treeStripMode
-        ? 'w-9'
-        : 'w-60'}"
+      id="agent-session-sidebar"
+      class="relative shrink-0 overflow-hidden border-r border-border bg-background transition-[width] {treeDrawerMode
+        ? 'absolute inset-y-0 left-0 z-30 shadow-xl'
+        : ''}"
+      style="width: {treePanelWidth}px"
       data-tree-region="true"
     >
       {#if treeStripMode}
@@ -298,38 +444,66 @@
             aria-label={t("agentPage.showTree")}
             onclick={toggleTree}
           >
-            <IconPanelLeft class="h-3.5 w-3.5" />
+            <IconPanelLeftOpen class="h-3.5 w-3.5" />
           </button>
           <span class="mt-1 text-[10px] text-muted-foreground">
             {agentSessionsList.sessions.length}
           </span>
         </div>
       {:else}
-        <div class="h-full w-60">
+        <div class="h-full w-full">
           <SessionTree />
         </div>
       {/if}
     </div>
 
-    <main class="flex min-w-0 flex-1 flex-col">
+    {#if !narrow && !treeCollapsed}
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div
+        class="relative z-10 h-full w-1 shrink-0 cursor-col-resize touch-none select-none hover:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        role="separator"
+        tabindex="0"
+        aria-controls="agent-session-sidebar"
+        aria-orientation="vertical"
+        aria-label={t("agentPage.resizeTree")}
+        aria-valuemin={264}
+        aria-valuemax={maxAgentTreeWidth(columnsWidth)}
+        aria-valuenow={treePanelWidth}
+        data-agent-tree-resizer="true"
+        onpointerdown={(event) => startResize(event, "tree")}
+        onkeydown={handleTreeResizeKeydown}
+      ></div>
+    {/if}
+
+    <main class="flex min-w-0 flex-1 flex-col" data-agent-chat-region="true">
       <SessionFace />
     </main>
 
-    {#if rightPanelOpen}
+    {#if rightPanelVisible}
       <!-- ≥1024：常驻侧栏（左缘拖宽）；<1024：overlay drawer（含关闭钮 + 背景幕）。 -->
       <div
         class="absolute inset-y-0 right-0 z-30 flex w-full max-[1023px]:bg-background/95 max-[1023px]:shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:w-(--agent-right-width) min-[1024px]:shrink-0 min-[1024px]:border-l min-[1024px]:border-border max-[1023px]:backdrop-blur-sm"
         style="--agent-right-width: {rightPanelWidth}px"
         data-right-panel-region="true"
       >
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <div
-          class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 min-[1024px]:block"
+          class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-[1024px]:block"
           role="separator"
+          tabindex="0"
+          aria-controls="agent-right-panel-content"
           aria-orientation="vertical"
           aria-label={t("agentPage.resizeRightPanel")}
-          onpointerdown={startResize}
+          aria-valuemin={AGENT_RIGHT_PANEL_MIN_WIDTH}
+          aria-valuemax={resolveRightPanelWidth(0.65, rightPanelAvailableWidth)}
+          aria-valuenow={rightPanelWidth}
+          data-agent-right-resizer="true"
+          onpointerdown={(event) => startResize(event, "right")}
+          onkeydown={handleRightResizeKeydown}
         ></div>
-        <div class="min-w-0 flex-1">
+        <div id="agent-right-panel-content" class="min-w-0 flex-1">
           <ExtensionPanel />
         </div>
         <button
@@ -352,7 +526,7 @@
       class="absolute inset-x-0 bottom-0 z-30 max-h-[70%] shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:max-h-none min-[1024px]:shadow-none"
       data-terminal-region="true"
     >
-      <TerminalDock height={terminalHeight} onHeight={setTerminalHeight} />
+      <TerminalDock height={resolvedTerminalHeight} onHeight={setTerminalHeight} />
     </div>
   {/if}
 </section>

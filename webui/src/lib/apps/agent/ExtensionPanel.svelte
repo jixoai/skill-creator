@@ -1,49 +1,98 @@
 <!--
-  Agent 页右扩展面板（skills-agent-page 1.5）：panelTabs 三页。
-  用户原始需求 [2026-10-03]（design §5）：「[Agent 终端][审批][卡]……panelTabs
-  按会话上下文自动切换（新审批到达 → 审批 tab 角标）；用户手动切换优先（会话
-  内记忆）」。
+  Agent 页右扩展面板：typed 单宿主 / 多 tab registry（skills-agent-page-zcode-parity 3.1/3.2/3.3）。
+  用户原始需求 [2026-10-04]（design §3）：「复刻 ZCode 的单宿主、多 tab、单 active
+  content；补 tab close menu、reorder、overview/search/reopen」。
   正交意图：
-    [1] Agent 终端流：transcript 帧 tool_call（bash 族）只读回放视图——数据源
-        = agentSession.items 的 tool 行（零新 RPC），行渲染复用 AgentToolRow。
-    [2] 审批：agent.proposals.* 统一审批面（extension-panel watch store 轮询
-        投影）；决定卡复用 AgentProposalCard（approve/reject 直连 RPC）。
-    [3] 卡片：工具结果携带的 ui:// 卡（沙箱 iframe 渲染沿用 AgentCard）——
-        从 tool 行 result 经最小 Zod 收窄提取（畸形退化空）。
-    [4] tab 切换语义：手动点击优先（会话内记忆 manualTab）；自动切换只在无
-        手动记忆时生效（新审批到达 → approvals + 角标）。
-  妥协声明：无。
+    [1] 单宿主组合：tab 条（overview/scroll viewport/add 菜单）+ 单 active 面板体
+        （inactive 保持挂载只隐藏——ZCode TabsContent forceMount 语义）+ 空 tab
+        open-tab launcher。
+    [2] tab 条物理：溢出判定（60px 预算 + add 按钮跟随/固定）+ 滚动 mask 边 + active
+        tab 自动滚入可视区（rAF 量测 → scrollBy smooth）。
+    [3] 内联面板体：approvals（统一审批面）/ bash-output（shell 工具流）/
+        subagents（spawn 目录）/ cards（ui:// 卡列表）；ui-card/file-preview 体在
+        components/agent/extension/。
+    [4] watch 生命周期：审批轮询 start/stop（到达沿驱动 typed request，见 store）。
+  妥协声明：4 个意图聚合于本文件——ExtensionPanel 是 registry 的唯一宿主边界
+  （apps/agent 其余文件归并行批，拆分会把接线散进他人域）；子结构已物理拆分到
+  components/agent/extension/。
+  ZCode 引用：app-shell/AnimatedSidePanePanel.tsx:418-1101（visibleTabs 派生回退/
+  溢出 mask/自动 reveal/add 菜单/tab 条/面板体分派/openTabLauncher）。
 -->
 <script lang="ts">
-  import { z } from "zod";
-  import IconSquareTerminal from "@lucide/svelte/icons/square-terminal";
-  import IconBadgeCheck from "@lucide/svelte/icons/badge-check";
-  import IconIdCard from "@lucide/svelte/icons/id-card";
-  import { t } from "$lib/i18n";
+  import IconPlus from "@lucide/svelte/icons/plus";
+  import IconPanelRight from "@lucide/svelte/icons/panel-right";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
   import { agentSession } from "$lib/stores/agent.svelte";
-  import AgentToolRow from "$lib/components/agent/AgentToolRow.svelte";
+  import AgentToolRow, { toolUiCardRefOf } from "$lib/components/agent/AgentToolRow.svelte";
   import AgentProposalCard from "$lib/components/agent/AgentProposalCard.svelte";
   import AgentCard from "$lib/components/agent/AgentCard.svelte";
+  import FilePreviewBody from "$lib/components/agent/extension/FilePreviewBody.svelte";
+  import PanelTabButton from "$lib/components/agent/extension/PanelTabButton.svelte";
+  import TabContextMenu from "$lib/components/agent/extension/TabContextMenu.svelte";
+  import TabOverview from "$lib/components/agent/extension/TabOverview.svelte";
+  import { panelTabIcon } from "$lib/components/agent/extension/panel-tab-icon.js";
   import {
+    resolvePanelTabRevealScroll,
+    resolveSidePaneTabsOverflow,
+  } from "$lib/components/agent/extension/side-pane-layout.js";
+  import {
+    getPanelTabTitle,
+    type ExtensionPanelTabType,
+  } from "$lib/components/agent/extension/panel-tabs.js";
+  import {
+    activateExtensionTab,
+    closeAllExtensionTabs,
+    closeExtensionTab,
+    closeOtherExtensionTabs,
     extensionPanel,
-    setExtensionTabManual,
+    openExtensionApprovals,
+    openExtensionBashOutput,
+    openExtensionCards,
+    openExtensionSubagents,
+    reorderExtensionTab,
+    reopenRecentExtensionTab,
+    setExtensionDraggingTabId,
     startExtensionPanelWatch,
     stopExtensionPanelWatch,
-    type ExtensionPanelTab,
+    visibleActiveExtensionTabId,
+    visibleExtensionTabs,
+    visibleRecentClosedExtensionTabs,
   } from "./extension-panel.svelte.js";
+
+  /**
+   * 容器接线位（编排者转 Codex）：onCloseSidePane 提供时渲染面板关闭钮（ZCode
+   * closeSidePaneButton :803）；separator 键盘 resize/比例宽度接线需求见 change 报告。
+   */
+  let { onCloseSidePane }: { onCloseSidePane?: () => void } = $props();
 
   startExtensionPanelWatch();
   $effect(() => {
     return () => stopExtensionPanelWatch();
   });
 
-  const tabs: Array<{ id: ExtensionPanelTab; label: string; icon: typeof IconSquareTerminal }> = [
-    { id: "terminal-narrative", label: t("extensionPanel.tabTerminal"), icon: IconSquareTerminal },
-    { id: "approvals", label: t("extensionPanel.tabApprovals"), icon: IconBadgeCheck },
-    { id: "cards", label: t("extensionPanel.tabCards"), icon: IconIdCard },
+  const visibleTabs = $derived(visibleExtensionTabs());
+  const activeTabId = $derived(visibleActiveExtensionTabId());
+  const recentClosedTabs = $derived(visibleRecentClosedExtensionTabs());
+
+  // ---- Add 菜单 / open-tab launcher 项（ZCode :763-802 launcher items——已开类型
+  // 收起，等价 ZCode review 项的 hasReviewTab 行为；file-preview/ui-card 不入菜单：
+  // ZCode code-viewer 同样只经输出链接打开）。 ----
+  const launcherItems: Array<{
+    id: ExtensionPanelTabType;
+    label: string;
+    open: () => void;
+  }> = [
+    { id: "approvals", label: "Approvals", open: openExtensionApprovals },
+    { id: "bash-output", label: "Shell output", open: openExtensionBashOutput },
+    { id: "subagents", label: "Subagents", open: openExtensionSubagents },
+    { id: "cards", label: "Cards", open: openExtensionCards },
   ];
 
-  /** 内核工具行的 bash 族判定（Agent 终端流过滤面；bash/pwsh 覆盖模式矩阵）。 */
+  const openTypeSet = $derived(new Set(visibleTabs.map((tab) => tab.type)));
+  const addMenuItems = $derived(launcherItems.filter((item) => !openTypeSet.has(item.id)));
+
+  // ---- 数据面（沿用 skills-agent-page 1.5 既有投影，零新 RPC）。 ----
+  /** 内核工具行的 bash 族判定（bash/pwsh 覆盖模式矩阵）。 */
   function isShellTool(toolName: string): boolean {
     const normalized = toolName.toLowerCase();
     return normalized.includes("bash") || normalized.includes("shell");
@@ -53,41 +102,15 @@
     agentSession.items.filter((item) => item.kind === "tool" && isShellTool(item.toolName)),
   );
 
-  /** ui:// 卡引用提取面（与 AgentToolRow 的消费 schema 同形；畸形 → null）。 */
-  const UiCardRefSchema = z.object({
-    uiCard: z.object({ resourceUri: z.string().min(1), title: z.string().optional() }),
-  });
-  const ResultEnvelopeSchema = z.object({ content: z.array(z.unknown()).optional() }).loose();
-
-  interface CardEntry {
-    seq: number;
-    resourceUri: string;
-    title: string;
-  }
-
-  function uiCardOf(payload: unknown): { resourceUri: string; title?: string } | null {
-    const direct = UiCardRefSchema.safeParse(payload);
-    if (direct.success) return direct.data.uiCard;
-    const envelope = ResultEnvelopeSchema.safeParse(payload);
-    if (!envelope.success || envelope.data.content === undefined) return null;
-    for (const block of envelope.data.content) {
-      const nested = UiCardRefSchema.safeParse(block);
-      if (nested.success) return nested.data.uiCard;
-    }
-    return null;
-  }
+  const subagentItems = $derived(agentSession.items.filter((item) => item.kind === "subagent"));
 
   const cardEntries = $derived.by(() => {
-    const entries: CardEntry[] = [];
+    const entries: Array<{ seq: number; resourceUri: string; title: string }> = [];
     for (const item of agentSession.items) {
       if (item.kind !== "tool" || item.result === undefined) continue;
-      const card = uiCardOf(item.result);
+      const card = toolUiCardRefOf(item.result);
       if (card !== null) {
-        entries.push({
-          seq: item.seq,
-          resourceUri: card.resourceUri,
-          title: card.title ?? card.resourceUri,
-        });
+        entries.push({ seq: item.seq, resourceUri: card.resourceUri, title: card.title });
       }
     }
     return entries;
@@ -99,102 +122,406 @@
   const decidedProposals = $derived(
     (extensionPanel.proposals ?? []).filter((proposal) => proposal.status !== "pending"),
   );
+
+  // ---- tab 条溢出 / 滚动 mask（ZCode :550-636：add 按钮预算还原假想布局，避免
+  // ResizeObserver 反馈环；mask 边绑定真实 scrollLeft）。 ----
+  let viewportEl = $state<HTMLDivElement | null>(null);
+  let overflow = $state({ overflowing: false, maskLeft: false, maskRight: false });
+  let rafId: number | null = null;
+
+  function computeOverflow(): void {
+    rafId = null;
+    const viewport = viewportEl;
+    if (viewport === null) {
+      overflow = { overflowing: false, maskLeft: false, maskRight: false };
+      return;
+    }
+    const content = viewport.querySelector<HTMLElement>("[data-side-pane-tabs-content]");
+    if (content === null) {
+      overflow = { overflowing: false, maskLeft: false, maskRight: false };
+      return;
+    }
+    const maxScrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const addButton = viewport.parentElement?.querySelector<HTMLElement>(
+      "[data-side-pane-add-tab-trigger]",
+    );
+    const addButtonWidth = addButton?.getBoundingClientRect().width ?? 0;
+    const isOverflowing = resolveSidePaneTabsOverflow({
+      addButtonInside: Boolean(addButton && content.contains(addButton)),
+      addButtonWidth,
+      tabCount: visibleTabs.length,
+      viewportWidth: viewport.clientWidth,
+    });
+    overflow = {
+      overflowing: isOverflowing,
+      maskLeft: isOverflowing && viewport.scrollLeft > 1,
+      maskRight: isOverflowing && viewport.scrollLeft < maxScrollLeft - 1,
+    };
+  }
+
+  function scheduleOverflowCompute(): void {
+    if (rafId !== null) return;
+    if (typeof requestAnimationFrame !== "function") {
+      computeOverflow();
+      return;
+    }
+    rafId = requestAnimationFrame(() => computeOverflow());
+  }
+
+  $effect(() => {
+    void visibleTabs.length;
+    scheduleOverflowCompute();
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  });
+
+  function bindTabsViewport(element: HTMLDivElement): { destroy(): void } {
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => scheduleOverflowCompute());
+    resizeObserver?.observe(element);
+    const content = element.querySelector<HTMLElement>("[data-side-pane-tabs-content]");
+    if (content !== null) resizeObserver?.observe(content);
+    window.addEventListener("resize", scheduleOverflowCompute);
+    return {
+      destroy() {
+        resizeObserver?.disconnect();
+        window.removeEventListener("resize", scheduleOverflowCompute);
+        if (rafId !== null) cancelAnimationFrame(rafId);
+      },
+    };
+  }
+
+  const viewportMaskStyle = $derived.by(() => {
+    if (!overflow.maskLeft && !overflow.maskRight) return undefined;
+    const leftEdge = overflow.maskLeft ? "transparent 0%, black 16px" : "black 0%";
+    const rightEdge = overflow.maskRight
+      ? "black calc(100% - 16px), transparent 100%"
+      : "black 100%";
+    const value = `linear-gradient(to right, ${leftEdge}, ${rightEdge})`;
+    return `mask-image: ${value}; -webkit-mask-image: ${value};`;
+  });
+
+  // ---- active tab 自动滚入可视区（ZCode :638-679：外部激活的 tab 可能被横向
+  // 滚动区遮住；rAF 后按真实 DOM 宽度滚回，不用固定宽度估算）。 ----
+  $effect(() => {
+    const id = activeTabId;
+    void visibleTabs.length;
+    if (id.length === 0) return;
+    const frame = requestAnimationFrame(() => {
+      const viewport = viewportEl;
+      if (viewport === null) return;
+      const tabEl = viewport.querySelector<HTMLElement>(
+        `[data-side-pane-tab-id="${CSS.escape(id)}"]`,
+      );
+      if (tabEl === null) return;
+      const viewportRect = viewport.getBoundingClientRect();
+      const tabRect = tabEl.getBoundingClientRect();
+      const delta = resolvePanelTabRevealScroll(
+        viewportRect.left,
+        viewportRect.right,
+        tabRect.left,
+        tabRect.right,
+      );
+      if (delta !== null) viewport.scrollBy({ left: delta, behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+
+  // ---- 拖拽排序 / 上下文菜单（ZCode :462-478 DnD 回调族 + :189-196 菜单）。 ----
+  let dropTargetTabId = $state<string | null>(null);
+  let contextMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
+
+  function handleDragStart(tabId: string): void {
+    setExtensionDraggingTabId(tabId);
+  }
+
+  function handleDragEnd(): void {
+    setExtensionDraggingTabId(null);
+    dropTargetTabId = null;
+  }
+
+  function handleDrop(draggedTabId: string, overTabId: string): void {
+    reorderExtensionTab(draggedTabId, overTabId);
+    setExtensionDraggingTabId(null);
+    dropTargetTabId = null;
+  }
+
+  function openContextMenu(event: MouseEvent, tabId: string): void {
+    event.preventDefault();
+    contextMenu = { tabId, x: event.clientX, y: event.clientY };
+  }
 </script>
 
 <aside
-  class="flex h-full flex-col bg-background"
-  aria-label={t("extensionPanel.panelAria")}
+  class="flex h-full min-h-0 flex-col bg-background"
+  aria-label="Extension panel"
   data-extension-panel="true"
 >
-  <div class="flex h-9 shrink-0 items-stretch border-b border-border" role="tablist">
-    {#each tabs as tab (tab.id)}
-      {@const Icon = tab.icon}
-      <button
-        type="button"
-        role="tab"
-        aria-selected={extensionPanel.activeTab === tab.id}
-        class="relative flex min-w-0 flex-1 items-center justify-center gap-1 px-1 text-[11px] transition-colors {extensionPanel.activeTab ===
-        tab.id
-          ? 'border-b-2 border-primary font-medium text-primary'
-          : 'border-b-2 border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
-        onclick={() => setExtensionTabManual(tab.id)}
-      >
-        <Icon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span class="truncate">{tab.label}</span>
-        {#if tab.id === "approvals" && extensionPanel.approvalsBadge > 0}
-          <span
-            class="ml-0.5 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-primary-foreground"
+  {#if visibleTabs.length === 0}
+    <!-- 空 tab：open-tab launcher（ZCode :814-859——标题/描述/可开面板清单）。 -->
+    <div class="flex h-full min-h-0 flex-col">
+      <div class="flex h-12 shrink-0 items-center justify-end px-2">
+        {#if onCloseSidePane}
+          <button
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Close panel"
+            onclick={onCloseSidePane}
           >
-            {extensionPanel.approvalsBadge}
-          </span>
-        {/if}
-      </button>
-    {/each}
-  </div>
-
-  <div class="min-h-0 flex-1 overflow-y-auto" role="tabpanel">
-    {#if extensionPanel.activeTab === "terminal-narrative"}
-      <div class="flex flex-col gap-1 p-2">
-        {#if shellToolItems.length === 0}
-          <p class="px-1 py-3 text-xs text-muted-foreground">{t("extensionPanel.terminalEmpty")}</p>
-        {:else}
-          {#each shellToolItems as item (item.seq)}
-            {#if item.kind === "tool"}
-              <AgentToolRow
-                toolName={item.toolName}
-                argsText={item.argsText}
-                result={item.result}
-                phase={item.phase}
-                running={item.phase === "calling" && agentSession.status === "running"}
-                startedAt={item.startedAt}
-                endedAt={item.endedAt}
-              />
-            {/if}
-          {/each}
+            <IconPanelRight class="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         {/if}
       </div>
-    {:else if extensionPanel.activeTab === "approvals"}
-      <div class="flex flex-col gap-2 p-2">
-        {#if extensionPanel.error}
-          <div class="px-1 text-xs text-destructive" role="alert">{extensionPanel.error}</div>
-        {/if}
-        {#if pendingProposals.length === 0 && decidedProposals.length === 0}
-          <p class="px-1 py-3 text-xs text-muted-foreground">
-            {t("extensionPanel.approvalsEmpty")}
-          </p>
-        {/if}
-        {#each pendingProposals as proposal (proposal.id)}
-          <AgentProposalCard
-            proposalId={proposal.id}
-            capability={proposal.capability ?? proposal.kind}
-            input={proposal.payload}
-            status={proposal.status}
-          />
-        {/each}
-        {#if decidedProposals.length > 0}
-          <div class="px-1 pt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-            {t("extensionPanel.decidedHeader")}
+      <div class="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10">
+        <div class="flex w-full max-w-80 flex-col gap-5">
+          <div class="flex flex-col gap-2 text-center">
+            <h2 class="text-base leading-6 font-semibold text-foreground">Open a tab</h2>
+            <p class="text-xs leading-5 text-muted-foreground">
+              Pick a panel to inspect this session's agent output.
+            </p>
           </div>
-          {#each decidedProposals.slice(0, 10) as proposal (proposal.id)}
-            <AgentProposalCard
-              proposalId={proposal.id}
-              capability={proposal.capability ?? proposal.kind}
-              input={proposal.payload}
-              status={proposal.status}
+          <div class="flex w-full flex-col gap-2">
+            {#each launcherItems as item (item.id)}
+              {@const Icon = panelTabIcon(item.id)}
+              <button
+                type="button"
+                data-side-pane-open-tab-item={item.id}
+                class="flex h-12 min-w-0 items-center gap-3 rounded-xl bg-muted/40 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                onclick={item.open}
+              >
+                <Icon class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span class="min-w-0 flex-1 truncate text-left">{item.label}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      </div>
+    </div>
+  {:else}
+    <!-- tab 条：[overview] [scroll viewport + tabs + add] [add(溢出) + close]。 -->
+    <div class="flex h-12 shrink-0 items-stretch border-b border-border">
+      <div class="flex h-full shrink-0 items-center p-2">
+        <TabOverview
+          tabs={visibleTabs}
+          {activeTabId}
+          {recentClosedTabs}
+          onActivateTab={activateExtensionTab}
+          onCloseTab={closeExtensionTab}
+          onReopenClosedTab={reopenRecentExtensionTab}
+        />
+      </div>
+      <div
+        bind:this={viewportEl}
+        use:bindTabsViewport
+        class="side-pane-tabs-viewport min-w-0 flex-1 overflow-x-auto"
+        style={viewportMaskStyle}
+        data-side-pane-tabs-viewport=""
+        onscroll={() => scheduleOverflowCompute()}
+      >
+        <div
+          class="flex h-12 w-full items-center gap-1 py-2.5"
+          data-side-pane-tabs-content=""
+          role="tablist"
+          aria-label="Extension panel tabs"
+        >
+          {#each visibleTabs as tab (tab.id)}
+            <PanelTabButton
+              {tab}
+              isActive={tab.id === activeTabId}
+              badge={tab.type === "approvals" ? extensionPanel.approvalsBadge : 0}
+              closeTabLabel={`Close ${getPanelTabTitle(tab)}`}
+              isDragged={extensionPanel.draggingTabId === tab.id}
+              isDropTarget={dropTargetTabId === tab.id &&
+                extensionPanel.draggingTabId !== null &&
+                extensionPanel.draggingTabId !== tab.id}
+              onActivate={activateExtensionTab}
+              onClose={closeExtensionTab}
+              onContextMenuOpen={openContextMenu}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragOverTab={(overTabId) => (dropTargetTabId = overTabId)}
+              onDrop={handleDrop}
             />
           {/each}
+          {#if !overflow.overflowing && addMenuItems.length > 0}
+            <DropdownMenu.DropdownMenu>
+              <DropdownMenu.Trigger
+                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                aria-label="Open a tab"
+                data-side-pane-add-tab-trigger=""
+              >
+                <IconPlus class="h-3.5 w-3.5" aria-hidden="true" />
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="end" class="w-48">
+                {#each addMenuItems as item (item.id)}
+                  {@const Icon = panelTabIcon(item.id)}
+                  <DropdownMenu.Item onclick={item.open} class="gap-2">
+                    <Icon class="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{item.label}</span>
+                  </DropdownMenu.Item>
+                {/each}
+              </DropdownMenu.Content>
+            </DropdownMenu.DropdownMenu>
+          {/if}
+        </div>
+      </div>
+      <div class="ml-auto flex h-full shrink-0 items-center gap-1 px-2">
+        {#if overflow.overflowing && addMenuItems.length > 0}
+          <DropdownMenu.DropdownMenu>
+            <DropdownMenu.Trigger
+              class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              aria-label="Open a tab"
+              data-side-pane-add-tab-trigger=""
+            >
+              <IconPlus class="h-3.5 w-3.5" aria-hidden="true" />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" class="w-48">
+              {#each addMenuItems as item (item.id)}
+                {@const Icon = panelTabIcon(item.id)}
+                <DropdownMenu.Item onclick={item.open} class="gap-2">
+                  <Icon class="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{item.label}</span>
+                </DropdownMenu.Item>
+              {/each}
+            </DropdownMenu.Content>
+          </DropdownMenu.DropdownMenu>
         {/if}
       </div>
-    {:else}
-      <div class="flex flex-col gap-2 p-2">
-        {#if cardEntries.length === 0}
-          <p class="px-1 py-3 text-xs text-muted-foreground">{t("extensionPanel.cardsEmpty")}</p>
-        {:else}
-          {#each cardEntries as entry (entry.seq)}
-            <AgentCard resourceUri={entry.resourceUri} title={entry.title} />
-          {/each}
-        {/if}
-      </div>
-    {/if}
-  </div>
+    </div>
+
+    <!-- 面板体：全部挂载、inactive 隐藏（ZCode TabsContent forceMount——iframe/
+         滚动状态跨 tab 切换保留）。 -->
+    <div class="relative min-h-0 flex-1">
+      {#each visibleTabs as tab (tab.id)}
+        <div
+          class="absolute inset-0 min-h-0 overflow-y-auto {tab.id === activeTabId ? '' : 'hidden'}"
+          role="tabpanel"
+          aria-label={getPanelTabTitle(tab)}
+        >
+          {#if tab.type === "approvals"}
+            <div class="flex flex-col gap-2 p-2">
+              {#if extensionPanel.error}
+                <div class="px-1 text-xs text-destructive" role="alert">
+                  {extensionPanel.error}
+                </div>
+              {/if}
+              {#if pendingProposals.length === 0 && decidedProposals.length === 0}
+                <p class="px-1 py-3 text-xs text-muted-foreground">No proposals</p>
+              {/if}
+              {#each pendingProposals as proposal (proposal.id)}
+                <AgentProposalCard
+                  proposalId={proposal.id}
+                  capability={proposal.capability ?? proposal.kind}
+                  input={proposal.payload}
+                  status={proposal.status}
+                />
+              {/each}
+              {#if decidedProposals.length > 0}
+                <div class="px-1 pt-1 text-[10px] tracking-wide text-muted-foreground uppercase">
+                  Decided
+                </div>
+                {#each decidedProposals.slice(0, 10) as proposal (proposal.id)}
+                  <AgentProposalCard
+                    proposalId={proposal.id}
+                    capability={proposal.capability ?? proposal.kind}
+                    input={proposal.payload}
+                    status={proposal.status}
+                  />
+                {/each}
+              {/if}
+            </div>
+          {:else if tab.type === "bash-output"}
+            <div class="flex flex-col gap-1 p-2">
+              {#if shellToolItems.length === 0}
+                <p class="px-1 py-3 text-xs text-muted-foreground">
+                  No shell tool activity in this session yet
+                </p>
+              {:else}
+                {#each shellToolItems as item (item.seq)}
+                  {#if item.kind === "tool"}
+                    <AgentToolRow
+                      toolName={item.toolName}
+                      argsText={item.argsText}
+                      result={item.result}
+                      phase={item.phase}
+                      running={item.phase === "calling" && agentSession.status === "running"}
+                      startedAt={item.startedAt}
+                      endedAt={item.endedAt}
+                    />
+                  {/if}
+                {/each}
+              {/if}
+            </div>
+          {:else if tab.type === "subagents"}
+            <div class="flex flex-col gap-1 p-2">
+              {#if subagentItems.length === 0}
+                <p class="px-1 py-3 text-xs text-muted-foreground">
+                  No subagent activity in this session yet
+                </p>
+              {:else}
+                {#each subagentItems as item (item.seq)}
+                  {#if item.kind === "subagent"}
+                    <div
+                      class="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-[11px]"
+                    >
+                      <span class="min-w-0 flex-1 truncate text-foreground">{item.label}</span>
+                      <span class="shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground">
+                        {item.mode}
+                      </span>
+                    </div>
+                  {/if}
+                {/each}
+              {/if}
+            </div>
+          {:else if tab.type === "cards"}
+            <div class="flex flex-col gap-2 p-2">
+              {#if cardEntries.length === 0}
+                <p class="px-1 py-3 text-xs text-muted-foreground">No cards in this session yet</p>
+              {:else}
+                {#each cardEntries as entry (entry.seq)}
+                  <AgentCard resourceUri={entry.resourceUri} title={entry.title} />
+                {/each}
+              {/if}
+            </div>
+          {:else if tab.type === "ui-card"}
+            <div class="p-2">
+              <AgentCard resourceUri={tab.resourceUri} title={tab.title} />
+            </div>
+          {:else if tab.type === "file-preview"}
+            <FilePreviewBody path={tab.path} />
+          {/if}
+        </div>
+      {/each}
+    </div>
+  {/if}
 </aside>
+
+{#if contextMenu !== null}
+  <TabContextMenu
+    x={contextMenu.x}
+    y={contextMenu.y}
+    tabId={contextMenu.tabId}
+    canCloseOthers={visibleTabs.length > 1}
+    closeTabLabel="Close tab"
+    closeOtherTabsLabel="Close other tabs"
+    closeAllTabsLabel="Close all tabs"
+    onClose={closeExtensionTab}
+    onCloseOthers={closeOtherExtensionTabs}
+    onCloseAll={closeAllExtensionTabs}
+    onDismiss={() => (contextMenu = null)}
+  />
+{/if}
+
+<style>
+  /* tab 条横向滚动不显示滚动条（ZCode scrollbar-hide 等价；溢出态由 mask 边提示）。 */
+  .side-pane-tabs-viewport {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .side-pane-tabs-viewport::-webkit-scrollbar {
+    display: none;
+  }
+</style>
