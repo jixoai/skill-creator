@@ -84,6 +84,7 @@ vi.mock("../components/confirm-dialog.svelte", async () => {
 
 import CreatorWorkspace from "../apps/creator/CreatorWorkspace.svelte";
 import { loadSkillDoc, saveSkill } from "../stores/creator";
+import { workspaceState } from "../stores/workspaces.svelte";
 import {
   connectMockClient,
   resetConnectionStub,
@@ -96,6 +97,7 @@ import {
   creatorDraftKey,
 } from "../stores/creator-editor.svelte";
 import type { WorkspaceProviderTarget, SkillId } from "../types";
+import type { ImportedWorkspaceId } from "$shared/contracts/workspaces.js";
 
 const WS = "ws_0123456789abcdef01234567" as WorkspaceProviderTarget["workspaceId"];
 const PROVIDER = "openclaw" as WorkspaceProviderTarget["providerId"];
@@ -211,6 +213,70 @@ describe("creator deep-link recovery (WS5 walkthrough B)", () => {
     connectMockClient(rpc as unknown as Record<string, unknown>);
     await flushAsync();
     expect(rpc.creator.load.mock.calls.length).toBe(loadCallsAfterHeal);
+
+    unmount(instance);
+  });
+});
+
+describe("creator pageheader breadcrumb (workspace-page-polish P1-4)", () => {
+  // 面包屑全 label 化钉：workspace label / provider label / 技能名；opaque
+  // ws_/sk_ id 不得回流页头（只留 omnibox URL）。
+  function seedWorkspaceProjection() {
+    workspaceState.workspaces = [
+      {
+        // WS 的联合类型（"~" | ImportedWorkspaceId）按 kind 收窄到 directory 成员。
+        id: WS as ImportedWorkspaceId,
+        kind: "directory",
+        path: "/tmp/imported-ws",
+        label: "Imported Lab",
+        active: true,
+        available: true,
+        skillCount: 1,
+        providers: [
+          {
+            id: PROVIDER,
+            label: "OpenClaw Agent",
+            path: "/tmp/imported-ws/.openclaw",
+            available: true,
+            writable: true,
+            skillCount: 1,
+          },
+        ],
+      },
+    ];
+  }
+
+  it("renders label-only breadcrumb and never the opaque ws_/sk_ ids", async () => {
+    seedWorkspaceProjection();
+    const rpc = makeRpcMock();
+    connectMockClient(rpc as unknown as Record<string, unknown>);
+    const instance = mount(CreatorWorkspace, { target: target as HTMLElement });
+    await flushAsync();
+
+    // 三段 label 按序渲染（workspace → provider → 技能名）；Svelte 会剥元素前
+    // 空白（分隔符贴左侧 label），断言按去全部空白比对。
+    const nav = target?.querySelector("nav[aria-label='Skill location breadcrumb']");
+    const crumb = (nav?.textContent ?? "").replace(/\s+/g, "");
+    expect(crumb).toBe("ImportedLab/OpenClawAgent/code-review");
+    // opaque id 零回流（URL 里的 id 不进页头 DOM）。
+    expect(crumb).not.toContain(WS);
+    expect(crumb).not.toContain(SK);
+
+    unmount(instance);
+    workspaceState.workspaces = [];
+  });
+
+  it("omits missing segments instead of falling back to opaque ids (projection not loaded)", async () => {
+    workspaceState.workspaces = [];
+    const rpc = makeRpcMock();
+    connectMockClient(rpc as unknown as Record<string, unknown>);
+    const instance = mount(CreatorWorkspace, { target: target as HTMLElement });
+    await flushAsync();
+
+    // 投影未载：workspace/provider 段缺省（不渲染 ws id 兜底）；技能名仍随草稿
+    // hydrate 呈现。
+    const nav = target?.querySelector("nav[aria-label='Skill location breadcrumb']");
+    expect((nav?.textContent ?? "").replace(/\s+/g, " ").trim()).toBe("code-review");
 
     unmount(instance);
   });

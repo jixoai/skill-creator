@@ -123,6 +123,15 @@ describe("真实目录规模防塌机制契约（走查 13-fix）", () => {
     expect(footerCss).toMatch(/\.imported-list\s*\{[\s\S]*?max-height:/);
     expect(footerCss).toMatch(/\.imported-list\s*\{[\s\S]*?overflow-y:\s*auto/);
   });
+
+  it("row descriptions clamp without the display:block override that defeats -webkit-box", () => {
+    // 批评处置 P1-3b 同族根因：Tailwind 输出序 .block 后于 .line-clamp-*，
+    // display:block 覆盖 -webkit-box 使 clamp 失效（desk 走查 40 行折叠）——
+    // clamp 类禁与 block 同用。
+    expect(skillsScreenSrc).toMatch(/class="mt-0\.5 line-clamp-2 text-xs leading-4"/);
+    expect(skillsScreenSrc).not.toMatch(/line-clamp-\d+ block/);
+    expect(skillsScreenSrc).not.toMatch(/block line-clamp-\d+/);
+  });
 });
 
 describe("窄屏栈切换与 chips 滚动条机制契约（修复批 2）", () => {
@@ -141,9 +150,22 @@ describe("窄屏栈切换与 chips 滚动条机制契约（修复批 2）", () =
     expect(skillsScreenSrc).toMatch(/class="skills-detail-pane[^"]*detail-hidden/);
   });
 
-  it("keeps the inline-size container on the master-detail wrapper as the panes' query container", () => {
-    expect(screenCss).toMatch(/\.skills-master-detail\s*\{[\s\S]*?container-type:\s*inline-size/);
-    expect(screenCss).toMatch(/@container \(max-width: 559px\)/);
+  it("stacks master-detail inside the dashboard's named single-column query (unified 692px)", () => {
+    // 批评处置 P2：dashboard <692px 单列降档与 master-detail 栈切换共享同一
+    // 阈值真相源（560-691px 区间曾出现「dashboard 已单列、master-detail 仍
+    // 双栏挤压」——620px 走查实拍）。skills-screen 不再自带无名容器阈值。
+    expect(screenCss).toMatch(/@container dashboard \(width < 692px\)\s*\{/);
+    expect(screenCss).not.toMatch(/@container \(max-width: 559px\)/);
+    expect(screenCss).not.toMatch(/\.skills-master-detail\s*\{[\s\S]*?container-type/);
+    // 阈值一致性：与 SkillsDashboard 单列降档逐字相等（改一处不改另一处 = 红）。
+    const dashboardThreshold = Number(
+      dashboardSrc.match(/@container dashboard \(width < (\d+)px\)/)?.[1],
+    );
+    const screenThreshold = Number(
+      skillsScreenSrc.match(/@container dashboard \(width < (\d+)px\)/)?.[1],
+    );
+    expect(screenThreshold).toBe(dashboardThreshold);
+    expect(screenThreshold).toBe(692);
   });
 
   it("hides the chips-row scrollbar behind an edge fade mask without losing scroll", () => {

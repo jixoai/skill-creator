@@ -9,6 +9,10 @@
   内容 = 本 ws 会话列表（target.workspaceId 过滤，零新 RPC）+ 会话面
   （SessionFace，1.4 组件族——与 Agent 页双消费同一份）；「在 Agent 页打开」
   深链（/agent?session=）+ 同 session 双开角标（agentPageSessionId 数据面）。
+  ——2026-10-04（workspace-page-polish vision P1-5b）：attach 面板加开态
+  min-w-[320px] 地板（clamp 下限）——宽 var 失效时面板塌缩到 min-content
+  （暗色截图实测 ~165px、空态文案 90px 细条），地板兜底可读性；关闭态不加
+  （width:0 折叠语义不受影响）。
   正交意图：
   1. attach 容器：≥720px 常驻侧栏（宽度 = agentPanel.width，DevicePrefs 持久），
      <720px 单屏覆盖；Esc 收起（模态打开时让位）；resize 拖拽（pointer 捕获）。
@@ -126,7 +130,7 @@
   class="relative flex h-full w-full flex-col bg-background min-[720px]:w-(--agent-panel-width) min-[720px]:overflow-hidden duration-150 ease-in-out {resizing
     ? ''
     : 'min-[720px]:transition-[width,border-color] max-[720px]:transition-[transform,visibility]'} {agentPanel.open
-    ? 'border-l border-border'
+    ? 'min-[720px]:min-w-[320px] border-l border-border'
     : 'border-l-0 max-[720px]:translate-x-full max-[720px]:invisible'}"
   style="--agent-panel-width: {agentPanel.open ? agentPanel.width : 0}px"
   aria-label={t("agentPanel.panelAria")}

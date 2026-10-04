@@ -646,7 +646,7 @@
       {#if layoutMode !== "drawer" || treeDrawerOpen}
         <aside
           class="{layoutMode === 'wide'
-            ? 'h-full w-full border-r border-border'
+            ? 'h-full w-80 max-w-[340px] shrink-0 border-r border-border'
             : layoutMode === 'drawer'
               ? 'absolute inset-y-0 left-0 z-10 w-72 border-r border-border bg-background shadow-lg'
               : 'h-full w-full'} {layoutMode === 'stack' && selectedCaseId !== null

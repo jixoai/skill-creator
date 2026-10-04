@@ -2,8 +2,10 @@
   用户原始需求 [2026-07-27]：「Creator 编辑 tab 左右分栏，左侧 ACP 对话，右侧子视图」
   → [2026-09-07]（openspec dsh-webui-composition 3.2）：移除 generic ACP 对话面板，
   Agent 会话由 DSH host 唯一承载；Creator 回归单列编辑器。
-  修订 [2026-10-02]（design-critique R1 Gap 1）：页头主标题 = 技能名（draft.name），
-  sk_/ws_ hash 降级为小号 muted 可复制次要行，不再作标题。
+  修订 [2026-10-02]（design-critique R1 Gap 1）：页头主标题 = 技能名（draft.name）。
+  修订 [2026-10-04]（workspace-page-polish vision P1-4）：面包屑全 label 化——
+  workspace label / provider label（workspaceState 投影）/ 技能名（草稿同源）；
+  ws_/sk_ opaque id 不再进页头（只留 omnibox URL），复制 id 入口随 id 一并退役。
   修订 [2026-10-03]（evaluating-dashboard 1.4）：test/eval 子视图退役（评估迁独立
   Evaluating 区块）；编辑页保留「View evaluation」深链（三段路由同三元组）。
   正交意图：
@@ -32,7 +34,7 @@
     type CreatorDraft,
   } from "$lib/stores/creator-editor.svelte";
   import { connectionState, loadSkillDoc } from "$lib/store.svelte";
-  import { showToast } from "$lib/toast.svelte";
+  import { workspaceState } from "$lib/stores/workspaces.svelte";
   import { t } from "$lib/i18n";
   import { TEMPLATES } from "$lib/templates";
   import type { WorkspaceProviderTarget } from "$lib/types";
@@ -150,19 +152,28 @@
     return name.length > 0 ? name : t("creatorEditor.untitledSkill");
   });
 
-  /** 次要行 hash 点击复制（clipboard 不可用时 toast 提示，不静默失败）。 */
-  async function copyId(label: string, value: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(value);
-      showToast(t("creatorEditor.copiedToast", { label }));
-    } catch {
-      showToast(t("creatorEditor.copyFailedToast"));
+  // P1-4：面包屑 label 段（workspace label / provider label / 技能名）。label 来自
+  // workspaceState 投影——未加载或未知段直接缺省（不回退 opaque id），投影到位后
+  // 响应式回填；技能段仅在 edit 路由（skillId 存在）且草稿名非空时呈现。
+  const breadcrumb = $derived.by<string[]>(() => {
+    if (!wsId || !providerId) return [];
+    const parts: string[] = [];
+    const workspace = workspaceState.workspaces.find((item) => item.id === wsId);
+    if (workspace) {
+      parts.push(workspace.label);
+      const provider = workspace.providers.find((item) => item.id === providerId);
+      if (provider) parts.push(provider.label);
     }
-  }
+    if (skillId !== undefined) {
+      const name = editor.draft.name.trim();
+      if (name.length > 0) parts.push(name);
+    }
+    return parts;
+  });
 </script>
 
 <div class="flex h-full flex-col overflow-hidden">
-  <!-- 标题栏：主标题 = 技能名；opaque id 降级为小号 muted 可复制次要行。 -->
+  <!-- 标题栏：主标题 = 技能名；次要行 = 全 label 面包屑（P1-4，无 opaque id）。 -->
   <header class="flex shrink-0 flex-col gap-0.5 border-b border-border px-4 py-2">
     <div class="flex items-center justify-between gap-2">
       <span class="truncate text-sm font-medium">{headerTitle}</span>
@@ -184,32 +195,19 @@
         </button>
       {/if}
     </div>
-    {#if wsId && providerId}
-      <div
+    {#if wsId && providerId && breadcrumb.length > 0}
+      <!-- P1-4：全 label 面包屑——opaque id 只留 omnibox URL。 -->
+      <nav
         class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground"
+        aria-label={t("creatorEditor.breadcrumbAria")}
       >
-        <button
-          type="button"
-          class="max-w-40 truncate font-mono underline-offset-2 hover:underline"
-          title={t("creatorEditor.copyWorkspaceIdTitle", { id: wsId })}
-          onclick={() => void copyId("Workspace id", wsId)}
-        >
-          {wsId}
-        </button>
-        <span aria-hidden="true" class="text-border">/</span>
-        <span class="truncate">{providerId}</span>
-        {#if skillId}
-          <span aria-hidden="true" class="text-border">/</span>
-          <button
-            type="button"
-            class="max-w-40 truncate font-mono underline-offset-2 hover:underline"
-            title={t("creatorEditor.copySkillIdTitle", { id: skillId })}
-            onclick={() => void copyId("Skill id", skillId)}
-          >
-            {skillId}
-          </button>
-        {/if}
-      </div>
+        {#each breadcrumb as part, index (index)}
+          {#if index > 0}
+            <span aria-hidden="true" class="text-border">/</span>
+          {/if}
+          <span class="max-w-40 truncate" title={part}>{part}</span>
+        {/each}
+      </nav>
     {/if}
   </header>
 

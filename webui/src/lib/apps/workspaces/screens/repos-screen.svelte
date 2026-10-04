@@ -240,11 +240,13 @@
     </section>
 
     {#if recentScans.length > 0}
-      <section class="mt-3 rounded-lg border border-border bg-muted/20 p-2.5">
-        <h3 class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      <!-- 分组标题化（批评处置 P2）：screen 面板自身已是卡——外层再包
+           border/bg 盒即双层卡中卡；降为纯分组标题 + 行 hover，视觉单层。 -->
+      <section class="mt-4" aria-label={t("reposScreen.recentScans")}>
+        <h3 class="px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           {t("reposScreen.recentScans")}
         </h3>
-        <ul class="mt-1.5 space-y-0.5">
+        <ul class="mt-1 space-y-0.5">
           {#each recentScans as recent (recent.id)}
             <li>
               <button

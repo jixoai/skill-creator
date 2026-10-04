@@ -8,6 +8,11 @@
   修订 [2026-10-04]（workspace-page-polish V4）：安装目标默认仅列当前 tab ws 的
   providers；其他 ws 收进「Show other workspaces」折叠区（保留跨 ws 多选能力，
   但页面不再默认露出其他 ws 清单——页内跨 ws 切换器痕迹收敛）。
+  修订 [2026-10-04]（workspace-page-polish 批评处置 P1-3）：工具栏 flex-wrap
+  动作成组（Discover 任何面板宽度完整）；列表行描述 clamp 2 行 + 行高 ≤64px +
+  全文进 preview（Tailwind .block 覆盖 .line-clamp-* 的 -webkit-box 是折叠
+  根因，clamp 元素禁配 block）；preview pre-wrap 换行 + 预览头 name/description
+  + 列表行 previewed 高亮双向对应。
   正交意图：
     1. 从 URL path param sourceId 解析源 gitUrl（curated 静态目录或 user 源 RPC list），
        首扫自动触发。
@@ -282,47 +287,54 @@
 </script>
 
 <div class="flex h-full flex-col overflow-hidden">
-  <header class="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
-    <div class="min-w-0 flex-1">
+  <!-- 工具栏防截断（批评处置 P1-3a）：flex-wrap + 动作成组——行宽不足时动作组
+       整体换行（组内再自换行），任何面板宽度下按钮完整，不再被 Agent 面板
+       边缘拦腰切断；标题块 basis-56 保证换行前保有最小可读宽度。 -->
+  <header
+    class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3"
+  >
+    <div class="min-w-0 flex-1 basis-56">
       <h1 class="truncate text-sm font-semibold">{sourceLabel}</h1>
       {#if gitUrl}
         <p class="truncate font-mono text-[11px] text-muted-foreground">{gitUrl}</p>
       {/if}
     </div>
-    {#if scan}
-      <span class="shrink-0 text-[11px] text-muted-foreground" data-testid="scan-meta">
-        {t("reposScan.meta", { count: scan.skills.length, commit: scan.commit.slice(0, 12) })}
-      </span>
-    {/if}
-    <form
-      class="flex shrink-0 items-center gap-1"
-      onsubmit={(event) => {
-        event.preventDefault();
-        if (gitUrl) void runScan(gitUrl, scanRef);
-      }}
-    >
-      <input
-        bind:value={scanRef}
-        placeholder={t("reposScan.refPlaceholder")}
-        title={t("reposScan.refTitle")}
-        aria-label={t("reposScan.refTitle")}
-        class="h-7 w-28 rounded-md border border-input bg-input/20 px-2 font-mono text-[11px] outline-none placeholder:text-muted-foreground focus-visible:border-ring"
-      />
-      <button
-        type="submit"
-        disabled={scanning || !gitUrl}
-        class="h-7 rounded-md border border-border px-2 text-[11px] transition-colors hover:bg-muted/50 disabled:opacity-50"
+    <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+      {#if scan}
+        <span class="shrink-0 text-[11px] text-muted-foreground" data-testid="scan-meta">
+          {t("reposScan.meta", { count: scan.skills.length, commit: scan.commit.slice(0, 12) })}
+        </span>
+      {/if}
+      <form
+        class="flex shrink-0 items-center gap-1"
+        onsubmit={(event) => {
+          event.preventDefault();
+          if (gitUrl) void runScan(gitUrl, scanRef);
+        }}
       >
-        {scanning ? t("reposScan.scanning") : t("reposScan.rescan")}
+        <input
+          bind:value={scanRef}
+          placeholder={t("reposScan.refPlaceholder")}
+          title={t("reposScan.refTitle")}
+          aria-label={t("reposScan.refTitle")}
+          class="h-7 w-28 rounded-md border border-input bg-input/20 px-2 font-mono text-[11px] outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+        />
+        <button
+          type="submit"
+          disabled={scanning || !gitUrl}
+          class="h-7 rounded-md border border-border px-2 text-[11px] transition-colors hover:bg-muted/50 disabled:opacity-50"
+        >
+          {scanning ? t("reposScan.scanning") : t("reposScan.rescan")}
+        </button>
+      </form>
+      <button
+        type="button"
+        onclick={() => goto(`/w/${wsId}/skills?screen=repos`)}
+        class="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] hover:bg-muted/50"
+      >
+        {t("reposScan.discover")}
       </button>
-    </form>
-    <button
-      type="button"
-      onclick={() => goto(`/w/${wsId}/skills?screen=repos`)}
-      class="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] hover:bg-muted/50"
-    >
-      {t("reposScan.discover")}
-    </button>
+    </div>
   </header>
 
   {#if sessionExpired}
@@ -388,14 +400,18 @@
         </header>
         <div class="min-h-0 flex-1 overflow-y-auto">
           {#each scan.skills as skill (skill.id)}
+            {@const previewed = previewSkillParam === skill.id}
             <button
               type="button"
-              class="flex w-full items-start gap-2 border-b border-border/70 px-3 py-2 text-left transition-colors {selectedIds.has(
-                skill.id,
-              )
-                ? 'bg-accent'
-                : 'hover:bg-accent/60'}"
+              class="flex w-full items-start gap-2 border-b border-border/70 px-3 py-1.5 text-left transition-colors
+                {previewed
+                ? 'bg-accent ring-1 ring-ring ring-inset'
+                : selectedIds.has(skill.id)
+                  ? 'bg-accent'
+                  : 'hover:bg-accent/60'}"
               aria-pressed={selectedIds.has(skill.id)}
+              aria-current={previewed ? "true" : undefined}
+              data-previewed={previewed || undefined}
               onclick={() => selectSkillForPreview(skill)}
             >
               <input
@@ -409,14 +425,21 @@
                 aria-label={t("reposScan.selectSkillAria")}
               />
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-[13px] font-medium text-foreground">
+                <!-- 行高 ≤64px（批评处置 P1-3b）：leading-snug + leading-4 + py-1.5 ≈ 64px；
+                     描述 clamp 2 行，全文进 preview 面板。clamp 元素禁配 block——
+                     Tailwind 输出序 .block 在 .line-clamp-* 之后，display:block 会
+                     覆盖 -webkit-box 使 line-clamp 失效（desk 走查 40 行折叠根因）。 -->
+                <span class="block truncate text-[13px] font-medium leading-snug text-foreground">
                   {skill.name}
                 </span>
-                <span class="mt-0.5 line-clamp-2 block text-[11px] text-muted-foreground">
+                <span class="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
                   {skill.description || t("reposScan.noDescription")}
                 </span>
                 {#if !skill.installable}
-                  <span class="mt-0.5 block text-[10px] text-amber-600 dark:text-amber-400">
+                  <span
+                    class="mt-0.5 line-clamp-1 text-[10px] leading-3 text-amber-600 dark:text-amber-400"
+                    title={skill.issues.join(" ") || t("reposScan.notInstallable")}
+                  >
                     {skill.issues.join(" ") || t("reposScan.notInstallable")}
                   </span>
                 {/if}
@@ -433,8 +456,22 @@
           {#if previewing}
             <p class="mt-2 text-xs text-muted-foreground">{t("reposScan.previewLoading")}</p>
           {:else if preview}
+            <!-- 预览头（批评处置 P1-3b/c）：列表行描述 clamp 后全文在此呈现；
+                 name 让面板自证当前预览对象（与列表行 previewed 高亮双向对应）。 -->
+            <div class="mt-2 min-w-0" data-testid="scan-preview-head">
+              <p class="truncate text-[13px] font-medium text-foreground">{preview.skill.name}</p>
+              <p class="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                {preview.skill.description || t("reposScan.noDescription")}
+              </p>
+            </div>
+            <p class="mt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t("reposScan.previewRaw")}
+            </p>
+            <!-- pre-wrap + break-words（批评处置 P1-3c）：窄面板（Agent 面板开启）
+                 下不再字符级硬切；纵向上限保留内滚。 -->
             <pre
-              class="mt-2 max-h-48 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-4">{preview.content}</pre>
+              class="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-2 text-[11px] leading-4"
+              data-testid="scan-preview-content">{preview.content}</pre>
           {:else}
             <p class="mt-2 text-xs text-muted-foreground">{t("reposScan.previewEmpty")}</p>
           {/if}

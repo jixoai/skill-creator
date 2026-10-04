@@ -207,6 +207,20 @@ describe("AgentPanel collapse semantics (R17-C: toggle collapses, never unmounts
     ctx.cleanup();
   });
 
+  it("floors the open panel at the clamp minimum and drops the floor when collapsed (P1-5b)", () => {
+    // 宽 var 失效（utility 未生成/级联失效）时面板会塌缩到 min-content（暗色
+    // 截图实测 ~165px、空态 90px 细条）；开态 min-w 地板 = clamp 下限兜底。
+    // 关闭态不得带地板——width:0 折叠语义依赖无 min-width。
+    const ctx = mountPanel();
+    const asideOpen = panelAside();
+    expect(asideOpen.classList.contains("min-[720px]:min-w-[320px]")).toBe(true);
+
+    setAgentPanelOpen(false);
+    flushSync();
+    expect(panelAside().classList.contains("min-[720px]:min-w-[320px]")).toBe(false);
+    ctx.cleanup();
+  });
+
   it("keeps the composer draft across collapse and reopen", () => {
     const ctx = mountPanel();
     agentComposer.text = "draft survives collapse";

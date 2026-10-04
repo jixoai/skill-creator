@@ -249,6 +249,7 @@
           size="sm"
           class="h-7 gap-1.5"
           disabled={loading || runTargets.length === 0}
+          hidden={targets.length === 0}
           onclick={() => (runOpen = true)}
         >
           <IconPlay class="h-3.5 w-3.5" />

@@ -11,7 +11,8 @@
      作用域；q 包含式未覆盖的模糊命中以补全条呈现（点击落位或改写 q）。
   4. 虚拟化窗口：>200 行时简单窗口化（computeDashboardWindow 纯数学；只减 DOM）。
   5. master-detail：详情恢复身份 = ?provider=&skill= 双参数（skillId 是
-     per-provider digest）；窄屏（屏容器 < 560px）?view=detail push 切换。
+     per-provider digest）；窄屏（dashboard 命名容器 < 692px，与网格单列降档
+     同源阈值）?view=detail push 切换。
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -419,9 +420,11 @@
   {/if}
 
   <!-- 窄屏栈切换的隐藏类只落在 pane 上（修复批 2 P1-2）：类落在
-       .skills-master-detail 自身时，无名 @container 会以上溯到的外层
-       .dashboard-shell 容器解析条件（559px），把整个 master-detail——列表行、
-       空态文案、详情面——一起藏掉，形成 450px 空白盲区。 -->
+       .skills-master-detail 自身时，隐藏类与容器查询在同一元素上互相不可见
+       （450px 盲区）。栈切换阈值统一到 dashboard 命名容器的 692px 单列降档
+       （批评处置 P2）：单列容器（Agent 面板开启 / 620px 窄窗）下列表满宽、
+       点行 push 详情（?view=detail 机制不变），不再出现 560-691px 区间的
+       「dashboard 已单列、master-detail 仍双栏挤压」。 -->
   <div class="skills-master-detail flex min-h-0 flex-1">
     <!-- 列表面（窄屏 ?view=detail 且详情身份有效时隐藏） -->
     <div
@@ -503,7 +506,9 @@
                     </span>
                   {/if}
                 </span>
-                <span class="mt-0.5 line-clamp-2 block text-xs leading-4">
+                <!-- clamp 元素禁配 block：Tailwind 输出序 .block 在 .line-clamp-*
+                     之后，display:block 覆盖 -webkit-box 使 clamp 失效。 -->
+                <span class="mt-0.5 line-clamp-2 text-xs leading-4">
                   {row.description || t("skillsScreen.noDescription")}
                 </span>
               </span>
@@ -558,14 +563,11 @@
 
   {#if wsId === ("~" as const)}
     <!-- Global 页脚：库快照行（冒烟锚点 en 逐字）+ self-skill banner + 导入管理。 -->
-    <DashboardFooter />
+    <DashboardFooter {wsId} />
   {/if}
 </section>
 
 <style>
-  .skills-master-detail {
-    container-type: inline-size;
-  }
   .skills-list-pane {
     min-width: 0;
   }
@@ -603,12 +605,12 @@
   .chips-row::-webkit-scrollbar {
     display: none;
   }
-  /* 窄屏（屏容器 < 560px）：list/detail 栈式切换（?view 参数驱动）；
+  /* 窄屏栈切换（?view 参数驱动）：查询绑定 dashboard 命名容器（.dashboard-shell，
+     SkillsDashboard 单列降档同源阈值 692px）——master-detail 与网格降档共享同一
+     断点真相源（批评处置 P2：620px 下 dashboard 已单列而 master-detail 仍双栏）。
      宽屏两类都渲染——master-detail 并列，隐藏类 inert（ProviderView 同族样板）。
-     隐藏类必须落在 pane 上：pane 的最近祖先容器 = .skills-master-detail 本身
-     （下方 container-type），查询条件即「屏容器 < 560px」；落在 wrapper 自身上
-     会上溯到 .dashboard-shell 解析，整个 master-detail 被藏掉（450px 盲区）。 */
-  @container (max-width: 559px) {
+     隐藏类仍必须落在 pane 上（修复批 2 P1-2 的 450px 盲区教训）。 */
+  @container dashboard (width < 692px) {
     .list-hidden,
     .detail-hidden {
       display: none;

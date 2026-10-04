@@ -27,8 +27,24 @@
     workspaceState.workspaces.filter((ws) => ws.kind === "directory"),
   );
 
-  /** 库快照：跨全部 workspace 的技能/位置总数（屏读摘要行 + 冒烟锚点，恒复数）。 */
+  /**
+   * 计数快照（屏读摘要行 + 冒烟锚点，恒复数）。Imported ws tab 上下文 =
+   * 当前 ws 的 providers 计数（专注单 Workspace——同屏数字与过滤视图不打架，
+   * vision P2-6）；Global/缺席 = 跨全部 workspace 的库快照（管理中枢语义）。
+   * 冒烟锚点格式不变（key 同一、仅数值语境化，正则 \\d+ 恒匹配）。
+   */
+  let { wsId }: { wsId?: string } = $props();
   const librarySnapshot = $derived.by(() => {
+    if (wsId !== undefined && wsId !== "~") {
+      const ws = workspaceState.workspaces.find((item) => item.id === wsId);
+      let skills = 0;
+      let providers = 0;
+      for (const provider of ws?.providers ?? []) {
+        providers += 1;
+        skills += provider.skillCount ?? 0;
+      }
+      return { skills, providers };
+    }
     let skills = 0;
     let providers = 0;
     for (const ws of workspaceState.workspaces) {

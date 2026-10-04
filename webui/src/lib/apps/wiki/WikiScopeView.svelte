@@ -8,6 +8,10 @@
   修订 [2026-10-04]（workspace-page-polish V1）：wiki 随 IA 平行化收编为 ws 页
   区块（/w/:wsId/wiki 直接挂本视图，pattern 行内展开、无二级路由）——「返回
   scope 索引」上级已不存在，返回按钮删除（旧 /wiki 全局路由退役）。
+  修订 [2026-10-04]（workspace-page-polish 批评处置 P1-2）：页头恒纵向堆叠
+  （标题+描述块 / 动作行）——desk 行内动作列 shrink-0 会把文本块压到
+  min-content（Agent 面板开启时 h1 ~110px、描述一词一行折 11 行）；narrow
+  结构即正确答案，桌面照抄。
   正交意图：
   1. 单 scope 的 pattern 列表（前端过滤 + 惰性展开正文）。
   2. 碎片追加表单（幂等提交：deduplicated 有独立反馈；失败 toast 可区分）。
@@ -236,31 +240,23 @@
 </script>
 
 <div class="flex h-full flex-col overflow-y-auto p-5">
-  <header
-    class="flex shrink-0 items-start justify-between gap-3 border-b border-border pb-4 max-[720px]:flex-col max-[720px]:gap-2.5"
-  >
-    <div class="min-w-0 max-[720px]:w-full">
-      <div class="flex items-center gap-2">
-        <h1
-          tabindex="-1"
-          bind:this={headingEl}
-          class="min-w-0 flex-1 truncate text-lg font-semibold outline-none"
-        >
-          {t("wikiScope.heading", { scope: scopeLabel })}
-        </h1>
-      </div>
+  <header class="flex shrink-0 flex-col gap-2.5 border-b border-border pb-4">
+    <div class="min-w-0">
+      <h1 tabindex="-1" bind:this={headingEl} class="truncate text-lg font-semibold outline-none">
+        {t("wikiScope.heading", { scope: scopeLabel })}
+      </h1>
       <p class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
         {#if scope === "~"}
           <Badge variant="secondary" class="shrink-0">{t("wikiHome.globalBadge")}</Badge>
         {:else}
           <Badge variant="secondary" class="shrink-0">{t("wikiScope.workspaceBadge")}</Badge>
         {/if}
-        <span class="min-w-0 max-[720px]:truncate">
+        <span class="min-w-0 truncate" title={t("wikiScope.subtitle", { scope: scopeLabel })}>
           {t("wikiScope.subtitle", { scope: scopeLabel })}
         </span>
       </p>
     </div>
-    <div class="flex shrink-0 items-center gap-1.5 max-[720px]:w-full">
+    <div class="flex items-center gap-1.5">
       <Button
         variant="ghost"
         size="icon"

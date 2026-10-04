@@ -96,6 +96,34 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* dark 下 markdown 渲染层跟随暗色 token（workspace-page-polish vision P1-5a，
+   2026-10-04）：@tailwindcss/typography 的 `.prose` 默认墨色是浅色系的
+   slate/gray-900（暗蓝紫），在暗底上不可读（SKILL.md 详情/Preview 的 h1/strong
+   实测近 1.2:1）。此规则按本产品 token 全量反转（语义等价 prose-invert，但走
+   主题 token 且全局生效——两个 prose 消费点 components/skills/skill-detail-panel
+   与 components/creator/preview 无需逐个挂 dark: 类）。自定义属性覆盖只需
+   特异性（0,2,0）> 插件 `.prose`（0,1,0），与插件变量名一一对应。 */
+.dark .prose {
+  --tw-prose-body: var(--muted-foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-kbd: var(--foreground);
+  --tw-prose-kbd-shadows: var(--border);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-pre-bg: var(--muted);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+
 @theme inline {
   --font-sans: "Inter Variable", sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
