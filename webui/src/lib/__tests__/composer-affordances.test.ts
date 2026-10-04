@@ -86,7 +86,11 @@ vi.mock("$lib/components/ui/dropdown-menu", async () => {
 
 import ComposerCard from "../components/agent/ComposerCard.svelte";
 import { flushSync, mount, unmount } from "./svelte-client";
-import { agentSession, resetAgentStoreStub } from "./stubs/agent-store-stub.svelte";
+import {
+  agentSession,
+  cancelAgentSession,
+  resetAgentStoreStub,
+} from "./stubs/agent-store-stub.svelte";
 import { agentComposer } from "../stores/agent-composer.svelte";
 
 /**
@@ -194,6 +198,52 @@ describe("ComposerCard attachment pickers (R14-B 4)", () => {
       expect(button?.className).toContain("h-8 w-8");
       expect(button?.className).toContain("after:-inset-1.5");
     }
+    ctx.cleanup();
+  });
+});
+
+describe("ComposerCard composer parity keyboard ownership (4.3)", () => {
+  beforeEach(() => {
+    resetAgentStoreStub(null);
+    agentSession.sessionId = "agent-s1";
+    agentSession.status = "running";
+    agentComposer.text = "";
+    agentComposer.images = [];
+    agentComposer.files = [];
+    agentComposer.editing = null;
+  });
+
+  it("stops the focused running session on Escape without handing the key to the panel", () => {
+    const ctx = mountComposer();
+    const input = ctx.textarea();
+    if (!input) throw new Error("composer textarea not rendered");
+    input.focus();
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+    expect(cancelAgentSession).toHaveBeenCalledTimes(1);
+    ctx.cleanup();
+  });
+
+  it("removes the last attachment on Backspace when the draft is empty", () => {
+    const ctx = mountComposer();
+    const input = ctx.textarea();
+    if (!input) throw new Error("composer textarea not rendered");
+    agentComposer.files = [{ name: "notes.md", data: "" }];
+    flushSync();
+    input.focus();
+    input.setSelectionRange(0, 0);
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }),
+    );
+    expect(agentComposer.files).toEqual([]);
+
+    agentComposer.images = [{ mediaType: "image/png", data: "" }];
+    flushSync();
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }),
+    );
+    expect(agentComposer.images).toEqual([]);
     ctx.cleanup();
   });
 });

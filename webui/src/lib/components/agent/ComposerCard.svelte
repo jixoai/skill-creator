@@ -145,6 +145,7 @@
   import SkillMenu from "./SkillMenu.svelte";
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
+  let composerRoot = $state<HTMLElement | null>(null);
   /** SlashMenu 实例（W3 统一 `/` 触发：命令 + 技能单实例）；卡片根 relative，
    * 菜单锚定卡上方。 */
   let slashMenu = $state<{ handleKeydown: (event: KeyboardEvent) => boolean } | null>(null);
@@ -220,6 +221,27 @@
     if (running && !hasDraft) return "stop" as const;
     if (running) return busyEnterPreference() === "steer" ? ("steer" as const) : ("queue" as const);
     return "send" as const;
+  });
+
+  /**
+   * ZCode 把 Escape stop 绑定到当前 focused composer pane，而不是 shell 的关闭键。
+   * 菜单/对话框先 preventDefault 时让它们自行消费，避免一次 Escape 同时停止会话
+   * 并收起宿主面板。
+   */
+  $effect(() => {
+    const root = composerRoot;
+    if (root === null || !running) return;
+    const onWindowKeydown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || composing) return;
+      const active = document.activeElement;
+      if (!(active instanceof Node) || !root.contains(active)) return;
+      if (document.querySelector("[role='dialog']")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void cancelAgentSession();
+    };
+    window.addEventListener("keydown", onWindowKeydown);
+    return () => window.removeEventListener("keydown", onWindowKeydown);
   });
 
   /** 显示态模式（R12-B 6）：会话内 = agentSession.mode；New Session 态 =
@@ -527,6 +549,21 @@
           requestAnimationFrame(() => el.setSelectionRange(next, next));
           return;
         }
+        // 官方 PromptInputTextarea 在正文为空时按 Backspace 移除最后一个附件。
+        // 当前协议将图片/文件分成两条有界通道；沿可见附件尾部消费文件优先，
+        // 没有文件时再消费最后一张图片，不扩展 daemon 合约。
+        if (agentComposer.text.length === 0) {
+          if (agentComposer.files.length > 0) {
+            agentComposer.files = agentComposer.files.slice(0, -1);
+            event.preventDefault();
+            return;
+          }
+          if (agentComposer.images.length > 0) {
+            agentComposer.images = agentComposer.images.slice(0, -1);
+            event.preventDefault();
+            return;
+          }
+        }
       }
     }
     if (event.key === "Enter" && !event.shiftKey) {
@@ -567,7 +604,16 @@
   }
 
   function onPaste(event: ClipboardEvent): void {
-    const files = [...(event.clipboardData?.files ?? [])];
+    // Chromium/Safari expose pasted screenshots through DataTransferItem even when
+    // `clipboardData.files` is empty; follow ZCode's item-first path and retain the
+    // files fallback for older engines.
+    const clipboardItems = [...(event.clipboardData?.items ?? [])];
+    const itemFiles = clipboardItems.flatMap((item) => {
+      if (item.kind !== "file") return [];
+      const file = item.getAsFile();
+      return file === null ? [] : [file];
+    });
+    const files = itemFiles.length > 0 ? itemFiles : [...(event.clipboardData?.files ?? [])];
     if (files.length > 0) {
       event.preventDefault();
       // W1：粘贴文件项统一路由（官方 keymap 语义；守卫沿用 store 双通道）。
@@ -602,6 +648,7 @@
 </script>
 
 <div
+  bind:this={composerRoot}
   class="relative mx-3 mb-3 flex shrink-0 flex-col rounded-[22px] border border-border bg-card shadow-sm"
 >
   <!-- W4 排队发件箱（composer 卡上方 dock；durable 帧到达退队）。 -->

@@ -288,6 +288,7 @@ describe("SkillsAgentPage shell geometry", () => {
     ).toBe("264px");
     click(host.querySelector('button[aria-label="agentPage.closeTreeDrawer"]'));
     expect(host.querySelector<HTMLElement>("[data-tree-region]")?.style.width).toBe("36px");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("agentPage.showTree");
 
     click(host.querySelector('button[aria-label="agentPage.toggleRightPanel"]'));
     expect(host.querySelector<HTMLElement>("[data-right-panel-region]")?.className).toContain(
@@ -297,10 +298,14 @@ describe("SkillsAgentPage shell geometry", () => {
       host.querySelector('[data-right-panel-region] button[aria-label="probe-close-extension"]'),
     );
     expect(host.querySelector("[data-right-panel-region]")).toBeNull();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("agentPage.showTree");
 
     click(host.querySelector('button[aria-label="agentPage.toggleTerminal"]'));
     expect(host.querySelector("[data-terminal-region]")).toBeTruthy();
     expect(host.querySelector("[data-right-panel-region]")).toBeNull();
+    click(host.querySelector('button[aria-label="probe-close-terminal"]'));
+    expect(host.querySelector("[data-terminal-region]")).toBeTruthy();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("agentPage.showTree");
   });
 
   it("routes ZCode global shell shortcuts without consuming editor key events", () => {

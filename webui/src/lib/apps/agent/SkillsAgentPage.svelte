@@ -91,6 +91,7 @@
   let terminalOpen = $state(initialTerminalOpen);
   let terminalMounted = $state(initialTerminalOpen);
   let terminalHeight = $state(readDevicePrefs().agentTerminalHeight);
+  let treeToggleButton: HTMLButtonElement | null = $state(null);
   let terminalToggleButton: HTMLButtonElement | null = $state(null);
   let pageElement: HTMLElement | null = $state(null);
   let columnsElement: HTMLElement | null = $state(null);
@@ -119,7 +120,9 @@
 
   function toggleRightPanel(): void {
     if (narrow) {
+      const closing = narrowRightPanelOpen;
       narrowRightPanelOpen = !narrowRightPanelOpen;
+      if (closing) focusVisibleAgentControl();
       return;
     }
     rightPanelOpen = !rightPanelOpen;
@@ -127,7 +130,7 @@
   }
 
   function toggleTerminal(): void {
-    if (terminalOpen) terminalToggleButton?.focus();
+    if (terminalOpen) focusVisibleAgentControl(terminalToggleButton);
     if (!terminalOpen) terminalMounted = true;
     terminalOpen = !terminalOpen;
     updateDevicePrefs({ agentTerminalOpen: terminalOpen });
@@ -196,6 +199,15 @@
   );
   const treeButtonOpen = $derived(narrow ? narrowTreeOpen : !treeCollapsed);
   const rightPanelVisible = $derived(narrow ? narrowRightPanelOpen : rightPanelOpen);
+
+  function focusVisibleAgentControl(preferred: HTMLButtonElement | null = null): void {
+    const candidate = preferred ?? treeToggleButton;
+    if (candidate !== null && candidate.isConnected && candidate.getClientRects().length > 0) {
+      candidate.focus();
+      return;
+    }
+    if (treeToggleButton !== null && treeToggleButton.isConnected) treeToggleButton.focus();
+  }
 
   $effect(() => {
     const page = pageElement;
@@ -417,6 +429,7 @@
        aria-label 即协议，改动须两处同步）；窄屏溢出菜单同源。 -->
   <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
     <button
+      bind:this={treeToggleButton}
       type="button"
       class="relative flex h-6 w-7 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1 after:content-[''] hover:bg-muted hover:text-foreground"
       title={treeButtonOpen ? t("agentPage.hideTree") : t("agentPage.showTree")}
@@ -498,7 +511,10 @@
         class="absolute inset-y-0 right-0 z-20 bg-foreground/15"
         style="left: {treePanelWidth}px"
         aria-label={t("agentPage.closeTreeDrawer")}
-        onclick={() => (narrowTreeOpen = false)}
+        onclick={() => {
+          narrowTreeOpen = false;
+          focusVisibleAgentControl();
+        }}
       ></button>
     {/if}
     <div
