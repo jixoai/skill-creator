@@ -1,17 +1,20 @@
 // @vitest-environment jsdom
 /**
- * EvaluatingOverview 组件级 DOM 断言（evaluating-dashboard task 1.2/1.5）。
+ * EvaluatingOverview 组件级 DOM 断言（evaluating-world-class task 1.3；
+ * evaluating-dashboard 沿承钉：点卡三段路由、typed error 降级卡、Run… 显式
+ * 确认（绝不自动运行）、Global 无 run 入口、nextCursor 续页）。
  *
- * 用户原始需求 [2026-10-03]（design §3）：「顶行：ws 名 + Run… 入口（显式选
- * target 确认）+ 刷新；主体：技能卡网格（五态徽标行 + stale 黄标 + 最近 run
- * 相对时间）；点卡跳三段路由详情」+ 有界近期 runs 行（运行中进度态/取消入口）。
+ * 用户原始需求 [2026-10-04]（design §4.1）：总览屏 = 健康度仪表——近期 runs
+ * 时间线（三态瞬时判读 + 运行中 cancel + tracked run live 进度）置顶 + 技能
+ * 健康卡网格（通过率环 + 三态计数行 + stale 环带 + 失败摘要行）+ 空态单焦点
+ * 引导（Creator 深链）。
  *
  * 正交意图：
- *   [1] 技能卡投影：五态徽标行 + stale 黄标 + 最近 run 相对时间 + typed error
- *       降级卡（整页不失败）；点卡 → 三段路由详情（goById 断言）。
- *   [2] run 面：Run… 仅 Imported ws（Global 缺席）；弹层显式确认（选 target +
- *       勾 case 后才发 run.start——禁自动运行）；近期 runs 行的运行中取消。
- *   [3] 残留台账（task 1.5）：errorCount > 0 → 红 chip；= 0 不渲染（正反钉）。
+ *   [1] 健康卡投影：通过率环（SVG，token 色）/三态计数（icon+数字，非零渲染）
+ *       /stale 黄带环绕/失败摘要行/typed error 降级卡（整页不失败）。
+ *   [2] run 面：时间线行（状态 icon + 技能名 + 相对时间；运行中 cancel +
+ *       live 进度）；Run… 仅 Imported ws；弹层显式确认后 start。
+ *   [3] 残留台账沿承：errorCount > 0 → 红 chip；= 0 不渲染（正反钉）。
  * 妥协声明：live 桌面走查归编排者（1.7 验证门）；本文件覆盖组件行为面。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -68,6 +71,7 @@ import RouterContextHarness from "./router-context-harness.svelte";
 import { goById } from "$lib/shell/navigate";
 import {
   evaluationOverviewState,
+  evaluationRunState,
   resetEvaluationOverview,
   resetEvaluationRun,
 } from "$lib/stores/evaluation-view.svelte";
@@ -176,8 +180,8 @@ afterEach(() => {
   host?.remove();
 });
 
-describe("EvaluatingOverview (evaluating-dashboard 1.2)", () => {
-  it("renders the card grid with five-state badges, stale marker and relative time", async () => {
+describe("EvaluatingOverview health cards (evaluating-world-class 1.3)", () => {
+  it("renders the pass-rate ring, three-state counts, stale band and failing line", async () => {
     const overview = vi.fn().mockResolvedValue(
       output([
         okTarget({
@@ -199,12 +203,36 @@ describe("EvaluatingOverview (evaluating-dashboard 1.2)", () => {
 
     expect(overview).toHaveBeenCalledWith({ wsId: WS });
     expect(text()).toContain("code-review");
-    expect(text()).toContain("2 passed");
-    expect(text()).toContain("1 failed");
-    expect(text()).toContain("50% stale");
+    // 通过率环 + 百分比（2/3 ≈ 67%）。ring 色 = failed 相 → destructive。
+    expect(host.querySelectorAll('[data-testid="evaluating-pass-ring"]')).toHaveLength(1);
+    expect(text()).toContain("67%");
+    // 三态计数行（icon + 数字）+ 相对时间。
+    const counts = host.querySelector('[data-testid="evaluating-card-counts"]');
+    expect(counts?.textContent).toContain("2");
+    expect(counts?.textContent).toContain("1");
     expect(text()).toContain("3m ago");
-    // 五态徽标行存在（data-testid 锚点）。
-    expect(host.querySelectorAll('[data-testid="evaluating-card-badges"]')).toHaveLength(1);
+    // stale 黄带环绕 + 占比 chip。
+    expect(text()).toContain("50% stale");
+    const card = host.querySelector('[data-testid="evaluating-target-card"]');
+    expect(card?.className).toContain("ring-amber");
+    // 失败摘要行。
+    expect(host.querySelector('[data-testid="evaluating-failing-line"]')?.textContent).toContain(
+      "1 failing",
+    );
+  });
+
+  it("renders a muted empty ring and the never-run line when the target has no run yet", async () => {
+    const overview = vi.fn().mockResolvedValue(output([okTarget()]));
+    mockOverviewRpc(overview);
+    mountView();
+    await flushAsync();
+    expect(text()).toContain("never run");
+    // 无 run：环容器在场但无进度弧、无百分比数字。
+    const ring = host.querySelector('[data-testid="evaluating-pass-ring"]');
+    expect(ring).not.toBeNull();
+    expect(ring?.querySelectorAll("circle")).toHaveLength(1);
+    expect(text()).not.toMatch(/\d+%/);
+    expect(host.querySelector('[data-testid="evaluating-failing-line"]')).toBeNull();
   });
 
   it("navigates to the three-segment detail route on card click", async () => {
@@ -270,11 +298,27 @@ describe("EvaluatingOverview (evaluating-dashboard 1.2)", () => {
 
     const chips = host.querySelectorAll('[data-testid="evaluating-errors-chip"]');
     expect(chips).toHaveLength(1); // 反态：errorCount=0 的卡不渲染。
-    expect(chips[0]!.textContent).toContain("2 errors");
+    expect(chips[0]!.textContent).toContain("2");
     expect(chips[0]!.className).toContain("bg-destructive"); // 红 chip。
   });
 
-  it("shows a cancel entry for running recent runs and reloads overview after cancel", async () => {
+  it("renders the empty state with the Creator deep link when no corpora exist", async () => {
+    const overview = vi.fn().mockResolvedValue(output([]));
+    mockOverviewRpc(overview);
+    mountView();
+    await flushAsync();
+    expect(text()).toContain("No evaluation corpora yet");
+    click(
+      Array.from(host.querySelectorAll("button")).find((entry) =>
+        entry.textContent?.includes("Open Creator"),
+      ),
+    );
+    expect(goById).toHaveBeenCalledWith("creator.home", { wsId: WS });
+  });
+});
+
+describe("EvaluatingOverview recent runs timeline (1.3)", () => {
+  it("shows a cancel entry for running runs, live progress for the tracked one, and reloads after cancel", async () => {
     const overview = vi.fn().mockResolvedValue(
       output(
         [okTarget()],
@@ -299,10 +343,23 @@ describe("EvaluatingOverview (evaluating-dashboard 1.2)", () => {
     );
     const { cancel } = mockOverviewRpc(overview);
     cancel.mockResolvedValue({ runId: `run_${"1".repeat(24)}`, status: "cancelled" });
+    // 该 run 同时是本 UI 追踪的 run → live 进度注入。
+    evaluationRunState.runId = `run_${"1".repeat(24)}`;
+    evaluationRunState.target = { workspaceId: WS, providerId: PROVIDER, skillId: SK };
+    evaluationRunState.status = "running";
+    evaluationRunState.startedAt = new Date().toISOString();
+    evaluationRunState.resultCount = 2;
+    evaluationRunState.totalCases = 5;
     mountView();
     await flushAsync();
 
     expect(text()).toContain("Recent runs");
+    const rows = host.querySelectorAll('[data-testid="evaluating-recent-run"]');
+    expect(rows).toHaveLength(2);
+    // tracked 运行中 run 的 live 进度（n/m）。
+    expect(
+      host.querySelector('[data-testid="evaluating-run-live-progress"]')?.textContent,
+    ).toContain("2/5");
     const cancelButtons = Array.from(host.querySelectorAll("button")).filter((button) =>
       button.textContent?.includes("Cancel run"),
     );
@@ -311,7 +368,7 @@ describe("EvaluatingOverview (evaluating-dashboard 1.2)", () => {
     await flushAsync();
     expect(cancel).toHaveBeenCalledWith({ runId: `run_${"1".repeat(24)}` });
     expect(showToast).toHaveBeenCalledWith("Run cancelled.");
-    // 非追踪 run 的取消 → 组件就地重拉总览。
+    // 取消后（tracked）store 侧驱动刷新；组件侧至少重拉过总览。
     expect(overview.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -376,8 +433,8 @@ describe("EvaluatingOverview (evaluating-dashboard 1.2)", () => {
     expect(triple?.textContent).toContain(SK);
 
     click(
-      Array.from(host.querySelectorAll('[data-stub="dialog-root"] button')).find((button) =>
-        button.textContent?.includes("Start run"),
+      Array.from(host.querySelectorAll('[data-stub="dialog-root"] button')).find((entry) =>
+        entry.textContent?.includes("Start run"),
       ),
     );
     await flushAsync();
@@ -388,13 +445,5 @@ describe("EvaluatingOverview (evaluating-dashboard 1.2)", () => {
       runner: "analyzer",
     });
     expect(showToast).toHaveBeenCalledWith("Run queued for sk_0123456789abcdef01234567.");
-  });
-
-  it("renders the empty state when no corpora exist", async () => {
-    const overview = vi.fn().mockResolvedValue(output([]));
-    mockOverviewRpc(overview);
-    mountView();
-    await flushAsync();
-    expect(text()).toContain("No evaluation corpora yet");
   });
 });

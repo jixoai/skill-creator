@@ -5,6 +5,9 @@
  * 修订 [2026-10-03]（evaluating-dashboard）：Eval 子视图退役为独立 Evaluating 区块；
  * 本 store 升格为其唯一数据层——详情行 + 总览聚合（cursor 分页）+ run 追踪
  * （start/cancel/status 轮询；completed 后 cancel 幂等返终态）。
+ * 修订 [2026-10-04]（evaluating-world-class）：run 时间线 + case 树 + 断言详情
+ * 纯投影（design §4.2/§5：期望 vs 观测 diff 双栏数据源、键盘导航纯函数、
+ * run 轮询期间刷新匹配投影驱动 case 逐个点亮与 live 进度）。
  *
  * 正交意图：
  *   [1] evaluationViewState 拉取与三态投影（loading / error / empty；
@@ -12,14 +15,17 @@
  *       断线的请求不提交 rows/error——不伪造数据）。
  *   [2] 纯函数投影：每案最新结果选取（endedAt 倒序 + resultId 稳定 tie-break）、
  *       case × 结果的行合并（含断言定义，供失败断言展开）、五态 outcome 徽标
- *       配色（互异、可区分）。
+ *       配色（互异、可区分）、run 时间线/case 树/断言详情行（run 报告视角）与
+ *       case 树键盘导航。
  *   [3] evaluationOverviewState：总览聚合第一页替换 + nextCursor 续页追加
  *       （三元组去重合并），同一 latest-request-wins + 连接门纪律。
  *   [4] run 追踪：start（Global 前置拒，与 daemon 闸同源语义）→ 内存轮询
- *       run.status 至终态 → 自动刷新匹配投影；cancel 幂等（终态返回即刷新）。
+ *       run.status 至终态（轮询期间同步 resultCount/totalCases live 进度并刷新
+ *       匹配投影）→ 终态刷新；cancel 幂等（终态返回即刷新）。
  */
 import type {
   EvaluationAssertion,
+  EvaluationAssertionKind,
   EvaluationCase,
   EvaluationOverviewRecentRun,
   EvaluationOverviewTarget,
@@ -53,11 +59,20 @@ export const evaluationViewState = $state<{
   rows: EvaluationRow[] | null;
   /** 原始 cases（行投影的编辑源；与 rows 同次提交）。 */
   cases: EvaluationCase[] | null;
+  /** 原始 results 全量（run 时间线/选中 run 投影源；与 rows 同次提交）。 */
+  results: EvaluationResultView[] | null;
   /** rows 归属的 target（run 终态后判定是否就地刷新；null = 未加载）。 */
   target: EvaluationTarget | null;
   loading: boolean;
   error: string | null;
-}>({ rows: null, cases: null, target: null, loading: false, error: null });
+}>({
+  rows: null,
+  cases: null,
+  results: null,
+  target: null,
+  loading: false,
+  error: null,
+});
 
 /** 拉取一个技能作用域的 cases 与全部结果，合并为只读行（每案最新一条）。 */
 export async function loadEvaluationView(target: EvaluationTarget): Promise<void> {
@@ -77,12 +92,14 @@ export async function loadEvaluationView(target: EvaluationTarget): Promise<void
     if (!request.isCurrent()) return;
     evaluationViewState.rows = buildEvaluationRows(casesRes.cases, resultsRes.results);
     evaluationViewState.cases = casesRes.cases;
+    evaluationViewState.results = resultsRes.results;
     evaluationViewState.target = target;
     evaluationViewState.error = null;
   } catch (error) {
     if (!request.isCurrent()) return;
     evaluationViewState.rows = null;
     evaluationViewState.cases = null;
+    evaluationViewState.results = null;
     evaluationViewState.target = target;
     evaluationViewState.error = error instanceof Error ? error.message : String(error);
   } finally {
@@ -95,6 +112,7 @@ export function resetEvaluationView(): void {
   loadGate.invalidate();
   evaluationViewState.rows = null;
   evaluationViewState.cases = null;
+  evaluationViewState.results = null;
   evaluationViewState.target = null;
   evaluationViewState.loading = false;
   evaluationViewState.error = null;
@@ -157,6 +175,211 @@ export function evaluationOutcomeBadge(outcome: EvaluationOutcome): string {
     case "stale":
       return "bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
+}
+
+/** ---------- run 时间线 + case 树投影（evaluating-world-class design §4.2/§5） ---------- */
+
+/** run 时间线行（单 target 的 results 按 runId 聚合；持久 run 投影 completed）。 */
+export interface EvaluationRunTimelineRow {
+  runId: string;
+  status: EvaluationRunStatus;
+  startedAt: string;
+  endedAt: string | null;
+  /** 五态计数（stale 单列；行内 results 总数 = 五计数之和）。 */
+  counts: {
+    passed: number;
+    failed: number;
+    error: number;
+    unavailable: number;
+    stale: number;
+  };
+}
+
+/**
+ * run 时间线：results 按 runId 聚合（startedAt 取组内最小、endedAt 取最大），
+ * tracked run（evaluationRunState）同 runId 时内存态胜出、未落盘时合成行；
+ * newest first（startedAt 降序 + runId 倒序 tie-break）。
+ */
+export function buildRunTimeline(
+  results: readonly EvaluationResultView[],
+  tracked: {
+    runId: string;
+    status: EvaluationRunStatus;
+    startedAt: string | null;
+  } | null,
+): EvaluationRunTimelineRow[] {
+  const byRun = new Map<string, EvaluationRunTimelineRow>();
+  for (const result of results) {
+    const row = byRun.get(result.runId) ?? {
+      runId: result.runId,
+      status: "completed" as const,
+      startedAt: result.startedAt,
+      endedAt: null,
+      counts: { passed: 0, failed: 0, error: 0, unavailable: 0, stale: 0 },
+    };
+    if (result.startedAt < row.startedAt) row.startedAt = result.startedAt;
+    if (row.endedAt === null || result.endedAt > row.endedAt) row.endedAt = result.endedAt;
+    row.counts[result.outcome] += 1;
+    byRun.set(result.runId, row);
+  }
+  if (tracked !== null) {
+    const existing = byRun.get(tracked.runId);
+    if (existing === undefined) {
+      byRun.set(tracked.runId, {
+        runId: tracked.runId,
+        status: tracked.status,
+        startedAt: tracked.startedAt ?? new Date().toISOString(),
+        endedAt: null,
+        counts: { passed: 0, failed: 0, error: 0, unavailable: 0, stale: 0 },
+      });
+    } else {
+      existing.status = tracked.status;
+      if (tracked.startedAt !== null && tracked.startedAt < existing.startedAt) {
+        existing.startedAt = tracked.startedAt;
+      }
+    }
+  }
+  return [...byRun.values()].sort((left, right) => {
+    if (left.startedAt !== right.startedAt) return left.startedAt < right.startedAt ? 1 : -1;
+    if (left.runId === right.runId) return 0;
+    return left.runId < right.runId ? 1 : -1;
+  });
+}
+
+/** 选中 run 内的 case → 结果映射（run 内同 case 多条时留最新）。 */
+export function runResultsByCase(
+  results: readonly EvaluationResultView[],
+  runId: string,
+): Map<string, EvaluationResultView> {
+  const byCase = new Map<string, EvaluationResultView>();
+  for (const result of results) {
+    if (result.runId !== runId) continue;
+    const existing = byCase.get(result.caseId);
+    if (existing === undefined || compareResultsNewestFirst(result, existing) < 0) {
+      byCase.set(result.caseId, result);
+    }
+  }
+  return byCase;
+}
+
+/** case 树节点（run 报告视角：runResult = 选中 run 内该 case 的结果行）。 */
+export interface EvaluationCaseTreeNode {
+  caseId: string;
+  /** prompt 首行截断（树行主文案；完整正文留在详情与编辑器）。 */
+  label: string;
+  enabled: boolean;
+  runResult: EvaluationResultView | null;
+  /** 断言通过分式（仅 passed/failed 结果携带；其余五态族 = null）。 */
+  score: { passed: number; total: number } | null;
+}
+
+/** prompt → 树行标签（首行 + 截断）。 */
+export function caseTreeLabel(prompt: string, max = 72): string {
+  const firstLine = prompt.split("\n")[0] ?? "";
+  return firstLine.length > max ? `${firstLine.slice(0, max)}…` : firstLine;
+}
+
+/** cases × 选中 run 结果 → 树节点（行序保持 cases 自身顺序）。 */
+export function buildCaseTreeNodes(
+  cases: readonly EvaluationCase[],
+  runByCase: ReadonlyMap<string, EvaluationResultView>,
+): EvaluationCaseTreeNode[] {
+  return cases.map((entry) => {
+    const runResult = runByCase.get(entry.caseId) ?? null;
+    const score =
+      runResult !== null && (runResult.outcome === "passed" || runResult.outcome === "failed")
+        ? {
+            passed: runResult.assertions.filter((row) => row.outcome === "passed").length,
+            total: runResult.assertions.length,
+          }
+        : null;
+    return {
+      caseId: entry.caseId,
+      label: caseTreeLabel(entry.input.prompt),
+      enabled: entry.enabled,
+      runResult,
+      score,
+    };
+  });
+}
+
+/** 断言详情行（期望 vs 观测 diff 双栏数据源；kind/expected/observed 冻结自结果行）。 */
+export interface AssertionDetailRow {
+  ref: number;
+  kind: EvaluationAssertionKind;
+  expected: string;
+  observed: string;
+  outcome: "passed" | "failed" | "error";
+  /** case 断言定义携带的 description（按 ref 对齐；缺失 = null）。 */
+  description: string | null;
+}
+
+/** 结果断言行 → 详情行（description 从 case 定义按 ref 补齐；结果冻结字段为准）。 */
+export function assertionDetailRows(
+  result: EvaluationResultView | null,
+  caseAssertions: readonly EvaluationAssertion[],
+): AssertionDetailRow[] {
+  if (result === null) return [];
+  return result.assertions.map((row) => ({
+    ref: row.ref,
+    kind: row.kind,
+    expected: row.expected,
+    observed: row.observed,
+    outcome: row.outcome,
+    description: caseAssertions[row.ref]?.description ?? null,
+  }));
+}
+
+/** case 树键盘状态（↑↓ 移动选择、Enter/→ 展开、Esc 收起）。 */
+export interface CaseTreeSelectionState {
+  selectedCaseId: string | null;
+}
+
+/**
+ * case 树键盘导航（纯函数；design §4.2）：↑↓ 沿 caseIds 移动选择（端点钳制，
+ * 无初始选择时 ↓ 取首行 / ↑ 取末行），Enter/→ 保持当前选择（展开语义 =
+ * 选中即右侧呈现断言详情），Esc 清空选择（收起）。未知 caseIds 返回原状态。
+ */
+export function caseTreeKeyboard(
+  state: CaseTreeSelectionState,
+  key: "ArrowUp" | "ArrowDown" | "Enter" | "ArrowRight" | "Escape",
+  caseIds: readonly string[],
+): CaseTreeSelectionState {
+  switch (key) {
+    case "ArrowDown":
+    case "ArrowUp": {
+      if (caseIds.length === 0) return state;
+      const delta = key === "ArrowDown" ? 1 : -1;
+      const current = state.selectedCaseId === null ? -1 : caseIds.indexOf(state.selectedCaseId);
+      const next =
+        current === -1
+          ? delta === 1
+            ? 0
+            : caseIds.length - 1
+          : Math.min(caseIds.length - 1, Math.max(0, current + delta));
+      return { selectedCaseId: caseIds[next] };
+    }
+    case "Enter":
+    case "ArrowRight":
+      return state;
+    case "Escape":
+      return { selectedCaseId: null };
+  }
+}
+
+/**
+ * 通过率（健康环/时间线胶囊）：分母 = 四计数之和（stale 不计入分母——stale
+ * 行无断言裁决）；零分母 → null（不定义，UI 不画进度）。
+ */
+export function evaluationPassRate(counts: {
+  passedCount: number;
+  failedCount: number;
+  errorCount: number;
+  unavailableCount: number;
+}): number | null {
+  const total =
+    counts.passedCount + counts.failedCount + counts.errorCount + counts.unavailableCount;
+  return total === 0 ? null : counts.passedCount / total;
 }
 
 /** ---------- 总览聚合（evaluating-dashboard design §1） ---------- */
@@ -290,8 +513,22 @@ export const evaluationRunState = $state<{
   runId: string | null;
   target: EvaluationTarget | null;
   status: EvaluationRunStatus | null;
+  /** start 时刻（ISO；时间线合成行的排序源；未知 = null）。 */
+  startedAt: string | null;
+  /** 已到达结果数（run.status 的 resultIds 长度；未知 = null）。 */
+  resultCount: number | null;
+  /** start 时的 case 总数（live 进度分母；非本 UI 发起 = null）。 */
+  totalCases: number | null;
   error: string | null;
-}>({ runId: null, target: null, status: null, error: null });
+}>({
+  runId: null,
+  target: null,
+  status: null,
+  startedAt: null,
+  resultCount: null,
+  totalCases: null,
+  error: null,
+});
 
 /** Global（~）target：run 与 case 写入在 UI 层即拒（daemon 同闸前置）。 */
 export function isGlobalEvaluationTarget(target: EvaluationTarget): boolean {
@@ -321,6 +558,9 @@ export async function startEvaluationRun(input: {
     evaluationRunState.runId = output.runId;
     evaluationRunState.target = input.target;
     evaluationRunState.status = output.status;
+    evaluationRunState.startedAt = new Date().toISOString();
+    evaluationRunState.resultCount = 0;
+    evaluationRunState.totalCases = input.caseIds.length;
     evaluationRunState.error = null;
     void pollRunToSettled(output.runId);
     return { ok: true, runId: output.runId };
@@ -349,7 +589,7 @@ export async function cancelEvaluationRun(runId: string): Promise<{
     if (evaluationRunState.runId === runId) {
       evaluationRunState.status = output.status;
       if (output.status === "completed" || output.status === "cancelled") {
-        await refreshAfterRunSettled();
+        await refreshMatchingRunProjections();
       }
     }
     return { ok: true };
@@ -363,10 +603,13 @@ export function resetEvaluationRun(): void {
   evaluationRunState.runId = null;
   evaluationRunState.target = null;
   evaluationRunState.status = null;
+  evaluationRunState.startedAt = null;
+  evaluationRunState.resultCount = null;
+  evaluationRunState.totalCases = null;
   evaluationRunState.error = null;
 }
 
-/** 轮询 run.status 至终态；终态或失联即停，并刷新匹配的详情/总览投影。 */
+/** 轮询 run.status 至终态；每刻同步 live 进度并刷新匹配投影（case 逐个点亮）。 */
 async function pollRunToSettled(runId: string): Promise<void> {
   const ownerGeneration = getConnectionGeneration();
   for (;;) {
@@ -382,10 +625,13 @@ async function pollRunToSettled(runId: string): Promise<void> {
       const output = await rpc.evaluation.run.status({ runId });
       if (evaluationRunState.runId !== runId) return;
       evaluationRunState.status = output.status;
+      evaluationRunState.resultCount = output.resultIds.length;
       if (output.status === "completed" || output.status === "cancelled") {
-        await refreshAfterRunSettled();
+        await refreshMatchingRunProjections();
         return;
       }
+      // 运行中：结果逐个落盘——刷新匹配投影驱动树行点亮与 live 进度。
+      await refreshMatchingRunProjections();
     } catch (error) {
       if (evaluationRunState.runId !== runId) return;
       // daemon 重启丢失内存 run 等：停止追踪并呈现错误（不伪装终态）。
@@ -395,8 +641,8 @@ async function pollRunToSettled(runId: string): Promise<void> {
   }
 }
 
-/** run 终态后：刷新归属匹配的详情行与总览页（latest-request-wins 保护并发）。 */
-async function refreshAfterRunSettled(): Promise<void> {
+/** run 轮询每刻/终态：刷新归属匹配的详情行与总览页（latest-request-wins 保护并发）。 */
+async function refreshMatchingRunProjections(): Promise<void> {
   const target = evaluationRunState.target;
   if (target === null) return;
   if (

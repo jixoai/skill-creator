@@ -1,20 +1,22 @@
 // @vitest-environment jsdom
 /**
- * EvaluatingDetail 组件级 DOM 断言（evaluating-dashboard task 1.3/1.5；
- * 迁移自 eval-view-revision-display.test.ts 的 R1-R3 revision 钉）。
+ * EvaluatingDetail 组件级 DOM 断言（evaluating-world-class task 1.4/1.5/1.6；
+ * evaluating-dashboard 迁移钉沿承：三段路由身份、挂载竞态补救、Run 固定三元组
+ * 显式确认、Cancel 幂等、Global 只读、技能不可解析降级面）。
  *
- * 用户原始需求 [2026-10-03]（design §3/§4）：详情屏 = eval-view 迁 apps/evaluating
- * 并升格——cases 表（五态 + bound/rev 对照 + 失败断言展开：期望 vs 观测 +
- * observedEndRevision 对比）+ Run（显式确认）/Cancel + case 新建编辑
- * （Imported only；Global 只读徽标）。
+ * 用户原始需求 [2026-10-04]（design §4.2）：详情屏 = run 报告——run 选择器
+ * （时间线胶囊）+ case 步骤树（失败默认选中、三态 icon、分式徽标）+ 断言详情
+ * （期望 vs 观测 diff 双栏记忆点 + finding 触发语义标记 + revision stale 判读）
+ * + 键盘 ↑↓/Enter/Esc + ?case= 深链 + 三尺寸（jsdom matchMedia=false → 单列
+ * push；wide 用 stubGlobal 切换）。
  *
  * 正交意图：
- *   [1] 迁移钉（design-critique R1/R2/R3）：bound/rev 双显合并、组内去重、
- *       未跑行 bound 保留、失败摘要行。
- *   [2] 升格钉：失败断言展开（ref 对齐期望 vs 观测）、Run 固定三元组确认、
- *       case 新建（boundRevision=现读 revision）/编辑（bound 保留）、
- *       Global 只读（入口缺席 + 徽标 + 说明）、active run 取消。
- *   [3] 残留台账（task 1.5）：非零 error 行 → 红 chip；= 0 不渲染（正反钉）。
+ *   [1] run 报告投影钉：时间线胶囊（最新在前/选中态/错误 chip）、case 树
+ *       （tone/score）、断言详情（diff 双栏 + 触发标记 + stale 判读）。
+ *   [2] 交互钉：失败默认选中、键盘导航（树容器 keydown）、?case= 深链、
+ *       run 切换重投影、「管理」折叠区（Imported-only）。
+ *   [3] 沿承钉：Run 固定三元组确认、case 新建/编辑、Global 只读、
+ *       unresolvable 技能降级。
  * 妥协声明：live 桌面走查归编排者（1.7 验证门）；本文件覆盖组件行为面。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,6 +96,8 @@ const SK = "sk_0123456789abcdef01234567";
 const REV_A = `sha256:${"a".repeat(64)}`;
 const REV_B = `sha256:${"b".repeat(64)}`;
 const target = { workspaceId: WS, providerId: PROVIDER, skillId: SK } as EvaluationTarget;
+const RUN_NEW = `run_${"9".repeat(24)}`;
+const RUN_OLD = `run_${"1".repeat(24)}`;
 
 function makeCase(
   caseId: string,
@@ -124,7 +128,7 @@ function makeResult(
   return {
     schemaVersion: 1,
     resultId: `evr_${caseId.slice(3, 27).padEnd(24, "0")}`,
-    runId: `run_${"1".repeat(24)}`,
+    runId: RUN_NEW,
     caseId,
     target,
     expectedRevision: REV_A,
@@ -138,8 +142,8 @@ function makeResult(
     endedAt: "2026-10-02T00:00:01.000Z",
     outcome: "passed",
     assertions: [
-      { ref: 0, outcome: "passed" },
-      { ref: 1, outcome: "passed" },
+      { ref: 0, kind: "contains", expected: "MIT", observed: "…MIT…", outcome: "passed" },
+      { ref: 1, kind: "finding-triggered", expected: "true", observed: "true", outcome: "passed" },
     ],
     stale: false,
     ...overrides,
@@ -178,7 +182,7 @@ function mockRpc(
     create: vi.fn().mockResolvedValue({ case_: cases[0] }),
     update: vi.fn().mockResolvedValue({ case_: cases[0] }),
     remove: vi.fn().mockResolvedValue({ removed: true }),
-    start: vi.fn().mockResolvedValue({ runId: `run_${"9".repeat(24)}`, status: "queued" }),
+    start: vi.fn().mockResolvedValue({ runId: RUN_NEW, status: "queued" }),
     cancel: vi.fn(),
     status: vi.fn(),
   };
@@ -208,12 +212,49 @@ async function flushAsync(): Promise<void> {
 let host: HTMLElement;
 const mounted: ReturnType<typeof mount>[] = [];
 
-function mountView(wsId = WS): void {
+interface MountOptions {
+  wsId?: string;
+  search?: Record<string, unknown>;
+}
+
+/** jsdom matchMedia 恒 false → 默认单列（stack）；wide 测试用 stubMatchMedia。 */
+function stubMatchMedia(matches: (query: string) => boolean): void {
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const listeners = new Set<() => void>();
+    const mediaQueryList = {
+      matches: matches(query),
+      media: query,
+      onchange: null,
+      addEventListener: (_: string, listener: () => void) => {
+        listeners.add(listener);
+      },
+      removeEventListener: (_: string, listener: () => void) => {
+        listeners.delete(listener);
+      },
+      addListener: (listener: () => void) => {
+        listeners.add(listener);
+      },
+      removeListener: (listener: () => void) => {
+        listeners.delete(listener);
+      },
+      dispatchEvent: () => false,
+    };
+    return mediaQueryList as unknown as MediaQueryList;
+  });
+}
+
+function mountView(options: MountOptions = {}): void {
   host = document.body.appendChild(document.createElement("div"));
   mounted.push(
     mount(RouterContextHarness, {
       target: host,
-      props: { view: "detail", wsId, providerId: PROVIDER, skillId: SK },
+      props: {
+        view: "detail",
+        wsId: options.wsId ?? WS,
+        providerId: PROVIDER,
+        skillId: SK,
+        ...(options.search === undefined ? {} : { search: options.search }),
+      },
     }),
   );
 }
@@ -234,6 +275,13 @@ function click(buttonEl: Element | null | undefined): void {
   flushSync();
 }
 
+function keydown(key: string): void {
+  const tree = host.querySelector('[data-testid="evaluating-case-tree"]');
+  expect(tree, "case tree must exist").toBeTruthy();
+  tree!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  flushSync();
+}
+
 function shortRev(value: string): string {
   return value.slice("sha256:".length, "sha256:".length + 14);
 }
@@ -249,9 +297,10 @@ beforeEach(() => {
 afterEach(() => {
   while (mounted.length > 0) unmount(mounted.pop() as ReturnType<typeof mount>);
   host?.remove();
+  vi.unstubAllGlobals();
 });
 
-describe("EvaluatingDetail route binding and rows (1.3)", () => {
+describe("EvaluatingDetail route binding (1.4)", () => {
   it("binds the three-segment route params to the loaded scope and skill title", async () => {
     const mock = mockRpc([makeCase(`ev_${"a".repeat(24)}`)], []);
     mountView();
@@ -267,160 +316,319 @@ describe("EvaluatingDetail route binding and rows (1.3)", () => {
       "code-review",
     );
   });
+});
 
-  it("renders five-state outcomes with failure summaries and the not-run chip", async () => {
-    const failedCase = `ev_${"a".repeat(24)}`;
-    const errorCase = `ev_${"b".repeat(24)}`;
+describe("EvaluatingDetail run report projection (1.4)", () => {
+  const PASS = `ev_${"a".repeat(24)}`;
+  const FAIL = `ev_${"b".repeat(24)}`;
+  const ERROR = `ev_${"c".repeat(24)}`;
+  const UNTOUCHED = `ev_${"d".repeat(24)}`;
+
+  function seedReport(): void {
     mockRpc(
-      [makeCase(failedCase), makeCase(errorCase), makeCase(`ev_${"c".repeat(24)}`)],
+      [makeCase(PASS), makeCase(FAIL), makeCase(ERROR), makeCase(UNTOUCHED)],
       [
-        makeResult(failedCase, {
+        makeResult(PASS, {
+          runId: RUN_NEW,
+          startedAt: "2026-10-02T00:10:00.000Z",
+          endedAt: "2026-10-02T00:10:01.000Z",
+        }),
+        makeResult(FAIL, {
+          runId: RUN_NEW,
           outcome: "failed",
           assertions: [
-            { ref: 0, outcome: "passed" },
-            { ref: 1, outcome: "failed" },
+            {
+              ref: 0,
+              kind: "contains",
+              expected: "MIT",
+              observed: "Apache-2.0 instead",
+              outcome: "failed",
+            },
+            {
+              ref: 1,
+              kind: "finding-triggered",
+              expected: "true",
+              observed: "false",
+              outcome: "failed",
+            },
           ],
+          startedAt: "2026-10-02T00:10:02.000Z",
+          endedAt: "2026-10-02T00:10:03.000Z",
         }),
-        makeResult(errorCase, {
+        makeResult(ERROR, {
+          runId: RUN_OLD,
           outcome: "error",
           assertions: [],
           failure: { code: "RUNNER_ERROR", detail: "boom".repeat(40) },
+          startedAt: "2026-10-01T00:00:00.000Z",
+          endedAt: "2026-10-01T00:00:01.000Z",
         }),
       ],
     );
+  }
+
+  it("renders the run timeline capsules newest-first with an errors chip for error runs", async () => {
+    seedReport();
     mountView();
     await flushAsync();
 
-    expect(text()).toContain("failed");
-    expect(text()).toContain("error");
-    expect(text()).toContain("not run");
-    const summaries = host.querySelectorAll('[data-testid="eval-failure-summary"]');
-    expect(summaries[0]?.textContent).toContain("1/2 assertion failed");
-    // error 行摘要 = failure.detail 有界截断（120 字符 + …）。
-    expect(summaries[1]?.textContent).toContain("…");
-    expect(summaries[1]?.textContent).toContain("boom");
+    const capsules = host.querySelectorAll('[data-testid="evaluating-run-capsule"]');
+    expect(capsules).toHaveLength(2);
+    expect(capsules[0]?.getAttribute("data-run-id")).toBe(RUN_NEW); // 最新在前。
+    expect(capsules[0]?.getAttribute("aria-pressed")).toBe("true"); // 默认选中最新。
+    expect(capsules[1]?.getAttribute("aria-pressed")).toBe("false");
+    // 旧 run 含 error 结果 → 红 chip（正钉）。
+    const chips = host.querySelectorAll('[data-testid="evaluating-errors-chip"]');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.textContent).toContain("1");
   });
-});
 
-describe("EvaluatingDetail revision display pins (migrated R1/R2/R3)", () => {
-  it("merges to a single rev column when the latest result matches the bound revision", async () => {
-    mockRpc([makeCase(`ev_${"a".repeat(24)}`)], [makeResult(`ev_${"a".repeat(24)}`)]);
+  it("projects case tree tones and score badges for the selected run", async () => {
+    seedReport();
     mountView();
     await flushAsync();
-    expect(text()).toContain(`rev ${shortRev(REV_A)}…`);
-    expect(text()).not.toContain("bound");
-  });
 
-  it("keeps both columns when the observed revision drifted from the bound one", async () => {
-    mockRpc(
-      [makeCase(`ev_${"b".repeat(24)}`)],
-      [makeResult(`ev_${"b".repeat(24)}`, { observedEndRevision: REV_B })],
+    const nodes = host.querySelectorAll('[data-testid="evaluating-case-node"]');
+    // 单列模式：失败 case 默认选中 → 树隐藏，先断言选中面再返回树。
+    const tones = new Map(
+      Array.from(nodes).map((node) => [
+        node.getAttribute("data-case-id"),
+        node.getAttribute("data-tone"),
+      ]),
     );
-    mountView();
-    await flushAsync();
-    expect(text()).toContain(`bound ${shortRev(REV_A)}…`);
-    expect(text()).toContain(`rev ${shortRev(REV_B)}…`);
-  });
-
-  it("keeps bound as the only revision source when the case was never run", async () => {
-    mockRpc([makeCase(`ev_${"c".repeat(24)}`)], []);
-    mountView();
-    await flushAsync();
-    expect(text()).toContain(`bound ${shortRev(REV_A)}…`);
-    expect(text()).toContain("not run");
-  });
-
-  it("shows bound once per consecutive same-revision group (R2) and rev once (R3)", async () => {
-    const ids = ["1", "2", "3"].map((digit) => `ev_${digit.repeat(24)}`);
-    mockRpc(
-      // 三行同 bound（REV_A），全部漂移到 REV_B：bound 与 rev 均组首一次（R2/R3）。
-      ids.map((id) => makeCase(id)),
-      ids.map((id) => makeResult(id, { observedEndRevision: REV_B })),
+    expect(tones.get(PASS)).toBe("passed");
+    expect(tones.get(FAIL)).toBe("failed");
+    expect(tones.get(ERROR)).toBe("pending"); // 旧 run 的 error 不在最新 run 内。
+    expect(tones.get(UNTOUCHED)).toBe("pending");
+    // 失败 case 的分式徽标 0/2。
+    const failNode = Array.from(nodes).find((node) => node.getAttribute("data-case-id") === FAIL);
+    expect(failNode?.querySelector('[data-testid="evaluating-case-score"]')?.textContent).toContain(
+      "0/2",
     );
-    mountView();
-    await flushAsync();
-    expect(text().split(`bound ${shortRev(REV_A)}…`).length - 1).toBe(1);
-    expect(text().split(`rev ${shortRev(REV_B)}…`).length - 1).toBe(1);
   });
 
-  it("dedupes the rev column across a consecutive same-observed group in merged state", async () => {
-    const ids = ["4", "5", "6"].map((digit) => `ev_${digit.repeat(24)}`);
-    mockRpc(
-      ids.map((id) => makeCase(id)),
-      ids.map((id) => makeResult(id)),
-    );
+  it("auto-selects the first failed case and renders the expected-vs-observed diff columns", async () => {
+    seedReport();
     mountView();
     await flushAsync();
-    expect(text().split(`rev ${shortRev(REV_A)}…`).length - 1).toBe(1);
-  });
-});
 
-describe("EvaluatingDetail failed assertion expansion (1.3)", () => {
-  it("expands expected vs observed per assertion on failed rows", async () => {
+    // 失败默认选中（单列 → 断言详情面在场）。
+    const pane = host.querySelector('[data-testid="evaluating-assertion-pane"]');
+    expect(pane).not.toBeNull();
+    const outcomeBadge = host.querySelector('[data-testid="evaluating-outcome-badge"]');
+    expect(outcomeBadge?.textContent).toContain("failed");
+    // revision 短显（stale 判读面）。
+    expect(text()).toContain(shortRev(REV_A));
+
+    // diff 双栏（记忆点）：contains 断言 期望 MIT | 观测 Apache。
+    const rows = host.querySelectorAll('[data-testid="evaluating-assertion-row"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.getAttribute("data-outcome")).toBe("failed");
+    const diff = rows[0]?.querySelector('[data-testid="evaluating-assertion-diff"]');
+    expect(diff?.textContent).toContain("expected");
+    expect(diff?.textContent).toContain("observed");
+    expect(diff?.textContent).toContain("MIT");
+    expect(diff?.textContent).toContain("Apache-2.0 instead");
+
+    // finding-triggered 触发语义标记（期望触发 → 未触发）。
+    const trigger = rows[1]?.querySelector('[data-testid="evaluating-trigger-mark"]');
+    expect(trigger?.textContent).toContain("expect triggered");
+    expect(trigger?.textContent).toContain("not triggered");
+  });
+
+  it("shows the stale judgment tag when the latest result drifted from the current revision", async () => {
     const caseId = `ev_${"a".repeat(24)}`;
-    mockRpc(
-      [makeCase(caseId)],
-      [
-        makeResult(caseId, {
-          outcome: "failed",
-          assertions: [
-            { ref: 0, outcome: "passed" },
-            { ref: 1, outcome: "failed" },
-          ],
-        }),
-      ],
-    );
+    mockRpc([makeCase(caseId)], [makeResult(caseId, { observedEndRevision: REV_B, stale: true })]);
     mountView();
     await flushAsync();
+    // 全 passed → 无默认选中（成功折叠）；点树行选中。
+    click(host.querySelector(`[data-case-id="${caseId}"] button`));
+    expect(host.querySelector('[data-testid="evaluating-stale-tag"]')?.textContent).toContain(
+      "stale",
+    );
+    expect(text()).toContain(shortRev(REV_B));
+  });
 
-    expect(host.querySelector('[data-testid="eval-assertion-detail"]')).toBeNull();
-    click(button("expected/observed"));
-    const detail = host.querySelector('[data-testid="eval-assertion-detail"]');
-    expect(detail).not.toBeNull();
-    expect(detail?.textContent).toContain("contains");
-    expect(detail?.textContent).toContain("expected: MIT");
-    expect(detail?.textContent).toContain("observed: passed");
-    expect(detail?.textContent).toContain("finding triggered");
-    expect(detail?.textContent).toContain("observed: failed");
-    // 再点收起。
-    click(button("expected/observed"));
-    expect(host.querySelector('[data-testid="eval-assertion-detail"]')).toBeNull();
+  it("re-projects the tree when an older run capsule is selected", async () => {
+    seedReport();
+    mountView();
+    await flushAsync();
+    const capsules = host.querySelectorAll('[data-testid="evaluating-run-capsule"]');
+    click(capsules[1]); // 旧 run（error 结果）。
+    flushSync();
+    const tones = new Map(
+      Array.from(host.querySelectorAll('[data-testid="evaluating-case-node"]')).map((node) => [
+        node.getAttribute("data-case-id"),
+        node.getAttribute("data-tone"),
+      ]),
+    );
+    // 旧 run：PASS/FAIL 未进该 run → pending；ERROR → error。
+    expect(tones.get(PASS)).toBe("pending");
+    expect(tones.get(ERROR)).toBe("error");
   });
 });
 
-describe("EvaluatingDetail non-zero errors red chip (task 1.5)", () => {
-  it("renders the red chip for error rows and hides it when all rows are clean", async () => {
-    const errorCase = `ev_${"b".repeat(24)}`;
-    const passCase = `ev_${"a".repeat(24)}`;
+describe("EvaluatingDetail keyboard navigation and deep link (1.4/1.6)", () => {
+  const ids = ["a", "b", "c"].map((digit) => `ev_${digit.repeat(24)}`);
+
+  function seedNoFailures(): void {
     mockRpc(
-      [makeCase(passCase), makeCase(errorCase)],
-      [
-        makeResult(passCase),
-        makeResult(errorCase, {
-          outcome: "error",
-          assertions: [],
-          failure: { code: "RUNNER_ERROR", detail: "runner exploded" },
+      ids.map((id) => makeCase(id)),
+      ids.map((id, index) =>
+        makeResult(id, {
+          startedAt: `2026-10-02T00:0${index}:00.000Z`,
+          endedAt: `2026-10-02T00:0${index}:01.000Z`,
         }),
-      ],
+      ),
     );
+  }
+
+  it("keeps the tree collapsed (no selection) when every case passes", async () => {
+    seedNoFailures();
+    mountView();
+    await flushAsync();
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).toBeNull();
+    expect(host.querySelector('[data-testid="evaluating-case-tree"]')).not.toBeNull();
+  });
+
+  it("moves selection with ArrowDown/ArrowUp, expands with Enter, collapses with Escape", async () => {
+    seedNoFailures();
     mountView();
     await flushAsync();
 
-    const chip = host.querySelector('[data-testid="evaluating-errors-chip"]');
-    expect(chip?.textContent).toContain("1 error");
-    expect(chip?.className).toContain("bg-destructive");
-    unmount(mounted.pop() as ReturnType<typeof mount>);
-    host.remove();
+    keydown("ArrowDown"); // 无初始选择 → 首行。
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).not.toBeNull();
+    expect(host.querySelector("li[aria-selected=true]")?.getAttribute("data-case-id")).toBe(ids[0]);
+    keydown("ArrowDown");
+    expect(host.querySelector("li[aria-selected=true]")?.getAttribute("data-case-id")).toBe(ids[1]);
+    keydown("ArrowUp");
+    keydown("ArrowUp"); // 端点钳制回首行。
+    expect(host.querySelector("li[aria-selected=true]")?.getAttribute("data-case-id")).toBe(ids[0]);
+    // Enter/→ 展开语义 = 保持选中；Esc 收起 = 清空（单列回到树）。
+    keydown("Enter");
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).not.toBeNull();
+    keydown("ArrowRight");
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).not.toBeNull();
+    keydown("Escape");
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).toBeNull();
+    expect(host.querySelector('[data-testid="evaluating-case-tree"]')).not.toBeNull();
+  });
 
-    // 反态：全部 passed → 无红 chip。
-    mockRpc([makeCase(passCase)], [makeResult(passCase)]);
+  it("selects the ?case= deep-linked case on mount", async () => {
+    seedNoFailures();
+    mountView({ search: { case: ids[2] } });
+    await flushAsync();
+    expect(host.querySelector("li[aria-selected=true]")?.getAttribute("data-case-id")).toBe(ids[2]);
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).not.toBeNull();
+  });
+
+  it("renders the wide two-pane layout when the viewport is at least 1024px", async () => {
+    stubMatchMedia((query) => query === "(min-width: 1024px)");
+    seedNoFailures();
     mountView();
     await flushAsync();
-    expect(host.querySelector('[data-testid="evaluating-errors-chip"]')).toBeNull();
+    // wide：树与详情双栏同屏（无选中时详情面为占位提示）。
+    expect(host.querySelector('[data-testid="evaluating-case-tree-pane"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).not.toBeNull();
+    expect(text()).toContain("Select a case");
   });
 });
 
-describe("EvaluatingDetail actions (1.3)", () => {
+describe("EvaluatingDetail manage cases drawer (1.5)", () => {
+  it("collapses case authoring behind the manage toggle and opens the editor", async () => {
+    const caseId = `ev_${"a".repeat(24)}`;
+    const mock = mockRpc([makeCase(caseId, { prompt: "Original prompt" })], []);
+    mountView();
+    await flushAsync();
+
+    // 诊断流优先：默认无「新建用例/编辑用例」直通入口。
+    expect(button("New case")).toBeUndefined();
+    expect(button("Edit case")).toBeUndefined();
+    const manage = host.querySelector('[data-testid="evaluating-manage"]');
+    expect(manage?.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+
+    click(manage?.querySelector("button"));
+    expect(manage?.querySelector("button")?.getAttribute("aria-expanded")).toBe("true");
+    click(button("Edit case"));
+    flushSync();
+    const dialog = host.querySelector('[data-stub="dialog-root"]');
+    expect(dialog).not.toBeNull();
+    const prompt = dialog!.querySelector<HTMLTextAreaElement>("#evaluating-case-prompt");
+    expect(prompt?.value).toBe("Original prompt");
+    prompt!.value = "Updated prompt";
+    prompt!.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    click(
+      Array.from(dialog!.querySelectorAll("button")).find((entry) =>
+        entry.textContent?.includes("Save case"),
+      ),
+    );
+    await flushAsync();
+    expect(mock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target,
+        caseId,
+        boundRevision: REV_A, // 编辑不改绑定。
+        input: expect.objectContaining({ prompt: "Updated prompt" }),
+      }),
+    );
+  });
+
+  it("creates a case bound to the freshly-read current revision from the manage drawer", async () => {
+    const mock = mockRpc([makeCase(`ev_${"a".repeat(24)}`)], []);
+    mountView();
+    await flushAsync();
+    click(host.querySelector('[data-testid="evaluating-manage"] button'));
+    click(button("New case"));
+    flushSync();
+    const dialog = host.querySelector('[data-stub="dialog-root"]');
+    const prompt = dialog!.querySelector<HTMLTextAreaElement>("#evaluating-case-prompt");
+    prompt!.value = "Check the license footer";
+    prompt!.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    const valueInput = dialog!.querySelector<HTMLInputElement>('input[aria-label="Value"]');
+    valueInput!.value = "Apache-2.0";
+    valueInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    click(
+      Array.from(dialog!.querySelectorAll("button")).find((entry) =>
+        entry.textContent?.includes("Save case"),
+      ),
+    );
+    await flushAsync();
+    expect(mock.create).toHaveBeenCalledWith({
+      target,
+      input: {
+        prompt: "Check the license footer",
+        assertions: [{ kind: "contains", value: "Apache-2.0" }],
+      },
+      boundRevision: REV_A,
+      enabled: true,
+    });
+  });
+
+  it("blocks validation instead of sending an invalid case", async () => {
+    const mock = mockRpc([makeCase(`ev_${"a".repeat(24)}`)], []);
+    mountView();
+    await flushAsync();
+    click(host.querySelector('[data-testid="evaluating-manage"] button'));
+    click(button("New case"));
+    flushSync();
+    const dialog = host.querySelector('[data-stub="dialog-root"]')!;
+    click(
+      Array.from(dialog.querySelectorAll("button")).find((entry) =>
+        entry.textContent?.includes("Save case"),
+      ),
+    );
+    await flushAsync();
+    expect(mock.create).not.toHaveBeenCalled();
+    expect(host.querySelector('[data-testid="case-validation"]')?.textContent).toContain(
+      "Prompt is required.",
+    );
+  });
+});
+
+describe("EvaluatingDetail actions (沿承钉)", () => {
   it("starts a run with the fixed route triple after explicit confirmation", async () => {
     const enabled = makeCase(`ev_${"a".repeat(24)}`, { enabled: true });
     const disabled = makeCase(`ev_${"b".repeat(24)}`, { enabled: false });
@@ -433,7 +641,6 @@ describe("EvaluatingDetail actions (1.3)", () => {
     flushSync();
     const dialog = host.querySelector('[data-stub="dialog-root"]');
     expect(dialog).not.toBeNull();
-    // 固定三元组标注（无 target 选择器）。
     const triple = host.querySelector('[data-testid="run-target-triple"]');
     expect(triple?.textContent).toContain(WS);
     expect(triple?.textContent).toContain(SK);
@@ -442,10 +649,8 @@ describe("EvaluatingDetail actions (1.3)", () => {
         entry.textContent?.includes("Select a skill"),
       ),
     ).toBe(false);
-    // 固定 target 的 cases 即刻拉取——等待默认勾选落定再确认。
     await flushAsync();
     expect(mock.casesList).toHaveBeenCalledWith({ target });
-
     click(
       Array.from(dialog!.querySelectorAll("button")).find((entry) =>
         entry.textContent?.includes("Start run"),
@@ -474,113 +679,39 @@ describe("EvaluatingDetail actions (1.3)", () => {
     expect(showToast).toHaveBeenCalledWith("Run cancelled.");
   });
 
-  it("creates a case bound to the freshly-read current revision", async () => {
-    const mock = mockRpc([makeCase(`ev_${"a".repeat(24)}`)], []);
-    mountView();
-    await flushAsync();
-
-    click(button("New case"));
-    flushSync();
-    const dialog = host.querySelector('[data-stub="dialog-root"]');
-    expect(dialog).not.toBeNull();
-    const prompt = dialog!.querySelector<HTMLTextAreaElement>("#evaluating-case-prompt");
-    prompt!.value = "Check the license footer";
-    prompt!.dispatchEvent(new Event("input", { bubbles: true }));
-    flushSync();
-    const valueInput = dialog!.querySelector<HTMLInputElement>('input[aria-label="Value"]');
-    valueInput!.value = "Apache-2.0";
-    valueInput!.dispatchEvent(new Event("input", { bubbles: true }));
-    flushSync();
-
-    click(
-      Array.from(dialog!.querySelectorAll("button")).find((entry) =>
-        entry.textContent?.includes("Save case"),
-      ),
-    );
-    await flushAsync();
-    expect(mock.create).toHaveBeenCalledWith({
-      target,
-      input: {
-        prompt: "Check the license footer",
-        assertions: [{ kind: "contains", value: "Apache-2.0" }],
-      },
-      boundRevision: REV_A,
-      enabled: true,
-    });
-    // 保存后行重拉。
-    expect(mock.casesList.mock.calls.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("edits a case preserving its original bound revision", async () => {
+  it("surfaces live progress for a tracked running run (capsule + tree line)", async () => {
     const caseId = `ev_${"a".repeat(24)}`;
-    const mock = mockRpc(
-      [makeCase(caseId, { boundRevision: REV_B, prompt: "Original prompt" })],
-      [],
-    );
+    mockRpc([makeCase(caseId)], []);
+    evaluationRunState.runId = RUN_NEW;
+    evaluationRunState.target = target;
+    evaluationRunState.status = "running";
+    evaluationRunState.startedAt = new Date().toISOString();
+    evaluationRunState.resultCount = 1;
+    evaluationRunState.totalCases = 3;
     mountView();
     await flushAsync();
 
-    click(button("Edit case"));
-    flushSync();
-    const dialog = host.querySelector('[data-stub="dialog-root"]');
-    const prompt = dialog!.querySelector<HTMLTextAreaElement>("#evaluating-case-prompt");
-    expect(prompt?.value).toBe("Original prompt");
-    prompt!.value = "Updated prompt";
-    prompt!.dispatchEvent(new Event("input", { bubbles: true }));
-    flushSync();
-
-    click(
-      Array.from(dialog!.querySelectorAll("button")).find((entry) =>
-        entry.textContent?.includes("Save case"),
-      ),
-    );
-    await flushAsync();
-    expect(mock.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target,
-        caseId,
-        boundRevision: REV_B, // 编辑不改绑定（design：重绑 = 删除后新建）。
-        input: expect.objectContaining({ prompt: "Updated prompt" }),
-      }),
-    );
-  });
-
-  it("blocks validation instead of sending an invalid case", async () => {
-    const mock = mockRpc([makeCase(`ev_${"a".repeat(24)}`)], []);
-    mountView();
-    await flushAsync();
-    click(button("New case"));
-    flushSync();
-    const dialog = host.querySelector('[data-stub="dialog-root"]')!;
-    click(
-      Array.from(dialog.querySelectorAll("button")).find((entry) =>
-        entry.textContent?.includes("Save case"),
-      ),
-    );
-    await flushAsync();
-    // 空 prompt + 空断言值：前端校验拦下（不发 RPC）。
-    expect(mock.create).not.toHaveBeenCalled();
-    expect(host.querySelector('[data-testid="case-validation"]')?.textContent).toContain(
-      "Prompt is required.",
-    );
+    // tracked run 注入时间线（未落盘也合成行）+ live 进度。
+    expect(text()).toContain("1/3");
+    expect(host.querySelector('[data-testid="evaluating-live-line"]')).not.toBeNull();
+    expect(
+      host.querySelector('[data-testid="evaluating-run-live-progress"]')?.textContent,
+    ).toContain("1/3");
   });
 });
 
-describe("EvaluatingDetail Global read-only gate (1.3 spec scenario)", () => {
-  it("hides run and case-writing entries and shows the read-only badge and note", async () => {
+describe("EvaluatingDetail gates (沿承钉)", () => {
+  it("hides run and case-writing entries and shows the read-only badge and note for Global", async () => {
     mockRpc([makeCase(`ev_${"a".repeat(24)}`)], []);
-    mountView("~");
+    mountView({ wsId: "~" });
     await flushAsync();
 
     expect(text()).toContain("read-only");
     expect(text()).toContain("Global workspace corpora are read-only");
     expect(button("Run…")).toBeUndefined();
-    expect(button("New case")).toBeUndefined();
-    expect(button("Edit case")).toBeUndefined();
+    expect(host.querySelector('[data-testid="evaluating-manage"]')).toBeNull();
   });
-});
 
-describe("EvaluatingDetail unresolvable skill face (1.3)", () => {
   it("shows the read-only banner and hides write actions when skills.info fails", async () => {
     mockRpc([makeCase(`ev_${"a".repeat(24)}`)], [], { skillName: null });
     mountView();
@@ -588,6 +719,14 @@ describe("EvaluatingDetail unresolvable skill face (1.3)", () => {
 
     expect(host.querySelector('[data-testid="evaluating-skill-unresolvable"]')).not.toBeNull();
     expect(button("Run…")).toBeUndefined();
-    expect(button("New case")).toBeUndefined();
+    expect(host.querySelector('[data-testid="evaluating-manage"]')).toBeNull();
+  });
+
+  it("renders the empty-corpus state with a direct new-case entry (Imported)", async () => {
+    mockRpc([], []);
+    mountView();
+    await flushAsync();
+    expect(text()).toContain("No cases for this skill yet");
+    expect(button("New case")).not.toBeUndefined();
   });
 });

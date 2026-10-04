@@ -148,7 +148,7 @@ function seedResult(
     startedAt: "2026-10-03T00:00:00.000Z",
     endedAt: "2026-10-03T00:00:01.000Z",
     outcome: "passed",
-    assertions: [{ ref: 0, outcome: "passed" }],
+    assertions: [{ ref: 0, kind: "contains", expected: "ok", observed: "ok", outcome: "passed" }],
     ...overrides,
   } as EvaluationResult;
   store.appendResult(t, result);

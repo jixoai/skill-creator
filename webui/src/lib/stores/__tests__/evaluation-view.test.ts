@@ -4,13 +4,17 @@
  * 用户原始需求 [2026-09-30]（evaluation-corpus Ch3 后续批）：评估语料最小只读查看面。
  * 修订 [2026-10-03]（evaluating-dashboard）：补 overview 聚合（分页/代次门）、
  * run 追踪（Global 前置拒/轮询至终态/cancel 幂等）与展示层纯投影。
+ * 修订 [2026-10-04]（evaluating-world-class 1.2）：run 时间线/case 树/断言详情
+ * 行纯投影、case 树键盘导航、run 轮询 live 进度（resultCount/totalCases）与
+ * 运行中匹配投影刷新。
  * 正交意图：
  *   [1] loading / error / empty 三态与 latest-wins + 连接替换的提交纪律
  *       （被取代或断线的请求不伪造数据）——详情行与总览分页双面。
  *   [2] 纯函数投影：每案最新结果选取（含同时刻 tie-break）、行合并（含断言
- *       定义）、五态徽标配色互异、相对时间、分页合并去重。
+ *       定义）、五态徽标配色互异、相对时间、分页合并去重、run 时间线/case 树/
+ *       断言详情行/键盘导航。
  *   [3] run 生命周期：Global 拒（零 RPC）、断线拒、start→queued→轮询→completed
- *       （匹配投影就地刷新）、cancel（终态幂等 + 刷新）。
+ *       （每刻刷新匹配投影 + live 进度）、cancel（终态幂等 + 刷新）。
  * 说明：daemon 侧存储/五态协议/读写闸门由 test/evaluation-*.test.ts 覆盖；
  * 本文件只覆盖 WebUI store 层不变量。
  */
@@ -32,12 +36,18 @@ vi.mock("../connection.svelte", () => ({
 }));
 
 import {
+  assertionDetailRows,
+  buildCaseTreeNodes,
   buildEvaluationRows,
+  buildRunTimeline,
   cancelEvaluationRun,
+  caseTreeKeyboard,
+  caseTreeLabel,
   compareResultsNewestFirst,
   detailErrorCount,
   evaluationOutcomeBadge,
   evaluationOverviewState,
+  evaluationPassRate,
   evaluationRunState,
   evaluationViewState,
   latestResultByCase,
@@ -49,8 +59,10 @@ import {
   resetEvaluationOverview,
   resetEvaluationRun,
   resetEvaluationView,
+  runResultsByCase,
   RUN_POLL_INTERVAL_MS,
   startEvaluationRun,
+  type CaseTreeSelectionState,
 } from "../evaluation-view.svelte";
 import type {
   EvaluationCase,
@@ -108,8 +120,8 @@ function makeResult(overrides: Partial<EvaluationResultView> = {}): EvaluationRe
     endedAt: "2026-10-01T00:00:02.000Z",
     outcome: "passed",
     assertions: [
-      { ref: 0, outcome: "passed" },
-      { ref: 1, outcome: "passed" },
+      { ref: 0, kind: "contains", expected: "MIT", observed: "…MIT…", outcome: "passed" },
+      { ref: 1, kind: "finding-triggered", expected: "true", observed: "true", outcome: "passed" },
     ],
     stale: false,
     ...overrides,
@@ -558,10 +570,17 @@ describe("evaluation run tracking (evaluating-dashboard 1.3)", () => {
     await vi.advanceTimersByTimeAsync(RUN_POLL_INTERVAL_MS);
     expect(status).toHaveBeenCalledTimes(1);
     expect(evaluationRunState.status).toBe("running");
-    expect(casesList).not.toHaveBeenCalled();
+    // live 进度（evaluating-world-class 1.2）：start 记录总数、每刻同步已到达数。
+    expect(evaluationRunState.totalCases).toBe(1);
+    expect(evaluationRunState.resultCount).toBe(0);
+    // 运行中即刷新匹配投影（case 逐个点亮的驱动源）。
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(casesList).toHaveBeenCalledWith({ target });
 
     await vi.advanceTimersByTimeAsync(RUN_POLL_INTERVAL_MS);
     expect(evaluationRunState.status).toBe("completed");
+    expect(evaluationRunState.resultCount).toBe(1);
     // 终态刷新：匹配 target 的详情行 + 匹配 ws 的总览页都被重拉。
     await Promise.resolve();
     await Promise.resolve();
@@ -620,5 +639,255 @@ describe("evaluation run tracking (evaluating-dashboard 1.3)", () => {
     const outcome = await cancelEvaluationRun(`run_${"1".repeat(24)}`);
     expect(outcome).toEqual({ ok: false, message: "cancel blew up" });
     expect(evaluationRunState.status).toBe("running");
+  });
+});
+
+describe("run timeline / case tree projections (evaluating-world-class 1.2)", () => {
+  const RUN_A = `run_${"1".repeat(24)}`;
+  const RUN_B = `run_${"3".repeat(24)}`;
+
+  it("groups results into newest-first timeline rows with five-state counts", () => {
+    const rows = buildRunTimeline(
+      [
+        makeResult({
+          runId: RUN_A,
+          startedAt: "2026-10-01T00:00:01.000Z",
+          endedAt: "2026-10-01T00:00:02.000Z",
+        }),
+        makeResult({
+          runId: RUN_A,
+          caseId: `ev_${"b".repeat(24)}`,
+          outcome: "failed",
+          assertions: [
+            { ref: 0, kind: "contains", expected: "MIT", observed: "nope", outcome: "failed" },
+          ],
+          startedAt: "2026-10-01T00:00:03.000Z",
+          endedAt: "2026-10-01T00:00:04.000Z",
+        }),
+        makeResult({
+          runId: RUN_B,
+          outcome: "unavailable",
+          assertions: [],
+          failure: { code: "DSH_UNAVAILABLE", detail: "x" },
+          startedAt: "2026-10-02T00:00:00.000Z",
+          endedAt: "2026-10-02T00:00:01.000Z",
+        }),
+      ],
+      null,
+    );
+    expect(rows.map((row) => row.runId)).toEqual([RUN_B, RUN_A]);
+    expect(rows[0]).toMatchObject({
+      status: "completed",
+      startedAt: "2026-10-02T00:00:00.000Z",
+      endedAt: "2026-10-02T00:00:01.000Z",
+    });
+    expect(rows[0].counts).toEqual({ passed: 0, failed: 0, error: 0, unavailable: 1, stale: 0 });
+    expect(rows[1].counts).toEqual({ passed: 1, failed: 1, error: 0, unavailable: 0, stale: 0 });
+    // 组内 startedAt 取最小、endedAt 取最大。
+    expect(rows[1].startedAt).toBe("2026-10-01T00:00:01.000Z");
+    expect(rows[1].endedAt).toBe("2026-10-01T00:00:04.000Z");
+  });
+
+  it("lets the tracked in-memory run win and synthesizes a row before any result lands", () => {
+    const tracked = {
+      runId: RUN_A,
+      status: "running" as const,
+      startedAt: "2026-10-03T00:00:00.000Z",
+    };
+    const noResults = buildRunTimeline([], tracked);
+    expect(noResults).toHaveLength(1);
+    expect(noResults[0]).toMatchObject({ runId: RUN_A, status: "running", endedAt: null });
+
+    const withPersisted = buildRunTimeline(
+      [makeResult({ runId: RUN_A, startedAt: "2026-10-01T00:00:00.000Z" })],
+      tracked,
+    );
+    expect(withPersisted).toHaveLength(1);
+    expect(withPersisted[0].status).toBe("running");
+    expect(withPersisted[0].startedAt).toBe("2026-10-01T00:00:00.000Z");
+  });
+
+  it("maps the selected run's results per case keeping the newest duplicate", () => {
+    const caseId = `ev_${"a".repeat(24)}`;
+    const byCase = runResultsByCase(
+      [
+        makeResult({
+          runId: RUN_B,
+          caseId,
+          endedAt: "2026-10-01T00:00:05.000Z",
+          resultId: `evr_${"9".repeat(24)}`,
+        }),
+        makeResult({ runId: RUN_A, caseId, endedAt: "2026-10-01T00:00:09.000Z" }),
+        makeResult({ runId: RUN_A, caseId: `ev_${"c".repeat(24)}` }),
+      ],
+      RUN_A,
+    );
+    expect(byCase.size).toBe(2);
+    expect(byCase.get(caseId)?.resultId).toBe(`evr_${"1".repeat(24)}`);
+  });
+
+  it("builds case tree nodes with run results and assertion score fractions", () => {
+    const failed = `ev_${"a".repeat(24)}`;
+    const clean = `ev_${"b".repeat(24)}`;
+    const untouched = `ev_${"c".repeat(24)}`;
+    const cases = [failed, clean, untouched].map((caseId, index) =>
+      makeCase({
+        caseId,
+        enabled: index !== 2,
+        input: {
+          prompt: index === 0 ? "first line\nsecond line" : `prompt ${index}`,
+          assertions: makeCase().input.assertions,
+        },
+      }),
+    );
+    const nodes = buildCaseTreeNodes(
+      cases,
+      new Map([
+        [
+          failed,
+          makeResult({
+            caseId: failed,
+            outcome: "failed",
+            assertions: [
+              { ref: 0, kind: "contains", expected: "MIT", observed: "no", outcome: "passed" },
+              {
+                ref: 1,
+                kind: "finding-triggered",
+                expected: "true",
+                observed: "false",
+                outcome: "failed",
+              },
+            ],
+          }),
+        ],
+        [
+          clean,
+          makeResult({
+            caseId: clean,
+            outcome: "unavailable",
+            assertions: [],
+            failure: { code: "DSH_UNAVAILABLE", detail: "x" },
+          }),
+        ],
+      ]),
+    );
+    expect(nodes.map((node) => node.caseId)).toEqual([failed, clean, untouched]);
+    expect(nodes[0].label).toBe("first line");
+    expect(nodes[0].score).toEqual({ passed: 1, total: 2 });
+    // unavailable 族无断言裁决 → score=null、结果行保留。
+    expect(nodes[1].score).toBeNull();
+    expect(nodes[1].runResult?.outcome).toBe("unavailable");
+    // 未进该 run 的 case → 灰态（runResult=null）。
+    expect(nodes[2].runResult).toBeNull();
+    expect(nodes[2].enabled).toBe(false);
+  });
+
+  it("truncates long tree labels to the first prompt line", () => {
+    expect(caseTreeLabel("one\ntwo")).toBe("one");
+    expect(caseTreeLabel(`${"x".repeat(80)}\ntwo`)).toBe(`${"x".repeat(72)}…`);
+    expect(caseTreeLabel(`${"x".repeat(72)}\ntwo`)).toBe("x".repeat(72));
+  });
+
+  it("projects assertion detail rows from frozen result fields with case descriptions", () => {
+    const rows = assertionDetailRows(
+      makeResult({
+        outcome: "failed",
+        assertions: [
+          {
+            ref: 0,
+            kind: "contains",
+            expected: "MIT",
+            observed: "Apache instead",
+            outcome: "passed",
+          },
+          {
+            ref: 1,
+            kind: "finding-triggered",
+            expected: "false",
+            observed: "true",
+            outcome: "failed",
+          },
+        ],
+      }),
+      [
+        { kind: "contains", value: "MIT", description: "license line" },
+        { kind: "finding-triggered", value: false },
+      ],
+    );
+    expect(rows).toEqual([
+      {
+        ref: 0,
+        kind: "contains",
+        expected: "MIT",
+        observed: "Apache instead",
+        outcome: "passed",
+        description: "license line",
+      },
+      {
+        ref: 1,
+        kind: "finding-triggered",
+        expected: "false",
+        observed: "true",
+        outcome: "failed",
+        description: null,
+      },
+    ]);
+    // stale/unavailable（assertions 恒空）与未跑 → 空行集。
+    expect(
+      assertionDetailRows(
+        makeResult({ outcome: "stale", assertions: [] }),
+        makeCase().input.assertions,
+      ),
+    ).toEqual([]);
+    expect(assertionDetailRows(null, makeCase().input.assertions)).toEqual([]);
+  });
+
+  it("navigates the case tree with arrows clamped at the ends and Escape collapsing", () => {
+    const ids = [`ev_${"a".repeat(24)}`, `ev_${"b".repeat(24)}`, `ev_${"c".repeat(24)}`];
+    // 无初始选择：↓ 取首行、↑ 取末行。
+    expect(caseTreeKeyboard({ selectedCaseId: null }, "ArrowDown", ids)).toEqual({
+      selectedCaseId: ids[0],
+    });
+    expect(caseTreeKeyboard({ selectedCaseId: null }, "ArrowUp", ids)).toEqual({
+      selectedCaseId: ids[2],
+    });
+    // 移动 + 端点钳制。
+    let state: CaseTreeSelectionState = { selectedCaseId: ids[0] };
+    state = caseTreeKeyboard(state, "ArrowDown", ids);
+    expect(state.selectedCaseId).toBe(ids[1]);
+    state = caseTreeKeyboard(state, "ArrowDown", ids);
+    state = caseTreeKeyboard(state, "ArrowDown", ids);
+    expect(state.selectedCaseId).toBe(ids[2]);
+    state = caseTreeKeyboard(state, "ArrowUp", ids);
+    state = caseTreeKeyboard(state, "ArrowUp", ids);
+    state = caseTreeKeyboard(state, "ArrowUp", ids);
+    expect(state.selectedCaseId).toBe(ids[0]);
+    // Enter/→ 展开语义 = 保持选中；Esc 收起 = 清空。
+    expect(caseTreeKeyboard({ selectedCaseId: ids[1] }, "Enter", ids)).toEqual({
+      selectedCaseId: ids[1],
+    });
+    expect(caseTreeKeyboard({ selectedCaseId: ids[1] }, "ArrowRight", ids)).toEqual({
+      selectedCaseId: ids[1],
+    });
+    expect(caseTreeKeyboard({ selectedCaseId: ids[1] }, "Escape", ids)).toEqual({
+      selectedCaseId: null,
+    });
+    // 空 case 集：任何键 no-op。
+    expect(caseTreeKeyboard({ selectedCaseId: null }, "ArrowDown", [])).toEqual({
+      selectedCaseId: null,
+    });
+  });
+
+  it("computes pass rates with a zero-denominator null (never 0/NaN)", () => {
+    expect(
+      evaluationPassRate({ passedCount: 3, failedCount: 1, errorCount: 0, unavailableCount: 0 }),
+    ).toBe(0.75);
+    expect(
+      evaluationPassRate({ passedCount: 0, failedCount: 0, errorCount: 0, unavailableCount: 0 }),
+    ).toBeNull();
+    // stale 计数不在分母内（调用方不传）。
+    expect(
+      evaluationPassRate({ passedCount: 2, failedCount: 0, errorCount: 2, unavailableCount: 0 }),
+    ).toBe(0.5);
   });
 });

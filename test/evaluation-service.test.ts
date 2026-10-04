@@ -157,6 +157,31 @@ describe("evaluation service (analyzer runner)", () => {
     expect(result.assertions[1].outcome).toBe("failed");
   });
 
+  it("freezes per-assertion kind/expected/observed text at run time (evaluating-world-class 1.1)", async () => {
+    const entry = seedCase({
+      prompt: "p",
+      assertions: [
+        { kind: "contains", value: "missing" },
+        { kind: "finding-triggered", value: false },
+      ],
+    });
+    const service = serviceWith();
+    await runToCompletion(service, [entry.caseId]);
+    const [result] = await service.results(target);
+    if (result.outcome !== "failed") throw new Error("expected failed outcome");
+    const contains = result.assertions.find((item) => item.kind === "contains");
+    if (contains === undefined) throw new Error("contains assertion row missing");
+    expect(contains.expected).toBe("missing");
+    // 未命中 → observed = 检索面末段摘录（有界，不含期望词）。
+    expect(contains.observed).not.toContain("missing");
+    expect(contains.observed.length).toBeLessThanOrEqual(202);
+    const triggered = result.assertions.find((item) => item.kind === "finding-triggered");
+    if (triggered === undefined) throw new Error("finding-triggered assertion row missing");
+    expect(triggered.expected).toBe("false");
+    // 语料同名 alpha ×2 → duplicate-name finding 存在 → 观测 = 已触发（"true"）。
+    expect(triggered.observed).toBe("true");
+  });
+
   it("maps duplicate-name corpus findings to finding-kind / finding-triggered assertions", async () => {
     // 语料含同名 alpha ×2 → duplicate-name finding 覆盖两个技能。
     const entry = seedCase({

@@ -7,6 +7,9 @@
  * 字典序 cursor 分页 + recentRuns 固定窗口 20 + staleRatio revision 现读）与
  * Global run 前置闸（design §2 r2：排队/runner 之前拒绝——不产生 run entry、
  * 不触 adapter、零落盘）。
+ * 修订 [2026-10-04]（evaluating-world-class task 1.1）：断言裁决补冻结文本
+ * kind/expected/observed（contains 族 = 有界摘录；finding 族 = 规范化值列表
+ * /布尔）——期望 vs 观测 diff 双栏的 run 时数据源。
  *
  * 正交意图：
  *   [1] run 生命周期：start→{runId,queued}；内存态表 + 结果落盘；cancel 竞态
@@ -225,25 +228,82 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
   const findingsFor = (findings: AnalyzerFinding[], skillId: string): AnalyzerFinding[] =>
     findings.filter((finding) => finding.skillIds.includes(skillId));
 
+  /** observed 摘录上限（evaluating-world-class design §5：有界，不含结果全文）。 */
+  const OBSERVED_EXCERPT_MAX = 200;
+
+  /**
+   * contains 族观测摘录：命中处为中心的窗口（未命中 = 检索面末段）；空白
+   * 折叠为单空格，越界加省略号。空文本 → 空串（UI 侧渲染「无输出」）。
+   */
+  const observedExcerpt = (text: string, needle: string): string => {
+    const clean = text.replaceAll(/\s+/g, " ").trim();
+    if (clean === "") return "";
+    const at = clean.indexOf(needle);
+    if (at === -1) {
+      return clean.length <= OBSERVED_EXCERPT_MAX
+        ? clean
+        : `…${clean.slice(clean.length - OBSERVED_EXCERPT_MAX)}`;
+    }
+    const start = Math.max(0, at - Math.floor(OBSERVED_EXCERPT_MAX / 2));
+    const end = start + OBSERVED_EXCERPT_MAX;
+    return `${start > 0 ? "…" : ""}${clean.slice(start, end)}${end < clean.length ? "…" : ""}`;
+  };
+
+  /**
+   * 单断言裁决 + 冻结文本（evaluating-world-class task 1.1）：outcome 与
+   * observed 同源生成（永不矛盾）；expected = 断言定义规范化。finding 族
+   * observed = 规范化值列表（逗号连接，缺席 = 空串）或 "true"/"false"。
+   */
   const judgeAssertion = (
     assertion: EvaluationAssertion,
     ctx: { text: string; findings: AnalyzerFinding[] },
-  ): "passed" | "failed" => {
+  ): {
+    kind: EvaluationAssertion["kind"];
+    expected: string;
+    observed: string;
+    outcome: "passed" | "failed";
+  } => {
+    const uniqueValues = (values: string[]): string => [...new Set(values)].sort().join(", ");
     switch (assertion.kind) {
       case "contains":
-        return ctx.text.includes(assertion.value) ? "passed" : "failed";
+        return {
+          kind: assertion.kind,
+          expected: assertion.value,
+          observed: observedExcerpt(ctx.text, assertion.value),
+          outcome: ctx.text.includes(assertion.value) ? "passed" : "failed",
+        };
       case "not-contains":
-        return ctx.text.includes(assertion.value) ? "failed" : "passed";
+        return {
+          kind: assertion.kind,
+          expected: assertion.value,
+          observed: observedExcerpt(ctx.text, assertion.value),
+          outcome: ctx.text.includes(assertion.value) ? "failed" : "passed",
+        };
       case "finding-kind":
-        return ctx.findings.some((finding) => finding.kind === assertion.value)
-          ? "passed"
-          : "failed";
+        return {
+          kind: assertion.kind,
+          expected: assertion.value,
+          observed: uniqueValues(ctx.findings.map((finding) => finding.kind)),
+          outcome: ctx.findings.some((finding) => finding.kind === assertion.value)
+            ? "passed"
+            : "failed",
+        };
       case "finding-triggered":
-        return ctx.findings.length > 0 === assertion.value ? "passed" : "failed";
+        return {
+          kind: assertion.kind,
+          expected: String(assertion.value),
+          observed: String(ctx.findings.length > 0),
+          outcome: ctx.findings.length > 0 === assertion.value ? "passed" : "failed",
+        };
       case "finding-severity":
-        return ctx.findings.some((finding) => finding.severity === assertion.value)
-          ? "passed"
-          : "failed";
+        return {
+          kind: assertion.kind,
+          expected: assertion.value,
+          observed: uniqueValues(ctx.findings.map((finding) => finding.severity)),
+          outcome: ctx.findings.some((finding) => finding.severity === assertion.value)
+            ? "passed"
+            : "failed",
+        };
     }
   };
 
@@ -303,7 +363,7 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
         const mine = findings.filter((finding) => finding.skillIds.includes(primary.skillId));
         const assertions = runCase.input.assertions.map((assertion, index) => ({
           ref: index,
-          outcome: judgeAssertion(assertion, { text: primary.content, findings: mine }),
+          ...judgeAssertion(assertion, { text: primary.content, findings: mine }),
         }));
         const allPassed = assertions.every((item) => item.outcome === "passed");
         return {
@@ -348,7 +408,7 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
         const text = corpus.find((doc) => doc.skillId === target.skillId)?.content ?? "";
         const assertions = runCase.input.assertions.map((assertion, index) => ({
           ref: index,
-          outcome: judgeAssertion(assertion, { text, findings: mine }),
+          ...judgeAssertion(assertion, { text, findings: mine }),
         }));
         const end = await loadSkill(target);
         // run 中漂移 → stale 作废。
@@ -403,7 +463,7 @@ export function createEvaluationService(deps: EvaluationServiceDeps): Evaluation
         const transcript = await adapter.readTranscript(session.sessionId);
         const assertions = runCase.input.assertions.map((assertion, index) => ({
           ref: index,
-          outcome: judgeAssertion(assertion, { text: transcript, findings: [] }),
+          ...judgeAssertion(assertion, { text: transcript, findings: [] }),
         }));
         const end = await loadSkill(target);
         if (end.revision !== current.revision) {

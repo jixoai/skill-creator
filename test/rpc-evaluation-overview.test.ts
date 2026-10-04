@@ -120,7 +120,15 @@ function seedTargetDir(
         startedAt: "2026-10-03T00:00:00.000Z",
         endedAt: run.endedAt,
         outcome: "passed" as const,
-        assertions: [{ ref: 0, outcome: "passed" as const }],
+        assertions: [
+          {
+            ref: 0,
+            kind: "contains" as const,
+            expected: "ok",
+            observed: "ok",
+            outcome: "passed" as const,
+          },
+        ],
       })),
     );
     fs.writeFileSync(

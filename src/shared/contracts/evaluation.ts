@@ -7,6 +7,9 @@
  * 修订 [2026-10-03]（evaluating-dashboard design §1 r2 定稿）：补
  * `evaluation.overview` 聚合 io（targets 字典序 cursor 分页 + recentRuns 固定
  * 窗口 20 + staleRatio 零分母缺席 + 单 target typed error 行）。
+ * 修订 [2026-10-04]（evaluating-world-class task 1.1）：断言裁决行补
+ * kind/expected/observed 冻结文本（run 时落盘；期望 vs 观测 diff 双栏数据源；
+ * 旧持久化结果 safeParse 不兼容 → 空信封重建）。
  *
  * 正交意图：
  *   [1] case schema（B2/B′5）：五类断言（min(1)）+ 双 hash 域（boundRevision
@@ -28,7 +31,18 @@ export const EvaluationTargetSchema = z.object({
 /** 评估作用域目标。 */
 export type EvaluationTarget = z.infer<typeof EvaluationTargetSchema>;
 
-/** 断言种类（B2/B′5：finding-triggered 为布尔——fixture 的 expectTrigger 域）。 */
+/** 断言种类字面量（断言定义与裁决行共用；B2/B′5）。 */
+export const EvaluationAssertionKindSchema = z.enum([
+  "contains",
+  "not-contains",
+  "finding-kind",
+  "finding-triggered",
+  "finding-severity",
+]);
+/** 断言种类。 */
+export type EvaluationAssertionKind = z.infer<typeof EvaluationAssertionKindSchema>;
+
+/** 断言定义（B2/B′5：finding-triggered 为布尔——fixture 的 expectTrigger 域）。 */
 export const EvaluationAssertionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("contains"),
@@ -128,11 +142,21 @@ export const EvaluationRunnerSchema = z.discriminatedUnion("kind", [
 /** 评估 runner 描述。 */
 export type EvaluationRunner = z.infer<typeof EvaluationRunnerSchema>;
 
-/** 单条断言的裁决（unavailable/stale 结果的数组恒空）。 */
+/**
+ * 单条断言的裁决（unavailable/stale 结果的数组恒空）。kind/expected/observed
+ * 为 run 时冻结文本（evaluating-world-class design §5）：expected = 断言定义的
+ * 期望值规范化；observed = runner 实际观测（contains 族 = 有界摘录，
+ * finding 族 = 规范化值列表/布尔）；case 后续编辑不影响历史结果可读。
+ */
 const AssertionOutcomeSchema = z.strictObject({
   ref: z.number().int().nonnegative(),
+  kind: EvaluationAssertionKindSchema,
+  expected: z.string(),
+  observed: z.string(),
   outcome: z.enum(["passed", "failed", "error"]),
 });
+/** 单条断言的裁决行。 */
+export type EvaluationAssertionOutcome = z.infer<typeof AssertionOutcomeSchema>;
 
 const ResultBase = {
   schemaVersion: z.literal(1),

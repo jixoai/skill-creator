@@ -76,7 +76,7 @@ function makeResult(overrides: Record<string, unknown> = {}) {
       version: { promptVersion: "1", toolVersion: "1", dshVersion: "n/a" },
     },
     outcome: "passed",
-    assertions: [{ ref: 0, outcome: "passed" }],
+    assertions: [{ ref: 0, kind: "contains", expected: "ok", observed: "ok", outcome: "passed" }],
     startedAt: "2026-09-30T00:00:00.000Z",
     endedAt: "2026-09-30T00:00:01.000Z",
     ...overrides,
@@ -114,7 +114,7 @@ describe("evaluation schemas (task 4.1)", () => {
     expect(EvaluationResultSchema.safeParse(makeResult({ assertions: [] })).success).toBe(false);
     expect(
       EvaluationResultSchema.safeParse(
-        makeResult({ outcome: "stale", assertions: [{ ref: 0, outcome: "passed" }] }),
+        makeResult({ outcome: "stale", assertions: [makeResult().assertions[0]] }),
       ).success,
     ).toBe(false);
     expect(
