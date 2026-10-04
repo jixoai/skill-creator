@@ -4,6 +4,10 @@
  * 用户原始需求 [2026-10-03]（design §4）：「前端：xterm.js（webui 依赖新增，懒
  * 加载 chunk）；多终端 tab；拖高分隔条」+ 可靠性语义冻结（seq 对账 / buffer
  * 缺口重放 / write reqId 高水位去重 / create resume 重连）。
+ * 修订 [2026-10-04]（skills-agent-page-zcode-parity 2.1/2.3）：tab 所有权按
+ * Workspace 分区 + ZCode 关闭/退出语义（最后一个 tab 关闭 = 收起面板保活
+ * session；PTY exit = 同步删除 tab）+ 两段式 create（pane 先 fit 再带真实
+ * cols/rows 建会话）+ resize 队列（id 未 ready 暂存，ack 后 flush）。
  *
  * 正交意图：
  *   [1] 连接生命周期：/ws/terminal 单端点（?token= web token 与 /ws/rpc 同法）；
@@ -15,10 +19,20 @@
  *       缓冲已裁剪 → 通知面清屏重拉（reset 事件 + lastSeq 对齐 availableFrom-1）。
  *   [3] write reqId 高水位：per-session 单调计数；server 回执 duplicate 仅确认
  *       （不重复落放——PTY stdin 收到的键序与首次发送一致由 server 保证）。
- *   [4] tab 投影：creating/alive/exited 三态 + 客户端侧并发 ≤4 预判（服务端
- *       LIMIT_EXCEEDED 兜底 typed error）。
- * 妥协声明：list 控制消息当前仅用于测试面（UI 不拉全局清单——tab 真相在本地
- *   注册表 + resume 对账；不主动认领未知会话）。
+ *   [4] Workspace 分区 tab 所有权（ZCode Terminal.tsx:49-128 / terminalPanelState）：
+ *       tabs 按 workspaceKey 分区，per-workspace sessionIds + activeSessionId；
+ *       面板打开/切换 workspace 时懒确保该 workspace 有 session（不杀旧 workspace
+ *       的 PTY）；关闭最后一个 tab = 收起面板并保活（close-panel）；PTY exit =
+ *       删除 session，仅当前 workspace 的最后一个 tab 才连带关闭面板；活动 tab
+ *       回退 = 被关 tab 的左侧邻居。
+ *   [5] 两段式 create + resize 队列（ZCode TerminalSession.tsx:784-796/884-896）：
+ *       draft tab 不立即发 create；pane 挂载 fit 出真实 cols/rows 后经
+ *       attachTerminalPane 发 create{cols,rows}（避免启动输出按错误宽度重排）；
+ *       id 未 ready 期间的 resize 暂存 pendingCreateSize，created ack 后 flush。
+ * 妥协声明：（a）WS create 无关联 id，多个 creating draft 按 FIFO 换轨（ZCode 为
+ *   per-session promise，无此歧义面）；（b）list 控制消息当前仅测试面（tab 真相
+ *   在本地注册表 + resume 对账）；（c）created/list ack 不回传 shell（协议 r3/r4
+ *   冻结），shellLabel 仅在调用方显式指定 shell 时可知，否则为 null（展示面隐藏）。
  */
 
 import { readWebToken } from "$lib/rpc-client";
@@ -30,6 +44,13 @@ import {
   type TerminalClientMessage,
   type TerminalServerMessage,
 } from "./protocol.js";
+import {
+  TERMINAL_DEFAULT_WORKSPACE_KEY,
+  formatShellLabel,
+  formatTerminalTabTitle,
+  nextSessionIndex,
+  terminalPathLeaf,
+} from "./terminal-tabs.js";
 
 /** daemon 全局并发活 PTY 上限（design §4 SHALL；客户端预判入口禁用）。 */
 export const TERMINAL_MAX_LIVE = 4;
@@ -49,18 +70,39 @@ export type TerminalOutputEvent =
 
 type OutputListener = (event: TerminalOutputEvent) => void;
 
-/** 面内可见的 tab 投影。 */
+/** 面内可见的 tab 投影（workspace 分区所有；ZCode TerminalSessionDescriptor 同构）。 */
 export interface TerminalTabView {
+  /**
+   * 稳定 UI key（draft 期生成，created ack 换轨后不变）。ZCode session.id 天生
+   * 稳定（PTY id 另持）；本协议 sessionId 会被 ack 换轨重命名，pane 保活
+   * （keyed each）必须以 uiKey 为键。
+   */
+  uiKey: string;
   sessionId: string;
-  /** 展示名（Terminal 1/2/…；创建序号本地分配）。 */
+  /** 所属 workspace 分区 key（ZCode Terminal.tsx:49 workspaceIdentity || cwd || default）。 */
+  workspaceKey: string;
+  /** create cwd（tab 标题的 projectName 派生源）。 */
+  cwd: string | undefined;
+  /** per-workspace 创建编号（最小空位；ZCode getNextTerminalSessionIndex）。 */
+  index: number;
+  /** 展示名（projectName / projectName N）。 */
   title: string;
+  /** 实际 shell 展示 label（仅显式指定 shell 时可知；否则 null = 隐藏）。 */
+  shellLabel: string | null;
   /** create ack 未达（新建中；断线重连期间为 false）。 */
   creating: boolean;
   alive: boolean;
   exitCode: number | null;
 }
 
-/** per-session 对账账本（非响应式；UI 只看 tabs/activeSessionId 投影）。 */
+/** per-workspace tab 注册表（ZCode TerminalWorkspaceState 同构）。 */
+export interface TerminalWorkspaceView {
+  key: string;
+  sessionIds: string[];
+  activeSessionId: string | null;
+}
+
+/** per-session 对账账本（非响应式；UI 只看 tabs/workspaces 投影）。 */
 interface SessionLedger {
   lastSeq: number;
   highestSeen: number;
@@ -68,8 +110,16 @@ interface SessionLedger {
   reqCounter: number;
   bufferInFlight: boolean;
   listeners: Set<OutputListener>;
-  /** 断线期间待补发的新建参数（created ack 未达）。 */
-  createOptions: { cwd?: string } | null;
+  /** create 参数（两段式：pane attach 补 cols/rows 后发 create）。 */
+  createOptions: { cwd?: string; shell?: string; cols?: number; rows?: number } | null;
+  /** pane 已挂载并上报过尺寸（重连补发 create 的准入）。 */
+  paneAttached: boolean;
+  /** create 帧已发出（测试/诊断面）。 */
+  createSent: boolean;
+  /** id 未 ready 期间暂存的 resize 终值（created ack 后 flush）。 */
+  pendingCreateSize: { cols: number; rows: number } | null;
+  /** 已发送的最近 resize 终值（同值去重）。 */
+  lastSentSize: { cols: number; rows: number } | null;
   /**
    * 已落放输出的有界镜像（pane 重挂载/切 tab 回看面）：按落放顺序的 data 块；
    * reset（gap 清屏）时清空重建。字节上限有界（近似值，超限从头裁剪）。
@@ -85,8 +135,12 @@ export type TerminalConnectionStatus = "idle" | "connecting" | "open" | "closed"
 
 export const terminalState = $state({
   status: "idle" as TerminalConnectionStatus,
+  /** 全量 tab（所有 workspace；dock 按活动 workspace 过滤渲染）。 */
   tabs: [] as TerminalTabView[],
-  activeSessionId: null as string | null,
+  /** workspace 分区注册表（顺序 = 首见顺序）。 */
+  workspaces: [] as TerminalWorkspaceView[],
+  /** 当前展示的 workspace 分区（dock 挂载/切换时设置）。 */
+  activeWorkspaceKey: null as string | null,
   lastError: null as string | null,
   /** 非 sandbox 首开提示的确认态（sessionStorage——每次 WebUI 会话首开都提示）。 */
   noticeAcknowledged: readNoticeAck(),
@@ -111,6 +165,8 @@ let reconnectAttempts = 0;
 let connectToken = 0;
 /** 测试注入的 socket 工厂（生产 = 原生 WebSocket）。 */
 let socketFactory: ((url: string) => WebSocket) | null = null;
+/** 面板关闭回调（dock 注册；close-panel 语义的唯一出口）。 */
+let panelCloseHandler: (() => void) | null = null;
 
 function ledgerOf(sessionId: string): SessionLedger {
   let ledger = ledgers.get(sessionId);
@@ -123,6 +179,10 @@ function ledgerOf(sessionId: string): SessionLedger {
       bufferInFlight: false,
       listeners: new Set(),
       createOptions: null,
+      paneAttached: false,
+      createSent: false,
+      pendingCreateSize: null,
+      lastSentSize: null,
       mirror: [],
       mirrorBytes: 0,
     };
@@ -228,19 +288,32 @@ export async function connect(): Promise<void> {
   };
   terminalState.status = "open";
   reconnectAttempts = 0;
-  // 重连对账：既有 tab 逐个 resume（created ack 后按 replayFrom 触发补拉）；
-  // created ack 未达的 tab 补发 create。
+  // 重连对账：已确立 tab 逐个 create{resume}（created ack 后按 replayFrom 补拉）；
+  // creating tab 仅在 pane 已 attach 过时补发 create（未 attach 的由 pane 发起）。
   for (const tab of terminalState.tabs) {
     if (tab.creating) {
       const ledger = ledgers.get(tab.sessionId);
-      send({
-        type: "create",
-        ...(ledger?.createOptions?.cwd ? { cwd: ledger.createOptions.cwd } : {}),
-      });
+      if (ledger?.paneAttached) sendCreate(tab.sessionId);
     } else {
       send({ type: "create", resume: tab.sessionId });
     }
   }
+}
+
+/** 发送 create（两段式第二段：attach 已补尺寸；失败保序等重连）。 */
+function sendCreate(sessionId: string): void {
+  const ledger = ledgers.get(sessionId);
+  if (ledger === undefined) return;
+  const options = ledger.createOptions ?? {};
+  const frame: TerminalClientMessage = {
+    type: "create",
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+    ...(options.shell !== undefined ? { shell: options.shell } : {}),
+    ...(options.cols !== undefined ? { cols: options.cols } : {}),
+    ...(options.rows !== undefined ? { rows: options.rows } : {}),
+  };
+  if (send(frame)) ledger.createSent = true;
+  else void connect();
 }
 
 function cancelReconnect(): void {
@@ -281,40 +354,144 @@ export function aliveTerminalCount(): number {
   return terminalState.tabs.filter((tab) => tab.alive).length;
 }
 
-/** 新建终端 tab（UI 入口；并发预判 + 服务端 LIMIT_EXCEEDED 兜底）。 */
-export function createTerminalTab(options?: { cwd?: string }): void {
-  if (aliveTerminalCount() >= TERMINAL_MAX_LIVE) {
+function workspaceOf(key: string): TerminalWorkspaceView | undefined {
+  return terminalState.workspaces.find((workspace) => workspace.key === key);
+}
+
+function ensureWorkspaceRecord(key: string): TerminalWorkspaceView {
+  let workspace = workspaceOf(key);
+  if (workspace === undefined) {
+    workspace = { key, sessionIds: [], activeSessionId: null };
+    terminalState.workspaces.push(workspace);
+  }
+  return workspace;
+}
+
+/** tab 展示名（ZCode Terminal.tsx:313-316：cwd leaf 或 "Terminal"，index 1 无后缀）。 */
+function deriveTabTitle(cwd: string | undefined, index: number): string {
+  const projectName = terminalPathLeaf(cwd ?? "") || t("terminal.tabTitle");
+  return formatTerminalTabTitle(projectName, index);
+}
+
+/**
+ * 设置活动 workspace 分区并懒确保其有 session（ZCode Terminal.tsx:67-82
+ * ensureWorkspaceTerminalState：面板打开/切换 workspace 时创建首个 tab，不卸载
+ * 其它 workspace 的 PTY）。LIMIT 预判失败时保持空分区（不重试循环）。
+ */
+export function setTerminalWorkspace(key: string, options?: { cwd?: string }): void {
+  const workspaceKey = key.trim() === "" ? TERMINAL_DEFAULT_WORKSPACE_KEY : key;
+  terminalState.activeWorkspaceKey = workspaceKey;
+  const existing = workspaceOf(workspaceKey);
+  const hasLiveSession =
+    existing !== undefined &&
+    existing.sessionIds.some((id) => terminalState.tabs.some((tab) => tab.sessionId === id));
+  if (hasLiveSession) return;
+  createTerminalTab({ ...(options?.cwd !== undefined ? { cwd: options.cwd } : {}) });
+}
+
+/**
+ * 新建终端 tab（两段式第一段：draft 不发 create；pane attach 携真实尺寸发送）。
+ * UI 入口；并发预判（含 creating pending 窗——两段式下 ack 前也要计入，防连点
+ * 超发）+ 服务端 LIMIT_EXCEEDED 兜底。
+ */
+export function createTerminalTab(options?: { cwd?: string; shell?: string }): void {
+  const pendingOrAlive = terminalState.tabs.filter((tab) => tab.alive || tab.creating).length;
+  if (pendingOrAlive >= TERMINAL_MAX_LIVE) {
     terminalState.lastError = "LIMIT_EXCEEDED";
     showToast(t("terminal.limitReached"));
     return;
   }
+  const workspaceKey = terminalState.activeWorkspaceKey ?? TERMINAL_DEFAULT_WORKSPACE_KEY;
+  const workspace = ensureWorkspaceRecord(workspaceKey);
   tabCounter += 1;
   const draftId = `pending-${tabCounter}`;
+  const usedIndices = workspace.sessionIds
+    .map((id) => terminalState.tabs.find((tab) => tab.sessionId === id)?.index)
+    .filter((index): index is number => typeof index === "number");
+  const index = nextSessionIndex(usedIndices);
+  const cwd = options?.cwd;
   const ledger = ledgerOf(draftId);
-  ledger.createOptions = { ...(options?.cwd ? { cwd: options.cwd } : {}) };
-  terminalState.tabs.push({
+  ledger.createOptions = {
+    ...(cwd !== undefined ? { cwd } : {}),
+    ...(options?.shell !== undefined ? { shell: options.shell } : {}),
+  };
+  const tab: TerminalTabView = {
+    uiKey: draftId,
     sessionId: draftId,
-    title: `${t("terminal.tabTitle")} ${tabCounter}`,
+    workspaceKey,
+    cwd,
+    index,
+    title: deriveTabTitle(cwd, index),
+    shellLabel: formatShellLabel(options?.shell ?? null),
     creating: true,
     alive: false,
     exitCode: null,
-  });
-  terminalState.activeSessionId = draftId;
-  if (!send({ type: "create", ...(options?.cwd ? { cwd: options.cwd } : {}) })) {
-    void connect();
-  }
+  };
+  terminalState.tabs.push(tab);
+  workspace.sessionIds.push(draftId);
+  workspace.activeSessionId = draftId;
+  terminalState.activeWorkspaceKey = workspaceKey;
 }
 
-/** 关闭 tab（发送 exit；本地立即移除——已退会话的 typed error 无面）。 */
-export function closeTerminalTab(sessionId: string): void {
+/**
+ * pane 挂载就绪——两段式 create 第二段（ZCode TerminalSession.tsx:784-796
+ * initial fit before create）：携带 fit 出的真实 cols/rows 发 create；无布局
+ * （隐藏挂载）时省略尺寸（服务端默认，ZCode 80x24 同语义）。幂等：非
+ * creating / 已 attach 的会话为 no-op。
+ */
+export function attachTerminalPane(sessionId: string, size?: { cols: number; rows: number }): void {
+  const tab = terminalState.tabs.find((item) => item.sessionId === sessionId);
+  if (tab === undefined || !tab.creating) return;
+  const ledger = ledgerOf(sessionId);
+  if (ledger.paneAttached) return;
+  ledger.createOptions = {
+    ...ledger.createOptions,
+    ...(size !== undefined ? { cols: size.cols, rows: size.rows } : {}),
+  };
+  ledger.paneAttached = true;
+  sendCreate(sessionId);
+}
+
+/** 注册面板关闭回调（close-panel 语义出口；dock 挂载期绑定，卸载解绑）。 */
+export function bindTerminalPanelClose(handler: () => void): () => void {
+  panelCloseHandler = handler;
+  return () => {
+    if (panelCloseHandler === handler) panelCloseHandler = null;
+  };
+}
+
+function requestPanelClose(): boolean {
+  if (panelCloseHandler === null) return false;
+  panelCloseHandler();
+  return true;
+}
+
+/**
+ * 移除 session（ZCode terminalPanelState.ts:107-140 closeTerminalSession 语义）：
+ * 活动 tab 回退 = 被关 tab 的左侧邻居（closingIndex-1）而非列表头；workspace
+ * 清空时移除分区记录。
+ */
+function removeSession(sessionId: string): void {
   const index = terminalState.tabs.findIndex((tab) => tab.sessionId === sessionId);
   if (index < 0) return;
   const tab = terminalState.tabs[index]!;
-  if (!tab.creating) send({ type: "exit", sessionId });
+  const workspace = workspaceOf(tab.workspaceKey);
   terminalState.tabs.splice(index, 1);
   ledgers.delete(sessionId);
-  if (terminalState.activeSessionId === sessionId) {
-    terminalState.activeSessionId = terminalState.tabs[0]?.sessionId ?? null;
+  if (workspace !== undefined) {
+    const closingIndex = workspace.sessionIds.indexOf(sessionId);
+    const nextSessionIds = workspace.sessionIds.filter((id) => id !== sessionId);
+    if (nextSessionIds.length === 0) {
+      terminalState.workspaces = terminalState.workspaces.filter(
+        (item) => item.key !== workspace.key,
+      );
+    } else {
+      const fallbackSessionId = nextSessionIds[Math.max(0, closingIndex - 1)] ?? nextSessionIds[0]!;
+      workspace.sessionIds = nextSessionIds;
+      if (workspace.activeSessionId === sessionId) {
+        workspace.activeSessionId = fallbackSessionId;
+      }
+    }
   }
   if (terminalState.tabs.length === 0 && !wanted) {
     cancelReconnect();
@@ -323,22 +500,78 @@ export function closeTerminalTab(sessionId: string): void {
   }
 }
 
-/** 选择活动 tab。 */
-export function setActiveTerminal(sessionId: string): void {
-  if (terminalState.tabs.some((tab) => tab.sessionId === sessionId)) {
-    terminalState.activeSessionId = sessionId;
+/**
+ * 关闭 tab（ZCode Terminal.tsx:190-223 handleCloseSession）：
+ * - 该 workspace 仅此一个 tab → close-panel：只收起面板并保活 session（不 exit）；
+ * - 否则 → close-session：exit + 移除（活动回退左邻）。
+ * 无面板宿主时（独立调用/测试）close-panel 退化为移除该 session。
+ */
+export function closeTerminalTab(sessionId: string): void {
+  const tab = terminalState.tabs.find((item) => item.sessionId === sessionId);
+  if (tab === undefined) return;
+  const workspace = workspaceOf(tab.workspaceKey);
+  const isLastOfWorkspace = workspace === undefined || workspace.sessionIds.length <= 1;
+  if (isLastOfWorkspace) {
+    if (requestPanelClose()) return;
+    removeSession(sessionId);
+    return;
   }
+  if (!tab.creating) send({ type: "exit", sessionId });
+  removeSession(sessionId);
 }
 
-/** 键序写入（reqId per-session 单调；server 高水位去重回执 duplicate）。 */
+/**
+ * PTY 退出处置（ZCode Terminal.tsx:225-249 / terminalPanelState.ts:142-171
+ * exitTerminalSession）：exit 是 session 生命周期终点——同步删除 tab；仅当前
+ * workspace 的最后一个 tab 才连带关闭面板（隐藏 workspace 的退出只回收自身）。
+ */
+function applyExitSession(sessionId: string, exitCode: number): void {
+  const tab = terminalState.tabs.find((item) => item.sessionId === sessionId);
+  if (tab === undefined) return;
+  tab.alive = false;
+  tab.exitCode = exitCode;
+  emit(sessionId, { kind: "exit", exitCode });
+  const workspace = workspaceOf(tab.workspaceKey);
+  const isLastOfWorkspace = workspace === undefined || workspace.sessionIds.length <= 1;
+  const wasActiveWorkspace = tab.workspaceKey === terminalState.activeWorkspaceKey;
+  removeSession(sessionId);
+  if (isLastOfWorkspace && wasActiveWorkspace) requestPanelClose();
+}
+
+/** 选择活动 tab（其所属 workspace 的 activeSessionId；仅接受已知 tab）。 */
+export function setActiveTerminal(sessionId: string): void {
+  const tab = terminalState.tabs.find((item) => item.sessionId === sessionId);
+  if (tab === undefined) return;
+  const workspace = workspaceOf(tab.workspaceKey);
+  if (workspace !== undefined) workspace.activeSessionId = sessionId;
+}
+
+/**
+ * 键序写入（reqId per-session 单调；server 高水位去重回执 duplicate）。
+ * creating 期间（draft 未换轨）丢弃输入——create 未确立的会话不可写。
+ */
 export function writeTerminal(sessionId: string, data: string): void {
+  const tab = terminalState.tabs.find((item) => item.sessionId === sessionId);
+  if (tab === undefined || tab.creating) return;
   const ledger = ledgerOf(sessionId);
   ledger.reqCounter += 1;
   send({ type: "write", sessionId, reqId: ledger.reqCounter, data });
 }
 
-/** 尺寸变更（终值幂等）。 */
+/**
+ * 尺寸变更（终值幂等 + 同值去重）。id 未 ready（creating）期间暂存
+ * pendingCreateSize，created ack 后 flush（ZCode pendingTerminalSizeRef 同构）。
+ */
 export function resizeTerminal(sessionId: string, cols: number, rows: number): void {
+  const tab = terminalState.tabs.find((item) => item.sessionId === sessionId);
+  if (tab === undefined) return;
+  const ledger = ledgerOf(sessionId);
+  if (tab.creating) {
+    ledger.pendingCreateSize = { cols, rows };
+    return;
+  }
+  if (ledger.lastSentSize?.cols === cols && ledger.lastSentSize?.rows === rows) return;
+  ledger.lastSentSize = { cols, rows };
   send({ type: "resize", sessionId, cols, rows });
 }
 
@@ -405,11 +638,22 @@ function ingestEntry(sessionId: string, ledger: SessionLedger, seq: number, data
 function dispatchServerMessage(message: TerminalServerMessage): void {
   switch (message.type) {
     case "created": {
-      // draft pending-N → 真实 sessionId 换轨（账本/监听/active 同步迁移）。
-      const draftIndex = terminalState.tabs.findIndex((tab) => tab.creating);
+      // resume ack 优先按精确 id 匹配：resume 回执回显既有 sessionId，而全新
+      // create 的服务端 id 对客户端未知——两者并发在途时（重连补发窗口），
+      // 先匹配 established tab 才不会让 pending draft 误领 resume 的 ack。
       const resumeIndex = terminalState.tabs.findIndex(
         (tab) => !tab.creating && tab.sessionId === message.sessionId,
       );
+      // draft pending-N → 真实 sessionId 换轨（账本/监听/workspace active 同步迁移）。
+      // ack 只可能对应已发出的 create：adopt 限定 createSent 的 draft（FIFO）——
+      // 未 attach 的 draft（pane 尚未发起 create）不得被别人的 ack 误领。
+      const draftIndex =
+        resumeIndex >= 0
+          ? -1
+          : terminalState.tabs.findIndex((tab) => {
+              if (!tab.creating) return false;
+              return ledgers.get(tab.sessionId)?.createSent === true;
+            });
       if (draftIndex >= 0) {
         const draft = terminalState.tabs[draftIndex]!;
         const draftId = draft.sessionId;
@@ -422,12 +666,22 @@ function dispatchServerMessage(message: TerminalServerMessage): void {
           ledger.reqCounter = draftLedger.reqCounter;
           ledger.pending = draftLedger.pending;
           ledger.listeners = draftLedger.listeners;
+          ledger.createOptions = draftLedger.createOptions;
+          ledger.paneAttached = draftLedger.paneAttached;
+          ledger.createSent = draftLedger.createSent;
+          ledger.pendingCreateSize = draftLedger.pendingCreateSize;
+          ledger.lastSentSize = draftLedger.lastSentSize;
         }
+        const workspace = workspaceOf(draft.workspaceKey);
         draft.sessionId = message.sessionId;
         draft.creating = false;
         draft.alive = true;
-        if (terminalState.activeSessionId === draftId) {
-          terminalState.activeSessionId = message.sessionId;
+        if (workspace !== undefined) {
+          const slot = workspace.sessionIds.indexOf(draftId);
+          if (slot >= 0) workspace.sessionIds[slot] = message.sessionId;
+          if (workspace.activeSessionId === draftId) {
+            workspace.activeSessionId = message.sessionId;
+          }
         }
       } else if (resumeIndex < 0) {
         return; // 未知会话（非本面创建）：不认领。
@@ -437,6 +691,22 @@ function dispatchServerMessage(message: TerminalServerMessage): void {
       // 全新 create（lastSeq=0）无缺失面，首帧 output 自然起序。
       // stale tab 迁移后的账本（draft 换轨）复用同一路径。
       const ledger = ledgerOf(message.sessionId);
+      // id ready：flush create 期间暂存的 resize 终值（与 create 帧同值则跳过）。
+      const pendingSize = ledger.pendingCreateSize;
+      ledger.pendingCreateSize = null;
+      if (
+        pendingSize !== null &&
+        (ledger.createOptions?.cols !== pendingSize.cols ||
+          ledger.createOptions?.rows !== pendingSize.rows)
+      ) {
+        ledger.lastSentSize = pendingSize;
+        send({
+          type: "resize",
+          sessionId: message.sessionId,
+          cols: pendingSize.cols,
+          rows: pendingSize.rows,
+        });
+      }
       if (ledger.lastSeq > 0) {
         ledger.highestSeen = Math.max(ledger.highestSeen, ledger.lastSeq + 1);
         requestCatchUp(message.sessionId);
@@ -476,12 +746,7 @@ function dispatchServerMessage(message: TerminalServerMessage): void {
       return;
     }
     case "exit": {
-      const tab = terminalState.tabs.find((item) => item.sessionId === message.sessionId);
-      if (tab) {
-        tab.alive = false;
-        tab.exitCode = message.exitCode;
-      }
-      emit(message.sessionId, { kind: "exit", exitCode: message.exitCode });
+      applyExitSession(message.sessionId, message.exitCode);
       return;
     }
     case "duplicate": {
@@ -494,30 +759,20 @@ function dispatchServerMessage(message: TerminalServerMessage): void {
     case "error": {
       terminalState.lastError = message.message;
       if (message.code === "LIMIT_EXCEEDED") {
-        // 新建被拒：回收 creating 中的 tab（既有 tab 不受影响）。
+        // 新建被拒：回收 creating 中的 tab（既有 tab 不受影响；空分区保留，
+        // dock 呈空态，ensure 不自动重试）。
         const index = terminalState.tabs.findIndex((tab) => tab.creating);
         if (index >= 0) {
           const tab = terminalState.tabs[index]!;
-          ledgers.delete(tab.sessionId);
-          terminalState.tabs.splice(index, 1);
-          terminalState.activeSessionId = terminalState.tabs[0]?.sessionId ?? null;
+          removeSession(tab.sessionId);
         }
         showToast(t("terminal.limitReached"));
         return;
       }
       if (message.code === "SESSION_NOT_FOUND") {
         if (message.sessionId === undefined) return;
-        // resume 的会话已被回收（idle 30min/daemon 重启）：本地 tab 退役。
-        const index = terminalState.tabs.findIndex(
-          (tab) => !tab.creating && tab.sessionId === message.sessionId,
-        );
-        if (index >= 0) {
-          const tab = terminalState.tabs[index]!;
-          ledgers.delete(tab.sessionId);
-          emit(message.sessionId, { kind: "exit", exitCode: -1 });
-          terminalState.tabs.splice(index, 1);
-          terminalState.activeSessionId = terminalState.tabs[0]?.sessionId ?? null;
-        }
+        // resume 的会话已被回收（idle 30min/daemon 重启）：本地 tab 按退出处置。
+        applyExitSession(message.sessionId, -1);
         return;
       }
       showToast(t("terminal.errorToast", { message: message.message }));
@@ -533,7 +788,7 @@ export function __setTerminalSocketFactoryForTests(
   socketFactory = factory;
 }
 
-/** 测试面：复位全部状态（关停 socket、清 tab/账本/计数）。 */
+/** 测试面：复位全部状态（关停 socket、清 tab/workspace/账本/计数）。 */
 export function __resetTerminalClientForTests(): void {
   cancelReconnect();
   closeSocket();
@@ -541,8 +796,10 @@ export function __resetTerminalClientForTests(): void {
   reconnectAttempts = 0;
   terminalState.status = "idle";
   terminalState.tabs = [];
-  terminalState.activeSessionId = null;
+  terminalState.workspaces = [];
+  terminalState.activeWorkspaceKey = null;
   terminalState.lastError = null;
   ledgers.clear();
   tabCounter = 0;
+  panelCloseHandler = null;
 }
