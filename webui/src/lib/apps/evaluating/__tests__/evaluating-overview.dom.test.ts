@@ -367,7 +367,11 @@ describe("EvaluatingOverview recent runs timeline (1.3)", () => {
     click(cancelButtons[0]);
     await flushAsync();
     expect(cancel).toHaveBeenCalledWith({ runId: `run_${"1".repeat(24)}` });
-    expect(showToast).toHaveBeenCalledWith("Run cancelled.");
+    expect(showToast).toHaveBeenCalledWith(
+      "Run cancelled.",
+      undefined,
+      `eval-run-run_${"1".repeat(24)}`,
+    );
     // 取消后（tracked）store 侧驱动刷新；组件侧至少重拉过总览。
     expect(overview.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
@@ -444,8 +448,13 @@ describe("EvaluatingOverview recent runs timeline (1.3)", () => {
       caseIds: [`ev_${"a".repeat(24)}`],
       runner: "analyzer",
     });
-    // P2-3：started toast 技能 label 化（人名主显，不再直出 sk_ opaque ID）。
-    expect(showToast).toHaveBeenCalledWith("Run queued for code-review.");
+    // P2-3：started toast 技能 label 化（人名主显，不再直出 sk_ opaque ID）；
+    // R2-3：lifecycle key 入参（终态帧按同 key 取代本帧）。
+    expect(showToast).toHaveBeenCalledWith(
+      "Run queued for code-review.",
+      undefined,
+      `eval-run-run_${"3".repeat(24)}`,
+    );
   });
 });
 
@@ -646,7 +655,11 @@ describe("EvaluatingOverview 批评环 R1 处置批（健康绑定/P1-3/P2-1/2/5
       executed: 4,
     };
     await flushAsync();
-    expect(showToast).toHaveBeenCalledWith("Run completed: 3/4 passed.");
+    expect(showToast).toHaveBeenCalledWith(
+      "Run completed: 3/4 passed.",
+      undefined,
+      `eval-run-run_${"4".repeat(24)}`,
+    );
     evaluationRunState.settledSummary = {
       runId: `run_${"4".repeat(24)}`,
       status: "completed",

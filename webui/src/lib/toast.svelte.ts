@@ -8,15 +8,29 @@ interface Toast {
   id: string;
   message: string;
   action?: { label: string; run: () => void };
+  /** 生命周期键：同 key 新 toast 取代旧 toast（如同一 run 的 queued→cancelled）。 */
+  key?: string;
 }
 
 /** 全局 toast 队列。 */
 export const toasts = $state<Toast[]>([]);
 
-/** 显示一个 toast。可选带一个 action（如"撤销"）。 */
-export function showToast(message: string, action?: { label: string; run: () => void }): void {
+/**
+ * 显示一个 toast。可选带一个 action（如"撤销"）；可选 lifecycle key——
+ * 同 key 播报取代仍在屏上的旧 toast，不让同一实体的过期状态堆叠。
+ */
+export function showToast(
+  message: string,
+  action?: { label: string; run: () => void },
+  key?: string,
+): void {
+  if (key !== undefined) {
+    for (let i = toasts.length - 1; i >= 0; i--) {
+      if (toasts[i].key === key) toasts.splice(i, 1);
+    }
+  }
   const id = globalThis.crypto.randomUUID();
-  toasts.push({ id, message, action });
+  toasts.push({ id, message, action, key });
   // 自动消失（有 action 时延迟更久）。
   const ttl = action ? 8000 : 3500;
   setTimeout(() => dismissToast(id), ttl);

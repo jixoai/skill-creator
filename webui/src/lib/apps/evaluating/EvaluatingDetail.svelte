@@ -178,16 +178,24 @@
     if (summary === null) return;
     if (untrack(() => toastedSettledRunId) === summary.runId) return;
     toastedSettledRunId = summary.runId;
+    // R2-3：lifecycle key——终态帧取代仍在屏上的「Run queued」帧（同一 run 至多一张）。
+    const toastKey = `eval-run-${summary.runId}`;
     if (summary.status === "cancelled") {
-      showToast(t("evaluating.runCancelledToast"));
+      showToast(t("evaluating.runCancelledToast"), undefined, toastKey);
     } else if (summary.executed === 0) {
-      showToast(t("evaluating.runCompletedEmptyToast"));
+      showToast(t("evaluating.runCompletedEmptyToast"), undefined, toastKey);
     } else if (summary.passed !== null && summary.executed !== null) {
       showToast(
         t("evaluating.runCompletedToast", { passed: summary.passed, total: summary.executed }),
+        undefined,
+        toastKey,
       );
     } else {
-      showToast(t("evaluating.runStateToast", { status: t("evaluating.runStatusCompleted") }));
+      showToast(
+        t("evaluating.runStateToast", { status: t("evaluating.runStatusCompleted") }),
+        undefined,
+        toastKey,
+      );
     }
   });
 
@@ -477,7 +485,7 @@
   }
 </script>
 
-<div class="evaluating-kbd-scope flex h-full flex-col overflow-hidden">
+<div class="evaluating-kbd-scope evaluating-page-shell flex h-full flex-col overflow-hidden">
   <!-- 顶行：返回总览 + 技能名（人语汇）+ workspace/provider label 次要行 + 动作。 -->
   <header class="flex shrink-0 flex-col gap-1 border-b border-border px-4 py-2">
     <div class="flex items-center justify-between gap-2">
@@ -512,13 +520,13 @@
             onclick={() => (treeDrawerOpen = !treeDrawerOpen)}
           >
             <IconListTree class="h-3.5 w-3.5" />
-            {t("evaluating.casesButton")}
+            <span class="evaluating-btn-label">{t("evaluating.casesButton")}</span>
           </Button>
         {/if}
         {#if activeRun}
           <Button variant="outline" size="sm" class="h-7 gap-1.5" onclick={() => void cancelRun()}>
             <IconLoader class="h-3.5 w-3.5 animate-spin" />
-            {t("evaluating.cancelAction")}
+            <span class="evaluating-btn-label">{t("evaluating.cancelAction")}</span>
           </Button>
         {:else if canWrite && !skillUnresolvable}
           <Button
@@ -530,7 +538,7 @@
             onclick={() => (runOpen = true)}
           >
             <IconPlay class="h-3.5 w-3.5" />
-            {t("evaluating.runEntry")}
+            <span class="evaluating-btn-label">{t("evaluating.runEntry")}</span>
           </Button>
         {/if}
         <Button
@@ -544,7 +552,7 @@
           {#if loading}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconRefresh
               class="h-3.5 w-3.5"
             />{/if}
-          {t("evaluating.refresh")}
+          <span class="evaluating-btn-label">{t("evaluating.refresh")}</span>
         </Button>
       </div>
     </div>
@@ -960,7 +968,7 @@
                   data-testid="evaluating-failure-detail"
                 >
                   <p class="font-mono text-[11px] font-medium">{result.failure.code}</p>
-                  <p class="mt-1 break-all text-muted-foreground">{result.failure.detail}</p>
+                  <p class="mt-1 wrap-anywhere text-muted-foreground">{result.failure.detail}</p>
                 </div>
               {:else}
                 <!-- 断言逐条行 + 期望 vs 观测 diff 双栏（记忆点）。 -->
@@ -1052,7 +1060,7 @@
                             >
                               {t("evaluating.assertionExpected")}
                             </p>
-                            <p class="break-all font-mono text-[11px] text-foreground">
+                            <p class="wrap-anywhere font-mono text-[11px] text-foreground">
                               {row.expected === "" ? t("evaluating.observedEmpty") : row.expected}
                             </p>
                           </div>
@@ -1063,7 +1071,7 @@
                               {t("evaluating.assertionObserved")}
                             </p>
                             <p
-                              class="break-all font-mono text-[11px] {failed
+                              class="wrap-anywhere font-mono text-[11px] {failed
                                 ? 'text-destructive'
                                 : 'text-foreground'}"
                             >
@@ -1137,7 +1145,17 @@
    *    inline padding 上）。
    * 3. P2-12 键盘导航 focus-visible 2px outline（胶囊/树行等原生 button 无 shadcn
    *    ring——统一可见焦点环）。
+   * 4. R2-4 头部动作降级跟随「页面」容器宽度（Agent 面板挤压时视口断点失效——
+   *    与总览同款 <480px 纯图标化，label 隐藏 title 保语义）。
    */
+  .evaluating-page-shell {
+    container-type: inline-size;
+  }
+  @container (width < 480px) {
+    .evaluating-btn-label {
+      display: none;
+    }
+  }
   .evaluating-assertion-pane {
     container-type: inline-size;
   }

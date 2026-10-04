@@ -102,16 +102,24 @@
     if (summary === null) return;
     if (untrack(() => toastedSettledRunId) === summary.runId) return;
     toastedSettledRunId = summary.runId;
+    // R2-3：lifecycle key——终态帧取代仍在屏上的「Run queued」帧（同一 run 至多一张）。
+    const toastKey = `eval-run-${summary.runId}`;
     if (summary.status === "cancelled") {
-      showToast(t("evaluating.runCancelledToast"));
+      showToast(t("evaluating.runCancelledToast"), undefined, toastKey);
     } else if (summary.executed === 0) {
-      showToast(t("evaluating.runCompletedEmptyToast"));
+      showToast(t("evaluating.runCompletedEmptyToast"), undefined, toastKey);
     } else if (summary.passed !== null && summary.executed !== null) {
       showToast(
         t("evaluating.runCompletedToast", { passed: summary.passed, total: summary.executed }),
+        undefined,
+        toastKey,
       );
     } else {
-      showToast(t("evaluating.runStateToast", { status: t("evaluating.runStatusCompleted") }));
+      showToast(
+        t("evaluating.runStateToast", { status: t("evaluating.runStatusCompleted") }),
+        undefined,
+        toastKey,
+      );
     }
   });
 
@@ -243,7 +251,8 @@
     // 成功播报统一归 settledSummary effect（tracked run 按 runId 幂等单次播报）；
     // 非本 UI 追踪的 run 不驱动 store 终态——就地播报并重拉总览。
     if (evaluationRunState.runId !== runId) {
-      showToast(t("evaluating.runCancelledToast"));
+      // 非 store 追踪的 run：就地播报同一 lifecycle key（取代其 queued 帧若有）。
+      showToast(t("evaluating.runCancelledToast"), undefined, `eval-run-${runId}`);
       if (wsId !== null) void loadEvaluationOverview(wsId);
     }
   }

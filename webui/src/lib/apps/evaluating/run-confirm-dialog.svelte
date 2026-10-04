@@ -214,11 +214,14 @@
     });
     starting = false;
     if (outcome.ok) {
-      // P2-3：toast 技能 label 化（人名优先；ID 只在无名时兜底）。
+      // P2-3：toast 技能 label 化（人名优先；ID 只在无名时兜底）；R2-3 lifecycle
+      // key——终态播报（settledSummary effect）取代本帧，同一 run 至多一张 toast。
       showToast(
         t("evaluating.runStartedToast", {
           skill: selectedSkillName ?? target.skillId,
         }),
+        undefined,
+        `eval-run-${outcome.runId}`,
       );
       open = false;
       onStarted(outcome.runId);

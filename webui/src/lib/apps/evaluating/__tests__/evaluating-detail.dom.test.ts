@@ -678,7 +678,11 @@ describe("EvaluatingDetail actions (沿承钉)", () => {
     click(button("Cancel run"));
     await flushAsync();
     expect(mock.cancel).toHaveBeenCalledWith({ runId: `run_${"5".repeat(24)}` });
-    expect(showToast).toHaveBeenCalledWith("Run cancelled.");
+    expect(showToast).toHaveBeenCalledWith(
+      "Run cancelled.",
+      undefined,
+      `eval-run-run_${"5".repeat(24)}`,
+    );
   });
 
   it("surfaces live progress for a tracked running run (capsule + tree line)", async () => {
@@ -875,6 +879,18 @@ describe("EvaluatingDetail 批评环 R1 处置批（P1-1/P1-2/P1-4/P2-3/4/5/9/12
     );
     // 键盘导航 focus-visible 作用域钩子（根元素）。
     expect(host.querySelector(".evaluating-kbd-scope")).not.toBeNull();
+    // R2-4：头部动作降级容器查询钩子（页面容器 <480px → 按钮纯图标化；
+    // label span 存在 = 降级不靠删 DOM，窄容器由 CSS 隐藏）。
+    expect(host.querySelector(".evaluating-page-shell")).not.toBeNull();
+    const headerLabels = host.querySelectorAll(".evaluating-btn-label");
+    expect(headerLabels.length).toBeGreaterThanOrEqual(2); // 至少 Run/Refresh。
+    // R2-1：mono 断词契约（wrap-anywhere——空格优先断行，超长 token 才兜底）。
+    const monoBlocks = diff?.querySelectorAll("p.font-mono");
+    expect(monoBlocks?.length).toBeGreaterThan(0);
+    for (const block of monoBlocks ?? []) {
+      expect(block.className).toContain("wrap-anywhere");
+      expect(block.className).not.toContain("break-all");
+    }
   });
 
   it("P2-10: toasts the completed summary once per run (idempotent dedupe)", async () => {
@@ -889,7 +905,11 @@ describe("EvaluatingDetail 批评环 R1 处置批（P1-1/P1-2/P1-4/P2-3/4/5/9/12
       executed: 3,
     };
     await flushAsync();
-    expect(showToast).toHaveBeenCalledWith("Run completed: 2/3 passed.");
+    expect(showToast).toHaveBeenCalledWith(
+      "Run completed: 2/3 passed.",
+      undefined,
+      `eval-run-run_${"3".repeat(24)}`,
+    );
     // 同一 run 重复写入不重复播报（事件幂等）。
     evaluationRunState.settledSummary = {
       runId: `run_${"3".repeat(24)}`,
