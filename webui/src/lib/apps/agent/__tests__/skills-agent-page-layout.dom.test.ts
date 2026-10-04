@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   },
   openExtensionFilePreview: vi.fn(() => ({ opened: true })),
   openExtensionBashOutput: vi.fn(() => ({ opened: true })),
+  // 空态 rail 派生源（Owner 裁决 4b）：默认非空（保住既有几何断言）；rail 测试
+  // 逐例改写返回值（mock 翻转不驱动 $derived，测试以重挂载换态）。
+  visibleExtensionTabs: vi.fn(() => [{ id: "probe-tab" }]),
   agentPageActiveSession: vi.fn(() => null),
   beginNewAgentSession: vi.fn(),
   loadAgentSessions: vi.fn(),
@@ -34,6 +37,7 @@ vi.mock("$lib/apps/agent/extension-panel.svelte.js", () => ({
   rebindExtensionPanel: vi.fn(),
   openExtensionFilePreview: mocks.openExtensionFilePreview,
   openExtensionBashOutput: mocks.openExtensionBashOutput,
+  visibleExtensionTabs: mocks.visibleExtensionTabs,
 }));
 vi.mock("$lib/apps/agent/SessionTree.svelte", async () => ({
   default: (await import("$lib/shell/__tests__/stub-leaf.svelte")).default,
@@ -96,6 +100,8 @@ beforeEach(() => {
   mocks.workspaceState.workspaces = [];
   mocks.openExtensionFilePreview.mockClear();
   mocks.openExtensionBashOutput.mockClear();
+  mocks.visibleExtensionTabs.mockClear();
+  mocks.visibleExtensionTabs.mockReturnValue([{ id: "probe-tab" }]);
   mocks.beginNewAgentSession.mockReset();
   mocks.loadAgentSessions.mockReset();
   mocks.registerAgentSurface.mockClear();
@@ -430,5 +436,40 @@ describe("SkillsAgentPage shell geometry", () => {
     click(host.querySelector('button[aria-label="probe-open-bash-output"]'));
     expect(mocks.openExtensionBashOutput).toHaveBeenCalledOnce();
     expect(host.querySelector("[data-right-panel-region]")).toBeTruthy();
+  });
+
+  it("collapses the empty right pane to the 48px icon rail and restores the ratio width with a tab", () => {
+    // 空态（无活动 tab）：侧栏收敛为 rail——宽度 48px、无拖宽分隔条；DevicePrefs
+    // 不新增字段（比例记忆原样保留）。mock 翻转不驱动 $derived，换态经重挂载。
+    mocks.visibleExtensionTabs.mockReturnValue([]);
+    mountPage();
+    let panel = host.querySelector<HTMLElement>("[data-right-panel-region]");
+    expect(panel?.style.getPropertyValue("--agent-right-width")).toBe("48px");
+    expect(panel?.dataset.rightPanelRail).toBe("true");
+    expect(host.querySelector("[data-agent-right-resizer]")).toBeNull();
+    expect(readDevicePrefs().agentRightPanelOpen).toBe(true);
+
+    // 有 tab：回全宽比例形态 + 分隔条回归（比例记忆未受 rail 旁路影响）。
+    unmount(mounted!);
+    mounted = null;
+    host.remove();
+    mocks.visibleExtensionTabs.mockReturnValue([{ id: "probe-tab" }]);
+    mountPage();
+    panel = host.querySelector<HTMLElement>("[data-right-panel-region]");
+    expect(panel?.style.getPropertyValue("--agent-right-width")).toBe("421px");
+    expect(panel?.dataset.rightPanelRail).toBeUndefined();
+    expect(host.querySelector("[data-agent-right-resizer]")).toBeTruthy();
+  });
+
+  it("keeps the narrow-screen drawer out of rail mode regardless of tab presence", () => {
+    mediaMatches = true;
+    mocks.visibleExtensionTabs.mockReturnValue([]);
+    mountPage();
+    click(host.querySelector('button[aria-label="agentPage.toggleRightPanel"]'));
+    const panel = host.querySelector<HTMLElement>("[data-right-panel-region]");
+    // 窄屏 drawer 是覆盖层（w-full），不参与 rail 收敛；空态由面板内的 launcher 卡承载。
+    expect(panel?.dataset.rightPanelRail).toBeUndefined();
+    expect(panel?.className).toContain("absolute inset-y-0 right-0 z-30");
+    expect(host.querySelector("[data-extension-panel-probe]")).toBeTruthy();
   });
 });

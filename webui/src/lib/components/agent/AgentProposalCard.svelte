@@ -9,7 +9,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { requireRpc } from "$lib/stores/connection.svelte";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
 
   let {
@@ -54,7 +54,7 @@
           : t("agentProposal.toastRejected", { capability }),
       );
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error));
+      showErrorToast(error instanceof Error ? error.message : String(error));
     } finally {
       deciding = false;
     }

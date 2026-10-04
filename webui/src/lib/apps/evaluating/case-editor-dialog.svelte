@@ -16,7 +16,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Textarea } from "$lib/components/ui/textarea";
   import { t } from "$lib/i18n";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
   import { isGlobalEvaluationTarget } from "$lib/stores/evaluation-view.svelte";
   import type {
@@ -208,7 +208,7 @@
       open = false;
       onSaved();
     } catch (error) {
-      showToast(
+      showErrorToast(
         t("evaluating.caseSaveFailedToast", {
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -233,7 +233,7 @@
       open = false;
       onSaved();
     } catch (error) {
-      showToast(
+      showErrorToast(
         t("evaluating.caseDeleteFailedToast", {
           error: error instanceof Error ? error.message : String(error),
         }),

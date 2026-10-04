@@ -26,7 +26,8 @@
   import { useParams, goById } from "$lib/shell";
   import { t } from "$lib/i18n";
   import { Button } from "$lib/components/ui/button";
-  import { showToast } from "$lib/toast.svelte";
+  import ErrorHint from "$lib/components/error-hint.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { connectionState } from "$lib/store.svelte";
   import {
     cancelEvaluationRun,
@@ -245,7 +246,7 @@
   async function cancelRun(runId: string): Promise<void> {
     const outcome = await cancelEvaluationRun(runId);
     if (!outcome.ok) {
-      showToast(t("evaluating.runCancelFailedToast", { error: outcome.message ?? "" }));
+      showErrorToast(t("evaluating.runCancelFailedToast", { error: outcome.message ?? "" }));
       return;
     }
     // 成功播报统一归 settledSummary effect（tracked run 按 runId 幂等单次播报）；
@@ -345,7 +346,7 @@
   {:else if error}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
       <p class="text-xs font-medium">{t("evaluating.loadErrorTitle")}</p>
-      <p class="text-xs text-destructive">{error}</p>
+      <ErrorHint {error} class="text-xs text-destructive" />
       <Button variant="outline" size="sm" onclick={refresh}>{t("common.retry")}</Button>
     </div>
   {:else if targets.length === 0}

@@ -2,6 +2,9 @@
   Agent 页右扩展面板：typed 单宿主 / 多 tab registry（skills-agent-page-zcode-parity 3.1/3.2/3.3）。
   用户原始需求 [2026-10-04]（design §3）：「复刻 ZCode 的单宿主、多 tab、单 active
   content；补 tab close menu、reorder、overview/search/reopen」。
+  修订 [2026-10-05]（Owner 裁决 4b，空面板折叠）：宽屏空态（无活动 tab）收敛为
+  ~48px 图标 rail——四入口竖排 + title 提示，点击即开 tab 并回全宽；窄屏 drawer
+  是覆盖层，保持原 open-tab launcher 卡。
   正交意图：
     [1] 单宿主组合：tab 条（overview/scroll viewport/add 菜单）+ 单 active 面板体
         （inactive 保持挂载只隐藏——ZCode TabsContent forceMount 语义）+ 空 tab
@@ -22,6 +25,7 @@
   import IconPlus from "@lucide/svelte/icons/plus";
   import IconPanelRight from "@lucide/svelte/icons/panel-right";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
+  import { t, type MessageKey } from "$lib/i18n";
   import { agentSession } from "$lib/stores/agent.svelte";
   import AgentToolRow, { toolUiCardRefOf } from "$lib/components/agent/AgentToolRow.svelte";
   import AgentProposalCard from "$lib/components/agent/AgentProposalCard.svelte";
@@ -62,8 +66,13 @@
   /**
    * 容器接线位（编排者转 Codex）：onCloseSidePane 提供时渲染面板关闭钮（ZCode
    * closeSidePaneButton :803）；separator 键盘 resize/比例宽度接线需求见 change 报告。
+   * railWhenEmpty（Owner 裁决 4b）：宽屏空态（无活动 tab）收敛为图标 rail——容器
+   * 同步把侧栏宽度压到 SIDE_PANE_RAIL_WIDTH_PX；窄屏 drawer 是覆盖层，保持原空态卡。
    */
-  let { onCloseSidePane }: { onCloseSidePane?: () => void } = $props();
+  let {
+    onCloseSidePane,
+    railWhenEmpty = false,
+  }: { onCloseSidePane?: () => void; railWhenEmpty?: boolean } = $props();
 
   startExtensionPanelWatch();
   $effect(() => {
@@ -76,16 +85,39 @@
 
   // ---- Add 菜单 / open-tab launcher 项（ZCode :763-802 launcher items——已开类型
   // 收起，等价 ZCode review 项的 hasReviewTab 行为；file-preview/ui-card 不入菜单：
-  // ZCode code-viewer 同样只经输出链接打开）。 ----
+  // ZCode code-viewer 同样只经输出链接打开）。rail 态复用同一 open 面（点击图标
+  // = 开对应 tab → 空态事实翻转 → 容器宽度自然回全宽）；railTitle 存 key，
+  // 模板内 t() 解析（locale 切换细粒度更新）。 ----
   const launcherItems: Array<{
     id: ExtensionPanelTabType;
     label: string;
+    railTitleKey: MessageKey;
     open: () => void;
   }> = [
-    { id: "approvals", label: "Approvals", open: openExtensionApprovals },
-    { id: "bash-output", label: "Shell output", open: openExtensionBashOutput },
-    { id: "subagents", label: "Subagents", open: openExtensionSubagents },
-    { id: "cards", label: "Cards", open: openExtensionCards },
+    {
+      id: "approvals",
+      label: "Approvals",
+      railTitleKey: "agentExtension.railOpenApprovals",
+      open: openExtensionApprovals,
+    },
+    {
+      id: "bash-output",
+      label: "Shell output",
+      railTitleKey: "agentExtension.railOpenBashOutput",
+      open: openExtensionBashOutput,
+    },
+    {
+      id: "subagents",
+      label: "Subagents",
+      railTitleKey: "agentExtension.railOpenSubagents",
+      open: openExtensionSubagents,
+    },
+    {
+      id: "cards",
+      label: "Cards",
+      railTitleKey: "agentExtension.railOpenCards",
+      open: openExtensionCards,
+    },
   ];
 
   const openTypeSet = $derived(new Set(visibleTabs.map((tab) => tab.type)));
@@ -260,7 +292,30 @@
   aria-label="Extension panel"
   data-extension-panel="true"
 >
-  {#if visibleTabs.length === 0}
+  {#if railWhenEmpty && visibleTabs.length === 0}
+    <!-- 空态收敛为图标 rail（Owner 裁决 4b，「少即是多」）：~48px 竖排四入口
+         （title 提示 + focus-visible 与 tab 条同式）；点击 = 开对应 tab →
+         空态事实翻转 → 容器宽度自然回全宽。无动画（右栏无过渡先例）。 -->
+    <nav
+      class="flex h-full w-full flex-col items-center gap-1 py-2"
+      aria-label={t("agentExtension.railAria")}
+      data-side-pane-rail="true"
+    >
+      {#each launcherItems as item (item.id)}
+        {@const Icon = panelTabIcon(item.id)}
+        <button
+          type="button"
+          data-side-pane-rail-item={item.id}
+          class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          title={t(item.railTitleKey)}
+          aria-label={t(item.railTitleKey)}
+          onclick={item.open}
+        >
+          <Icon class="h-4 w-4" aria-hidden="true" />
+        </button>
+      {/each}
+    </nav>
+  {:else if visibleTabs.length === 0}
     <!-- 空 tab：open-tab launcher（ZCode :814-859——标题/描述/可开面板清单）。 -->
     <div class="flex h-full min-h-0 flex-col">
       <div class="flex h-12 shrink-0 items-center justify-end px-2">

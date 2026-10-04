@@ -31,6 +31,13 @@ export const SIDE_PANE_MAX_RATIO = 0.65;
 /** ZCode animatedSidePanePanelModel.ts:55——minSize "240px"。 */
 export const SIDE_PANE_MIN_WIDTH_PX = 240;
 
+/**
+ * 空态图标 rail 宽（Owner 裁决 4b，2026-10-05）：无活动 tab 时侧栏收敛为
+ * ~48px 竖排图标条——旁路 240px 下限与比例记忆（rail 不可拖宽；空态由
+ * 「有无 tab」事实派生，不新增 DevicePrefs 字段）。
+ */
+export const SIDE_PANE_RAIL_WIDTH_PX = 48;
+
 /** ZCode sidePaneLayout.ts:4-6——tab 收缩下限/间距/溢出容差。 */
 export const SIDE_PANE_TAB_MIN_WIDTH_PX = 60;
 export const SIDE_PANE_TAB_GAP_PX = 4;

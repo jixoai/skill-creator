@@ -6,6 +6,7 @@
  */
 import { enBase } from "./base/en.js";
 import {
+  agentExtensionEn,
   settingsEn,
   shellExtraEn,
   creatorExtraEn,
@@ -16,6 +17,7 @@ import {
 
 export const en = {
   ...enBase,
+  ...agentExtensionEn,
   ...settingsEn,
   ...shellExtraEn,
   ...creatorExtraEn,

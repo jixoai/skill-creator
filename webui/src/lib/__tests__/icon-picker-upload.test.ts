@@ -15,9 +15,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 const toasts: string[] = [];
+const errorToasts: string[] = [];
 vi.mock("$lib/toast.svelte", () => ({
   showToast: (message: string) => {
     toasts.push(message);
+  },
+  // δ 线公共面：上传拒绝/读取失败走 error 变体（宽泛提示主显 + 原文次行）。
+  showErrorToast: (message: string) => {
+    errorToasts.push(message);
   },
 }));
 
@@ -123,6 +128,7 @@ describe("IconPicker upload (R7 8.3)", () => {
     // 真实浏览器常见路径：从 Figma/网页拖出的 svg 文件 File.type === ""，
     // readAsDataURL 产出 data:;base64（无 MIME）→ <img> 拒绝渲染 → 「上传不工作」。
     toasts.length = 0;
+    errorToasts.length = 0;
     const ctx = mountPicker();
     setFile(ctx.fileInput(), new File([SVG_SOURCE], "icon.svg", { type: "" }));
     await settleReader();
@@ -131,11 +137,13 @@ describe("IconPicker upload (R7 8.3)", () => {
     expect(picked).toBeDefined();
     expect(picked).toMatch(/^data:image\/svg\+xml/);
     expect(toasts).toEqual([]);
+    expect(errorToasts).toEqual([]);
     ctx.cleanup();
   });
 
   it("reads an .svg upload into an image/svg+xml dataURL and calls onPick", async () => {
     toasts.length = 0;
+    errorToasts.length = 0;
     const ctx = mountPicker();
     setFile(ctx.fileInput(), new File([SVG_SOURCE], "icon.svg", { type: "image/svg+xml" }));
     await settleReader();
@@ -145,11 +153,12 @@ describe("IconPicker upload (R7 8.3)", () => {
     expect(picked).toMatch(/^data:image\/svg\+xml/);
     expect((picked ?? "").length).toBeLessThanOrEqual(64 * 1024);
     expect(toasts).toEqual([]);
+    expect(errorToasts).toEqual([]);
     ctx.cleanup();
   });
 
   it("rejects uploads above the 64KiB limit with a toast and no onPick", async () => {
-    toasts.length = 0;
+    errorToasts.length = 0;
     const ctx = mountPicker();
     // base64 膨胀 4/3：>48KiB 原始字节即稳定越过 64KiB dataURL 预算。
     setFile(
@@ -159,18 +168,18 @@ describe("IconPicker upload (R7 8.3)", () => {
     await settleReader();
 
     expect(ctx.onPick).not.toHaveBeenCalled();
-    expect(toasts.length).toBe(1);
-    expect(toasts[0]).toMatch(/64 ?KiB/i);
+    expect(errorToasts.length).toBe(1);
+    expect(errorToasts[0]).toMatch(/64 ?KiB/i);
     ctx.cleanup();
   });
 
   it("rejects unsupported file types with a clear toast", async () => {
-    toasts.length = 0;
+    errorToasts.length = 0;
     const ctx = mountPicker();
     setFile(ctx.fileInput(), new File([SVG_SOURCE], "icon.gif", { type: "image/gif" }));
     await settleReader();
     expect(ctx.onPick).not.toHaveBeenCalled();
-    expect(toasts[0]).toMatch(/Unsupported icon type/i);
+    expect(errorToasts[0]).toMatch(/Unsupported icon type/i);
     ctx.cleanup();
   });
 

@@ -21,7 +21,7 @@
  *       预检，任一违反整批拒绝（单条 reason 通知，零项入场）；path 通道同数量
  *       守卫；读入计数（attachmentReads）供发送门控。
  */
-import { showToast } from "$lib/toast.svelte";
+import { showErrorToast } from "$lib/toast.svelte";
 import { loadPersistedDraftText, persistDraftText } from "./agent-submission.svelte";
 import type {
   ComposerReference,
@@ -220,7 +220,7 @@ function refuseBatch(reason: IntakeRefusalReason, detail: string): void {
     fileTooLarge: `"${detail}" exceeds its size limit. Nothing was added.`,
     unsupportedType: `Unsupported attachment type: ${detail}. Nothing was added.`,
   };
-  showToast(copy[reason]);
+  showErrorToast(copy[reason]);
 }
 
 /** 读入中的附件通道数（W2 发送门控）：>0 时 Enter 保持（still-reading 通知）。 */

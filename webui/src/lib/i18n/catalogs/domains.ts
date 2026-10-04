@@ -7,6 +7,7 @@
  *       export const <domain>Zh: Record<keyof typeof <domain>En, string> = {...};
  *       ——新域在 catalogs/domains/ 建独立文件并 import 进本文件，勿改 base。
  */
+import { agentExtensionEn, agentExtensionZh } from "./domains/agent-extension.js";
 import { creatorExtraEn, creatorExtraZh } from "./domains/creator-extra.js";
 import { dashCountsEn, dashCountsZh } from "./domains/dash-counts.js";
 import { errorHintsEn, errorHintsZh } from "./domains/error-hints.js";
@@ -15,6 +16,8 @@ import { shellExtraEn, shellExtraZh } from "./domains/shell-extra.js";
 import { slashModesEn, slashModesZh } from "./domains/slash-modes.js";
 
 export {
+  agentExtensionEn,
+  agentExtensionZh,
   creatorExtraEn,
   creatorExtraZh,
   dashCountsEn,

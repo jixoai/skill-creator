@@ -4,6 +4,9 @@
   「┌ omnibox 行 actions: [terminal][rightPanel] ┐
     │ workspaces └ sessions 树 │ Chat │ 扩展面板 panelTabs │
     ├ 终端（人类 PTY，xterm.js；可多 tab；可拖高）┤」
+  修订 [2026-10-05]（Owner 裁决 4b，空面板折叠）：宽屏右栏空态（无活动 tab）
+  收敛为 48px 图标 rail——空态由「有无 tab」事实派生，不新增 DevicePrefs 字段；
+  窄屏 drawer 不受影响。
   正交意图：
     [1] 四区布局：左树（264px 默认/最小，可拖至 50%，折叠 36px）/ 中部 Chat /
         右扩展面板（45% 默认/65% 最大，Chat 保底 320px）/ 底部终端；几何入 DevicePrefs。
@@ -45,6 +48,7 @@
     SIDE_PANE_KEYBOARD_STEP_PX,
     SIDE_PANE_MAX_RATIO,
     SIDE_PANE_MIN_WIDTH_PX,
+    SIDE_PANE_RAIL_WIDTH_PX,
     nudgeSidePaneRatio,
     sidePaneRatioFromWidth,
     sidePaneWidthFromRatio,
@@ -53,6 +57,7 @@
     openExtensionBashOutput,
     openExtensionFilePreview,
     rebindExtensionPanel,
+    visibleExtensionTabs,
   } from "./extension-panel.svelte.js";
   import {
     groupSessionsByCreatedAt,
@@ -188,6 +193,13 @@
   const rightPanelMinWidth = $derived(Math.min(SIDE_PANE_MIN_WIDTH_PX, rightPanelMaxWidth));
   const rightPanelWidth = $derived(
     Math.min(rightPanelMaxWidth, sidePaneWidthFromRatio(rightPanelRatio, rightPanelAvailableWidth)),
+  );
+  // 空面板折叠（Owner 裁决 4b）：宽屏无活动 tab 时侧栏收敛为图标 rail（旁路
+  // 240px 下限与比例记忆）；空态由「有无 tab」事实派生——点击 rail 图标开 tab
+  // 即回全宽，最后一个 tab 关闭即回 rail。DevicePrefs 不新增字段（记的是比例）。
+  const rightPanelRail = $derived(!narrow && visibleExtensionTabs().length === 0);
+  const rightPanelRenderWidth = $derived(
+    rightPanelRail ? SIDE_PANE_RAIL_WIDTH_PX : rightPanelWidth,
   );
   const terminalBasisHeight = $derived(
     pageHeight > 0 ? pageHeight : typeof window === "undefined" ? 0 : window.innerHeight,
@@ -575,30 +587,35 @@
     </main>
 
     {#if rightPanelVisible}
-      <!-- ≥1024：常驻侧栏（左缘拖宽）；<1024：overlay drawer（含关闭钮 + 背景幕）。 -->
+      <!-- ≥1024：常驻侧栏（左缘拖宽）；<1024：overlay drawer（含关闭钮 + 背景幕）。
+           空态 rail（Owner 裁决 4b）：宽屏无 tab 时宽度压到 SIDE_PANE_RAIL_WIDTH_PX
+           且不渲染拖宽分隔条；窄屏 drawer 不受影响（覆盖层，空态卡保持）。 -->
       <div
         class="absolute inset-y-0 right-0 z-30 flex w-full max-[1023px]:bg-background/95 max-[1023px]:shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:w-(--agent-right-width) min-[1024px]:shrink-0 min-[1024px]:border-l min-[1024px]:border-border max-[1023px]:backdrop-blur-sm"
-        style="--agent-right-width: {rightPanelWidth}px"
+        style="--agent-right-width: {rightPanelRenderWidth}px"
         data-right-panel-region="true"
+        data-right-panel-rail={rightPanelRail ? "true" : undefined}
       >
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div
-          class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-[1024px]:block"
-          role="separator"
-          tabindex="0"
-          aria-controls="agent-right-panel-content"
-          aria-orientation="vertical"
-          aria-label={t("agentPage.resizeRightPanel")}
-          aria-valuemin={rightPanelMinWidth}
-          aria-valuemax={rightPanelMaxWidth}
-          aria-valuenow={rightPanelWidth}
-          data-agent-right-resizer="true"
-          onpointerdown={(event) => startResize(event, "right")}
-          onkeydown={handleRightResizeKeydown}
-        ></div>
+        {#if !rightPanelRail}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <div
+            class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-[1024px]:block"
+            role="separator"
+            tabindex="0"
+            aria-controls="agent-right-panel-content"
+            aria-orientation="vertical"
+            aria-label={t("agentPage.resizeRightPanel")}
+            aria-valuemin={rightPanelMinWidth}
+            aria-valuemax={rightPanelMaxWidth}
+            aria-valuenow={rightPanelWidth}
+            data-agent-right-resizer="true"
+            onpointerdown={(event) => startResize(event, "right")}
+            onkeydown={handleRightResizeKeydown}
+          ></div>
+        {/if}
         <div id="agent-right-panel-content" class="min-w-0 flex-1">
-          <ExtensionPanel onCloseSidePane={toggleRightPanel} />
+          <ExtensionPanel onCloseSidePane={toggleRightPanel} railWhenEmpty={!narrow} />
         </div>
       </div>
     {/if}

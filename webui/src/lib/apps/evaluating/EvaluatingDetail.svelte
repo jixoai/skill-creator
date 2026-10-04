@@ -31,7 +31,8 @@
   import { useParams, useSearch, goById } from "$lib/shell";
   import { t } from "$lib/i18n";
   import { Button } from "$lib/components/ui/button";
-  import { showToast } from "$lib/toast.svelte";
+  import ErrorHint from "$lib/components/error-hint.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { connectionState } from "$lib/store.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
   import {
@@ -402,7 +403,7 @@
     // 成功播报统一归 settledSummary effect（按 runId 幂等——取消入口不再重复
     // toast；失败仍在此即时反馈）。
     if (!outcome.ok)
-      showToast(t("evaluating.runCancelFailedToast", { error: outcome.message ?? "" }));
+      showErrorToast(t("evaluating.runCancelFailedToast", { error: outcome.message ?? "" }));
   }
 
   function openNewCase(): void {
@@ -644,7 +645,7 @@
   {:else if error}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
       <p class="text-xs font-medium">{t("evaluating.detailErrorTitle")}</p>
-      <p class="text-xs text-destructive">{error}</p>
+      <ErrorHint {error} class="text-xs text-destructive" />
       <Button variant="outline" size="sm" onclick={reload}>{t("common.retry")}</Button>
     </div>
   {:else if cases !== null && cases.length === 0}

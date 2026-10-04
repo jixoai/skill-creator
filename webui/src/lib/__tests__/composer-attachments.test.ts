@@ -12,7 +12,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const toastMock = vi.fn();
-vi.mock("$lib/toast.svelte", () => ({ showToast: toastMock }));
+// δ 线公共面：整批拒绝通知走 error 变体（宽泛提示主显 + 原文次行）。
+const errorToastMock = vi.fn();
+vi.mock("$lib/toast.svelte", () => ({ showToast: toastMock, showErrorToast: errorToastMock }));
 
 const store = await import("$lib/stores/agent-composer.svelte");
 
@@ -25,6 +27,7 @@ describe("attachment intake whole-batch refusal (W2)", () => {
   beforeEach(() => {
     store.resetAllComposerTracks();
     toastMock.mockClear();
+    errorToastMock.mockClear();
   });
   afterEach(() => {
     store.resetAllComposerTracks();
@@ -40,8 +43,8 @@ describe("attachment intake whole-batch refusal (W2)", () => {
     ];
     await store.addComposerImages(five);
     expect(store.agentComposer.images).toHaveLength(0);
-    expect(toastMock).toHaveBeenCalledTimes(1);
-    expect(String(toastMock.mock.calls[0]?.[0])).toMatch(/at most 4 images/i);
+    expect(errorToastMock).toHaveBeenCalledTimes(1);
+    expect(String(errorToastMock.mock.calls[0]?.[0])).toMatch(/at most 4 images/i);
   });
 
   it("refuses the whole batch when one image is oversized", async () => {
@@ -50,7 +53,7 @@ describe("attachment intake whole-batch refusal (W2)", () => {
       fakeFile("big.png", "image/png", 5 * 1024 * 1024),
     ]);
     expect(store.agentComposer.images).toHaveLength(0);
-    expect(String(toastMock.mock.calls[0]?.[0])).toContain("big.png");
+    expect(String(errorToastMock.mock.calls[0]?.[0])).toContain("big.png");
   });
 
   it("refuses unsupported image types whole", async () => {
@@ -59,7 +62,7 @@ describe("attachment intake whole-batch refusal (W2)", () => {
       fakeFile("bad.tiff", "image/tiff", 100),
     ]);
     expect(store.agentComposer.images).toHaveLength(0);
-    expect(String(toastMock.mock.calls[0]?.[0])).toContain("image/tiff");
+    expect(String(errorToastMock.mock.calls[0]?.[0])).toContain("image/tiff");
   });
 
   it("accepts a valid batch atomically and tracks pending reads", async () => {
@@ -75,6 +78,7 @@ describe("attachment intake whole-batch refusal (W2)", () => {
     expect(store.agentComposer.images[0]?.preview).toContain("data:image/png;base64,");
     expect(store.attachmentReads.pending).toBe(0);
     expect(toastMock).not.toHaveBeenCalled();
+    expect(errorToastMock).not.toHaveBeenCalled();
   });
 
   it("doc channel refuses over-count whole (existing rail counts)", async () => {
@@ -84,13 +88,14 @@ describe("attachment intake whole-batch refusal (W2)", () => {
     ];
     await store.addComposerDocs([fakeFile("three.md", "text/markdown", 10)]);
     expect(store.agentComposer.files).toHaveLength(2);
-    expect(String(toastMock.mock.calls[0]?.[0])).toMatch(/at most 2 file attachments/i);
+    expect(String(errorToastMock.mock.calls[0]?.[0])).toMatch(/at most 2 file attachments/i);
   });
 
   it("doc channel skips image files (caller-side split re-verified)", async () => {
     await store.addComposerDocs([fakeFile("img.png", "image/png", 10)]);
     expect(store.agentComposer.files).toHaveLength(0);
     expect(toastMock).not.toHaveBeenCalled();
+    expect(errorToastMock).not.toHaveBeenCalled();
   });
 
   it("picked path channels refuse over-count whole", () => {
@@ -103,6 +108,6 @@ describe("attachment intake whole-batch refusal (W2)", () => {
       { path: "/e.png", name: "e.png" },
     ]);
     expect(store.agentComposer.images).toHaveLength(0);
-    expect(String(toastMock.mock.calls[0]?.[0])).toMatch(/at most 4 images/i);
+    expect(String(errorToastMock.mock.calls[0]?.[0])).toMatch(/at most 4 images/i);
   });
 });

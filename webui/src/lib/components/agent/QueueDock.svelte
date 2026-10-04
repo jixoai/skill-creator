@@ -17,7 +17,7 @@
   import IconX from "@lucide/svelte/icons/x";
   import { queuedOutbox } from "$lib/stores/agent-submission.svelte";
   import { agentQueue, agentSession, updateAgentQueueItem } from "$lib/stores/agent.svelte";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
 
   let collapsed = $state(false);
@@ -48,19 +48,19 @@
     if (text.length === 0) return;
     const result = await updateAgentQueueItem({ messageId, action: "edit", text });
     if (result && "error" in result)
-      showToast(t("queueDock.toastEditFailed", { error: result.error }));
+      showErrorToast(t("queueDock.toastEditFailed", { error: result.error }));
   }
 
   async function removeItem(messageId: string): Promise<void> {
     const result = await updateAgentQueueItem({ messageId, action: "remove" });
     if (result && "error" in result)
-      showToast(t("queueDock.toastRemoveFailed", { error: result.error }));
+      showErrorToast(t("queueDock.toastRemoveFailed", { error: result.error }));
   }
 
   async function steerItem(messageId: string): Promise<void> {
     const result = await updateAgentQueueItem({ messageId, action: "steer" });
     if (result && "error" in result)
-      showToast(t("queueDock.toastSteerFailed", { error: result.error }));
+      showErrorToast(t("queueDock.toastSteerFailed", { error: result.error }));
   }
 
   /** 编辑输入的键盘面：Enter 保存、Esc 取消（都不冒泡——面板 Esc 收起不抢）。 */

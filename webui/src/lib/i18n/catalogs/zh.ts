@@ -7,6 +7,7 @@
 import type { MessageKey } from "./en.js";
 import { zhBase } from "./base/zh.js";
 import {
+  agentExtensionZh,
   settingsZh,
   shellExtraZh,
   creatorExtraZh,
@@ -17,6 +18,7 @@ import {
 
 export const zh: Record<MessageKey, string> = {
   ...zhBase,
+  ...agentExtensionZh,
   ...settingsZh,
   ...shellExtraZh,
   ...creatorExtraZh,

@@ -49,7 +49,9 @@ vi.mock("$lib/shell/navigate", () => ({
 }));
 
 const showToast = vi.hoisted(() => vi.fn());
-vi.mock("$lib/toast.svelte", () => ({ showToast }));
+// δ 线公共面：失败路径 toast 走 error 变体（组件已迁移 showErrorToast）。
+const showErrorToast = vi.hoisted(() => vi.fn());
+vi.mock("$lib/toast.svelte", () => ({ showToast, showErrorToast }));
 
 vi.mock("$lib/components/ui/button", async () => {
   const { default: stub } = await import("$lib/__tests__/stubs/ui-button-stub.svelte");

@@ -127,7 +127,7 @@
   } from "./composer-chips.js";
   import { INPUT_TAKING_TOKENS } from "./SlashMenu.svelte";
   import { openSettings } from "$lib/stores/settings-ui.svelte";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
   import ContextMeter from "./ContextMeter.svelte";
   import QueueDock from "./QueueDock.svelte";
@@ -325,11 +325,11 @@
     });
     if (!result) return;
     if (result.outcome === "rejected") {
-      showToast(`${result.code}: ${result.detail}`);
+      showErrorToast(`${result.code}: ${result.detail}`);
       return;
     }
     if (result.outcome === "error") {
-      showToast(result.message);
+      showErrorToast(result.message);
       return;
     }
     showToast(t("composer.toastModelSwitched", { provider, model }));

@@ -21,7 +21,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Checkbox } from "$lib/components/ui/checkbox";
   import { t } from "$lib/i18n";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
   import { workspaceState } from "$lib/stores/workspaces.svelte";
   import {
@@ -230,7 +230,7 @@
     } else if (outcome.reason === "disconnected") {
       showToast(t("evaluating.runDisconnectedToast"));
     } else {
-      showToast(t("evaluating.runStartFailedToast", { error: outcome.message ?? "" }));
+      showErrorToast(t("evaluating.runStartFailedToast", { error: outcome.message ?? "" }));
     }
   }
 </script>

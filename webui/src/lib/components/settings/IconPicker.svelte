@@ -20,7 +20,7 @@
 <script lang="ts">
   import IconPencil from "@lucide/svelte/icons/pencil";
   import IconUpload from "@lucide/svelte/icons/upload";
-  import { showToast } from "$lib/toast.svelte";
+  import { showErrorToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
   import {
     ICON_EXTENSION_MIME,
@@ -164,7 +164,7 @@
     // （Figma 拖出的 svg type=""），不作为放行依据。
     const expectedMime = ICON_EXTENSION_MIME[extension] ?? "";
     if (expectedMime.length === 0) {
-      showToast(
+      showErrorToast(
         t("settings.icon.unsupportedType", {
           type: file.type || extension || file.name,
         }),
@@ -173,12 +173,12 @@
     }
     const reader = new FileReader();
     reader.onerror = () => {
-      showToast(t("settings.icon.readFailed", { name: file.name }));
+      showErrorToast(t("settings.icon.readFailed", { name: file.name }));
     };
     reader.onload = () => {
       const raw = typeof reader.result === "string" ? reader.result : "";
       if (raw.length === 0) {
-        showToast(t("settings.icon.readFailed", { name: file.name }));
+        showErrorToast(t("settings.icon.readFailed", { name: file.name }));
         return;
       }
       // MIME 重写：File.type 缺失（Figma/下载来源的 svg 常见）时 readAsDataURL 产出
@@ -187,11 +187,11 @@
         ? raw
         : withDataUrlMime(raw, expectedMime);
       if (dataUrl === null) {
-        showToast(t("settings.icon.readAsImageFailed", { name: file.name }));
+        showErrorToast(t("settings.icon.readAsImageFailed", { name: file.name }));
         return;
       }
       if (dataUrl.length > MAX_ICON_CHARS) {
-        showToast(t("settings.icon.tooLarge"));
+        showErrorToast(t("settings.icon.tooLarge"));
         return;
       }
       pickIcon(dataUrl);

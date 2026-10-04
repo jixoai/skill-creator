@@ -36,7 +36,7 @@
  */
 
 import { readWebToken } from "$lib/rpc-client";
-import { showToast } from "$lib/toast.svelte";
+import { showErrorToast, showToast } from "$lib/toast.svelte";
 import { t } from "$lib/i18n";
 import {
   TerminalClientMessageSchema,
@@ -775,7 +775,7 @@ function dispatchServerMessage(message: TerminalServerMessage): void {
         applyExitSession(message.sessionId, -1);
         return;
       }
-      showToast(t("terminal.errorToast", { message: message.message }));
+      showErrorToast(t("terminal.errorToast", { message: message.message }));
       return;
     }
   }

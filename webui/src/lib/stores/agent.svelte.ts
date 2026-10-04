@@ -67,7 +67,7 @@ import {
   switchComposerTrack,
 } from "./agent-composer.svelte";
 import { createRequestGenerationGate } from "./request-generation.js";
-import { showToast } from "$lib/toast.svelte";
+import { showErrorToast } from "$lib/toast.svelte";
 import { readDevicePrefs, updateDevicePrefs } from "$lib/shell/device-prefs.js";
 
 /** 待答审批的视图投影（approval-request 帧的 questions 载荷）。 */
@@ -1442,7 +1442,7 @@ export async function pickAgentFiles(mode: "image" | "file"): Promise<{ paths: s
     if (rpc === null) return null;
     return await rpc.agent.files.pickFiles({ mode });
   } catch (error) {
-    showToast(`File picker failed: ${error instanceof Error ? error.message : String(error)}`);
+    showErrorToast(`File picker failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
