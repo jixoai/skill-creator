@@ -22,6 +22,13 @@
  *   [4] run 追踪：start（Global 前置拒，与 daemon 闸同源语义）→ 内存轮询
  *       run.status 至终态（轮询期间同步 resultCount/totalCases live 进度并刷新
  *       匹配投影）→ 终态刷新；cancel 幂等（终态返回即刷新）。
+ *   [5] 健康度绑定（批评环 R1）：健康卡绑定「最近 completed 持久快照」——
+ *       payload lastRun 指向 running/cancelled run 的部分落盘计数时不采信
+ *       （cancelled/running 只进时间线与 live 行，不覆盖健康度），回落会话内
+ *       记忆的最近 completed 快照；两者皆无 → null（空环 + 「—」）。
+ *   [6] 终态摘要（批评环 R1 P2-10）：run 落定后经刷新后的投影计算
+ *       passed/executed 计数写入 settledSummary，供 UI 一次性 toast
+ *       （「Run completed: 3/4 passed」；事件按 runId 幂等去重）。
  */
 import type {
   EvaluationAssertion,
@@ -391,6 +398,8 @@ export const evaluationOverviewState = $state<{
   wsId: WorkspaceId | null;
   targets: EvaluationOverviewTarget[];
   recentRuns: EvaluationOverviewRecentRun[];
+  /** 健康快照按 targetKey（与 targets 同次提交；error 行缺席）。 */
+  healthByTarget: Record<string, EvaluationHealthSnapshot | null>;
   nextCursor: string | null;
   loading: boolean;
   loadingMore: boolean;
@@ -399,6 +408,7 @@ export const evaluationOverviewState = $state<{
   wsId: null,
   targets: [],
   recentRuns: [],
+  healthByTarget: {},
   nextCursor: null,
   loading: false,
   loadingMore: false,
@@ -425,6 +435,79 @@ export function sameEvaluationTarget(left: EvaluationTarget, right: EvaluationTa
   return evaluationTargetKey(left) === evaluationTargetKey(right);
 }
 
+/** ---------- 健康度绑定（批评环 R1：最近 completed 持久快照） ---------- */
+
+/** 健康快照（形状 = targets[].lastRun；语义 = 最近 completed run 的计数）。 */
+export type EvaluationHealthSnapshot = NonNullable<
+  Extract<EvaluationOverviewTarget, { skillName: string }>["lastRun"]
+>;
+
+/**
+ * 某 target 在 recentRuns 窗口内的最新 run（排序口径镜像 daemon overview：
+ * startedAt 降序、同刻 runId 字典序升者胜）。
+ */
+export function newestRecentRunForTarget(
+  recentRuns: readonly EvaluationOverviewRecentRun[],
+  target: EvaluationTarget,
+): EvaluationOverviewRecentRun | null {
+  let newest: EvaluationOverviewRecentRun | null = null;
+  for (const run of recentRuns) {
+    if (!sameEvaluationTarget(run.target, target)) continue;
+    if (
+      newest === null ||
+      run.startedAt > newest.startedAt ||
+      (run.startedAt === newest.startedAt && run.runId < newest.runId)
+    ) {
+      newest = run;
+    }
+  }
+  return newest;
+}
+
+/**
+ * 健康快照裁决（纯函数）：payload lastRun 是否可信。
+ * - lastRun 缺席 → null（无持久证据，空环「—」；trusted=true 表示可清理缓存）。
+ * - 最新 run 未终结（queued/running/cancelled）且已有部分结果落盘 → payload
+ *   lastRun 指向该 run 的部分计数，不采信（trusted=false），回落会话内记忆的
+ *   最近 completed 快照。
+ * - 其余（最新 run 已 completed，或未终结 run 尚无落盘结果 → lastRun 归属更早
+ *   的持久桶）→ payload 可信。
+ */
+export function evaluationHealthFor(
+  lastRun: EvaluationHealthSnapshot | undefined,
+  newestRun: Pick<EvaluationOverviewRecentRun, "status" | "resultIds"> | null,
+  cached: EvaluationHealthSnapshot | undefined,
+): { snapshot: EvaluationHealthSnapshot | null; trusted: boolean } {
+  if (lastRun === undefined) return { snapshot: null, trusted: true };
+  if (newestRun !== null && newestRun.status !== "completed" && newestRun.resultIds.length > 0) {
+    return { snapshot: cached ?? null, trusted: false };
+  }
+  return { snapshot: lastRun, trusted: true };
+}
+
+/** 会话内最近 completed 快照记忆（targetKey → 快照；reset 清空）。 */
+const overviewHealthCache = new Map<string, EvaluationHealthSnapshot>();
+
+/** 由当前 targets × recentRuns × 缓存推导健康快照表（与 targets 同次提交）。 */
+function commitOverviewHealth(): void {
+  const next: Record<string, EvaluationHealthSnapshot | null> = {};
+  for (const row of evaluationOverviewState.targets) {
+    if ("error" in row) continue;
+    const key = evaluationTargetKey(row.target);
+    const verdict = evaluationHealthFor(
+      row.lastRun,
+      newestRecentRunForTarget(evaluationOverviewState.recentRuns, row.target),
+      overviewHealthCache.get(key),
+    );
+    if (verdict.trusted) {
+      if (verdict.snapshot === null) overviewHealthCache.delete(key);
+      else overviewHealthCache.set(key, verdict.snapshot);
+    }
+    next[key] = verdict.snapshot;
+  }
+  evaluationOverviewState.healthByTarget = next;
+}
+
 /** 拉取总览第一页（替换投影；wsId 变化或显式刷新时调用）。 */
 export async function loadEvaluationOverview(wsId: WorkspaceId): Promise<void> {
   const request = overviewGate.issue();
@@ -442,6 +525,7 @@ export async function loadEvaluationOverview(wsId: WorkspaceId): Promise<void> {
     evaluationOverviewState.recentRuns = output.recentRuns;
     evaluationOverviewState.nextCursor = output.nextCursor ?? null;
     evaluationOverviewState.error = null;
+    commitOverviewHealth();
   } catch (error) {
     if (!request.isCurrent()) return;
     evaluationOverviewState.wsId = wsId;
@@ -478,6 +562,7 @@ export async function loadMoreEvaluationOverview(wsId: WorkspaceId): Promise<voi
     // recentRuns 不分页：续页携带的是同一固定窗口，取末次响应即可。
     evaluationOverviewState.recentRuns = output.recentRuns;
     evaluationOverviewState.nextCursor = output.nextCursor ?? null;
+    commitOverviewHealth();
   } catch (error) {
     if (!request.isCurrent()) return;
     evaluationOverviewState.error = error instanceof Error ? error.message : String(error);
@@ -489,9 +574,11 @@ export async function loadMoreEvaluationOverview(wsId: WorkspaceId): Promise<voi
 /** 清空总览状态并作废在途请求（消费方卸载时调用）。 */
 export function resetEvaluationOverview(): void {
   overviewGate.invalidate();
+  overviewHealthCache.clear();
   evaluationOverviewState.wsId = null;
   evaluationOverviewState.targets = [];
   evaluationOverviewState.recentRuns = [];
+  evaluationOverviewState.healthByTarget = {};
   evaluationOverviewState.nextCursor = null;
   evaluationOverviewState.loading = false;
   evaluationOverviewState.loadingMore = false;
@@ -508,6 +595,14 @@ export type StartRunOutcome =
   | { ok: true; runId: string }
   | { ok: false; reason: "global" | "disconnected" | "rpc-error"; message?: string };
 
+/** run 终态摘要（toast 数据源；passed/executed=null 表示投影不可达，退 plain 文案）。 */
+export interface EvaluationSettledSummary {
+  runId: string;
+  status: "completed" | "cancelled";
+  passed: number | null;
+  executed: number | null;
+}
+
 /** 活跃 run 追踪（start 成功后进入；终态停留供 UI 呈现；reset 清空）。 */
 export const evaluationRunState = $state<{
   runId: string | null;
@@ -519,6 +614,8 @@ export const evaluationRunState = $state<{
   resultCount: number | null;
   /** start 时的 case 总数（live 进度分母；非本 UI 发起 = null）。 */
   totalCases: number | null;
+  /** 终态摘要（每轮落定写入一次；新 run / reset 清空——UI 按 runId 幂等消费）。 */
+  settledSummary: EvaluationSettledSummary | null;
   error: string | null;
 }>({
   runId: null,
@@ -527,6 +624,7 @@ export const evaluationRunState = $state<{
   startedAt: null,
   resultCount: null,
   totalCases: null,
+  settledSummary: null,
   error: null,
 });
 
@@ -561,6 +659,7 @@ export async function startEvaluationRun(input: {
     evaluationRunState.startedAt = new Date().toISOString();
     evaluationRunState.resultCount = 0;
     evaluationRunState.totalCases = input.caseIds.length;
+    evaluationRunState.settledSummary = null;
     evaluationRunState.error = null;
     void pollRunToSettled(output.runId);
     return { ok: true, runId: output.runId };
@@ -590,6 +689,7 @@ export async function cancelEvaluationRun(runId: string): Promise<{
       evaluationRunState.status = output.status;
       if (output.status === "completed" || output.status === "cancelled") {
         await refreshMatchingRunProjections();
+        evaluationRunState.settledSummary = buildSettledSummary(runId, output.status);
       }
     }
     return { ok: true };
@@ -606,6 +706,7 @@ export function resetEvaluationRun(): void {
   evaluationRunState.startedAt = null;
   evaluationRunState.resultCount = null;
   evaluationRunState.totalCases = null;
+  evaluationRunState.settledSummary = null;
   evaluationRunState.error = null;
 }
 
@@ -628,6 +729,7 @@ async function pollRunToSettled(runId: string): Promise<void> {
       evaluationRunState.resultCount = output.resultIds.length;
       if (output.status === "completed" || output.status === "cancelled") {
         await refreshMatchingRunProjections();
+        evaluationRunState.settledSummary = buildSettledSummary(runId, output.status);
         return;
       }
       // 运行中：结果逐个落盘——刷新匹配投影驱动树行点亮与 live 进度。
@@ -641,19 +743,60 @@ async function pollRunToSettled(runId: string): Promise<void> {
   }
 }
 
-/** run 轮询每刻/终态：刷新归属匹配的详情行与总览页（latest-request-wins 保护并发）。 */
+/**
+ * run 轮询每刻/终态：刷新归属匹配的详情行与总览页（latest-request-wins 保护并发）。
+ * await 实际装载完成（R1 P2-10）：终态摘要依赖刷新后的投影读数。
+ */
 async function refreshMatchingRunProjections(): Promise<void> {
   const target = evaluationRunState.target;
   if (target === null) return;
+  const jobs: Promise<unknown>[] = [];
   if (
     evaluationViewState.target !== null &&
     sameEvaluationTarget(evaluationViewState.target, target)
   ) {
-    void loadEvaluationView(target);
+    jobs.push(loadEvaluationView(target));
   }
   if (evaluationOverviewState.wsId === target.workspaceId) {
-    void loadEvaluationOverview(target.workspaceId);
+    jobs.push(loadEvaluationOverview(target.workspaceId));
   }
+  if (jobs.length > 0) await Promise.all(jobs);
+}
+
+/**
+ * 终态摘要：从刷新后的投影计算该 run 的 passed/executed（详情投影优先——
+ * results 直数该 run；退总览 targets[].lastRun 四计数；均不在场 = null 退
+ * plain 文案）。cancelled 不消费计数，但统一写入供 UI 幂等去重）。
+ */
+function buildSettledSummary(
+  runId: string,
+  status: "completed" | "cancelled",
+): EvaluationSettledSummary {
+  let passed: number | null = null;
+  let executed: number | null = null;
+  const target = evaluationRunState.target;
+  if (target !== null) {
+    if (
+      evaluationViewState.target !== null &&
+      sameEvaluationTarget(evaluationViewState.target, target) &&
+      evaluationViewState.results !== null
+    ) {
+      const rows = evaluationViewState.results.filter((row) => row.runId === runId);
+      passed = rows.filter((row) => row.outcome === "passed").length;
+      executed = rows.length;
+    } else if (evaluationOverviewState.wsId === target.workspaceId) {
+      const row = evaluationOverviewState.targets.find(
+        (candidate) => !("error" in candidate) && sameEvaluationTarget(candidate.target, target),
+      );
+      const lastRun = row !== undefined && !("error" in row) ? row.lastRun : undefined;
+      if (lastRun !== undefined) {
+        passed = lastRun.passedCount;
+        executed =
+          lastRun.passedCount + lastRun.failedCount + lastRun.errorCount + lastRun.unavailableCount;
+      }
+    }
+  }
+  return { runId, status, passed, executed };
 }
 
 /** ---------- 展示层纯投影 ---------- */

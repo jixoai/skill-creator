@@ -444,6 +444,264 @@ describe("EvaluatingOverview recent runs timeline (1.3)", () => {
       caseIds: [`ev_${"a".repeat(24)}`],
       runner: "analyzer",
     });
-    expect(showToast).toHaveBeenCalledWith("Run queued for sk_0123456789abcdef01234567.");
+    // P2-3：started toast 技能 label 化（人名主显，不再直出 sk_ opaque ID）。
+    expect(showToast).toHaveBeenCalledWith("Run queued for code-review.");
+  });
+});
+
+describe("EvaluatingOverview 批评环 R1 处置批（健康绑定/P1-3/P2-1/2/5/10/11）", () => {
+  const now = () => new Date().toISOString();
+
+  function recentRun(
+    runId: string,
+    overrides: Partial<EvaluationOverviewOutput["recentRuns"][number]> = {},
+  ): EvaluationOverviewOutput["recentRuns"][number] {
+    return {
+      runId,
+      target: { workspaceId: WS, providerId: PROVIDER, skillId: SK },
+      status: "completed",
+      startedAt: now(),
+      resultIds: [],
+      ...overrides,
+    } as EvaluationOverviewOutput["recentRuns"][number];
+  }
+
+  it("binds health to the last completed snapshot: a poisoned payload (running partial) falls back to the remembered snapshot", async () => {
+    const overview = vi
+      .fn()
+      .mockResolvedValueOnce(
+        output(
+          [
+            okTarget({
+              lastRun: {
+                endedAt: new Date(Date.now() - 60_000).toISOString(),
+                status: "completed",
+                passedCount: 2,
+                failedCount: 0,
+                errorCount: 0,
+                unavailableCount: 0,
+              },
+            }),
+          ],
+          [
+            recentRun(`run_${"1".repeat(24)}`, {
+              resultIds: [`evr_${"1".repeat(24)}`, `evr_${"2".repeat(24)}`],
+            }),
+          ],
+        ),
+      )
+      .mockResolvedValueOnce(
+        output(
+          [
+            okTarget({
+              // 刷新后 payload lastRun 指向 running run 的部分落盘计数（毒化）。
+              lastRun: {
+                endedAt: now(),
+                status: "completed",
+                passedCount: 1,
+                failedCount: 0,
+                errorCount: 0,
+                unavailableCount: 0,
+              },
+            }),
+          ],
+          [
+            recentRun(`run_${"2".repeat(24)}`, {
+              status: "running",
+              resultIds: [`evr_${"9".repeat(24)}`],
+            }),
+          ],
+        ),
+      );
+    mockOverviewRpc(overview);
+    mountView();
+    await flushAsync();
+    expect(text()).toContain("100%");
+    expect(text()).toContain("2 ran");
+
+    click(
+      Array.from(host.querySelectorAll("button")).find((entry) =>
+        entry.textContent?.includes("Refresh"),
+      ),
+    );
+    await flushAsync();
+    // running 的部分计数不覆盖健康度：回落会话内记忆的 completed 快照。
+    expect(text()).toContain("100%");
+    expect(text()).toContain("2 ran");
+  });
+
+  it("shows an empty ring with 'no completed run' when only a cancelled run exists (no trusted snapshot)", async () => {
+    const overview = vi
+      .fn()
+      .mockResolvedValue(
+        output([okTarget()], [recentRun(`run_${"1".repeat(24)}`, { status: "cancelled" })]),
+      );
+    mockOverviewRpc(overview);
+    mountView();
+    await flushAsync();
+    expect(text()).toContain("no completed run");
+    expect(text()).not.toContain("never run");
+    expect(text()).not.toMatch(/\d+%/);
+  });
+
+  it("P2-1: colors the completed timeline icon by outcome when counts align with lastRun", async () => {
+    const overview = vi.fn().mockResolvedValue(
+      output(
+        [
+          okTarget({
+            skillId: SK,
+            lastRun: {
+              endedAt: now(),
+              status: "completed",
+              passedCount: 1,
+              failedCount: 2,
+              errorCount: 0,
+              unavailableCount: 0,
+            },
+          }),
+          okTarget({
+            skillId: SK2,
+            skillName: "clean-skill",
+            lastRun: {
+              endedAt: now(),
+              status: "completed",
+              passedCount: 3,
+              failedCount: 0,
+              errorCount: 0,
+              unavailableCount: 0,
+            },
+          }),
+        ],
+        [
+          recentRun(`run_${"1".repeat(24)}`, {
+            resultIds: [`evr_${"1".repeat(24)}`, `evr_${"2".repeat(24)}`, `evr_${"3".repeat(24)}`],
+          }),
+          recentRun(`run_${"2".repeat(24)}`, {
+            target: { workspaceId: WS, providerId: PROVIDER, skillId: SK2 },
+            resultIds: [`evr_${"4".repeat(24)}`, `evr_${"5".repeat(24)}`, `evr_${"6".repeat(24)}`],
+          }),
+        ],
+      ),
+    );
+    mockOverviewRpc(overview);
+    mountView();
+    await flushAsync();
+
+    const rows = host.querySelectorAll('[data-testid="evaluating-recent-run"]');
+    expect(rows).toHaveLength(2);
+    // 有失败 → 红✗；全过 → 绿✓（icon-stub 携带透传类——以类断言）。
+    expect(rows[0]?.querySelector('span[data-testid="icon-stub"].text-destructive')).not.toBeNull();
+    expect(rows[1]?.querySelector('span[data-testid="icon-stub"].text-emerald-600')).not.toBeNull();
+    // P2-2：百分比旁带分母（实际执行数）。
+    expect(text()).toContain("3 ran");
+  });
+
+  it("P2-5: marks completed-but-empty timeline rows with No cases ran", async () => {
+    const overview = vi
+      .fn()
+      .mockResolvedValue(
+        output([okTarget()], [recentRun(`run_${"1".repeat(24)}`, { resultIds: [] })]),
+      );
+    mockOverviewRpc(overview);
+    mountView();
+    await flushAsync();
+    const row = host.querySelector('[data-testid="evaluating-recent-run"]');
+    expect(row?.textContent).toContain("No cases ran");
+  });
+
+  it("P1-3/P2-8/P2-12: pins the responsive css contract hooks (auto-fill minmax grid, header degrade, focus ring)", async () => {
+    const overview = vi.fn().mockResolvedValue(output([okTarget()]));
+    mockOverviewRpc(overview);
+    mountView();
+    await flushAsync();
+
+    // 卡网格：220px 下限 auto-fill（Agent 面板挤压下列数收缩而非截断卡）。
+    const grid = host.querySelector('[data-testid="evaluating-target-grid"]');
+    expect(grid?.className).toContain("minmax(min(220px,100%),1fr)");
+    // 根容器查询上下文（<480px 按钮降级为图标）+ focus-visible 作用域。
+    expect(host.querySelector(".evaluating-overview-shell")).not.toBeNull();
+    expect(host.querySelector(".evaluating-kbd-scope")).not.toBeNull();
+    // 「N skills」徽标 nowrap + 按钮文案挂 label 钩子（取叶子 span——外层容器
+    // 文本也含 "1 skill"）。
+    const badge = Array.from(host.querySelectorAll("header span")).find(
+      (entry) => entry.childElementCount === 0 && entry.textContent?.trim() === "1 skill",
+    );
+    expect(badge?.className).toContain("whitespace-nowrap");
+    const runButton = Array.from(host.querySelectorAll("button")).find((entry) =>
+      entry.textContent?.includes("Run…"),
+    );
+    expect(runButton?.querySelector(".evaluating-btn-label")).not.toBeNull();
+  });
+
+  it("P2-10: toasts the completed summary once per run (idempotent dedupe)", async () => {
+    const overview = vi.fn().mockResolvedValue(output([okTarget()]));
+    mockOverviewRpc(overview);
+    mountView();
+    await flushAsync();
+
+    evaluationRunState.settledSummary = {
+      runId: `run_${"4".repeat(24)}`,
+      status: "completed",
+      passed: 3,
+      executed: 4,
+    };
+    await flushAsync();
+    expect(showToast).toHaveBeenCalledWith("Run completed: 3/4 passed.");
+    evaluationRunState.settledSummary = {
+      runId: `run_${"4".repeat(24)}`,
+      status: "completed",
+      passed: 3,
+      executed: 4,
+    };
+    await flushAsync();
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("P2-11: shows the readonly model/route line after picking the Provider model runner", async () => {
+    const settingsGet = vi.fn().mockResolvedValue({
+      settings: {
+        configVersion: 1,
+        revision: 0,
+        model: { provider: "zai", model: "glm-5.3", reasoningEffort: "high" },
+        preset: "draft",
+        permissions: {},
+        session: {},
+        defaultMode: "free",
+        modelRoutes: [],
+      },
+      providers: [],
+    });
+    const overview = vi.fn().mockResolvedValue(output([okTarget()]));
+    rpcClient = {
+      evaluation: {
+        overview,
+        cases: { list: vi.fn().mockResolvedValue({ cases: [] }) },
+        run: { start: vi.fn(), status: vi.fn(), cancel: vi.fn() },
+      },
+      agent: { settings: { get: settingsGet } },
+    };
+    mountView();
+    await flushAsync();
+
+    click(
+      Array.from(host.querySelectorAll("button")).find((entry) =>
+        entry.textContent?.includes("Run…"),
+      ),
+    );
+    flushSync();
+    // 先选 target（runner 区在 effectiveTarget 就绪后渲染）。
+    click(host.querySelector('[data-stub="dialog-root"] button[aria-pressed]'));
+    await flushAsync();
+    // analyzer 默认：不拉 settings。
+    expect(settingsGet).not.toHaveBeenCalled();
+    click(
+      Array.from(host.querySelectorAll('[data-stub="dialog-root"] button')).find((entry) =>
+        entry.textContent?.includes("Provider model"),
+      ),
+    );
+    await flushAsync();
+    expect(settingsGet).toHaveBeenCalledWith({});
+    const line = host.querySelector('[data-testid="run-provider-model-line"]');
+    expect(line?.textContent).toContain("Model: zai · glm-5.3 · reasoning high");
   });
 });

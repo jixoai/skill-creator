@@ -78,6 +78,7 @@ vi.mock("$lib/components/ui/dialog", async () => ({
 
 import RouterContextHarness from "./router-context-harness.svelte";
 import { goById } from "$lib/shell/navigate";
+import { workspaceState } from "$lib/stores/workspaces.svelte";
 import {
   evaluationRunState,
   evaluationViewState,
@@ -290,6 +291,7 @@ beforeEach(() => {
   rpcClient = null;
   showToast.mockReset();
   vi.mocked(goById).mockReset();
+  workspaceState.workspaces = [];
   resetEvaluationView();
   resetEvaluationRun();
 });
@@ -728,5 +730,174 @@ describe("EvaluatingDetail gates (沿承钉)", () => {
     await flushAsync();
     expect(text()).toContain("No cases for this skill yet");
     expect(button("New case")).not.toBeUndefined();
+  });
+});
+
+describe("EvaluatingDetail 批评环 R1 处置批（P1-1/P1-2/P1-4/P2-3/4/5/9/12）", () => {
+  const PASS_A = `ev_${"a".repeat(24)}`;
+  const PASS_B = `ev_${"b".repeat(24)}`;
+
+  function seedAllPassed(): void {
+    mockRpc(
+      [makeCase(PASS_A), makeCase(PASS_B)],
+      [
+        makeResult(PASS_A, {
+          startedAt: "2026-10-02T00:10:00.000Z",
+          endedAt: "2026-10-02T00:10:01.000Z",
+        }),
+        makeResult(PASS_B, {
+          resultId: `evr_${"2".repeat(24)}`,
+          startedAt: "2026-10-02T00:11:00.000Z",
+          endedAt: "2026-10-02T00:11:01.000Z",
+        }),
+      ],
+    );
+  }
+
+  it("P1-1: keeps the case tree visible without opening the drawer when no case is selected (850 drawer)", async () => {
+    stubMatchMedia((query) => query === "(min-width: 720px)");
+    seedAllPassed();
+    mountView();
+    await flushAsync();
+
+    // 全通过 → 无默认选中；抽屉态下树强制可见（Cases 不收起唯一内容）。
+    expect(host.querySelector('[data-testid="evaluating-case-tree-pane"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')).not.toBeNull();
+    // 详情层无选中 → 明确空态引导（不再纯白）。
+    expect(text()).toContain("Select a case");
+    const casesButton = button("Cases");
+    expect(casesButton?.getAttribute("aria-expanded")).toBe("true");
+
+    // 选中 case 后抽屉收起（诊断落回详情面）——既有行为保持。
+    click(host.querySelector(`[data-case-id="${PASS_A}"] button`));
+    expect(host.querySelector('[data-testid="evaluating-case-tree-pane"]')).toBeNull();
+    expect(host.querySelector('[data-testid="evaluating-assertion-detail"]')).not.toBeNull();
+  });
+
+  it("P1-4/P2-5: cancelled capsules carry amber microcopy and empty completed runs say No cases ran", async () => {
+    seedAllPassed();
+    // 追踪态注入：cancelled（部分）与 completed-but-empty 两个内存 run。
+    evaluationRunState.runId = `run_${"7".repeat(24)}`;
+    evaluationRunState.target = target;
+    evaluationRunState.status = "cancelled";
+    evaluationRunState.startedAt = new Date().toISOString();
+    mountView();
+    await flushAsync();
+
+    const capsules = host.querySelectorAll('[data-testid="evaluating-run-capsule"]');
+    const cancelled = Array.from(capsules).find(
+      (entry) => entry.getAttribute("data-run-state") === "cancelled",
+    );
+    expect(cancelled).toBeTruthy();
+    // 可见微文案（非 sr-only；icon-stub 也携带 amber 类——用 font-medium 锁定
+    // 文案 span）＋琥珀色一套状态语言。
+    expect(cancelled!.querySelector("span.font-medium.text-amber-600")?.textContent).toContain(
+      "cancelled",
+    );
+
+    // completed-but-empty（新 run 零落盘结果）。
+    evaluationRunState.runId = `run_${"8".repeat(24)}`;
+    evaluationRunState.status = "completed";
+    evaluationRunState.resultCount = 0;
+    flushSync();
+    const empty = Array.from(host.querySelectorAll('[data-testid="evaluating-run-capsule"]')).find(
+      (entry) => entry.getAttribute("data-run-state") === "completed",
+    );
+    expect(empty?.textContent).toContain("No cases ran");
+  });
+
+  it("P2-4: shows the viewing-older-run banner only when an older run is selected", async () => {
+    // 两个持久 run：旧的失败、新的通过。
+    mockRpc(
+      [makeCase(PASS_A)],
+      [
+        makeResult(PASS_A, {
+          runId: RUN_OLD,
+          outcome: "failed",
+          assertions: [
+            { ref: 0, kind: "contains", expected: "MIT", observed: "none", outcome: "failed" },
+          ],
+          startedAt: "2026-10-01T00:00:00.000Z",
+          endedAt: "2026-10-01T00:00:01.000Z",
+        }),
+        makeResult(PASS_A, {
+          runId: RUN_NEW,
+          startedAt: "2026-10-02T00:00:00.000Z",
+          endedAt: "2026-10-02T00:00:01.000Z",
+        }),
+      ],
+    );
+    mountView();
+    await flushAsync();
+    // 默认最新 run → 无横幅。
+    expect(host.querySelector('[data-testid="evaluating-older-run-banner"]')).toBeNull();
+
+    const capsules = host.querySelectorAll('[data-testid="evaluating-run-capsule"]');
+    click(capsules[1]); // 旧 run。
+    const banner = host.querySelector('[data-testid="evaluating-older-run-banner"]');
+    expect(banner?.textContent).toContain("Viewing run from");
+  });
+
+  it("P2-3: labels the breadcrumb with the workspace label and drops the opaque skill id", async () => {
+    workspaceState.workspaces = [
+      {
+        id: WS,
+        kind: "directory",
+        label: "Alpha Lab",
+        path: "/tmp/alpha-lab",
+        providers: [],
+      } as never,
+    ];
+    seedAllPassed();
+    mountView();
+    await flushAsync();
+    expect(text()).toContain("Alpha Lab");
+    expect(text()).toContain(PROVIDER);
+    // skillId 退役（标题已是人名；身份真相留在 URL 三段）。
+    expect(text()).not.toContain(SK);
+  });
+
+  it("P1-2/P2-9/P2-12: pins the css contract hooks (diff container query, chips fade, focus ring)", async () => {
+    seedAllPassed();
+    mountView();
+    await flushAsync();
+    click(host.querySelector(`[data-case-id="${PASS_A}"] button`));
+    const diff = host.querySelector('[data-testid="evaluating-assertion-diff"]');
+    expect(diff?.className).toContain("evaluating-diff-grid");
+    // EXPECTED 格携带分隔线钩子（<720 堆叠 = border-bottom；≥720 = border-right）。
+    expect(diff?.querySelector(".evaluating-diff-expected")).not.toBeNull();
+    // 胶囊行边缘渐隐钩子 + 断言面板容器查询上下文。
+    expect(host.querySelector('[data-testid="evaluating-run-selector"]')?.className).toContain(
+      "evaluating-run-chips",
+    );
+    expect(host.querySelector('[data-testid="evaluating-assertion-pane"]')?.className).toContain(
+      "evaluating-assertion-pane",
+    );
+    // 键盘导航 focus-visible 作用域钩子（根元素）。
+    expect(host.querySelector(".evaluating-kbd-scope")).not.toBeNull();
+  });
+
+  it("P2-10: toasts the completed summary once per run (idempotent dedupe)", async () => {
+    seedAllPassed();
+    mountView();
+    await flushAsync();
+
+    evaluationRunState.settledSummary = {
+      runId: `run_${"3".repeat(24)}`,
+      status: "completed",
+      passed: 2,
+      executed: 3,
+    };
+    await flushAsync();
+    expect(showToast).toHaveBeenCalledWith("Run completed: 2/3 passed.");
+    // 同一 run 重复写入不重复播报（事件幂等）。
+    evaluationRunState.settledSummary = {
+      runId: `run_${"3".repeat(24)}`,
+      status: "completed",
+      passed: 2,
+      executed: 3,
+    };
+    await flushAsync();
+    expect(showToast).toHaveBeenCalledTimes(1);
   });
 });

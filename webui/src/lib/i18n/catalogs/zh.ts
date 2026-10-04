@@ -139,6 +139,8 @@ export const zh: Record<keyof EnCatalog, string> = {
   "agentTree.start": "开始",
   "agentTree.cancel": "取消",
   "agentTree.toggleGroup": "折叠 {group}",
+  "agentTree.expandGroup": "展开 {group}",
+  "agentTree.collapseGroup": "折叠 {group}",
   "agentTree.organizationWorkspace": "工作区",
   "agentTree.organizationTimeline": "时间线",
   "agentTree.search": "搜索会话",
@@ -391,6 +393,9 @@ export const zh: Record<keyof EnCatalog, string> = {
   "evaluating.caseCountMany": "{count} 个用例",
   "evaluating.staleShare": "{percent}% 过期",
   "evaluating.notRunYet": "从未运行",
+  "evaluating.noCompletedRun": "尚无完成的运行",
+  "evaluating.ranCount": "已执行 {count}",
+  "evaluating.noCasesRan": "没有执行任何用例",
   "evaluating.passedCount": "{count} 通过",
   "evaluating.failedCount": "{count} 失败",
   "evaluating.errorCountOne": "{count} 错误",
@@ -409,6 +414,8 @@ export const zh: Record<keyof EnCatalog, string> = {
   "evaluating.cancelRun": "取消运行",
   "evaluating.cancelRunTitle": "取消此运行",
   "evaluating.runStateToast": "运行{status}。",
+  "evaluating.runCompletedToast": "运行完成：{passed}/{total} 通过。",
+  "evaluating.runCompletedEmptyToast": "运行完成——没有执行任何用例。",
 
   /** Run 确认弹层（显式 target 三元组标注；绝不自动运行）。 */
   "evaluating.runTitle": "运行评估",
@@ -418,6 +425,10 @@ export const zh: Record<keyof EnCatalog, string> = {
   "evaluating.runRunnerLabel": "Runner",
   "evaluating.runRunnerAnalyzer": "Analyzer（离线）",
   "evaluating.runRunnerProviderModel": "Provider model",
+  "evaluating.runModelLabel": "模型",
+  "evaluating.runModelLine": "{provider} · {model}",
+  "evaluating.runModelLineWithEffort": "{provider} · {model} · 推理 {effort}",
+  "evaluating.runModelUnavailable": "默认模型未解析——请检查 Agent 设置",
   "evaluating.runCasesLabel": "用例",
   "evaluating.runCasesLoading": "正在加载用例…",
   "evaluating.runNoCases": "该目标还没有用例。",
@@ -436,6 +447,8 @@ export const zh: Record<keyof EnCatalog, string> = {
 
   /** 详情屏（三段路由 /w/:wsId/evaluating/:providerId/:skillId；run 报告式）。 */
   "evaluating.backTitle": "返回评估总览",
+  "evaluating.globalWorkspaceLabel": "Global",
+  "evaluating.viewingOlderRun": "正在查看 {time} 的运行",
   "evaluating.readonlyBadge": "只读",
   "evaluating.readonlyNote": "Global 工作区语料只读——在导入的工作区打开该技能才能运行或编辑。",
   "evaluating.cancelAction": "取消运行",

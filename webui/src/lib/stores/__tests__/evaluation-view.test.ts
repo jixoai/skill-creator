@@ -45,16 +45,19 @@ import {
   caseTreeLabel,
   compareResultsNewestFirst,
   detailErrorCount,
+  evaluationHealthFor,
   evaluationOutcomeBadge,
   evaluationOverviewState,
   evaluationPassRate,
   evaluationRunState,
+  evaluationTargetKey,
   evaluationViewState,
   latestResultByCase,
   loadEvaluationOverview,
   loadEvaluationView,
   loadMoreEvaluationOverview,
   mergeOverviewTargets,
+  newestRecentRunForTarget,
   relativeTimeParts,
   resetEvaluationOverview,
   resetEvaluationRun,
@@ -67,6 +70,7 @@ import {
 import type {
   EvaluationCase,
   EvaluationOverviewOutput,
+  EvaluationOverviewRecentRun,
   EvaluationOverviewTarget,
   EvaluationResultView,
   EvaluationTarget,
@@ -889,5 +893,240 @@ describe("run timeline / case tree projections (evaluating-world-class 1.2)", ()
     expect(
       evaluationPassRate({ passedCount: 2, failedCount: 0, errorCount: 2, unavailableCount: 0 }),
     ).toBe(0.5);
+  });
+});
+
+describe("health snapshot binding (批评环 R1：最近 completed 持久快照)", () => {
+  const snapshot = {
+    endedAt: "2026-10-01T00:00:02.000Z",
+    status: "completed" as const,
+    passedCount: 2,
+    failedCount: 1,
+    errorCount: 0,
+    unavailableCount: 0,
+  };
+
+  it("picks the newest recent run per target mirroring daemon ordering (startedAt desc, runId asc tie)", () => {
+    const runs = [
+      {
+        runId: `run_${"b".repeat(24)}`,
+        target,
+        status: "completed" as const,
+        startedAt: "2026-10-02T00:00:00.000Z",
+        resultIds: [],
+      },
+      {
+        runId: `run_${"a".repeat(24)}`,
+        target,
+        status: "cancelled" as const,
+        startedAt: "2026-10-02T00:00:00.000Z",
+        resultIds: [`evr_${"1".repeat(24)}`],
+      },
+      {
+        runId: `run_${"c".repeat(24)}`,
+        target: { ...target, skillId: "sk_ffffffffffffffffffffffff" },
+        status: "running" as const,
+        startedAt: "2026-10-03T00:00:00.000Z",
+        resultIds: [],
+      },
+    ] as EvaluationOverviewRecentRun[];
+    const newest = newestRecentRunForTarget(runs, target);
+    // 同刻 runId 字典序升者胜（镜像 daemon recentRuns tie-break）。
+    expect(newest?.runId).toBe(`run_${"a".repeat(24)}`);
+    expect(newestRecentRunForTarget(runs, { ...target, providerId: "amp" } as never)).toBeNull();
+  });
+
+  it("trusts payload lastRun when the newest run is completed or has no persisted results", () => {
+    // 最新 run 已 completed → payload 可信。
+    expect(
+      evaluationHealthFor(snapshot, { status: "completed", resultIds: ["x"] }, undefined),
+    ).toEqual({ snapshot, trusted: true });
+    // 最新 run 未终结但尚无落盘结果 → lastRun 归属更早持久桶，payload 仍可信。
+    expect(evaluationHealthFor(snapshot, { status: "running", resultIds: [] }, undefined)).toEqual({
+      snapshot,
+      trusted: true,
+    });
+    // 无持久证据 → null（trusted：缓存可清理）。
+    expect(evaluationHealthFor(undefined, null, snapshot)).toEqual({
+      snapshot: null,
+      trusted: true,
+    });
+  });
+
+  it("falls back to the remembered completed snapshot when the newest run already persisted partial results", () => {
+    const newest = { status: "cancelled" as const, resultIds: [`evr_${"1".repeat(24)}`] };
+    // cancelled 部分落盘 → payload lastRun 指向该 run 的部分计数：不采信。
+    expect(evaluationHealthFor(snapshot, newest, undefined)).toEqual({
+      snapshot: null,
+      trusted: false,
+    });
+    // 会话内有最近 completed 记忆 → 回落（cancelled/running 不覆盖健康度）。
+    expect(evaluationHealthFor(snapshot, newest, snapshot)).toEqual({
+      snapshot,
+      trusted: false,
+    });
+  });
+
+  it("commits healthByTarget and holds the last completed snapshot across a poisoned refresh", async () => {
+    const overview = mockOverview();
+    // 第一页：最新 run completed → payload 可信并进入会话记忆。
+    overview.mockResolvedValueOnce(
+      overviewOutput(
+        [okTarget({ lastRun: snapshot })],
+        [
+          {
+            runId: `run_${"1".repeat(24)}`,
+            target,
+            status: "completed",
+            startedAt: "2026-10-01T00:00:00.000Z",
+            resultIds: [`evr_${"1".repeat(24)}`, `evr_${"2".repeat(24)}`, `evr_${"3".repeat(24)}`],
+          },
+        ],
+      ),
+    );
+    await loadEvaluationOverview(WS_ID);
+    const key = evaluationTargetKey(target);
+    expect(evaluationOverviewState.healthByTarget[key]).toEqual(snapshot);
+
+    // 刷新：running run 已部分落盘，payload lastRun 指向部分计数 → 健康度回落
+    // 上一次 completed 快照（不被运行中/取消的部分数据覆盖）。
+    const poisoned = {
+      endedAt: "2026-10-02T00:00:02.000Z",
+      status: "completed" as const,
+      passedCount: 1,
+      failedCount: 0,
+      errorCount: 0,
+      unavailableCount: 0,
+    };
+    overview.mockResolvedValueOnce(
+      overviewOutput(
+        [okTarget({ lastRun: poisoned })],
+        [
+          {
+            runId: `run_${"2".repeat(24)}`,
+            target,
+            status: "running",
+            startedAt: "2026-10-02T00:00:00.000Z",
+            resultIds: [`evr_${"9".repeat(24)}`],
+          },
+        ],
+      ),
+    );
+    await loadEvaluationOverview(WS_ID);
+    expect(evaluationOverviewState.healthByTarget[key]).toEqual(snapshot);
+  });
+
+  it("projects a null health (empty ring) when only a cancelled run exists and no snapshot was ever trusted", async () => {
+    const overview = mockOverview();
+    overview.mockResolvedValueOnce(
+      overviewOutput(
+        [okTarget()],
+        [
+          {
+            runId: `run_${"1".repeat(24)}`,
+            target,
+            status: "cancelled",
+            startedAt: "2026-10-01T00:00:00.000Z",
+            resultIds: [],
+          },
+        ],
+      ),
+    );
+    await loadEvaluationOverview(WS_ID);
+    const key = evaluationTargetKey(target);
+    expect(evaluationOverviewState.healthByTarget[key]).toBeNull();
+  });
+});
+
+describe("settled summary (批评环 R1 P2-10：终态 toast 计数摘要)", () => {
+  it("computes passed/executed from the refreshed detail projection on completion", async () => {
+    vi.useFakeTimers();
+    const runId = `run_${"1".repeat(24)}`;
+    evaluationViewState.target = target;
+    evaluationViewState.rows = [];
+    const resultsList = vi
+      .fn()
+      .mockResolvedValueOnce({ results: [] })
+      .mockResolvedValue({
+        results: [
+          makeResult({ runId, outcome: "passed" }),
+          makeResult({
+            runId,
+            resultId: `evr_${"2".repeat(24)}`,
+            caseId: `ev_${"b".repeat(24)}`,
+            outcome: "failed",
+          }),
+        ],
+      });
+    const overview = vi.fn().mockResolvedValue(overviewOutput([]));
+    const start = vi.fn().mockResolvedValue({ runId, status: "queued" });
+    const status = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "running", resultIds: [] })
+      .mockResolvedValue({ status: "completed", resultIds: [`evr_${"1".repeat(24)}`] });
+    rpcClient = {
+      evaluation: {
+        run: { start, status, cancel: vi.fn() },
+        cases: { list: vi.fn().mockResolvedValue({ cases: [makeCase()] }) },
+        results: { list: resultsList },
+        overview,
+      },
+    };
+    await startEvaluationRun({ target, caseIds: [`ev_${"a".repeat(24)}`], runner: "analyzer" });
+    await vi.advanceTimersByTimeAsync(RUN_POLL_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(RUN_POLL_INTERVAL_MS);
+    expect(evaluationRunState.status).toBe("completed");
+    await Promise.resolve();
+    await Promise.resolve();
+    // 详情投影在位 → passed/executed 从该 run 的结果行直数（1/2 passed）。
+    expect(evaluationRunState.settledSummary).toEqual({
+      runId,
+      status: "completed",
+      passed: 1,
+      executed: 2,
+    });
+    vi.useRealTimers();
+  });
+
+  it("records the cancelled terminal with an idempotent single summary (dedupe key)", async () => {
+    vi.useFakeTimers();
+    const runId = `run_${"1".repeat(24)}`;
+    const cancel = vi.fn().mockResolvedValue({ runId, status: "cancelled" });
+    rpcClient = {
+      evaluation: {
+        run: {
+          start: vi.fn().mockResolvedValue({ runId, status: "queued" }),
+          status: vi.fn(),
+          cancel,
+        },
+        cases: { list: vi.fn().mockResolvedValue({ cases: [] }) },
+        results: { list: vi.fn().mockResolvedValue({ results: [] }) },
+      },
+    };
+    await startEvaluationRun({ target, caseIds: [`ev_${"a".repeat(24)}`], runner: "analyzer" });
+    const outcome = await cancelEvaluationRun(runId);
+    expect(outcome.ok).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(evaluationRunState.settledSummary).toEqual({
+      runId,
+      status: "cancelled",
+      passed: null,
+      executed: null,
+    });
+    vi.useRealTimers();
+  });
+
+  it("clears the settled summary when a new run starts", async () => {
+    evaluationRunState.settledSummary = {
+      runId: `run_${"0".repeat(24)}`,
+      status: "completed",
+      passed: 1,
+      executed: 1,
+    };
+    const start = vi.fn().mockResolvedValue({ runId: `run_${"1".repeat(24)}`, status: "queued" });
+    rpcClient = { evaluation: { run: { start, status: vi.fn(), cancel: vi.fn() } } };
+    await startEvaluationRun({ target, caseIds: [`ev_${"a".repeat(24)}`], runner: "analyzer" });
+    expect(evaluationRunState.settledSummary).toBeNull();
   });
 });

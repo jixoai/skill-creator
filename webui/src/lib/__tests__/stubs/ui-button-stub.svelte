@@ -12,6 +12,7 @@
     class: klass = "",
     title,
     "aria-label": ariaLabel,
+    "aria-expanded": ariaExpanded,
   }: {
     children?: Snippet;
     onclick?: (event: MouseEvent) => void;
@@ -19,9 +20,18 @@
     class?: string;
     title?: string;
     "aria-label"?: string;
+    "aria-expanded"?: boolean;
   } = $props();
 </script>
 
-<button type="button" class={klass} {onclick} {disabled} {title} aria-label={ariaLabel}>
+<button
+  type="button"
+  class={klass}
+  {onclick}
+  {disabled}
+  {title}
+  aria-label={ariaLabel}
+  aria-expanded={ariaExpanded}
+>
   {@render children?.()}
 </button>

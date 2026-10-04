@@ -2,13 +2,19 @@
   用户原始需求 [2026-10-03]（evaluating-dashboard design §3）：
   「动作：Run（target 确认弹层，三段标注 workspace/provider/skill）」——run 发起
   的唯一显式确认面（绝不自动运行）。
+  修订 [2026-10-04]（evaluating-world-class 批评环 R1）：三段标注 label 化
+  （workspace label + 技能人名主显，opaque ID 降次级 mono）+ started toast 同源
+  label 化（P2-3）；Provider model 选中后展示将运行的 model/route 只读行
+  （agent.settings.get 默认路由；P2-11）。
   正交意图：
   1. 双形态：总览模式（targets 可选列表）与详情模式（fixedTarget 固定三元组）；
-     三段标注（workspace/provider/skill）+ runner 二选一 + case 显式勾选。
+     三段标注（label 主显）+ runner 二选一 + case 显式勾选。
   2. 提交门：未选 target / 未勾 case / Global target（runGlobalBlocked）一律不可
      启动；成功后 toast + 关闭 + onStarted 回调（刷新由消费方/轮询负责）。
+  3. model/route 只读投影：runner=provider-model 时现读 agent 默认模型路由，
+     只读非选择器；失败静默降级（非关键信息不阻塞 run）。
   视图状态：cases 拉取（getRpc 空连接 → typed 提示，不 throw——$effect 内安全）；
-  草稿（runner/勾选）→ 组件本地 $state（弹层关闭即弃）。
+  草稿（runner/勾选/modelLine）→ 组件本地 $state（弹层关闭即弃）。
 -->
 <script lang="ts">
   import * as Dialog from "$lib/components/ui/dialog";
@@ -17,6 +23,7 @@
   import { t } from "$lib/i18n";
   import { showToast } from "$lib/toast.svelte";
   import { getRpc } from "$lib/stores/connection.svelte";
+  import { workspaceState } from "$lib/stores/workspaces.svelte";
   import {
     evaluationTargetKey,
     isGlobalEvaluationTarget,
@@ -24,6 +31,7 @@
   } from "$lib/stores/evaluation-view.svelte";
   import type { EvaluationCase, EvaluationTarget } from "$shared/contracts/evaluation.js";
   import type { WorkspaceId } from "$shared/contracts/workspaces.js";
+  import IconBot from "@lucide/svelte/icons/bot";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPlay from "@lucide/svelte/icons/play";
 
@@ -38,6 +46,7 @@
     wsId,
     targets,
     fixedTarget = null,
+    fixedSkillName = null,
     onStarted = () => {},
   }: {
     open?: boolean;
@@ -46,6 +55,8 @@
     targets: RunTargetOption[];
     /** 详情模式：固定三元组（target 选择器缺席）。 */
     fixedTarget?: EvaluationTarget | null;
+    /** 详情模式：技能人名（P2-3 toast label 化；缺省回退 skillId）。 */
+    fixedSkillName?: string | null;
     onStarted?: (runId: string) => void;
   } = $props();
 
@@ -68,6 +79,18 @@
   const canStart = $derived(
     effectiveTarget !== null && !isGlobal && selectedCaseIds.length > 0 && !starting,
   );
+
+  /** P2-3：目标块与 toast 的 label 化（skill 人名优先；ID 降次级）。 */
+  const selectedSkillName = $derived.by(() => {
+    if (fixedTarget !== null) return fixedSkillName ?? fixedTarget.skillId;
+    if (selectedKey === null) return null;
+    return targets.find((option) => evaluationTargetKey(option.target) === selectedKey)?.skillName;
+  });
+  /** workspace 人名（注册表 label；Global 专名；未注册回退 wsId）。 */
+  const workspaceLabel = $derived.by(() => {
+    if (wsId === "~") return t("evaluating.globalWorkspaceLabel");
+    return workspaceState.workspaces.find((workspace) => workspace.id === wsId)?.label ?? wsId;
+  });
 
   // 弹层开启且 target 就绪时拉 cases（断线 → typed 提示行；不 throw）。
   $effect(() => {
@@ -110,6 +133,55 @@
     };
   });
 
+  // P2-11：选 Provider model 后显示将运行的 model/route 只读行——provider-model
+  // 会话走内核默认路由（agent.settings.get 的 settings.model）；拉取失败静默降级
+  // 为「未解析」提示（非关键信息，不阻塞 run）。
+  let modelLine = $state<string | null>(null);
+  let modelLoading = $state(false);
+  $effect(() => {
+    if (!open || runner !== "provider-model") {
+      modelLine = null;
+      return;
+    }
+    const rpc = getRpc();
+    if (!rpc) {
+      modelLine = null;
+      return;
+    }
+    let cancelled = false;
+    modelLoading = true;
+    rpc.agent.settings
+      .get({})
+      .then((view) => {
+        if (cancelled) return;
+        const selection = view.settings.model;
+        if (selection === undefined) {
+          modelLine = null;
+          return;
+        }
+        modelLine =
+          selection.reasoningEffort !== undefined && selection.reasoningEffort !== ""
+            ? t("evaluating.runModelLineWithEffort", {
+                provider: selection.provider,
+                model: selection.model,
+                effort: selection.reasoningEffort,
+              })
+            : t("evaluating.runModelLine", {
+                provider: selection.provider,
+                model: selection.model,
+              });
+      })
+      .catch(() => {
+        if (!cancelled) modelLine = null;
+      })
+      .finally(() => {
+        if (!cancelled) modelLoading = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   function selectTarget(option: RunTargetOption): void {
     selectedKey = evaluationTargetKey(option.target);
   }
@@ -142,7 +214,12 @@
     });
     starting = false;
     if (outcome.ok) {
-      showToast(t("evaluating.runStartedToast", { skill: target.skillId }));
+      // P2-3：toast 技能 label 化（人名优先；ID 只在无名时兜底）。
+      showToast(
+        t("evaluating.runStartedToast", {
+          skill: selectedSkillName ?? target.skillId,
+        }),
+      );
       open = false;
       onStarted(outcome.runId);
     } else if (outcome.reason === "global") {
@@ -193,17 +270,28 @@
       {/if}
 
       {#if effectiveTarget}
-        <!-- 三段标注（design §3：workspace/provider/skill 显式确认）。 -->
+        <!-- 三段标注（design §3：workspace/provider/skill 显式确认；P2-3 label 化——
+             人名/ID 双层：label 主显，opaque ID 降次级 mono）。 -->
         <dl
           class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs"
           data-testid="run-target-triple"
         >
           <dt class="text-muted-foreground">{t("evaluating.runTripleWorkspace")}</dt>
-          <dd class="truncate font-mono">{effectiveTarget.workspaceId}</dd>
+          <dd class="min-w-0 truncate">
+            <span class="font-medium">{workspaceLabel}</span>
+            <span class="ml-1.5 font-mono text-[11px] text-muted-foreground">{wsId}</span>
+          </dd>
           <dt class="text-muted-foreground">{t("evaluating.runTripleProvider")}</dt>
-          <dd class="truncate font-mono">{effectiveTarget.providerId}</dd>
+          <dd class="min-w-0 truncate">
+            <span class="font-medium">{effectiveTarget.providerId}</span>
+          </dd>
           <dt class="text-muted-foreground">{t("evaluating.runTripleSkill")}</dt>
-          <dd class="truncate font-mono">{effectiveTarget.skillId}</dd>
+          <dd class="min-w-0 truncate">
+            <span class="font-medium">{selectedSkillName ?? effectiveTarget.skillId}</span>
+            <span class="ml-1.5 font-mono text-[11px] text-muted-foreground">
+              {effectiveTarget.skillId}
+            </span>
+          </dd>
         </dl>
       {/if}
 
@@ -234,6 +322,24 @@
               </button>
             {/each}
           </div>
+          {#if runner === "provider-model"}
+            <!-- P2-11：将运行的 model/route 只读行（内核默认路由；只读非选择器）。 -->
+            <p
+              class="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+              data-testid="run-provider-model-line"
+            >
+              {#if modelLoading}
+                <IconLoader class="size-3 animate-spin" aria-hidden="true" />
+              {:else}
+                <IconBot class="size-3" aria-hidden="true" />
+              {/if}
+              <span class="min-w-0 truncate">
+                {modelLine !== null
+                  ? `${t("evaluating.runModelLabel")}: ${modelLine}`
+                  : t("evaluating.runModelUnavailable")}
+              </span>
+            </p>
+          {/if}
         </div>
 
         <div class="space-y-1.5">

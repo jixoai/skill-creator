@@ -6,14 +6,23 @@
   case 新建/编辑收进「管理」折叠区（诊断流优先）；Imported-only 门控沿旧。
   迁移保留（evaluating-dashboard 回归钉）：三段路由身份消费、挂载竞态补救、
   Run… 固定三元组显式确认、Cancel 幂等、Global 只读、技能不可解析降级面。
+  修订 [2026-10-04]（evaluating-world-class 批评环 R1 处置批）：
+  P1-1 抽屉态无选中 case 时树强制可见（Cases 不收起唯一内容；空态引导）；
+  P1-2 diff 双栏改断言面板容器查询（<720px 堆叠，Agent 面板挤压下视口断点
+  失效）；P1-4 run 胶囊四态一套状态语言（cancelled 橙禁制 + 微文案）；P2-3
+  面包屑 label 化（workspace label / provider；skillId 退役）；P2-4 旧 run
+  判读横幅；P2-5 completed-but-empty「No cases ran」；P2-6 Refresh 图标
+  统一 circular-arrows；P2-9 胶囊行边缘渐隐；P2-10 终态 toast 消费
+  settledSummary（计数摘要 + runId 幂等去重）；P2-12 focus-visible 2px
+  outline（scoped CSS 契约由 dom 测试钉钩子）。
   正交意图：
   1. run 报告投影：results 全量 → run 时间线（选中 run 的 per-case 结果）→
      case 树（三态 icon + 分式徽标）→ 断言详情（冻结 expected/observed）。
   2. 选择状态机：URL ?case= 深链 ↔ selectedCaseId（replace）；默认选首个失败
      case（design §4.2「失败默认展开且选中；成功折叠」）；键盘沿纯函数
      caseTreeKeyboard。
-  3. 三尺寸（design §3）：≥1024 树+详情双栏 / 720-1024 树抽屉 / <720 单列
-     push（?case= 携带）。
+  3. 三尺寸（design §3）：≥1024 树+详情双栏 / 720-1024 树抽屉（无选中时
+     强制可见——P1-1）/ <720 单列 push（?case= 携带）。
   视图状态：行/结果 → evaluation-view store；技能名/revision → skills.info
   现读；选择/弹层/抽屉 → 组件本地 $state。
 -->
@@ -52,15 +61,17 @@
   import type { SkillId } from "$shared/contracts/skills.js";
   import RunConfirmDialog from "./run-confirm-dialog.svelte";
   import CaseEditorDialog from "./case-editor-dialog.svelte";
+  import { workspaceState } from "$lib/stores/workspaces.svelte";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPlay from "@lucide/svelte/icons/play";
-  import IconClipboard from "@lucide/svelte/icons/clipboard-check";
+  import IconRefresh from "@lucide/svelte/icons/refresh-cw";
   import IconCheck from "@lucide/svelte/icons/check";
   import IconX from "@lucide/svelte/icons/x";
   import IconAlert from "@lucide/svelte/icons/triangle-alert";
   import IconClock from "@lucide/svelte/icons/clock";
   import IconBan from "@lucide/svelte/icons/ban";
+  import IconCircleSlash from "@lucide/svelte/icons/circle-slash";
   import IconChevronRight from "@lucide/svelte/icons/chevron-right";
   import IconListTree from "@lucide/svelte/icons/list-tree";
 
@@ -158,23 +169,25 @@
     }
   });
 
-  // run 终态 toast（状态迁移边沿触发；挂载时的既有终态不播报）。
-  let lastRunStatus = $state<EvaluationRunStatus | null>(null);
+  // run 终态 toast（批评环 R1 P2-10）：消费 store 的 settledSummary（含计数
+  // 摘要「Run completed: 3/4 passed」），按 runId 幂等——同一 run 只播报一次
+  // （取消入口的手动成功 toast 已退役，本 effect 是唯一终态播报源）。
+  let toastedSettledRunId = $state<string | null>(null);
   $effect(() => {
-    const status = evaluationRunState.status;
-    const was = untrack(() => lastRunStatus);
-    lastRunStatus = status;
-    if (was === null || was === status) return;
-    if (status === "completed" || status === "cancelled") {
+    const summary = evaluationRunState.settledSummary;
+    if (summary === null) return;
+    if (untrack(() => toastedSettledRunId) === summary.runId) return;
+    toastedSettledRunId = summary.runId;
+    if (summary.status === "cancelled") {
+      showToast(t("evaluating.runCancelledToast"));
+    } else if (summary.executed === 0) {
+      showToast(t("evaluating.runCompletedEmptyToast"));
+    } else if (summary.passed !== null && summary.executed !== null) {
       showToast(
-        t("evaluating.runStateToast", {
-          status: t(
-            status === "completed"
-              ? "evaluating.runStatusCompleted"
-              : "evaluating.runStatusCancelled",
-          ),
-        }),
+        t("evaluating.runCompletedToast", { passed: summary.passed, total: summary.executed }),
       );
+    } else {
+      showToast(t("evaluating.runStateToast", { status: t("evaluating.runStatusCompleted") }));
     }
   });
 
@@ -194,6 +207,21 @@
     };
   });
   const layoutMode = $derived(wideMatch ? "wide" : midMatch ? "drawer" : "stack");
+
+  /**
+   * 批评环 R1 P1-1：抽屉态下无选中 case 时树强制可见——Cases 只切换详情层，
+   * 不收起唯一内容；任意断点内容区至少呈现列表或明确空态。
+   */
+  const treeVisible = $derived(
+    layoutMode !== "drawer" || treeDrawerOpen || selectedCaseId === null,
+  );
+
+  /** 面包屑 workspace label（P2-3：人语汇优先；未注册回退 wsId；Global 专名）。 */
+  const workspaceLabel = $derived.by(() => {
+    if (wsId === null) return null;
+    if (wsId === "~") return t("evaluating.globalWorkspaceLabel");
+    return workspaceState.workspaces.find((workspace) => workspace.id === wsId)?.label ?? wsId;
+  });
 
   // ---- run 报告投影（store 纯函数；results 全量 = 时间线源） ----
   const cases = $derived(evaluationViewState.cases);
@@ -221,6 +249,12 @@
       return selectedRunId;
     }
     return timeline[0].runId;
+  });
+  /** P2-4：正在查看旧 run 的非选中态横幅（最新 run 之外的时间线上下文锚）。 */
+  const viewingOlderRun = $derived.by(() => {
+    if (timeline.length < 2 || effectiveRunId === null) return null;
+    if (effectiveRunId === timeline[0].runId) return null;
+    return timeline.find((row) => row.runId === effectiveRunId) ?? null;
   });
   const runByCase = $derived(
     results === null || effectiveRunId === null
@@ -337,9 +371,10 @@
     const runId = evaluationRunState.runId;
     if (runId === null) return;
     const outcome = await cancelEvaluationRun(runId);
+    // 成功播报统一归 settledSummary effect（按 runId 幂等——取消入口不再重复
+    // toast；失败仍在此即时反馈）。
     if (!outcome.ok)
       showToast(t("evaluating.runCancelFailedToast", { error: outcome.message ?? "" }));
-    else showToast(t("evaluating.runCancelledToast"));
   }
 
   function openNewCase(): void {
@@ -429,10 +464,21 @@
         return t("evaluating.runStatusCancelled");
     }
   }
+
+  /** run 胶囊五计数总和（P2-5：completed-but-empty → 「No cases ran」）。 */
+  function runCountTotal(counts: {
+    passed: number;
+    failed: number;
+    error: number;
+    unavailable: number;
+    stale: number;
+  }): number {
+    return counts.passed + counts.failed + counts.error + counts.unavailable + counts.stale;
+  }
 </script>
 
-<div class="flex h-full flex-col overflow-hidden">
-  <!-- 顶行：返回总览 + 技能名（人语汇）+ opaque id 次要行 + 动作（Run/Cancel/刷新/抽屉）。 -->
+<div class="evaluating-kbd-scope flex h-full flex-col overflow-hidden">
+  <!-- 顶行：返回总览 + 技能名（人语汇）+ workspace/provider label 次要行 + 动作。 -->
   <header class="flex shrink-0 flex-col gap-1 border-b border-border px-4 py-2">
     <div class="flex items-center justify-between gap-2">
       <div class="flex min-w-0 items-center gap-2">
@@ -450,7 +496,7 @@
         </span>
         {#if isGlobal}
           <span
-            class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+            class="shrink-0 whitespace-nowrap rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
           >
             {t("evaluating.readonlyBadge")}
           </span>
@@ -462,7 +508,7 @@
             variant="outline"
             size="sm"
             class="h-7 gap-1.5"
-            aria-expanded={treeDrawerOpen}
+            aria-expanded={treeVisible}
             onclick={() => (treeDrawerOpen = !treeDrawerOpen)}
           >
             <IconListTree class="h-3.5 w-3.5" />
@@ -491,25 +537,28 @@
           variant="outline"
           size="sm"
           class="h-7 gap-1.5"
+          title={t("evaluating.refreshTitle")}
           onclick={reload}
           disabled={loading || target === null}
         >
-          {#if loading}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconClipboard
+          {#if loading}<IconLoader class="h-3.5 w-3.5 animate-spin" />{:else}<IconRefresh
               class="h-3.5 w-3.5"
             />{/if}
           {t("evaluating.refresh")}
         </Button>
       </div>
     </div>
+    <!-- P2-3：面包屑 label 化（workspace label / provider；skill 名已在标题，
+         opaque skillId 退役——身份真相留在 URL 三段）。 -->
     <div
       class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-9 text-xs text-muted-foreground"
     >
-      {#if providerId}
-        <span class="truncate">{providerId}</span>
+      {#if workspaceLabel !== null}
+        <span class="truncate">{workspaceLabel}</span>
       {/if}
-      {#if skillId}
+      {#if providerId}
         <span aria-hidden="true" class="text-border">/</span>
-        <span class="truncate font-mono">{skillId}</span>
+        <span class="truncate">{providerId}</span>
       {/if}
       {#if cases !== null}
         <span aria-hidden="true" class="text-border">·</span>
@@ -543,6 +592,16 @@
     </p>
   {/if}
 
+  {#if viewingOlderRun !== null}
+    <!-- P2-4：旧 run 判读锚（非选中态横幅——不抢焦点，点最新胶囊即回）。 -->
+    <p
+      class="shrink-0 border-b border-border bg-muted/30 px-4 py-1 text-[11px] text-muted-foreground"
+      data-testid="evaluating-older-run-banner"
+    >
+      {t("evaluating.viewingOlderRun", { time: relativeTime(viewingOlderRun.startedAt) })}
+    </p>
+  {/if}
+
   {#if loading && cases === null}
     <div
       class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground"
@@ -570,9 +629,10 @@
       {/if}
     </div>
   {:else if nodes.length > 0}
-    <!-- run 选择器（时间线胶囊：最新在前，选中态；运行中 live 进度）。 -->
+    <!-- run 选择器（时间线胶囊：最新在前，选中态；运行中 live 进度；P2-9 边缘
+         渐隐单行横滚——先例 dashboard chips-row）。 -->
     <div
-      class="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border px-4 py-1.5"
+      class="evaluating-run-chips flex shrink-0 items-center gap-1.5 border-b border-border px-4 py-1.5"
       data-testid="evaluating-run-selector"
     >
       {#if timeline.length === 0}
@@ -581,6 +641,8 @@
         {#each timeline as run (run.runId)}
           {@const selected = run.runId === effectiveRunId}
           {@const live = trackedRun?.runId === run.runId && activeRun ? liveProgressText : null}
+          {@const hasFailure = run.counts.failed > 0 || run.counts.error > 0}
+          {@const ranNothing = run.status === "completed" && runCountTotal(run.counts) === 0}
           <button
             type="button"
             class="flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors {selected
@@ -589,21 +651,33 @@
             aria-pressed={selected}
             data-testid="evaluating-run-capsule"
             data-run-id={run.runId}
+            data-run-state={run.status}
             onclick={() => selectRun(run.runId)}
           >
             {#if run.status === "running"}
-              <IconLoader class="size-3 animate-spin" aria-hidden="true" />
+              <IconLoader class="size-3 animate-spin text-primary" aria-hidden="true" />
+            {:else if run.status === "queued"}
+              <IconCircleSlash class="size-3 text-muted-foreground" aria-hidden="true" />
             {:else if run.status === "completed"}
               <IconCheck
-                class="size-3 {run.counts.failed > 0 || run.counts.error > 0
+                class="size-3 {hasFailure
                   ? 'text-destructive'
                   : 'text-emerald-600 dark:text-emerald-400'}"
                 aria-hidden="true"
               />
             {:else}
-              <IconClock class="size-3" aria-hidden="true" />
+              <IconBan class="size-3 text-amber-600 dark:text-amber-400" aria-hidden="true" />
             {/if}
             <span>{relativeTime(run.startedAt)}</span>
+            {#if run.status === "cancelled"}
+              <!-- P1-4：cancelled 微文案（与总览一套状态语言；不再与运行中同貌）。 -->
+              <span class="font-medium text-amber-600 dark:text-amber-400">
+                {runStatusLabel(run.status)}
+              </span>
+            {:else if ranNothing}
+              <!-- P2-5：completed-but-empty → 行级「No cases ran」。 -->
+              <span class="text-muted-foreground">{t("evaluating.noCasesRan")}</span>
+            {/if}
             {#if run.counts.failed > 0}
               <span
                 class="font-medium text-destructive"
@@ -642,8 +716,9 @@
 
     <!-- 主体：≥1024 树+详情双栏 / 720-1024 详情+树抽屉 / <720 单列 push。 -->
     <div class="relative min-h-0 flex-1 {layoutMode === 'wide' ? 'flex' : ''}">
-      <!-- case 步骤树（抽屉态 = 左滑覆盖层；单列态 = 无选中时的整面）。 -->
-      {#if layoutMode !== "drawer" || treeDrawerOpen}
+      <!-- case 步骤树（抽屉态 = 左滑覆盖层；单列态 = 无选中时的整面；P1-1：抽屉态
+           无选中时强制可见——Cases 不收起唯一内容）。 -->
+      {#if treeVisible}
         <aside
           class="{layoutMode === 'wide'
             ? 'h-full w-80 max-w-[340px] shrink-0 border-r border-border'
@@ -788,11 +863,11 @@
       <!-- 断言详情（选中 case；双栏态右栏 / 单列态 push 视图）。 -->
       {#if layoutMode !== "stack" || selectedCaseId !== null}
         <section
-          class={layoutMode === "wide"
-            ? "h-full min-w-0 flex-1 overflow-y-auto"
-            : layoutMode === "drawer"
-              ? "h-full min-w-0 flex-1 overflow-y-auto"
-              : "h-full w-full overflow-y-auto"}
+          class="evaluating-assertion-pane {layoutMode === 'wide'
+            ? 'h-full min-w-0 flex-1 overflow-y-auto'
+            : layoutMode === 'drawer'
+              ? 'h-full min-w-0 flex-1 overflow-y-auto'
+              : 'h-full w-full overflow-y-auto'}"
           data-testid="evaluating-assertion-pane"
         >
           {#if layoutMode === "stack" && selectedCaseId !== null}
@@ -815,8 +890,9 @@
           {/if}
 
           {#if selectedNode === null}
+            <!-- P1-1：无选中 case 的明确空态引导（wide + 抽屉态；单列态此面不渲染）。 -->
             <div class="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-              {#if layoutMode === "wide"}
+              {#if layoutMode !== "stack"}
                 <p class="text-xs text-muted-foreground">{t("evaluating.selectCaseHint")}</p>
               {/if}
             </div>
@@ -960,14 +1036,17 @@
                           {/if}
                         </div>
                       {:else}
-                        <!-- 期望 vs 观测 diff 双栏（等宽字体并排对照；不做行级算法 diff）。 -->
+                        <!-- 期望 vs 观测 diff 双栏（等宽字体并排对照；不做行级算法 diff）。
+                             P1-2（批评环 R1）：列宽跟随断言面板的容器查询（非视口——
+                             Agent 面板挤压下视口断点失效）；<720px 上下堆叠，不再压出
+                             空壳列。 -->
                         <div
-                          class="grid grid-cols-2 border-t {failed
+                          class="evaluating-diff-grid border-t {failed
                             ? 'border-destructive/30'
                             : 'border-border'}"
                           data-testid="evaluating-assertion-diff"
                         >
-                          <div class="min-w-0 border-r border-border p-2">
+                          <div class="evaluating-diff-expected min-w-0 p-2">
                             <p
                               class="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
                             >
@@ -1035,6 +1114,7 @@
     wsId={target.workspaceId}
     targets={[]}
     fixedTarget={target}
+    fixedSkillName={skillName}
   />
 {/if}
 {#if target !== null && canWrite && !skillUnresolvable && currentRevision !== null}
@@ -1046,3 +1126,63 @@
     onSaved={reload}
   />
 {/if}
+
+<style>
+  /*
+   * 批评环 R1 处置批的 CSS 契约（jsdom 无法断言样式——class 钩子由 dom 测试钉死）：
+   * 1. P1-2 断言 diff 双栏跟随「断言面板」容器宽度（Agent 面板挤压下视口断点失效）：
+   *    ≥720px 并排双栏（EXPECTED 右分隔线），<720px 上下堆叠（EXPECTED 下分隔线）。
+   * 2. P2-9 run 胶囊行单行横滚 + 边缘渐隐（先例：workspaces skills-screen chips-row）；
+   *    隐藏原生滚动条，「可滚」affordance 交给 mask 渐变（渐变区落在容器自有 16px
+   *    inline padding 上）。
+   * 3. P2-12 键盘导航 focus-visible 2px outline（胶囊/树行等原生 button 无 shadcn
+   *    ring——统一可见焦点环）。
+   */
+  .evaluating-assertion-pane {
+    container-type: inline-size;
+  }
+  .evaluating-diff-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .evaluating-diff-grid > .evaluating-diff-expected {
+    border-bottom: 1px solid var(--border);
+  }
+  @container (min-width: 720px) {
+    .evaluating-diff-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .evaluating-diff-grid > .evaluating-diff-expected {
+      border-bottom: none;
+      border-right: 1px solid var(--border);
+    }
+  }
+  .evaluating-run-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+  }
+  .evaluating-run-chips::-webkit-scrollbar {
+    display: none;
+  }
+  .evaluating-kbd-scope :global(button:focus-visible),
+  .evaluating-kbd-scope :global([tabindex]:focus-visible) {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+</style>

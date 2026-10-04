@@ -142,6 +142,8 @@ export const en = {
   "agentTree.start": "Start",
   "agentTree.cancel": "Cancel",
   "agentTree.toggleGroup": "Toggle {group}",
+  "agentTree.expandGroup": "Expand {group}",
+  "agentTree.collapseGroup": "Collapse {group}",
   "agentTree.organizationWorkspace": "Workspace",
   "agentTree.organizationTimeline": "Timeline",
   "agentTree.search": "Search sessions",
@@ -400,6 +402,9 @@ export const en = {
   "evaluating.caseCountMany": "{count} cases",
   "evaluating.staleShare": "{percent}% stale",
   "evaluating.notRunYet": "never run",
+  "evaluating.noCompletedRun": "no completed run",
+  "evaluating.ranCount": "{count} ran",
+  "evaluating.noCasesRan": "No cases ran",
   "evaluating.passedCount": "{count} passed",
   "evaluating.failedCount": "{count} failed",
   "evaluating.errorCountOne": "{count} error",
@@ -418,6 +423,8 @@ export const en = {
   "evaluating.cancelRun": "Cancel run",
   "evaluating.cancelRunTitle": "Cancel this run",
   "evaluating.runStateToast": "Run {status}.",
+  "evaluating.runCompletedToast": "Run completed: {passed}/{total} passed.",
+  "evaluating.runCompletedEmptyToast": "Run completed — no cases ran.",
 
   /** Run 确认弹层（显式 target 三元组标注；绝不自动运行）。 */
   "evaluating.runTitle": "Run evaluation",
@@ -428,6 +435,10 @@ export const en = {
   "evaluating.runRunnerLabel": "Runner",
   "evaluating.runRunnerAnalyzer": "Analyzer (offline)",
   "evaluating.runRunnerProviderModel": "Provider model",
+  "evaluating.runModelLabel": "Model",
+  "evaluating.runModelLine": "{provider} · {model}",
+  "evaluating.runModelLineWithEffort": "{provider} · {model} · reasoning {effort}",
+  "evaluating.runModelUnavailable": "default model unresolved — check Agent settings",
   "evaluating.runCasesLabel": "Cases",
   "evaluating.runCasesLoading": "Loading cases…",
   "evaluating.runNoCases": "This target has no cases yet.",
@@ -447,6 +458,8 @@ export const en = {
 
   /** 详情屏（三段路由 /w/:wsId/evaluating/:providerId/:skillId；run 报告式）。 */
   "evaluating.backTitle": "Back to the evaluating overview",
+  "evaluating.globalWorkspaceLabel": "Global",
+  "evaluating.viewingOlderRun": "Viewing run from {time}",
   "evaluating.readonlyBadge": "read-only",
   "evaluating.readonlyNote":
     "Global workspace corpora are read-only — open the skill in an imported workspace to run or edit.",
