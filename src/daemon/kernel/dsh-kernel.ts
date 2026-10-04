@@ -32,7 +32,11 @@ import {
   resolveProfileDir,
 } from "@deepseek-ai/dsh-app-boot";
 import type { Context } from "@deepseek-ai/cordis";
-import { completeTransitiveMirror, ensureDirLink } from "../dsh-profile-support.js";
+import {
+  completeTransitiveMirror,
+  reanchorMirrorToHost,
+  recoverProfilesOrphanLocks,
+} from "../dsh-profile-support.js";
 import { agentRoleRowsYaml } from "./agent-roles.js";
 import {
   createEphemeralSession,
@@ -151,8 +155,21 @@ export async function bootDshKernel(options: DshKernelOptions): Promise<DshKerne
   fs.writeFileSync(path.join(profileDir, "cordis.patch.yml"), disableYaml + llmYaml, "utf8");
 
   const installAnchor = path.join(repoRoot, "package.json");
+  // 2026-10-04 事故双守护（heal 前置）：孤儿写锁恢复（官方协议把清理定为
+  // 操作员动作，宿主 boot 期单例可代行）+ 镜像家族宿主源重锚（防共享 npx
+  // 缓存被 warmup 刷新导致的版本漂移；详见 dsh-profile-support.ts 意图 [3][4]）。
+  const orphanLocks = recoverProfilesOrphanLocks(options.home);
+  if (orphanLocks.length > 0) {
+    console.warn(`[dsh-kernel] recovered orphan profile lock(s): ${orphanLocks.join(", ")}`);
+  }
   const profile = loadProfile("skill-creator", "kernel", installAnchor, options.home);
   await healProfilesModuleFallback({ installAnchor, profile, home: options.home });
+  const reanchor = reanchorMirrorToHost(options.home, installAnchor);
+  if (reanchor.rebuilt.length > 0) {
+    console.warn(
+      `[dsh-kernel] mirror drift (${reanchor.trigger.join(", ")}) — hot-rebuilt ${reanchor.rebuilt.length} package(s) from host tree`,
+    );
+  }
   completeTransitiveMirror(options.home);
 
   // 产品 preset（roster 的 user root：$DSH_HOME/.agent-presets/<id>/，官方机制
