@@ -11,7 +11,12 @@
        + revision stale 判读）+ 键盘 ↑↓/Enter/Esc
 - [x] 1.5 case 管理收进折叠区（诊断优先）；Imported-only 门控沿旧
 - [x] 1.6 i18n C 类（en=zh 齐全）+ 三尺寸（双栏/抽屉/单列 push）
-- [ ] 1.7 验证门：全量绿 + webui check + ego-browser（两故事走查 + 键盘 + live
+- [x] 1.7 验证门：全量绿 + webui check + ego-browser（两故事走查 + 键盘 + live
        run）+ 新鲜批评者批评环（9+ 门或停止条件收口）+ 进程回收
-       （测试/check 部分已过：webui check 0/0、evaluation 五套件 39+71 绿、
-       pnpm typecheck 绿；ego-browser 与批评环归编排者）
+       （收口记录 2026-10-04：批评环 R1 6.4 → R2 8.1（处置 82f8478：断词
+       wrap-anywhere 三处/toast lifecycle key 键控/Detail 头部容器查询降级；
+       running 撞色项 CSS+像素采样证伪不改）→ R3 8.8（处置 de60ac9：layoutMode
+       测量源容器化，Agent 面板挤压压溃拔除）→ R4 终判 9.4 过线、建议归档；
+       两故事 R3/R4 复验 PASS；全量 214 文件 2180 测试绿（首跑 1 文件失败经
+       两次独立复跑全绿判定为并行负载抖动）；webui check 0/0；R2-R4 三轮
+       子代理进程回收证据齐——证据 /tmp/ia-redesign/screens-eval-r{2,3,4}/）
