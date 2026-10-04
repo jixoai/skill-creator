@@ -165,6 +165,72 @@
     }
   }
 
+  /* ---------- 展开正文最小渲染（2.2 处置批 P2-6） ----------
+     碎片正文是轻 markdown：标题/列表/围栏代码块三类区分 + 段落；不做全量引擎
+     （无内联标记解析、无 HTML 透传——纯文本插值，天然无注入面）。 */
+
+  type WikiBodyBlock =
+    | { kind: "heading"; level: 2 | 3 | 4; text: string }
+    | { kind: "paragraph"; text: string }
+    | { kind: "list"; items: string[] }
+    | { kind: "code"; lines: string[] };
+
+  const HEADING_RE = /^(#{1,3})\s+(.*)$/;
+  const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/;
+
+  function wikiBodyBlocks(body: string): WikiBodyBlock[] {
+    const blocks: WikiBodyBlock[] = [];
+    const lines = body.replace(/\r\n/g, "\n").split("\n");
+    let i = 0;
+    const isSpecial = (line: string): boolean =>
+      line.startsWith("```") || HEADING_RE.test(line) || LIST_ITEM_RE.test(line);
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.startsWith("```")) {
+        const code: string[] = [];
+        i += 1;
+        while (i < lines.length && !lines[i].startsWith("```")) {
+          code.push(lines[i]);
+          i += 1;
+        }
+        i += 1; // 收栏 ```（缺失收栏时消费到末尾）
+        if (code.length > 0) blocks.push({ kind: "code", lines: code });
+        continue;
+      }
+      const heading = HEADING_RE.exec(line);
+      if (heading) {
+        // pattern 行标题已是页面一级语境：# 映射 h2 语义级，逐级降小。
+        blocks.push({
+          kind: "heading",
+          level: Math.min(heading[1].length + 1, 4) as 2 | 3 | 4,
+          text: heading[2].trim(),
+        });
+        i += 1;
+        continue;
+      }
+      if (LIST_ITEM_RE.test(line)) {
+        const items: string[] = [];
+        while (i < lines.length && LIST_ITEM_RE.test(lines[i])) {
+          items.push(LIST_ITEM_RE.exec(lines[i])?.[1]?.trim() ?? "");
+          i += 1;
+        }
+        blocks.push({ kind: "list", items });
+        continue;
+      }
+      if (line.trim() === "") {
+        i += 1;
+        continue;
+      }
+      const paragraph: string[] = [];
+      while (i < lines.length && lines[i].trim() !== "" && !isSpecial(lines[i])) {
+        paragraph.push(lines[i].trim());
+        i += 1;
+      }
+      blocks.push({ kind: "paragraph", text: paragraph.join(" ") });
+    }
+    return blocks;
+  }
+
   /* ---------- 蒸馏入口（tasks 1.6；投影与代次纪律在 wiki-distill store） ---------- */
 
   /** RunState 徽标 key（六态穷尽；无 phase 字段——RunState 即阶段真相）。 */
@@ -572,8 +638,38 @@
                 {:else if state.error}
                   <p class="text-xs text-destructive" role="alert">{state.error}</p>
                 {:else if state.read}
-                  <pre
-                    class="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 p-3 text-xs leading-relaxed">{state.read.body.trim()}</pre>
+                  <!-- 最小 markdown 渲染（P2-6）：标题/列表/代码块区分，段落剥
+                       原始 # 前缀；纯文本插值无注入面。 -->
+                  <div class="max-h-72 space-y-2 overflow-y-auto text-xs leading-relaxed">
+                    {#each wikiBodyBlocks(state.read.body) as block, i (i)}
+                      {#if block.kind === "heading"}
+                        {#if block.level === 2}
+                          <p class="text-sm font-semibold text-foreground">{block.text}</p>
+                        {:else if block.level === 3}
+                          <p class="text-[13px] font-semibold text-foreground">{block.text}</p>
+                        {:else}
+                          <p
+                            class="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                          >
+                            {block.text}
+                          </p>
+                        {/if}
+                      {:else if block.kind === "list"}
+                        <ul class="list-disc space-y-0.5 pl-5">
+                          {#each block.items as item, j (j)}
+                            <li>{item}</li>
+                          {/each}
+                        </ul>
+                      {:else if block.kind === "code"}
+                        <pre
+                          class="overflow-x-auto rounded-md bg-muted/40 p-2 font-mono text-[11px] leading-4">{block.lines.join(
+                            "\n",
+                          )}</pre>
+                      {:else}
+                        <p class="text-muted-foreground">{block.text}</p>
+                      {/if}
+                    {/each}
+                  </div>
                 {/if}
               </div>
             {/if}

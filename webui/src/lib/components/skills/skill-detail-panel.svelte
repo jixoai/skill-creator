@@ -260,11 +260,14 @@
           <p class="mt-0.5 text-xs leading-5 text-muted-foreground">{detail.description}</p>
         </div>
       </div>
-      <div class="mt-2 flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+      <!-- 动作行（2.2 处置批 P2-9）：nowrap + 行内横滚（chips-row 同族）——四个
+           动作不再 3+1 ragged wrap（换行位置随 pane 宽度漂移）；滚动条隐藏，
+           溢出可拖。 -->
+      <div class="detail-actions mt-2 flex shrink-0 items-center justify-end gap-1.5">
         <Button
           variant="ghost"
           size="icon"
-          class="h-8 w-8"
+          class="h-8 w-8 shrink-0"
           title={t("skillDetail.insightsTitle")}
           aria-label={t("skillDetail.insightsTitle")}
           onclick={() =>
@@ -279,7 +282,7 @@
           <Button
             variant="outline"
             size="sm"
-            class="h-8 gap-1.5"
+            class="h-8 shrink-0 gap-1.5"
             title={t("skillDetail.editTitle")}
             onclick={() =>
               goById("creator.workspace.skill", {
@@ -298,7 +301,7 @@
         <Button
           variant="outline"
           size="sm"
-          class="h-8 gap-1.5"
+          class="h-8 shrink-0 gap-1.5"
           disabled={validating}
           onclick={() => void handleValidate()}
         >
@@ -310,7 +313,7 @@
         <Button
           size="sm"
           variant={detail.disabled ? "default" : "outline"}
-          class="h-8 gap-1.5"
+          class="h-8 shrink-0 gap-1.5"
           disabled={toggling}
           onclick={() => void handleToggle()}
         >
@@ -322,6 +325,9 @@
           {detail.disabled ? t("skillDetail.enable") : t("skillDetail.disable")}
         </Button>
       </div>
+      <!-- metadata 行（P2-9）：Update check 并入（原 body 独立区块退役）——徽标
+           流（provider/目录/禁用/更新态）与轻量只读动作同列，正文区不再被
+           单按钮区块打断。 -->
       <div class="mt-2 flex flex-wrap items-center gap-1.5">
         <Badge variant="secondary">{detail.provider}</Badge>
         {#if detail.directoryName !== detail.name}
@@ -331,6 +337,47 @@
           <Badge variant="outline" class="text-amber-700 dark:text-amber-300">
             {t("skillDetail.disabledBadge")}
           </Badge>
+        {/if}
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-6 shrink-0 gap-1 px-2 text-[11px]"
+          disabled={checkingUpdate || skillsUpdateState.checking}
+          onclick={() => void handleCheckUpdate()}
+        >
+          {#if checkingUpdate || skillsUpdateState.checking}
+            <IconLoader class="h-3 w-3 animate-spin" />
+          {:else}
+            <IconDownload class="h-3 w-3" />
+          {/if}
+          {t("skillDetail.updateCheck")}
+        </Button>
+        {#if updateEntry}
+          {#if updateEntry.status === "updated"}
+            <Badge variant="secondary">{t("skillDetail.updateOutdated")}</Badge>
+          {:else if updateEntry.status === "already-current"}
+            <Badge variant="outline">{t("skillDetail.updateCurrent")}</Badge>
+          {:else if updateEntry.status === "failed"}
+            <Badge variant="destructive">{t("skillDetail.updateFailed")}</Badge>
+          {:else}
+            <Badge variant="outline">{t("skillDetail.updateUnavailable")}</Badge>
+          {/if}
+          {#if updateEntry.error}
+            <span
+              class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+              title={updateEntry.error}
+            >
+              {updateEntry.error}
+            </span>
+          {/if}
+        {:else if skillsUpdateState.checkError}
+          <span
+            class="min-w-0 flex-1 truncate text-xs text-destructive"
+            role="alert"
+            title={skillsUpdateState.checkError}
+          >
+            {skillsUpdateState.checkError}
+          </span>
         {/if}
       </div>
     </header>
@@ -356,42 +403,7 @@
         </section>
       {/if}
 
-      <section class="mb-4 flex items-center gap-2 border-b border-border pb-3">
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-7 gap-1.5 text-xs"
-          disabled={checkingUpdate || skillsUpdateState.checking}
-          onclick={() => void handleCheckUpdate()}
-        >
-          {#if checkingUpdate || skillsUpdateState.checking}
-            <IconLoader class="h-3.5 w-3.5 animate-spin" />
-          {:else}
-            <IconDownload class="h-3.5 w-3.5" />
-          {/if}
-          {t("skillDetail.updateCheck")}
-        </Button>
-        {#if updateEntry}
-          {#if updateEntry.status === "updated"}
-            <Badge variant="secondary">{t("skillDetail.updateOutdated")}</Badge>
-          {:else if updateEntry.status === "already-current"}
-            <Badge variant="outline">{t("skillDetail.updateCurrent")}</Badge>
-          {:else if updateEntry.status === "failed"}
-            <Badge variant="destructive">{t("skillDetail.updateFailed")}</Badge>
-          {:else}
-            <Badge variant="outline">{t("skillDetail.updateUnavailable")}</Badge>
-          {/if}
-          {#if updateEntry.error}
-            <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-              {updateEntry.error}
-            </span>
-          {/if}
-        {:else if skillsUpdateState.checkError}
-          <span class="min-w-0 flex-1 truncate text-xs text-destructive" role="alert">
-            {skillsUpdateState.checkError}
-          </span>
-        {/if}
-      </section>
+      <!-- Update check 独立区块已并入头部 metadata 行（2.2 处置批 P2-9）。 -->
 
       <!-- Chat about this skill（creator-agent-chat 1.4）：resume/新建两态在 action 内裁决。 -->
       <section class="mb-4">
@@ -440,8 +452,13 @@
           <h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             SKILL.md
           </h3>
-          <!-- 渲染器关闭原始 HTML 透传，并兜底 sanitize；详见 render-skill-md.ts -->
-          <div class="prose prose-sm max-w-none overflow-x-auto">{@html renderedBody}</div>
+          <!-- 渲染器关闭原始 HTML 透传，并兜底 sanitize；详见 render-skill-md.ts。
+               pre 在列内折行（2.2 处置批 P2-9，与 creator preview P2-5 同族法则）。 -->
+          <div
+            class="prose prose-sm max-w-none prose-pre:whitespace-pre-wrap prose-pre:break-words"
+          >
+            {@html renderedBody}
+          </div>
         </section>
       {:else}
         <p class="flex items-center gap-2 text-xs text-muted-foreground">
@@ -462,5 +479,15 @@
     .detail-back {
       display: none;
     }
+  }
+  /* 动作行单行横滚（2.2 处置批 P2-9，skills-screen chips-row 同族）：滚动条
+     隐藏，「可滚」由溢出截断自证；动作永不 ragged wrap。 */
+  .detail-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .detail-actions::-webkit-scrollbar {
+    display: none;
   }
 </style>

@@ -9,6 +9,9 @@
   懒加载组件）；new 模式校验改 validateNewDraft 字段级错误 + Save 禁用联动。
   2026-10-02 design-critique R2：工具栏危险操作隔离——Reload/Save 为常规组，
   Delete 经分隔线推到右端（confirm 链路与配色不动）。
+  修订 [2026-10-04]（workspace-page-polish 2.2 处置批）：P1-3 pristine 红错延后
+  （错误只在 touched/提交尝试后呈现；目录名规则文案降为常态 muted helper）；
+  P2-10 加载态改 frontmatter 表单同构骨架（Delete 的 revision 闸门既有语义保持）。
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -117,6 +120,22 @@
   const directoryNameValid = $derived(
     draft.mode !== "new" || newDraftErrors.directoryName === null,
   );
+
+  // pristine 红错延后（2.2 处置批 P1-3）：错误只在字段 touched（blur）或提交尝试
+  // 后呈现——空表单开局不再三条 text-destructive。目录名规则文案常态 muted helper。
+  let submittedAttempt = $state(false);
+  const touched = $state({ directoryName: false, name: false, description: false });
+  const showDirectoryError = $derived(
+    draft.mode === "new" && (touched.directoryName || submittedAttempt) && !directoryNameValid,
+  );
+  const showNameError = $derived(
+    draft.mode === "new" && (touched.name || submittedAttempt) && newDraftErrors.name !== null,
+  );
+  const showDescriptionError = $derived(
+    draft.mode === "new" &&
+      (touched.description || submittedAttempt) &&
+      newDraftErrors.description !== null,
+  );
   const canSave = $derived(
     !saving &&
       draft.name.trim().length > 0 &&
@@ -149,6 +168,7 @@
       return;
     }
     // new 模式
+    submittedAttempt = true;
     const parsed = SkillDirectoryNameSchema.safeParse(draft.directoryName);
     if (!parsed.success) {
       showToast("Directory name must be lowercase letters, numbers, and hyphens.");
@@ -294,8 +314,25 @@
   </div>
 
   {#if loading}
-    <div class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
-      <IconLoader class="h-4 w-4 animate-spin" /> Loading…
+    <!-- 加载骨架（2.2 处置批 P2-10）：frontmatter 表单同构骨架（label 条 + 输入条
+         ×3 + 正文大块）——结构预留给眼睛定位，替代裸 Loading 文本。 -->
+    <div class="min-h-0 flex-1 space-y-4 p-4" role="status" aria-busy="true">
+      <div class="space-y-1.5">
+        <div class="h-3 w-24 animate-pulse rounded bg-muted/60"></div>
+        <div class="h-8 w-full animate-pulse rounded-md bg-muted/60"></div>
+      </div>
+      <div class="space-y-1.5">
+        <div class="h-3 w-16 animate-pulse rounded bg-muted/60"></div>
+        <div class="h-8 w-full animate-pulse rounded-md bg-muted/60"></div>
+      </div>
+      <div class="space-y-1.5">
+        <div class="h-3 w-20 animate-pulse rounded bg-muted/60"></div>
+        <div class="h-16 w-full animate-pulse rounded-md bg-muted/60"></div>
+      </div>
+      <div class="flex min-h-48 flex-1 flex-col gap-1.5">
+        <div class="h-3 w-28 animate-pulse rounded bg-muted/60"></div>
+        <div class="h-full min-h-36 w-full animate-pulse rounded-md bg-muted/60"></div>
+      </div>
     </div>
   {:else if loadError}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
@@ -314,11 +351,17 @@
           <span class="text-[11px] font-medium text-muted-foreground">Directory name</span>
           <Input
             bind:value={draft.directoryName}
+            onblur={() => (touched.directoryName = true)}
             class="h-8 font-mono text-xs"
             placeholder="my-skill"
           />
-          {#if !directoryNameValid}
-            <span class="text-[11px] text-destructive">
+          {#if showDirectoryError}
+            <span class="text-[11px] text-destructive" data-testid="directory-name-error">
+              {newDraftErrors.directoryName ?? "Use lowercase letters, numbers, and hyphens."}
+            </span>
+          {:else}
+            <!-- 规则 helper 常态 muted（P1-3）：pristine 期只提示规则，不红错。 -->
+            <span class="text-[11px] text-muted-foreground" data-testid="directory-name-helper">
               Use lowercase letters, numbers, and hyphens.
             </span>
           {/if}
@@ -327,8 +370,13 @@
 
       <label class="block space-y-1">
         <span class="text-[11px] font-medium text-muted-foreground">Name</span>
-        <Input bind:value={draft.name} class="h-8 text-sm" placeholder="Skill name" />
-        {#if draft.mode === "new" && newDraftErrors.name}
+        <Input
+          bind:value={draft.name}
+          onblur={() => (touched.name = true)}
+          class="h-8 text-sm"
+          placeholder="Skill name"
+        />
+        {#if showNameError}
           <span class="text-[11px] text-destructive">{newDraftErrors.name}</span>
         {/if}
       </label>
@@ -337,10 +385,11 @@
         <span class="text-[11px] font-medium text-muted-foreground">Description</span>
         <textarea
           bind:value={draft.description}
+          onblur={() => (touched.description = true)}
           rows="2"
           class="w-full resize-y rounded-md border border-input bg-input/20 px-2 py-1 text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           placeholder="What this skill does"></textarea>
-        {#if draft.mode === "new" && newDraftErrors.description}
+        {#if showDescriptionError}
           <span class="text-[11px] text-destructive">{newDraftErrors.description}</span>
         {/if}
       </label>

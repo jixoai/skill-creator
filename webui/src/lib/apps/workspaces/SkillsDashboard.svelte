@@ -13,6 +13,7 @@
   4. wsId 身份解析（manifest zod 已校验；此处二次 safeParse 为 branded 类型）。
 -->
 <script lang="ts">
+  import { tick } from "svelte";
   import { useParams, useSearch, goById } from "$lib/shell";
   import { t } from "$lib/i18n";
   import { WorkspaceIdSchema, type WorkspaceId } from "$shared/contracts/workspaces.js";
@@ -56,6 +57,21 @@
     { id: "agents" as const, label: t("dashboard.screenAgents") },
     { id: "repos" as const, label: t("dashboard.screenRepos") },
   ]);
+
+  // 深链滚动（2.2 处置批 P2-10）：?screen= 深链落点在换行网格里可能在折叠线下
+  // （skills span 2 + agents/repos 换行）——active 变化时把落点滚进视口；高亮由
+  // 既有 data-active 边框承担（下追加 ring 强化落点可寻）。单列窄容器只有
+  // active screen 可见，scrollIntoView 无害。
+  let gridEl = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    const screen = activeScreen;
+    if (screen === "skills") return;
+    void tick().then(() => {
+      gridEl
+        ?.querySelector<HTMLElement>(`.grid-item[data-screen="${screen}"]`)
+        ?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    });
+  });
 </script>
 
 {#if wsId}
@@ -85,14 +101,18 @@
     </div>
 
     <div class="dashboard-scroll min-h-0 flex-1 overflow-y-auto p-4">
-      <div class="dashboard-grid" data-testid="dashboard-grid">
-        <div class="grid-item skills-item" data-active={activeScreen === "skills"}>
+      <div class="dashboard-grid" bind:this={gridEl} data-testid="dashboard-grid">
+        <div
+          class="grid-item skills-item"
+          data-screen="skills"
+          data-active={activeScreen === "skills"}
+        >
           <SkillsScreen {wsId} />
         </div>
-        <div class="grid-item" data-active={activeScreen === "agents"}>
+        <div class="grid-item" data-screen="agents" data-active={activeScreen === "agents"}>
           <AgentsScreen {wsId} />
         </div>
-        <div class="grid-item" data-active={activeScreen === "repos"}>
+        <div class="grid-item" data-screen="repos" data-active={activeScreen === "repos"}>
           <ReposScreen {wsId} />
         </div>
       </div>
@@ -144,9 +164,11 @@
     min-height: 0;
     overscroll-behavior: contain;
   }
-  /* active screen 高亮（宽屏全部并列，深链 ?screen= 指示落点）。 */
+  /* active screen 高亮（宽屏全部并列，深链 ?screen= 指示落点）。2.2 处置批
+     P2-10：ring 强化深链落点可寻（滚动由 script 侧 scrollIntoView 承担）。 */
   .dashboard-grid .grid-item[data-active="true"] :global(.screen) {
     border-color: color-mix(in oklab, var(--primary, #7c3aed) 40%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary, #7c3aed) 25%, transparent);
   }
 
   /* 单列容器：显式降档 span 1（r2 修订）+ 只显示 active screen

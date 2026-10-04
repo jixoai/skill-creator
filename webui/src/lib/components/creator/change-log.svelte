@@ -4,13 +4,17 @@
   1. 调用 creator.revisions 拉取 revision 历史（reverse-chronological）。
   2. 每条展示时间戳 + unified diff；点击展开显示完整正文快照（若 daemon 持久化）。
   视图状态：展开条目 → 组件 $state（瞬时 UI）。
+  修订 [2026-10-04]（workspace-page-polish 2.2 处置批 P1-2）：加载 effect 纳入
+  连接状态依赖——挂载窗口期不发 RPC（requireRpc 同步 throw 曾把假断连 error
+  钉死在深链面板上），重连自动补载；连接期呈现「重连中」而非错误。
   妥协声明：历史由 daemon 持有，浏览器只在子视图激活时拉取一次，不缓存跨渲染周期。
 -->
 <script lang="ts">
   import { useCreatorEditor } from "$lib/stores/creator-editor.svelte";
-  import { requireRpc } from "$lib/store.svelte";
+  import { connectionState, requireRpc } from "$lib/store.svelte";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import { getConnectionGeneration } from "$lib/store.svelte";
+  import { t } from "$lib/i18n";
   import { Button } from "$lib/components/ui/button";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconRotate from "@lucide/svelte/icons/rotate-cw";
@@ -26,9 +30,13 @@
   let entries = $state<CreatorRevisionEntry[]>([]);
   let expanded = $state<Record<string, boolean>>({});
 
-  // skillId 变化时重新拉取（edit 模式）。
+  // skillId 变化时重新拉取（edit 模式）。连接态是本 effect 的依赖（2.2 处置批
+  // P1-2）：挂载窗口期（WS 未就绪）不发起 requireRpc（同步 throw 会把 error 钉死
+  // 在面板上）；连接转 ready 自动重跑补载——对照 skills-screen 的 reconnect
+  // auto-remedy 范式，这里直接把连接闸做进加载 effect。
   $effect(() => {
     if (draft.mode !== "edit" || draft.skillId === null) return;
+    if (connectionState.status !== "connected") return;
     void loadRevisions(draft.skillId);
   });
 
@@ -99,6 +107,17 @@
   {:else if loading}
     <div class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
       <IconLoader class="h-4 w-4 animate-spin" /> Loading history…
+    </div>
+  {:else if connectionState.status !== "connected" && entries.length === 0}
+    <!-- 连接窗口期（2.2 处置批 P1-2）：显示重连中而非错误；连接转 ready 由加载
+         effect 的连接依赖自动补载。已有条目时保留列表（数据不闪没）。 -->
+    <div
+      class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground"
+      role="status"
+      data-testid="change-log-reconnecting"
+    >
+      <IconLoader class="h-4 w-4 animate-spin" />
+      {t("changeLog.reconnecting")}
     </div>
   {:else if error}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">

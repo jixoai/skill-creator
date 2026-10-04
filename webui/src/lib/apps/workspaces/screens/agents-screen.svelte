@@ -94,13 +94,20 @@
                 <span class="truncate text-[13px] font-medium text-foreground">
                   {provider.label}
                 </span>
-                {#if provider.writable}
-                  <Badge variant="outline" class="text-[10px]">{t("agentsScreen.writable")}</Badge>
-                {:else}
-                  <Badge variant="outline" class="text-[10px]">
-                    <IconShieldOff class="h-3 w-3" />
-                    {t("agentsScreen.readonly")}
-                  </Badge>
+                <!-- 可写性徽标（2.2 处置批 P2-9）：磁盘缺失（!available）行不给
+                     writable/readonly 徽标——目录不存在时「可写」是未经检验的断言；
+                     缺失语义由下方「Not found on disk」行独自承担。 -->
+                {#if provider.available}
+                  {#if provider.writable}
+                    <Badge variant="outline" class="text-[10px]">
+                      {t("agentsScreen.writable")}
+                    </Badge>
+                  {:else}
+                    <Badge variant="outline" class="text-[10px]">
+                      <IconShieldOff class="h-3 w-3" />
+                      {t("agentsScreen.readonly")}
+                    </Badge>
+                  {/if}
                 {/if}
                 {#if providerFilter === provider.id}
                   <span

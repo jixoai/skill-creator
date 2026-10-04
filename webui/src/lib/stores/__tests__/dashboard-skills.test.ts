@@ -233,6 +233,18 @@ describe("纯投影", () => {
     expect(chips.find((c) => c.providerId === "ghost")?.label).toBe("ghost");
   });
 
+  it("provider chips 零计数倒置（2.2 处置批 P2-2）：非零前置、零计数殿后（组内相对序保持）", () => {
+    const providers = [
+      { providerId: "empty-a" as ProviderId, label: "Empty A", available: true, skillCount: 0 },
+      { providerId: "full-a" as ProviderId, label: "Full A", available: true, skillCount: 1 },
+      { providerId: "empty-b" as ProviderId, label: "Empty B", available: true, skillCount: 0 },
+      { providerId: "full-b" as ProviderId, label: "Full B", available: true, skillCount: 2 },
+    ];
+    const rows = [row("full-a", 1), row("full-b", 2), row("full-b", 3)];
+    const chips = dashboardProviderCounts(providers, rows);
+    expect(chips.map((c) => c.providerId)).toEqual(["full-a", "full-b", "empty-a", "empty-b"]);
+  });
+
   it("duplicate counts map member ids to group size minus one", () => {
     const duplicates = {
       groups: [
@@ -278,6 +290,26 @@ describe("纯投影", () => {
     ).toEqual(["skill-2", "skill-3"]);
     expect(filterDashboardRows(rows, { duplicatesOnly: true }, dupIds).map((r) => r.name)).toEqual([
       "skill-2",
+    ]);
+  });
+
+  it("filterDashboardRows 行序可预测（2.2 处置批 P2-7）：provider 首现分组 + name localeCompare 二级键", () => {
+    // 乱序输入：同名行跨 provider、组内乱序、数字名走 numeric 序。
+    const rows = [
+      row("zcode", 10), // name skill-10
+      row("claude-code", 2),
+      row("zcode", 2),
+      row("claude-code", 1),
+      row("zcode", 1),
+    ];
+    const ordered = filterDashboardRows(rows, {}).map((r) => `${r.providerId}/${r.name}`);
+    // 分组按首现行序（zcode 先出现）；组内 numeric localeCompare：1 < 2 < 10。
+    expect(ordered).toEqual([
+      "zcode/skill-1",
+      "zcode/skill-2",
+      "zcode/skill-10",
+      "claude-code/skill-1",
+      "claude-code/skill-2",
     ]);
   });
 

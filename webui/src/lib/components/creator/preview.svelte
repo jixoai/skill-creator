@@ -54,7 +54,12 @@
     {#if draft.body.trim().length === 0}
       <p class="text-xs text-muted-foreground/70">Nothing to preview yet.</p>
     {:else}
-      <div class="prose prose-sm max-w-none overflow-x-auto">{@html renderedBody}</div>
+      <!-- pre 代码块约束进内容列（2.2 处置批 P2-5）：pre 的 min-content 会把整列
+           撑出 pane 右缘——pre-wrap + break-words 让代码在列内折行（与
+           RepositoryScan preview 同族法则），不再依赖整列横向滚动。 -->
+      <div class="prose prose-sm max-w-none prose-pre:whitespace-pre-wrap prose-pre:break-words">
+        {@html renderedBody}
+      </div>
     {/if}
   </section>
 </div>

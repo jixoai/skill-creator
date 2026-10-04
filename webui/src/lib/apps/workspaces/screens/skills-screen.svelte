@@ -47,6 +47,7 @@
   import DashboardFooter from "./dashboard-footer.svelte";
   import IconArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import IconFile from "@lucide/svelte/icons/file-text";
+  import IconLayers from "@lucide/svelte/icons/layers";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
   import IconPause from "@lucide/svelte/icons/circle-pause";
   import IconSearch from "@lucide/svelte/icons/search";
@@ -173,6 +174,14 @@
 
   const providerChips = $derived(
     dashboardProviderCounts(dashboardSkillsState.providers, dashboardSkillsState.rows),
+  );
+  // 零计数 chips 折叠（2.2 处置批 P2-2）：非零前置（store 排序），零计数收进
+  // 「+N providers」溢出项；选中的零计数 chip 强制露出（筛选态不被折叠隐藏）。
+  const nonZeroChips = $derived(providerChips.filter((chip) => chip.count > 0));
+  const zeroChips = $derived(providerChips.filter((chip) => chip.count === 0));
+  let zeroChipsExpanded = $state(false);
+  const zeroChipsVisible = $derived(
+    zeroChipsExpanded || zeroChips.some((chip) => chip.providerId === providerFilter),
   );
   const duplicateCounts = $derived.by(() => {
     // 全量组已载（truncated 提示后的 skills.duplicates 查询）→ 以全量接管过滤。
@@ -349,7 +358,8 @@
     {/if}
     <!-- provider chips：All + 每 provider 计数（联动 Agents screen 的选中态真相）。
          单行横滚（走查 13-fix）：真实目录 76 chips wrap 九行会把 master-detail 挤到
-         0px——不换行、横向内滚，header 高度退回单行。 -->
+         0px——不换行、横向内滚，header 高度退回单行。零计数折叠（2.2 处置批
+         P2-2）：非零 chips 前置，零计数收进「+N providers」溢出项按需展开。 -->
     <div class="chips-row mt-2 flex gap-1.5" role="group" aria-label={t("skillsScreen.chipsAria")}>
       <button
         type="button"
@@ -363,7 +373,7 @@
         {t("skillsScreen.chipAll")}
         <span class="tabular-nums opacity-70">{totalLoaded}</span>
       </button>
-      {#each providerChips as chip (chip.providerId)}
+      {#each nonZeroChips as chip (chip.providerId)}
         <button
           type="button"
           class="flex min-h-7 max-w-full items-center gap-1 rounded-full border px-2.5 text-xs transition-colors
@@ -382,6 +392,42 @@
           <span class="tabular-nums opacity-70">{chip.count}</span>
         </button>
       {/each}
+      {#if zeroChips.length > 0}
+        <button
+          type="button"
+          class="flex min-h-7 shrink-0 items-center gap-1 rounded-full border border-dashed border-border/70 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted/50"
+          aria-expanded={zeroChipsVisible}
+          aria-pressed={zeroChips.some((chip) => chip.providerId === providerFilter)}
+          title={zeroChips.map((chip) => chip.providerId).join(", ")}
+          data-testid="zero-providers-overflow"
+          onclick={() => (zeroChipsExpanded = !zeroChipsExpanded)}
+        >
+          {zeroChipsVisible
+            ? t("skillsScreen.hideEmptyProviders")
+            : t("skillsScreen.moreProviders", { count: zeroChips.length })}
+        </button>
+        {#if zeroChipsVisible}
+          {#each zeroChips as chip (chip.providerId)}
+            <button
+              type="button"
+              class="flex min-h-7 max-w-full items-center gap-1 rounded-full border px-2.5 text-xs transition-colors
+                {providerFilter === chip.providerId
+                ? 'border-primary/60 bg-primary/10 font-medium text-foreground'
+                : 'border-border/70 text-muted-foreground hover:bg-muted/50'}"
+              aria-pressed={providerFilter === chip.providerId}
+              title={chip.providerId}
+              onclick={() =>
+                setSearch({
+                  provider: providerFilter === chip.providerId ? undefined : chip.providerId,
+                  skill: undefined,
+                })}
+            >
+              <span class="truncate">{chip.label}</span>
+              <span class="tabular-nums opacity-70">{chip.count}</span>
+            </button>
+          {/each}
+        {/if}
+      {/if}
     </div>
   </header>
 
@@ -495,13 +541,15 @@
                     </span>
                   {/if}
                   {#if sameContent > 0}
+                    <!-- 重复徽标（2.2 处置批 P2-9）：↗ 换 layers——「同内容多副本」
+                         语义，不再与外链/跳转 affordance 混淆；title 保留计数语义。 -->
                     <span
                       class="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground/80"
                       title={sameContent === 1
                         ? t("skillsScreen.sameContentOne", { count: sameContent })
                         : t("skillsScreen.sameContentMany", { count: sameContent })}
                     >
-                      <IconArrowUpRight class="h-3 w-3" aria-hidden="true" />
+                      <IconLayers class="h-3 w-3" aria-hidden="true" />
                       <span class="tabular-nums">{sameContent}</span>
                     </span>
                   {/if}

@@ -142,7 +142,8 @@ describe("SkillMenu (skill-search-gui C4)", () => {
     const search = vi.fn();
     rpcClient = { skills: { search } };
     const ctx = mountMenu("$");
-    expect(ctx.menu()?.textContent).toContain("输入关键词检索技能");
+    // 2.2 处置批 P2-1：en 占位由历史中文改英文（zh 词典不动）。
+    expect(ctx.menu()?.textContent).toContain("Type to search skills");
     await vi.advanceTimersByTimeAsync(400);
     expect(search).not.toHaveBeenCalled();
     ctx.cleanup();

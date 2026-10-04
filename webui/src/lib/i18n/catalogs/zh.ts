@@ -568,6 +568,8 @@ export const zh: Record<keyof EnCatalog, string> = {
   "skillsScreen.sameContentMany": "与其他 {count} 个安装内容相同",
   "skillsScreen.noDescription": "暂无描述",
   "skillsScreen.loadMore": "载入更多",
+  "skillsScreen.moreProviders": "+{count} 个 provider",
+  "skillsScreen.hideEmptyProviders": "收起空 provider",
   "skillsScreen.selectSkill": "选择一个技能",
   "skillsScreen.selectSkillBody": "查看它的 frontmatter、渲染正文与校验状态。",
 
@@ -644,6 +646,8 @@ export const zh: Record<keyof EnCatalog, string> = {
   "reposScan.dryRunBody": "计划安装 {installs} 项，分布到 {destinations} 个目的地。",
   "reposScan.summary": "已安装 {installed} · 覆盖 {overwritten} · 跳过 {skipped} · 失败 {failed}",
   "reposScan.viewInDashboard": "在 dashboard 中查看",
+  "reposScan.confirmTitle": "确认安装",
+  "reposScan.confirmBody": "将 {skills} 个所选技能安装到 {targets} 个 provider 位置：",
 
   /** ---------- Skill 详情面（只读文档 + 管理动作；编辑唯一真相 = Creator） ---------- */
   "skillDetail.loading": "正在载入技能…",
@@ -731,6 +735,7 @@ export const zh: Record<keyof EnCatalog, string> = {
 
   /** ---------- Creator 编辑页（二级工作页残留文案入词典；creator-agent-chat 1.9） ---------- */
   "creatorEditor.newSkillTitle": "新技能",
+  "changeLog.reconnecting": "重连中…",
   "creatorEditor.untitledSkill": "技能",
   "creatorEditor.invalidTarget": "非法的 workspace 目标。",
   "creatorEditor.viewEvaluation": "查看评估",

@@ -212,4 +212,44 @@ describe("WikiScopeView", () => {
 
     unmount(instance);
   });
+
+  it("expands a pattern with minimal markdown rendering（2.2 处置批 P2-6：标题/列表/代码区分，剥 # 前缀）", async () => {
+    rpcMock.wiki.list.mockResolvedValue({ patterns: [makeItem("md-note", "Markdown note")] });
+    const instance = mountView();
+    await flushAsync();
+
+    rpcMock.wiki.read.mockResolvedValue({
+      ...makeItem("md-note", "Markdown note"),
+      scope: "~",
+      body: [
+        "# Release law",
+        "",
+        "Ship small or do not ship.",
+        "",
+        "- pin the version",
+        "- audit the lockfile",
+        "",
+        "```json",
+        '{"pinned": true}',
+        "```",
+      ].join("\n"),
+    });
+    const row = Array.from(target?.querySelectorAll("button") ?? []).find((button) =>
+      button.textContent?.includes("Markdown note"),
+    ) as HTMLButtonElement;
+    row.click();
+    await flushAsync();
+
+    // 标题剥离「# 」前缀；列表项成 bullet；代码块进 pre；围栏标记不再字面呈现。
+    expect(target?.textContent).toContain("Release law");
+    expect(target?.textContent).not.toContain("# Release law");
+    expect(target?.textContent).toContain("pin the version");
+    expect(target?.textContent).toContain('{"pinned": true}');
+    expect(target?.textContent).not.toContain("```");
+    // 嵌套渲染 ul（外层是 pattern 列表自身，用 list-disc 类锚定嵌套面）。
+    expect(target?.querySelector("ul.list-disc")?.querySelectorAll("li").length).toBe(2);
+    expect(target?.querySelector("pre")?.textContent).toContain('{"pinned": true}');
+
+    unmount(instance);
+  });
 });

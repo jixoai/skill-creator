@@ -175,12 +175,14 @@ describe("creator deep-link recovery (WS5 walkthrough B)", () => {
     await flushAsync();
 
     expect(target?.textContent).toContain("Change history");
-    // 未连接：不发文档 RPC（连接闸）；子视图 RPC（revisions）失败被 catch 成
-    // 错误面——页面存活不冻结。
+    // 未连接：不发文档 RPC（连接闸）；log 子视图（ChangeLog）呈现「重连中」
+    // 而非错误面（2.2 处置批 P1-2：连接窗口期不再把 requireRpc throw 钉死成
+    // 假断连 error——旧断言 "not connected" 错误面退役）。页面存活不冻结。
     expect(rpc.creator.load).not.toHaveBeenCalled();
-    expect(target?.textContent).toContain("not connected");
+    expect(rpc.creator.revisions).not.toHaveBeenCalled();
+    expect(target?.querySelector('[data-testid="change-log-reconnecting"]')).not.toBeNull();
 
-    // 连接转 ready：文档兜底 hydrate 自动补载。
+    // 连接转 ready：文档兜底 hydrate 自动补载 + revisions 连接依赖自动重跑。
     connectMockClient(rpc as unknown as Record<string, unknown>);
     await flushAsync();
 
@@ -189,6 +191,12 @@ describe("creator deep-link recovery (WS5 walkthrough B)", () => {
       providerId: PROVIDER,
       skillId: SK,
     });
+    expect(rpc.creator.revisions).toHaveBeenCalledWith({
+      workspaceId: WS,
+      providerId: PROVIDER,
+      skillId: SK,
+    });
+    expect(target?.querySelector('[data-testid="change-log-reconnecting"]')).toBeNull();
 
     // 反冻结钉：URL search 变化仍驱动子视图切换（僵尸分支不可能做到），
     // 且兜底 hydrate 的文档落在草稿上（Name 字段 = 服务器名，非空占位）。
@@ -277,6 +285,48 @@ describe("creator pageheader breadcrumb (workspace-page-polish P1-4)", () => {
     // hydrate 呈现。
     const nav = target?.querySelector("nav[aria-label='Skill location breadcrumb']");
     expect((nav?.textContent ?? "").replace(/\s+/g, " ").trim()).toBe("code-review");
+
+    unmount(instance);
+  });
+});
+
+describe("creator new-form pristine errors (workspace-page-polish 2.2 P1-3)", () => {
+  function mountNewForm() {
+    shellRouteState.params = { mode: "new", wsId: WS, providerId: PROVIDER };
+    shellRouteState.search = { subview: "file" };
+    const rpc = makeRpcMock();
+    connectMockClient(rpc as unknown as Record<string, unknown>);
+    return mount(CreatorWorkspace, { target: target as HTMLElement });
+  }
+
+  it("shows no red errors on a pristine new form; helper stays muted until touched", async () => {
+    const instance = mountNewForm();
+    await flushAsync();
+
+    // pristine：零 text-destructive（旧实现开局即三条红错）。
+    expect(target?.querySelectorAll(".text-destructive").length).toBe(0);
+    // 目录名规则文案以 muted helper 常态在场（非红错）。
+    expect(target?.querySelector('[data-testid="directory-name-helper"]')).not.toBeNull();
+    expect(target?.querySelector('[data-testid="directory-name-error"]')).toBeNull();
+
+    // touched（blur）后错误才呈现：空 Name blur → "Name is required."
+    const nameInput = target?.querySelector<HTMLInputElement>("input[placeholder='Skill name']");
+    nameInput?.dispatchEvent(new Event("blur", { bubbles: true }));
+    flushSync();
+    expect(target?.textContent).toContain("Name is required.");
+    // 未 touched 的 Description 仍无红错。
+    expect(target?.textContent).not.toContain("Description is required.");
+
+    // 目录名输入非法值 + blur → 红错取代 helper。
+    const dirInput = target?.querySelector<HTMLInputElement>("input[placeholder='my-skill']");
+    if (dirInput) {
+      dirInput.value = "Bad_Name";
+      dirInput.dispatchEvent(new Event("input", { bubbles: true }));
+      dirInput.dispatchEvent(new Event("blur", { bubbles: true }));
+      flushSync();
+    }
+    expect(target?.querySelector('[data-testid="directory-name-error"]')).not.toBeNull();
+    expect(target?.querySelector('[data-testid="directory-name-helper"]')).toBeNull();
 
     unmount(instance);
   });

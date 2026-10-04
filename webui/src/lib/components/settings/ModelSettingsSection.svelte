@@ -225,8 +225,8 @@
       <button
         type="button"
         class="mt-0.5 shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 transition-colors hover:bg-amber-500/25"
-        title="The active model ({view.settings.model
-          .provider}) rides an env-provided route with no tab — click to add it as a route."
+        title="Your active model ({view.settings.model
+          .provider}) comes from an environment variable and is not listed under Routes — click to register it here."
         onclick={addEnvActiveRoute}
       >
         active outside tabs
@@ -235,8 +235,8 @@
   </div>
   {#if activeOutsideRoutes && view}
     <p class="text-[10px] text-amber-700">
-      {view.settings.model.provider} · {view.settings.model.model} (outside Routes) — env-provided; add
-      it as a route to manage it here.
+      {view.settings.model.provider} · {view.settings.model.model} is active via an environment variable,
+      outside Routes. Add it as a route to manage it here.
     </p>
   {/if}
 
@@ -380,8 +380,8 @@
         >
           <p class="text-xs font-medium">Add your first model route</p>
           <p class="max-w-[320px] text-[10px] leading-snug text-muted-foreground">
-            Pick a provider from the catalog (zcode Registry) with its models, or point at any
-            custom OpenAI/Anthropic-compatible endpoint.
+            Pick a provider and its models from the built-in catalog, or point at any custom
+            OpenAI/Anthropic-compatible endpoint.
           </p>
           <div class="mt-1 flex gap-2">
             <Button

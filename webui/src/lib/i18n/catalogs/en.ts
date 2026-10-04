@@ -327,10 +327,10 @@ export const en = {
   "slashMenu.empty": "No matching command or skill",
 
   /** ---------- `$` 技能引用菜单 ---------- */
-  /** typeToSearch 两键的 en 值固定现网中文占位（skill-menu.test 锚点；历史遗留，
-      后续批统一裁决测试与文案）。 */
-  "skillMenu.typeToSearch": "输入关键词检索技能",
-  "skillMenu.typeToSearchEmpty": "输入关键词检索技能…",
+  /** 空输入占位两键（2.2 处置批 P2-1）：en 历史中文占位改英文（带/不带省略号
+      区分：Empty 态更空、留输入暗示）；zh 词典不动。 */
+  "skillMenu.typeToSearch": "Type to search skills",
+  "skillMenu.typeToSearchEmpty": "Type to search skills…",
   "skillMenu.searching": "Searching skills…",
   "skillMenu.notConnected": "Not connected",
   "skillMenu.searchUnavailable": "Search unavailable",
@@ -587,6 +587,8 @@ export const en = {
   "skillsScreen.sameContentMany": "Same content as {count} other installations",
   "skillsScreen.noDescription": "No description",
   "skillsScreen.loadMore": "Load more",
+  "skillsScreen.moreProviders": "+{count} providers",
+  "skillsScreen.hideEmptyProviders": "Hide empty providers",
   "skillsScreen.selectSkill": "Select a skill",
   "skillsScreen.selectSkillBody": "Inspect its frontmatter, rendered body, and validation status.",
 
@@ -666,6 +668,9 @@ export const en = {
   "reposScan.summary":
     "Installed {installed} · overwritten {overwritten} · skipped {skipped} · failed {failed}",
   "reposScan.viewInDashboard": "View in dashboard",
+  "reposScan.confirmTitle": "Confirm install",
+  "reposScan.confirmBody":
+    "Install {skills} selected skill(s) into {targets} provider location(s):",
 
   /** ---------- Skill 详情面（只读文档 + 管理动作；编辑唯一真相 = Creator） ---------- */
   "skillDetail.loading": "Loading skill…",
@@ -764,6 +769,7 @@ export const en = {
 
   /** ---------- Creator 编辑页（二级工作页残留文案入词典；creator-agent-chat 1.9） ---------- */
   "creatorEditor.newSkillTitle": "New skill",
+  "changeLog.reconnecting": "Reconnecting…",
   "creatorEditor.untitledSkill": "Skill",
   "creatorEditor.invalidTarget": "Invalid workspace target.",
   "creatorEditor.viewEvaluation": "View evaluation",

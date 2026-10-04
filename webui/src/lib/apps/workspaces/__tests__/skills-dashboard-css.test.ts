@@ -202,3 +202,53 @@ describe("skill-detail-panel 编辑所有权源扫描（design §7）", () => {
     expect(panelSrc).toMatch(/checkUpdates/);
   });
 });
+
+describe("workspace-page-polish 2.2 处置批机制契约（P2-2/P2-9/P2-10）", () => {
+  const agentsSrc = readFileSync(
+    fileURLToPath(new URL("../screens/agents-screen.svelte", import.meta.url)),
+    "utf-8",
+  );
+
+  it("provider chips 零计数折叠（P2-2）：非零 chips 前置渲染 + 零计数收进 +N 溢出项", () => {
+    expect(skillsScreenSrc).toMatch(/const nonZeroChips = \$derived\(providerChips\.filter/);
+    expect(skillsScreenSrc).toMatch(/const zeroChips = \$derived\(providerChips\.filter/);
+    expect(skillsScreenSrc).toMatch(/data-testid="zero-providers-overflow"/);
+    expect(skillsScreenSrc).toMatch(/skillsScreen\.moreProviders/);
+    // 选中的零计数 chip 强制露出（筛选态不被折叠隐藏）。
+    expect(skillsScreenSrc).toMatch(
+      /zeroChips\.some\(\(chip\) => chip\.providerId === providerFilter\)/,
+    );
+    // 主渲染循环只消费 nonZeroChips（全量 providerChips 循环 = 折叠回归）。
+    const mainLoop = skillsScreenSrc.match(/\{#each nonZeroChips as chip \(chip\.providerId\)\}/);
+    expect(mainLoop).not.toBeNull();
+    expect(skillsScreenSrc).not.toMatch(/\{#each providerChips as chip \(chip\.providerId\)\}/);
+  });
+
+  it("重复徽标图标 layers 化（P2-9）：↗（外链语义）不再承担「同内容多副本」", () => {
+    expect(skillsScreenSrc).toMatch(/icons\/layers/);
+    const start = skillsScreenSrc.indexOf("{#if sameContent > 0}");
+    const end = skillsScreenSrc.indexOf("{/if}", start);
+    expect(start).toBeGreaterThan(-1);
+    const badgeBlock = skillsScreenSrc.slice(start, end);
+    expect(badgeBlock).toMatch(/<IconLayers class="h-3 w-3"/);
+    expect(badgeBlock).not.toMatch(/IconArrowUpRight/);
+  });
+
+  it("磁盘缺失 provider 行不给 writable/readonly 徽标（P2-9：可写性断言以在盘为前提）", () => {
+    // 徽标整块包在 available 闸内；缺失语义由「Not found on disk」行独自承担。
+    const badgeGate = agentsSrc.match(/\{#if provider\.available\}\s*\{#if provider\.writable\}/);
+    expect(badgeGate).not.toBeNull();
+    expect(agentsSrc).toMatch(/agentsScreen\.notFound/);
+  });
+
+  it("dashboard 深链滚动（P2-10）：active 非 skills 时 scrollIntoView 落点网格项", () => {
+    expect(dashboardSrc).toMatch(/data-screen="(skills|agents|repos)"/);
+    expect(dashboardSrc).toMatch(
+      /scrollIntoView\(\{ block: "nearest", inline: "nearest", behavior: "smooth" \}\)/,
+    );
+    // 高亮强化：active 边框之外追加 ring（落点可寻）。
+    expect(dashboardSrc).toMatch(
+      /\.grid-item\[data-active="true"\] :global\(\.screen\)\s*\{[\s\S]*?box-shadow:/,
+    );
+  });
+});

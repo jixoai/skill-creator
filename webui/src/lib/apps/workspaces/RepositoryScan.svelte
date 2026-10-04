@@ -13,6 +13,11 @@
   全文进 preview（Tailwind .block 覆盖 .line-clamp-* 的 -webkit-box 是折叠
   根因，clamp 元素禁配 block）；preview pre-wrap 换行 + 预览头 name/description
   + 列表行 previewed 高亮双向对应。
+  修订 [2026-10-04]（workspace-page-polish 2.2 处置批）：P1-1 安装确认步
+  （选中目标 >10 时 Install 先过对话框，列计数与目标名；Dry-run 不设闸）；
+  P2-3 选中真相本地 Set 化（连续 toggle 读旧 page.url.search 互相覆盖的竞态
+  根治——URL 降级为单向投影）；P2-4 容器 <692px 单列栈（阈值与 dashboard
+  网格降档同源，不再 50/50 截断 label）；P2-10 scanning 骨架行替换裸文本。
   正交意图：
     1. 从 URL path param sourceId 解析源 gitUrl（curated 静态目录或 user 源 RPC list），
        首扫自动触发。
@@ -85,15 +90,27 @@
   // 手动 ref（branch/tag）输入；为空扫描默认分支。
   let scanRef = $state("");
 
-  // 选中技能从 URL ?selected= 派生（视图状态真相源）。
+  // ?selected= 投影（刷新/恢复面）。
   const selectedParam = $derived(getSearch?.()?.selected ?? "");
-  const selectedIds = $derived.by<Set<string>>(() => {
-    const ids = selectedParam
-      .split(",")
-      .map((part) => part.trim())
-      .filter(Boolean);
-    return new Set(ids);
+  // 选中真相 = 本地 Set（2.2 处置批 P2-3）：旧实现每次 toggle 从 page.url.search
+  // 重建参数，goto 未落地前第二个 toggle 会丢掉第一个的变更（互相覆盖）。URL 降级
+  // 为单向投影：写入一律序列化本地 Set；投影值集合（projected）落地回声不重放
+  // （乱序落地安全）；未投影过的参数变化（挂载种子/真外部导航）才重放真相。
+  // 写入均 replaceState（不产历史条目），故 mounted 生命周期内不存在「回退到
+  // 已投影值」的外部导航路径。
+  let selectedTruth = $state<Set<string>>(new Set());
+  const projectedSelections = new Set<string>();
+  $effect(() => {
+    const param = selectedParam;
+    if (projectedSelections.has(param)) return;
+    selectedTruth = new Set(
+      param
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean),
+    );
   });
+  const selectedIds = $derived(selectedTruth);
 
   // 当前预览的 skillId（来自 URL ?skill=，刷新可恢复）。
   const previewSkillParam = $derived(getSearch?.()?.skill);
@@ -196,22 +213,30 @@
   }
 
   function toggleSelected(skill: RemoteSkill): void {
-    const next = new Set(selectedIds);
+    const next = new Set(selectedTruth);
     if (next.has(skill.id)) next.delete(skill.id);
     else next.add(skill.id);
     writeSelected(next);
   }
 
-  function writeSelected(ids: Set<string>): void {
-    const value = [...ids].join(",");
-    const search = new URLSearchParams(page.url.search);
+  /** 以本地选中真相覆写 search 的 selected 键（P2-3 单向投影；其余键保留）。 */
+  function projectSelected(search: URLSearchParams): void {
+    const value = [...selectedTruth].join(",");
     if (value) search.set("selected", value);
     else search.delete("selected");
+    projectedSelections.add(value);
+  }
+
+  function writeSelected(ids: Set<string>): void {
+    selectedTruth = ids;
+    const search = new URLSearchParams(page.url.search);
+    projectSelected(search);
     void goto(scanPath(search), { replaceState: true });
   }
 
   function selectSkillForPreview(skill: RemoteSkill): void {
     const search = new URLSearchParams(page.url.search);
+    projectSelected(search);
     search.set("skill", skill.id);
     void goto(scanPath(search), { replaceState: true });
   }
@@ -240,6 +265,35 @@
   });
 
   const installableSelected = $derived(selectedSkills.filter((skill) => skill.installable));
+
+  // 安装确认步（2.2 处置批 P1-1）：选中目标超过阈值时 Install 先过对话框（列
+  // 计数与目标名）——破坏性批量写入前的最后一道人闸。Dry-run 不设闸（无写入）。
+  // ExpectedInstallTarget 全链验证（canonical/非 symlink/containment）在 daemon
+  // 侧原样，本闸只拦「人没意识到规模」的误确认。
+  const INSTALL_CONFIRM_TARGETS_THRESHOLD = 10;
+  const selectedTargetEntries = $derived(
+    targets.filter((entry) =>
+      selectedTargets.some(
+        (selected) =>
+          selected.workspaceId === entry.target.workspaceId &&
+          selected.providerId === entry.target.providerId,
+      ),
+    ),
+  );
+  const needsInstallConfirm = $derived(
+    selectedTargetEntries.length > INSTALL_CONFIRM_TARGETS_THRESHOLD,
+  );
+  let installConfirmOpen = $state(false);
+
+  /** Install 入口：超阈值先开确认对话框，否则直跑。 */
+  function requestInstall(): void {
+    if (installing) return;
+    if (needsInstallConfirm) {
+      installConfirmOpen = true;
+      return;
+    }
+    void runInstall(false);
+  }
 
   async function runInstall(dryRun: boolean): Promise<void> {
     if (!scan) return;
@@ -286,7 +340,7 @@
   }
 </script>
 
-<div class="flex h-full flex-col overflow-hidden">
+<div class="scan-root flex h-full flex-col overflow-hidden">
   <!-- 工具栏防截断（批评处置 P1-3a）：flex-wrap + 动作成组——行宽不足时动作组
        整体换行（组内再自换行），任何面板宽度下按钮完整，不再被 Agent 面板
        边缘拦腰切断；标题块 basis-56 保证换行前保有最小可读宽度。 -->
@@ -358,7 +412,19 @@
     </div>
   {/if}
   {#if scanning}
-    <p class="px-4 py-8 text-center text-xs text-muted-foreground">{t("reposScan.scanning")}</p>
+    <!-- scanning 骨架行（2.2 处置批 P2-10）：替换裸文本——行形态与结果列表同构
+         （checkbox 位 + 名称条 + 描述条），role=status 保留屏幕阅读器语义。 -->
+    <div class="p-4" role="status" aria-label={t("reposScan.scanning")} data-testid="scan-skeleton">
+      {#each { length: 6 } as _, i (i)}
+        <div class="mb-2.5 flex items-start gap-2">
+          <div class="mt-0.5 h-3.5 w-3.5 shrink-0 animate-pulse rounded-sm bg-muted/60"></div>
+          <div class="min-w-0 flex-1 space-y-1.5">
+            <div class="h-3.5 w-2/5 animate-pulse rounded bg-muted/60"></div>
+            <div class="h-3 w-4/5 animate-pulse rounded bg-muted/60"></div>
+          </div>
+        </div>
+      {/each}
+    </div>
   {:else if scanError}
     <p class="px-4 py-8 text-center text-xs text-destructive">{scanError.message}</p>
     {#if gitUrl}
@@ -379,9 +445,12 @@
       {t("reposScan.noSkills")}
     </p>
   {:else}
-    <div class="flex min-h-0 flex-1">
+    <!-- 窄容器单列栈（2.2 处置批 P2-4）：容器查询阈值 692px 与 dashboard 网格
+         降档同源——Agent 面板开启/窄窗下不再 50/50 截断 label（列表上、预览+安装
+         下）。样式见文件尾 <style>。 -->
+    <div class="scan-split flex min-h-0 flex-1">
       <!-- 左：技能列表（多选） -->
-      <section class="flex w-1/2 min-w-0 flex-col border-r border-border">
+      <section class="scan-list flex w-1/2 min-w-0 min-h-0 flex-col border-r border-border">
         <header
           class="flex shrink-0 items-center justify-between px-3 py-2 text-xs text-muted-foreground"
         >
@@ -450,7 +519,7 @@
       </section>
 
       <!-- 右：预览 + 安装表单 + 结果 -->
-      <section class="flex w-1/2 min-w-0 flex-col overflow-y-auto">
+      <section class="scan-side flex w-1/2 min-w-0 min-h-0 flex-col overflow-y-auto">
         <div class="border-b border-border p-3">
           <h2 class="text-xs font-medium text-muted-foreground">{t("reposScan.preview")}</h2>
           {#if previewing}
@@ -549,7 +618,7 @@
               disabled={installing ||
                 installableSelected.length === 0 ||
                 selectedTargets.length === 0}
-              onclick={() => runInstall(false)}
+              onclick={() => requestInstall()}
               class="h-7 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {installing ? t("reposScan.installing") : t("reposScan.install")}
@@ -613,3 +682,76 @@
     </div>
   {/if}
 </div>
+
+{#if installConfirmOpen}
+  <!-- 安装确认步（2.2 处置批 P1-1）：目标 >10 时 Install 先过人闸——列计数与
+       目标名，确认后才发 install RPC（写入侧安全验证链原样）。 -->
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-label={t("reposScan.confirmTitle")}
+    data-testid="install-confirm"
+  >
+    <div class="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-lg">
+      <h2 class="text-sm font-semibold">{t("reposScan.confirmTitle")}</h2>
+      <p class="mt-1 text-xs text-muted-foreground">
+        {t("reposScan.confirmBody", {
+          skills: installableSelected.length,
+          targets: selectedTargetEntries.length,
+        })}
+      </p>
+      <ul class="mt-2 max-h-48 space-y-1 overflow-y-auto">
+        {#each selectedTargetEntries as entry (entry.target.workspaceId + ":" + entry.target.providerId)}
+          <li class="truncate rounded border border-border px-2 py-1 text-xs" title={entry.label}>
+            {entry.label}
+          </li>
+        {/each}
+      </ul>
+      <div class="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onclick={() => (installConfirmOpen = false)}
+          class="h-9 rounded-md border border-border px-3 text-xs hover:bg-muted/50"
+        >
+          {t("common.cancel")}
+        </button>
+        <button
+          type="button"
+          disabled={installing}
+          onclick={() => {
+            installConfirmOpen = false;
+            void runInstall(false);
+          }}
+          class="h-9 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {t("reposScan.install")}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<style>
+  /* 窄容器单列栈（2.2 处置批 P2-4）：自持匿名容器（本页为独立子路由，不在
+     dashboard 命名容器内）；阈值 692px 与 SkillsDashboard 网格降档同源——
+     两源阈值一致性由 repository-scan-css 契约测试钉死。 */
+  .scan-root {
+    container-type: inline-size;
+  }
+  @container (width < 692px) {
+    .scan-split {
+      flex-direction: column;
+    }
+    .scan-list {
+      width: 100%;
+      flex: 1 1 0;
+      border-right: 0;
+      border-bottom: 1px solid var(--border, #e5e7eb);
+    }
+    .scan-side {
+      width: 100%;
+      flex: 1 1 0;
+    }
+  }
+</style>

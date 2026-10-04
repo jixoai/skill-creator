@@ -55,3 +55,37 @@ describe("skill-detail readonly projection (specs/creator「编辑单一真相�
     expect(code).toMatch(/creator\.workspace\.skill/);
   });
 });
+
+describe("skill-detail 动作行与 metadata 布局机制（workspace-page-polish 2.2 处置批 P2-9）", () => {
+  // 同族剥注释源码扫描（上方 describe 的 code 是其块内常量，这里独立构建）。
+  const code = readFileSync(SOURCE, "utf8")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/[^\n]*/g, "");
+
+  it("动作行 nowrap + 行内横滚（不再 3+1 ragged wrap）", () => {
+    expect(code).toMatch(
+      /class="detail-actions mt-2 flex shrink-0 items-center justify-end gap-1\.5"/,
+    );
+    const styleMatch = code.match(/\.detail-actions\s*\{[^}]*\}/);
+    expect(styleMatch?.[0]).toContain("flex-wrap: nowrap");
+    expect(styleMatch?.[0]).toContain("overflow-x: auto");
+  });
+
+  it("Update check 并入头部 metadata 行（body 独立区块退役）", () => {
+    const headerEnd = code.indexOf("</header>");
+    const updateIdx = code.indexOf('t("skillDetail.updateCheck")');
+    expect(updateIdx).toBeGreaterThan(-1);
+    expect(updateIdx).toBeLessThan(headerEnd);
+    // 独立区块形态（updateCheck 按钮位于 section 容器内）不再出现。
+    const sectionMatch = code.match(
+      /<section[^>]*>\s*(?:(?!<\/section>).)*?skillDetail\.updateCheck(?:(?!<\/section>).)*?<\/section>/s,
+    );
+    expect(sectionMatch).toBeNull();
+  });
+
+  it("pre 代码块约束进内容列（prose-pre 折行，不再整列横向滚动）", () => {
+    expect(code).toMatch(/prose-pre:whitespace-pre-wrap prose-pre:break-words/);
+    expect(code).not.toMatch(/prose prose-sm max-w-none overflow-x-auto/);
+  });
+});
