@@ -5,7 +5,17 @@ import { flushSync, mount, unmount } from "svelte";
 const mocks = vi.hoisted(() => ({
   agentPanel: { open: false },
   agentSession: { sessionId: null as string | null, status: "idle" },
-  agentSessionsList: { loaded: true, loading: false, sessions: [], error: null as string | null },
+  agentSessionsList: {
+    loaded: true,
+    loading: false,
+    sessions: [] as Array<Record<string, unknown>>,
+    error: null as string | null,
+  },
+  workspaceState: {
+    workspaces: [] as Array<{ id: string; kind: "directory"; path: string }>,
+  },
+  openExtensionFilePreview: vi.fn(() => ({ opened: true })),
+  openExtensionBashOutput: vi.fn(() => ({ opened: true })),
   agentPageActiveSession: vi.fn(() => null),
   beginNewAgentSession: vi.fn(),
   loadAgentSessions: vi.fn(),
@@ -17,20 +27,25 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("$lib/stores/agent.svelte", () => mocks);
 vi.mock("$lib/stores/connection.svelte", () => ({ connectionState: mocks.connectionState }));
+vi.mock("$lib/stores/workspaces.svelte", () => ({ workspaceState: mocks.workspaceState }));
 vi.mock("$lib/shell", () => ({ useSearch: () => () => ({}) }));
 vi.mock("$lib/i18n", () => ({ t: (key: string) => key }));
-vi.mock("$lib/apps/agent/extension-panel.svelte.js", () => ({ rebindExtensionPanel: vi.fn() }));
+vi.mock("$lib/apps/agent/extension-panel.svelte.js", () => ({
+  rebindExtensionPanel: vi.fn(),
+  openExtensionFilePreview: mocks.openExtensionFilePreview,
+  openExtensionBashOutput: mocks.openExtensionBashOutput,
+}));
 vi.mock("$lib/apps/agent/SessionTree.svelte", async () => ({
   default: (await import("$lib/shell/__tests__/stub-leaf.svelte")).default,
 }));
 vi.mock("$lib/apps/agent/ExtensionPanel.svelte", async () => ({
-  default: (await import("$lib/shell/__tests__/stub-leaf.svelte")).default,
+  default: (await import("./ExtensionPanelProbe.svelte")).default,
 }));
 vi.mock("$lib/components/agent/SessionFace.svelte", async () => ({
-  default: (await import("$lib/shell/__tests__/stub-leaf.svelte")).default,
+  default: (await import("./SessionFaceProbe.svelte")).default,
 }));
 vi.mock("$lib/components/agent/terminal/TerminalDock.svelte", async () => ({
-  default: (await import("$lib/shell/__tests__/stub-leaf.svelte")).default,
+  default: (await import("./TerminalDockProbe.svelte")).default,
 }));
 
 import SkillsAgentPage from "../SkillsAgentPage.svelte";
@@ -78,6 +93,9 @@ beforeEach(() => {
   mocks.agentSessionsList.loading = false;
   mocks.agentSessionsList.sessions = [];
   mocks.agentSessionsList.error = null;
+  mocks.workspaceState.workspaces = [];
+  mocks.openExtensionFilePreview.mockClear();
+  mocks.openExtensionBashOutput.mockClear();
   mocks.beginNewAgentSession.mockReset();
   mocks.loadAgentSessions.mockReset();
   mocks.registerAgentSurface.mockClear();
@@ -276,9 +294,7 @@ describe("SkillsAgentPage shell geometry", () => {
       "absolute inset-y-0 right-0 z-30",
     );
     click(
-      host.querySelector(
-        '[data-right-panel-region] button[aria-label="agentPage.toggleRightPanel"]',
-      ),
+      host.querySelector('[data-right-panel-region] button[aria-label="probe-close-extension"]'),
     );
     expect(host.querySelector("[data-right-panel-region]")).toBeNull();
 
@@ -331,5 +347,83 @@ describe("SkillsAgentPage shell geometry", () => {
     search.dispatchEvent(editorShortcut);
     expect(readDevicePrefs().agentTreeCollapsed).toBe(false);
     expect(editorShortcut.defaultPrevented).toBe(false);
+  });
+
+  it("binds the terminal to the selected Workspace and hides it without unmounting", () => {
+    const workspaceId = "ws_0123456789abcdef01234567";
+    mocks.agentSession.sessionId = "session-a";
+    mocks.agentSessionsList.sessions = [
+      {
+        sessionId: "session-a",
+        title: "Session A",
+        status: "idle",
+        cwd: "/work/repo/subdir",
+        createdAt: "2026-10-04T00:00:00.000Z",
+        mode: "free",
+        target: { workspaceId, providerId: "skills" },
+        seedSkill: null,
+      },
+    ];
+    mocks.workspaceState.workspaces = [{ id: workspaceId, kind: "directory", path: "/work/repo" }];
+    mountPage();
+
+    click(host.querySelector('button[aria-label="agentPage.toggleTerminal"]'));
+    const region = host.querySelector<HTMLElement>("[data-terminal-region]");
+    const dock = host.querySelector<HTMLElement>("[data-terminal-dock-probe]");
+    expect(dock?.dataset.workspaceKey).toBe(workspaceId);
+    expect(dock?.dataset.workspaceCwd).toBe("/work/repo/subdir");
+
+    click(host.querySelector('button[aria-label="probe-close-terminal"]'));
+    expect(region?.className).toContain("hidden");
+    expect(host.querySelector("[data-terminal-dock-probe]")).toBe(dock);
+
+    click(host.querySelector('button[aria-label="agentPage.toggleTerminal"]'));
+    expect(host.querySelector("[data-terminal-dock-probe]")).toBe(dock);
+  });
+
+  it("wires ExtensionPanel close back to the right-pane toggle", () => {
+    mountPage();
+    expect(host.querySelector("[data-extension-panel-probe]")).toBeTruthy();
+    click(host.querySelector('button[aria-label="probe-close-extension"]'));
+    expect(host.querySelector("[data-right-panel-region]")).toBeNull();
+  });
+
+  it("resizes the right pane by 16px through its persisted ratio and keeps the Chat minimum", () => {
+    mountPage();
+    const separator = host.querySelector<HTMLElement>("[data-agent-right-resizer]");
+    expect(separator?.getAttribute("role")).toBe("separator");
+    expect(separator?.getAttribute("aria-valuenow")).toBe("421");
+
+    const grow = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      bubbles: true,
+      cancelable: true,
+    });
+    separator!.dispatchEvent(grow);
+    flushSync();
+    expect(grow.defaultPrevented).toBe(true);
+    expect(separator?.getAttribute("aria-valuenow")).toBe("437");
+    expect(readDevicePrefs().agentRightPanelExpandedRatio).toBeCloseTo(437 / 936);
+
+    const maximum = new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true });
+    separator!.dispatchEvent(maximum);
+    flushSync();
+    expect(separator?.getAttribute("aria-valuenow")).toBe("608");
+    expect(1200 - 264 - 608).toBeGreaterThanOrEqual(320);
+  });
+
+  it("routes file and bash tool actions through typed panel opens and reveals the pane", () => {
+    mountPage();
+    click(host.querySelectorAll('button[aria-label="agentPage.toggleRightPanel"]')[0] ?? null);
+    expect(host.querySelector("[data-right-panel-region]")).toBeNull();
+
+    click(host.querySelector('button[aria-label="probe-open-file-preview"]'));
+    expect(mocks.openExtensionFilePreview).toHaveBeenCalledWith({ path: "/tmp/tool-output.md" });
+    expect(host.querySelector("[data-right-panel-region]")).toBeTruthy();
+
+    click(host.querySelector('button[aria-label="probe-close-extension"]'));
+    click(host.querySelector('button[aria-label="probe-open-bash-output"]'));
+    expect(mocks.openExtensionBashOutput).toHaveBeenCalledOnce();
+    expect(host.querySelector("[data-right-panel-region]")).toBeTruthy();
   });
 });

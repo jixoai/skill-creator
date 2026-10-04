@@ -45,7 +45,15 @@
    * 聚焦本面 composer 的句柄。缺省（不在 SessionFace 内独立挂载时）回退全局
    * data 锚点——同一组件在面板与 Agent 页两呈现面下行为一致。
    */
-  let { focusComposer }: { focusComposer?: () => void } = $props();
+  let {
+    focusComposer,
+    onOpenFilePreview,
+    onOpenBashOutput,
+  }: {
+    focusComposer?: () => void;
+    onOpenFilePreview?: (path: string) => void;
+    onOpenBashOutput?: () => void;
+  } = $props();
 
   let scrollBody = $state<HTMLElement | null>(null);
   /** 折叠态行（thinking/tool）的 per-seq 展开表（streaming 态强制开）。 */
@@ -414,6 +422,8 @@
             running={item.phase === "calling" && agentSession.status === "running"}
             startedAt={item.startedAt}
             endedAt={item.endedAt}
+            {onOpenFilePreview}
+            {onOpenBashOutput}
           />
         {:else if item.kind === "approval"}
           <div class="flow-item">

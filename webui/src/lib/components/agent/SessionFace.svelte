@@ -31,6 +31,14 @@
   import TodoDock from "./TodoDock.svelte";
   import ComposerCard from "./ComposerCard.svelte";
 
+  let {
+    onOpenFilePreview,
+    onOpenBashOutput,
+  }: {
+    onOpenFilePreview?: (path: string) => void;
+    onOpenBashOutput?: () => void;
+  } = $props();
+
   let root = $state<HTMLElement | null>(null);
 
   /** 面内 composer 聚焦句柄（TranscriptView 编辑回填的落点）。 */
@@ -74,7 +82,7 @@
 <DropOverlay />
 
 <div bind:this={root} class="flex h-full min-h-0 flex-1 flex-col" data-session-face="true">
-  <TranscriptView {focusComposer} />
+  <TranscriptView {focusComposer} {onOpenFilePreview} {onOpenBashOutput} />
 
   {#if agentSession.promptError ?? agentSession.error}
     <div

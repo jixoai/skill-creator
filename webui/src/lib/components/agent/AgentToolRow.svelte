@@ -219,8 +219,10 @@
   import IconTerminal from "@lucide/svelte/icons/terminal";
   import IconFileText from "@lucide/svelte/icons/file-text";
   import IconImage from "@lucide/svelte/icons/image";
+  import IconPanelRight from "@lucide/svelte/icons/panel-right";
   import IconWrench from "@lucide/svelte/icons/wrench";
   import type { Component } from "svelte";
+  import { isUsableFilePreviewPath } from "./extension/panel-tabs.js";
   import DisclosureRow from "./DisclosureRow.svelte";
   import AgentCard from "./AgentCard.svelte";
   import AgentProposalCard from "./AgentProposalCard.svelte";
@@ -233,6 +235,8 @@
     running = false,
     startedAt,
     endedAt,
+    onOpenFilePreview,
+    onOpenBashOutput,
   }: {
     toolName: string;
     argsText?: string;
@@ -242,6 +246,8 @@
     running?: boolean;
     startedAt?: string;
     endedAt?: string;
+    onOpenFilePreview?: (path: string) => void;
+    onOpenBashOutput?: () => void;
   } = $props();
 
   let expanded = $state(false);
@@ -274,6 +280,10 @@
   const argsRecord = $derived(parseToolArgsRecord(argsText));
 
   const stringArg = (value: unknown): string => (typeof value === "string" ? value : "");
+  const previewPath = $derived(stringArg(argsRecord?.file_path) || stringArg(argsRecord?.path));
+  const filePreviewAvailable = $derived(
+    kind === "file" && onOpenFilePreview !== undefined && isUsableFilePreviewPath(previewPath),
+  );
 
   function firstLine(text: string): string {
     const line = text.split("\n", 1)[0] ?? "";
@@ -369,15 +379,41 @@
   {:else if uiCard}
     <AgentCard resourceUri={uiCard.resourceUri} title={uiCard.title} />
   {/if}
-  <DisclosureRow
-    icon={kindIcon}
-    title={displayName}
-    {summary}
-    open={expanded}
-    running={running && phase === "calling"}
-    error={phase === "error"}
-    onToggle={() => (expanded = !expanded)}
-  />
+  <div class="flex min-w-0 items-start gap-1">
+    <div class="min-w-0 flex-1">
+      <DisclosureRow
+        icon={kindIcon}
+        title={displayName}
+        {summary}
+        open={expanded}
+        running={running && phase === "calling"}
+        error={phase === "error"}
+        onToggle={() => (expanded = !expanded)}
+      />
+    </div>
+    {#if filePreviewAvailable}
+      <button
+        type="button"
+        class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        title={t("agentTool.openFilePreview")}
+        aria-label={t("agentTool.openFilePreviewAria", { path: previewPath })}
+        onclick={() => onOpenFilePreview?.(previewPath)}
+      >
+        <IconPanelRight class="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    {/if}
+    {#if kind === "bash" && onOpenBashOutput !== undefined}
+      <button
+        type="button"
+        class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        title={t("agentTool.openBashOutput")}
+        aria-label={t("agentTool.openBashOutputAria", { name: displayName })}
+        onclick={onOpenBashOutput}
+      >
+        <IconPanelRight class="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    {/if}
+  </div>
   {#if expanded}
     {#if phase === "error" && errorLine.length > 0}
       <div class="mt-1 rounded-lg bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">

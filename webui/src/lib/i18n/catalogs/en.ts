@@ -232,6 +232,10 @@ export const en = {
   "agentTool.cardTitle": "Card",
   "agentTool.todoSummaryOne": "{total} todo · {done} done",
   "agentTool.todoSummaryMany": "{total} todos · {done} done",
+  "agentTool.openFilePreview": "Open file preview",
+  "agentTool.openFilePreviewAria": "Open file preview: {path}",
+  "agentTool.openBashOutput": "Open shell output",
+  "agentTool.openBashOutputAria": "Open shell output for {name}",
 
   /** ---------- Todo 折叠卡 ---------- */
   "todoDock.tasks": "Tasks",

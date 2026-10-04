@@ -229,6 +229,10 @@ export const zh: Record<keyof EnCatalog, string> = {
   "agentTool.cardTitle": "卡片",
   "agentTool.todoSummaryOne": "{total} 项待办 · 已完成 {done}",
   "agentTool.todoSummaryMany": "{total} 项待办 · 已完成 {done}",
+  "agentTool.openFilePreview": "打开文件预览",
+  "agentTool.openFilePreviewAria": "打开文件预览：{path}",
+  "agentTool.openBashOutput": "打开 Shell 输出",
+  "agentTool.openBashOutputAria": "打开 {name} 的 Shell 输出",
   /** ---------- Todo 折叠卡 ---------- */
   "todoDock.tasks": "任务",
   "todoDock.counts": "完成 {done} · 进行 {active} · 待办 {pending}",

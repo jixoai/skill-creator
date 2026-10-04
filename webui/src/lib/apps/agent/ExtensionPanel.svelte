@@ -269,6 +269,7 @@
             type="button"
             class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label="Close panel"
+            title="Close panel"
             onclick={onCloseSidePane}
           >
             <IconPanelRight class="h-3.5 w-3.5" aria-hidden="true" />
@@ -388,6 +389,17 @@
               {/each}
             </DropdownMenu.Content>
           </DropdownMenu.DropdownMenu>
+        {/if}
+        {#if onCloseSidePane}
+          <button
+            type="button"
+            class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Close panel"
+            title="Close panel"
+            onclick={onCloseSidePane}
+          >
+            <IconPanelRight class="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         {/if}
       </div>
     </div>

@@ -41,19 +41,28 @@
   import { connectionState } from "$lib/stores/connection.svelte";
   import SessionFace from "$lib/components/agent/SessionFace.svelte";
   import TerminalDock from "$lib/components/agent/terminal/TerminalDock.svelte";
-  import { rebindExtensionPanel } from "./extension-panel.svelte.js";
+  import {
+    SIDE_PANE_KEYBOARD_STEP_PX,
+    SIDE_PANE_MAX_RATIO,
+    SIDE_PANE_MIN_WIDTH_PX,
+    nudgeSidePaneRatio,
+    sidePaneRatioFromWidth,
+    sidePaneWidthFromRatio,
+  } from "$lib/components/agent/extension/side-pane-layout.js";
+  import {
+    openExtensionBashOutput,
+    openExtensionFilePreview,
+    rebindExtensionPanel,
+  } from "./extension-panel.svelte.js";
   import {
     groupSessionsByCreatedAt,
     sessionDisplayName,
     sessionIsUnassigned,
   } from "./session-tree.js";
   import {
-    AGENT_LAYOUT_KEYBOARD_STEP,
-    AGENT_RIGHT_PANEL_MIN_WIDTH,
+    AGENT_CHAT_MIN_WIDTH,
     AGENT_TREE_COLLAPSED_WIDTH,
     AGENT_TREE_DEFAULT_WIDTH,
-    agentRightPanelRatio,
-    agentRightPanelWidth as resolveRightPanelWidth,
     clampAgentTreeWidth,
     matchAgentShellShortcut,
     maxAgentTreeWidth,
@@ -65,6 +74,7 @@
   } from "$lib/components/agent/terminal/terminal-geometry.js";
   import SessionTree from "./SessionTree.svelte";
   import ExtensionPanel from "./ExtensionPanel.svelte";
+  import { workspaceState } from "$lib/stores/workspaces.svelte";
 
   const unregister = registerAgentSurface("page");
   $effect(() => {
@@ -73,12 +83,15 @@
 
   // ---- 布局偏好（DevicePrefs appearance 域；design §1「全部显隐状态入
   // DevicePrefs」）----
+  const initialTerminalOpen = readDevicePrefs().agentTerminalOpen;
   let treeCollapsed = $state(readDevicePrefs().agentTreeCollapsed);
   let treeWidth = $state(readDevicePrefs().agentTreeWidth);
   let rightPanelOpen = $state(readDevicePrefs().agentRightPanelOpen);
   let rightPanelRatio = $state(readDevicePrefs().agentRightPanelExpandedRatio);
-  let terminalOpen = $state(readDevicePrefs().agentTerminalOpen);
+  let terminalOpen = $state(initialTerminalOpen);
+  let terminalMounted = $state(initialTerminalOpen);
   let terminalHeight = $state(readDevicePrefs().agentTerminalHeight);
+  let terminalToggleButton: HTMLButtonElement | null = $state(null);
   let pageElement: HTMLElement | null = $state(null);
   let columnsElement: HTMLElement | null = $state(null);
   let pageHeight = $state(0);
@@ -114,15 +127,37 @@
   }
 
   function toggleTerminal(): void {
+    if (terminalOpen) terminalToggleButton?.focus();
+    if (!terminalOpen) terminalMounted = true;
     terminalOpen = !terminalOpen;
     updateDevicePrefs({ agentTerminalOpen: terminalOpen });
   }
 
   function setRightPanelWidth(next: number, persist = false): void {
-    rightPanelRatio = agentRightPanelRatio(next, rightPanelAvailableWidth);
+    const bounded = Math.min(rightPanelMaxWidth, Math.max(rightPanelMinWidth, next));
+    rightPanelRatio = sidePaneRatioFromWidth(bounded, rightPanelAvailableWidth);
     if (persist) {
       updateDevicePrefs({ agentRightPanelExpandedRatio: rightPanelRatio });
     }
+  }
+
+  function revealRightPanel(): void {
+    if (narrow) {
+      narrowRightPanelOpen = true;
+      return;
+    }
+    if (!rightPanelOpen) {
+      rightPanelOpen = true;
+      updateDevicePrefs({ agentRightPanelOpen: true });
+    }
+  }
+
+  function openFilePreview(path: string): void {
+    if (openExtensionFilePreview({ path }).opened) revealRightPanel();
+  }
+
+  function openBashOutput(): void {
+    if (openExtensionBashOutput().opened) revealRightPanel();
   }
 
   function setTerminalHeight(next: number): void {
@@ -138,8 +173,18 @@
       : clampAgentTreeWidth(treeWidth, columnsWidth || AGENT_TREE_DEFAULT_WIDTH * 2),
   );
   const rightPanelAvailableWidth = $derived(Math.max(0, columnsWidth - treePanelWidth));
+  const rightPanelMaxWidth = $derived(
+    Math.max(
+      Math.min(SIDE_PANE_MIN_WIDTH_PX, rightPanelAvailableWidth),
+      Math.min(
+        rightPanelAvailableWidth * SIDE_PANE_MAX_RATIO,
+        rightPanelAvailableWidth - AGENT_CHAT_MIN_WIDTH,
+      ),
+    ),
+  );
+  const rightPanelMinWidth = $derived(Math.min(SIDE_PANE_MIN_WIDTH_PX, rightPanelMaxWidth));
   const rightPanelWidth = $derived(
-    resolveRightPanelWidth(rightPanelRatio, rightPanelAvailableWidth),
+    Math.min(rightPanelMaxWidth, sidePaneWidthFromRatio(rightPanelRatio, rightPanelAvailableWidth)),
   );
   const terminalBasisHeight = $derived(
     pageHeight > 0 ? pageHeight : typeof window === "undefined" ? 0 : window.innerHeight,
@@ -205,6 +250,17 @@
   const currentTitle = $derived(
     currentSummary !== null ? sessionDisplayName(currentSummary) : t("agentPage.newSessionTitle"),
   );
+  const terminalWorkspace = $derived.by(() => {
+    if (currentSummary === null) return null;
+    const workspaceId = currentSummary.target?.workspaceId;
+    const workspace = workspaceId
+      ? workspaceState.workspaces.find((item) => item.id === workspaceId)
+      : undefined;
+    const cwd =
+      currentSummary.cwd || (workspace?.kind === "directory" ? workspace.path : undefined);
+    const key = workspaceId ?? cwd;
+    return key === undefined || key.length === 0 ? null : { key, ...(cwd ? { cwd } : {}) };
+  });
 
   /** 双开角标（agent-surface spec「dual open projects one truth」）。 */
   const dualOpenInPanel = $derived(
@@ -249,7 +305,8 @@
     if (activeResize === null) return;
     if (cancelled) {
       if (activeResize === "tree") treeWidth = resizeStartTreeWidth;
-      else rightPanelRatio = agentRightPanelRatio(resizeStartRightWidth, rightPanelAvailableWidth);
+      else
+        rightPanelRatio = sidePaneRatioFromWidth(resizeStartRightWidth, rightPanelAvailableWidth);
     } else if (activeResize === "tree") {
       updateDevicePrefs({ agentTreeWidth: treeWidth });
     } else {
@@ -269,15 +326,31 @@
 
   function handleRightResizeKeydown(event: KeyboardEvent): void {
     let nextWidth: number | null = null;
-    const minimum = AGENT_RIGHT_PANEL_MIN_WIDTH;
-    const maximum = resolveRightPanelWidth(0.65, rightPanelAvailableWidth);
-    if (event.key === "ArrowLeft") nextWidth = rightPanelWidth + AGENT_LAYOUT_KEYBOARD_STEP;
-    else if (event.key === "ArrowRight") nextWidth = rightPanelWidth - AGENT_LAYOUT_KEYBOARD_STEP;
-    else if (event.key === "Home") nextWidth = minimum;
-    else if (event.key === "End") nextWidth = maximum;
+    if (event.key === "ArrowLeft") {
+      const ratio = nudgeSidePaneRatio(
+        sidePaneRatioFromWidth(rightPanelWidth, rightPanelAvailableWidth),
+        SIDE_PANE_KEYBOARD_STEP_PX,
+        rightPanelAvailableWidth,
+      );
+      nextWidth = Math.min(
+        rightPanelMaxWidth,
+        sidePaneWidthFromRatio(ratio, rightPanelAvailableWidth),
+      );
+    } else if (event.key === "ArrowRight") {
+      const ratio = nudgeSidePaneRatio(
+        sidePaneRatioFromWidth(rightPanelWidth, rightPanelAvailableWidth),
+        -SIDE_PANE_KEYBOARD_STEP_PX,
+        rightPanelAvailableWidth,
+      );
+      nextWidth = Math.min(
+        rightPanelMaxWidth,
+        sidePaneWidthFromRatio(ratio, rightPanelAvailableWidth),
+      );
+    } else if (event.key === "Home") nextWidth = rightPanelMinWidth;
+    else if (event.key === "End") nextWidth = rightPanelMaxWidth;
     if (nextWidth === null) return;
     event.preventDefault();
-    setRightPanelWidth(Math.max(minimum, Math.min(maximum, nextWidth)), true);
+    setRightPanelWidth(nextWidth, true);
   }
 
   function isEditableTarget(target: EventTarget | null): boolean {
@@ -391,6 +464,7 @@
       </span>
     {/if}
     <button
+      bind:this={terminalToggleButton}
       type="button"
       class="relative flex h-6 w-7 items-center justify-center rounded transition-colors after:absolute after:-inset-1 after:content-[''] {terminalOpen
         ? 'bg-primary/10 text-primary'
@@ -477,7 +551,7 @@
     {/if}
 
     <main class="flex min-w-0 flex-1 flex-col" data-agent-chat-region="true">
-      <SessionFace />
+      <SessionFace onOpenFilePreview={openFilePreview} onOpenBashOutput={openBashOutput} />
     </main>
 
     {#if rightPanelVisible}
@@ -496,37 +570,35 @@
           aria-controls="agent-right-panel-content"
           aria-orientation="vertical"
           aria-label={t("agentPage.resizeRightPanel")}
-          aria-valuemin={AGENT_RIGHT_PANEL_MIN_WIDTH}
-          aria-valuemax={resolveRightPanelWidth(0.65, rightPanelAvailableWidth)}
+          aria-valuemin={rightPanelMinWidth}
+          aria-valuemax={rightPanelMaxWidth}
           aria-valuenow={rightPanelWidth}
           data-agent-right-resizer="true"
           onpointerdown={(event) => startResize(event, "right")}
           onkeydown={handleRightResizeKeydown}
         ></div>
         <div id="agent-right-panel-content" class="min-w-0 flex-1">
-          <ExtensionPanel />
+          <ExtensionPanel onCloseSidePane={toggleRightPanel} />
         </div>
-        <button
-          type="button"
-          class="absolute top-1 right-1 z-20 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground min-[1024px]:hidden"
-          title={t("agentPage.toggleRightPanel")}
-          aria-label={t("agentPage.toggleRightPanel")}
-          onclick={toggleRightPanel}
-        >
-          <IconPanelRight class="h-3.5 w-3.5" />
-        </button>
       </div>
     {/if}
   </div>
 
-  {#if terminalOpen}
+  {#if terminalMounted}
     <!-- ≥1024：常驻底部容器（TerminalDock 自带拖高分隔条）；<1024：底部 overlay
-         drawer（inset-x-0 bottom-0 悬浮，不产生水平溢出）。 -->
+         drawer。首次打开后关闭只 display:none，TerminalDock/xterm/PTY 不卸载。 -->
     <div
-      class="absolute inset-x-0 bottom-0 z-30 max-h-[70%] shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:max-h-none min-[1024px]:shadow-none"
+      class="absolute inset-x-0 bottom-0 z-30 max-h-[70%] shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:max-h-none min-[1024px]:shadow-none {terminalOpen
+        ? ''
+        : 'hidden'}"
       data-terminal-region="true"
     >
-      <TerminalDock height={resolvedTerminalHeight} onHeight={setTerminalHeight} />
+      <TerminalDock
+        height={resolvedTerminalHeight}
+        onHeight={setTerminalHeight}
+        workspace={terminalWorkspace}
+        onClose={toggleTerminal}
+      />
     </div>
   {/if}
 </section>
