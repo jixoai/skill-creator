@@ -19,4 +19,13 @@
        本批补 >10 目标确认闸）+ P2 全做（P2-8 settings 行话由编排者补刀人
        话化，组件 i18n 化留 B 线批）；+2 补刀：dashboard-skills store NUL
        字节转义恢复文本 diff；门禁 110/110+check 0/0）
-- [ ] 2.3 ego-browser 复走查（清理面 + 打磨面）+ i18n 接续 + 进程回收
+- [x] 2.3 ego-browser 复走查（清理面 + 打磨面）+ i18n 接续 + 进程回收
+       （复评 2026-10-04：换新批评者 8.2/10（基线 7.2 +1.0），12/12 修复面
+       逐项有效 + 遗留双 PASS（$ 菜单分组头实证无需活会话；wiki 真空态
+       CTA 完整）+ 零 P1/P2 遗留；停止条件成立：剩余 4 项全 P3（2 项小修
+       已顺带批处置：wiki 标题闪 wsId/正文标题语义化；1 项文案已按建议
+       方向补刀 outside Routes；1 项 Global 计数口径（200/2594/76/225 四数
+       同屏）报 Owner 裁决）；i18n 新 key 出生即双语；进程回收证据齐
+       （全树退出+生产未扰证明）；证据 /tmp/ia-redesign/screens-wp-r2/ 29
+       帧。归档待 A 波 codex3 回流后与 skills-agent-page-zcode-parity 统
+       一全量门+归档）
