@@ -25,6 +25,7 @@ export const en = {
     "Persistent notes for {scope} — fragments collected here feed skill evolution.",
   "wikiScope.refreshTitle": "Refresh wiki",
   "wikiScope.globalScopeLabel": "Global",
+  "wikiScope.scopeLoading": "Loading workspace…",
   "wikiScope.distillButtonTitle": "Distill this workspace's fragments into the global wiki",
   "wikiScope.distillButton": "Distill to global",
   "wikiScope.addFragment": "Add fragment",

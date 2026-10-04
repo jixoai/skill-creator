@@ -70,7 +70,10 @@
   const scope = $derived(WorkspaceIdSchema.parse(wsId ?? "~"));
   const scopeLabel = $derived.by(() => {
     const match = workspaceState.workspaces.find((workspace) => workspace.id === scope);
-    return match?.label ?? (scope === "~" ? t("wikiScope.globalScopeLabel") : scope);
+    // 注册表未载入（Imported ws label 未解析）时回 null——标题渲染中性占位，
+    // 不闪 raw wsId（2.3 复评 P3-1）。
+    if (match) return match.label;
+    return scope === "~" ? t("wikiScope.globalScopeLabel") : null;
   });
 
   let filterQuery = $state("");
@@ -309,7 +312,7 @@
   <header class="flex shrink-0 flex-col gap-2.5 border-b border-border pb-4">
     <div class="min-w-0">
       <h1 tabindex="-1" bind:this={headingEl} class="truncate text-lg font-semibold outline-none">
-        {t("wikiScope.heading", { scope: scopeLabel })}
+        {t("wikiScope.heading", { scope: scopeLabel ?? t("wikiScope.scopeLoading") })}
       </h1>
       <p class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
         {#if scope === "~"}
@@ -317,8 +320,11 @@
         {:else}
           <Badge variant="secondary" class="shrink-0">{t("wikiScope.workspaceBadge")}</Badge>
         {/if}
-        <span class="min-w-0 truncate" title={t("wikiScope.subtitle", { scope: scopeLabel })}>
-          {t("wikiScope.subtitle", { scope: scopeLabel })}
+        <span
+          class="min-w-0 truncate"
+          title={t("wikiScope.subtitle", { scope: scopeLabel ?? t("wikiScope.scopeLoading") })}
+        >
+          {t("wikiScope.subtitle", { scope: scopeLabel ?? t("wikiScope.scopeLoading") })}
         </span>
       </p>
     </div>
@@ -644,15 +650,15 @@
                     {#each wikiBodyBlocks(state.read.body) as block, i (i)}
                       {#if block.kind === "heading"}
                         {#if block.level === 2}
-                          <p class="text-sm font-semibold text-foreground">{block.text}</p>
+                          <h2 class="text-sm font-semibold text-foreground">{block.text}</h2>
                         {:else if block.level === 3}
-                          <p class="text-[13px] font-semibold text-foreground">{block.text}</p>
+                          <h3 class="text-[13px] font-semibold text-foreground">{block.text}</h3>
                         {:else}
-                          <p
+                          <h4
                             class="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                           >
                             {block.text}
-                          </p>
+                          </h4>
                         {/if}
                       {:else if block.kind === "list"}
                         <ul class="list-disc space-y-0.5 pl-5">

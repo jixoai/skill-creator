@@ -235,8 +235,8 @@
   </div>
   {#if activeOutsideRoutes && view}
     <p class="text-[10px] text-amber-700">
-      {view.settings.model.provider} · {view.settings.model.model} is active via an environment variable,
-      outside Routes. Add it as a route to manage it here.
+      {view.settings.model.provider} · {view.settings.model.model} is active via an environment variable
+      and isn't in your route list yet — add it as a route to manage it here.
     </p>
   {/if}
 

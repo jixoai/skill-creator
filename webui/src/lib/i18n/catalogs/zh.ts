@@ -27,6 +27,7 @@ export const zh: Record<keyof EnCatalog, string> = {
   "wikiScope.subtitle": "{scope} 的持久笔记——在这里收集的碎片会驱动技能演进。",
   "wikiScope.refreshTitle": "刷新 wiki",
   "wikiScope.globalScopeLabel": "全局",
+  "wikiScope.scopeLoading": "正在载入工作区…",
   "wikiScope.distillButtonTitle": "把这个工作区的碎片蒸馏进全局 wiki",
   "wikiScope.distillButton": "蒸馏到全局",
   "wikiScope.addFragment": "添加碎片",
