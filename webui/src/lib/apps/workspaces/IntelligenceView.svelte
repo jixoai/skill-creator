@@ -597,10 +597,14 @@
               aria-label={t("intelligence.severityFilterAria")}
             >
               {#each Object.entries(SEVERITY_LABEL_KEYS) as [option, labelKey] (option)}
+                <!-- 单选过滤组 = toggleButton 语义（Owner 2026-10-05）：选中态不能
+                     只靠 variant 换色——aria-pressed 与 provider chips / evaluating
+                     target 选择同款（屏幕阅读器可感知当前过滤）。 -->
                 <Button
                   variant={severityFilter === option ? "default" : "outline"}
                   size="sm"
                   class="h-7 px-2 text-xs capitalize"
+                  aria-pressed={severityFilter === option}
                   onclick={() => setSeverityFilter(option as "all" | "error" | "warning" | "info")}
                 >
                   {t(labelKey)}
