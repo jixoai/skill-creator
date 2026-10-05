@@ -31,6 +31,13 @@
   import { useSearch } from "$lib/shell";
   import { readDevicePrefs, updateDevicePrefs } from "$lib/shell/device-prefs.js";
   import {
+    agentPagePanels,
+    revealAgentRightPanel,
+    syncAgentPagePanelsFromPrefs,
+    toggleAgentRightPanel,
+    toggleAgentTerminal,
+  } from "$lib/stores/agent-page-panels.svelte";
+  import {
     agentPageActiveSession,
     agentPanel,
     agentSession,
@@ -88,13 +95,14 @@
 
   // ---- 布局偏好（DevicePrefs appearance 域；design §1「全部显隐状态入
   // DevicePrefs」）----
-  const initialTerminalOpen = readDevicePrefs().agentTerminalOpen;
+  // 面板开合态（terminal/rightPanel/narrow）迁 shell 级共享 store
+  // （agent-page-panels，2026-10-05 toggleButton 落地）：页面真钮与顶栏
+  // 开关同源；挂载时重读持久化真值（组件级初始化语义保持）。
+  syncAgentPagePanelsFromPrefs();
+  const panels = agentPagePanels;
   let treeCollapsed = $state(readDevicePrefs().agentTreeCollapsed);
   let treeWidth = $state(readDevicePrefs().agentTreeWidth);
-  let rightPanelOpen = $state(readDevicePrefs().agentRightPanelOpen);
   let rightPanelRatio = $state(readDevicePrefs().agentRightPanelExpandedRatio);
-  let terminalOpen = $state(initialTerminalOpen);
-  let terminalMounted = $state(initialTerminalOpen);
   let terminalHeight = $state(readDevicePrefs().agentTerminalHeight);
   let treeToggleButton: HTMLButtonElement | null = $state(null);
   let terminalToggleButton: HTMLButtonElement | null = $state(null);
@@ -104,13 +112,9 @@
   let columnsWidth = $state(0);
 
   let narrowTreeOpen = $state(false);
-  let narrowRightPanelOpen = $state(false);
-  let narrow = $state(
-    typeof matchMedia !== "undefined" && matchMedia("(max-width: 1023px)").matches,
-  );
 
   function toggleTree(): void {
-    if (narrow) {
+    if (panels.narrow) {
       narrowTreeOpen = !narrowTreeOpen;
       return;
     }
@@ -123,22 +127,18 @@
     if (persist) updateDevicePrefs({ agentTreeWidth: treeWidth });
   }
 
+  // 关闭时焦点归还可见控件（关闭语义留在页面包装——focus 目标是页面内按钮
+  // ref；开合真值翻转与持久化归 store）。
   function toggleRightPanel(): void {
-    if (narrow) {
-      const closing = narrowRightPanelOpen;
-      narrowRightPanelOpen = !narrowRightPanelOpen;
-      if (closing) focusVisibleAgentControl();
-      return;
-    }
-    rightPanelOpen = !rightPanelOpen;
-    updateDevicePrefs({ agentRightPanelOpen: rightPanelOpen });
+    const closing = panels.narrow ? panels.narrowRightPanelOpen : panels.rightPanelOpen;
+    toggleAgentRightPanel();
+    if (closing) focusVisibleAgentControl();
   }
 
   function toggleTerminal(): void {
-    if (terminalOpen) focusVisibleAgentControl(terminalToggleButton);
-    if (!terminalOpen) terminalMounted = true;
-    terminalOpen = !terminalOpen;
-    updateDevicePrefs({ agentTerminalOpen: terminalOpen });
+    const closing = panels.terminalOpen;
+    toggleAgentTerminal();
+    if (closing) focusVisibleAgentControl(terminalToggleButton);
   }
 
   function setRightPanelWidth(next: number, persist = false): void {
@@ -150,14 +150,7 @@
   }
 
   function revealRightPanel(): void {
-    if (narrow) {
-      narrowRightPanelOpen = true;
-      return;
-    }
-    if (!rightPanelOpen) {
-      rightPanelOpen = true;
-      updateDevicePrefs({ agentRightPanelOpen: true });
-    }
+    revealAgentRightPanel();
   }
 
   function openFilePreview(path: string): void {
@@ -173,8 +166,8 @@
     updateDevicePrefs({ agentTerminalHeight: terminalHeight });
   }
 
-  const treeStripMode = $derived(narrow ? !narrowTreeOpen : treeCollapsed);
-  const treeDrawerMode = $derived(narrow && narrowTreeOpen);
+  const treeStripMode = $derived(panels.narrow ? !narrowTreeOpen : treeCollapsed);
+  const treeDrawerMode = $derived(panels.narrow && narrowTreeOpen);
   const treePanelWidth = $derived(
     treeStripMode
       ? AGENT_TREE_COLLAPSED_WIDTH
@@ -197,7 +190,7 @@
   // 空面板折叠（Owner 裁决 4b）：宽屏无活动 tab 时侧栏收敛为图标 rail（旁路
   // 240px 下限与比例记忆）；空态由「有无 tab」事实派生——点击 rail 图标开 tab
   // 即回全宽，最后一个 tab 关闭即回 rail。DevicePrefs 不新增字段（记的是比例）。
-  const rightPanelRail = $derived(!narrow && visibleExtensionTabs().length === 0);
+  const rightPanelRail = $derived(!panels.narrow && visibleExtensionTabs().length === 0);
   const rightPanelRenderWidth = $derived(
     rightPanelRail ? SIDE_PANE_RAIL_WIDTH_PX : rightPanelWidth,
   );
@@ -209,8 +202,10 @@
       ? defaultTerminalHeightPx(terminalBasisHeight)
       : clampTerminalHeightPx(terminalHeight, terminalBasisHeight),
   );
-  const treeButtonOpen = $derived(narrow ? narrowTreeOpen : !treeCollapsed);
-  const rightPanelVisible = $derived(narrow ? narrowRightPanelOpen : rightPanelOpen);
+  const treeButtonOpen = $derived(panels.narrow ? narrowTreeOpen : !treeCollapsed);
+  const rightPanelVisible = $derived(
+    panels.narrow ? panels.narrowRightPanelOpen : panels.rightPanelOpen,
+  );
 
   function focusVisibleAgentControl(preferred: HTMLButtonElement | null = null): void {
     const candidate = preferred ?? treeToggleButton;
@@ -293,17 +288,11 @@
       agentPageActiveSession() === agentSession.sessionId,
   );
 
-  // ---- 窄屏态（<1024：树 drawer/右面板 overlay/终端底部 overlay 的判定基准）。 ----
+  // ---- 窄屏态（<1024：树 drawer/右面板 overlay/终端底部 overlay 的判定基准）。
+  // narrow 真值迁 agent-page-panels store（matchMedia listener 常驻）；页面只
+  // 保留树抽屉的局部复位（进窄屏收起树 drawer）。 ----
   $effect(() => {
-    if (typeof matchMedia === "undefined") return;
-    const query = matchMedia("(max-width: 1023px)");
-    const update = (): void => {
-      narrow = query.matches;
-      if (query.matches) narrowTreeOpen = false;
-    };
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
+    if (panels.narrow) narrowTreeOpen = false;
   });
 
   // ---- 左树与右面板拖宽（DevicePrefs 只持设备几何，不改 URL/session）。 ----
@@ -435,10 +424,9 @@
   data-agent-page="true"
 >
   <!-- actionsToolbar（1.8 addressBarActions）：[terminal][rightPanel] 切换钮。
-       已接线：Codex 批的 Omnibox（shell/page-actions.ts）对 agent 页注册
-       terminal/right-panel 动作，runAction 经 aria-label 定位本工具位按钮
-       （t("agentPage.toggleTerminal")/t("agentPage.toggleRightPanel")——
-       aria-label 即协议，改动须两处同步）；窄屏溢出菜单同源。 -->
+       Omnibox（shell/page-actions.ts）的 terminal/right-panel 动作与本地真钮
+       同读 agent-page-panels 共享 store（2026-10-05 起 proxy-click aria-label
+       协议退役——开合真值/按下态单一真相源）；窄屏溢出菜单同源。 -->
   <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
     <button
       bind:this={treeToggleButton}
@@ -491,12 +479,12 @@
     <button
       bind:this={terminalToggleButton}
       type="button"
-      class="relative flex h-6 w-7 items-center justify-center rounded transition-colors after:absolute after:-inset-1 after:content-[''] {terminalOpen
+      class="relative flex h-6 w-7 items-center justify-center rounded transition-colors after:absolute after:-inset-1 after:content-[''] {panels.terminalOpen
         ? 'bg-primary/10 text-primary'
         : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
       title={t("agentPage.toggleTerminal")}
       aria-label={t("agentPage.toggleTerminal")}
-      aria-pressed={terminalOpen}
+      aria-pressed={panels.terminalOpen}
       onclick={toggleTerminal}
     >
       <IconTerminalSquare class="h-3.5 w-3.5" />
@@ -559,7 +547,7 @@
       {/if}
     </div>
 
-    {#if !narrow && !treeCollapsed}
+    {#if !panels.narrow && !treeCollapsed}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div
@@ -615,17 +603,17 @@
           ></div>
         {/if}
         <div id="agent-right-panel-content" class="min-w-0 flex-1">
-          <ExtensionPanel onCloseSidePane={toggleRightPanel} railWhenEmpty={!narrow} />
+          <ExtensionPanel onCloseSidePane={toggleRightPanel} railWhenEmpty={!panels.narrow} />
         </div>
       </div>
     {/if}
   </div>
 
-  {#if terminalMounted}
+  {#if panels.terminalMounted}
     <!-- ≥1024：常驻底部容器（TerminalDock 自带拖高分隔条）；<1024：底部 overlay
          drawer。首次打开后关闭只 display:none，TerminalDock/xterm/PTY 不卸载。 -->
     <div
-      class="absolute inset-x-0 bottom-0 z-30 max-h-[70%] shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:max-h-none min-[1024px]:shadow-none {terminalOpen
+      class="absolute inset-x-0 bottom-0 z-30 max-h-[70%] shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:max-h-none min-[1024px]:shadow-none {panels.terminalOpen
         ? ''
         : 'hidden'}"
       data-terminal-region="true"

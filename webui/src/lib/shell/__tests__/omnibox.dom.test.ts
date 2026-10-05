@@ -66,6 +66,7 @@ vi.mock("$lib/i18n", async () => {
 });
 
 import Omnibox from "../Omnibox.svelte";
+import { agentPagePanels } from "$lib/stores/agent-page-panels.svelte";
 import { flushSync, mount, unmount } from "../../__tests__/svelte-client";
 import { tick } from "svelte";
 import {
@@ -222,28 +223,26 @@ describe("Omnibox interactions", () => {
     expect(document.querySelector(".omnibox-invalid")).not.toBeNull();
   });
 
-  it("routes Agent Page actions to the page-owned terminal and panel toggles", () => {
+  it("toggles Agent Page panel state directly through the shared store (proxy-click retired)", () => {
     harness.page.url.pathname = "/agent";
-    document.body.insertAdjacentHTML(
-      "afterbegin",
-      '<section data-agent-page="true"><div><button aria-label="Show tree"></button><button aria-label="New session"></button><button aria-label="Toggle terminal"></button><button aria-label="Toggle extension panel"></button></div></section>',
-    );
-    const toggleTerminal = document.querySelector<HTMLButtonElement>(
-      '[aria-label="Toggle terminal"]',
-    );
-    const togglePanel = document.querySelector<HTMLButtonElement>(
-      '[aria-label="Toggle extension panel"]',
-    );
-    if (!toggleTerminal || !togglePanel) throw new Error("Agent Page action targets missing");
-    const terminalClick = vi.spyOn(toggleTerminal, "click");
-    const panelClick = vi.spyOn(togglePanel, "click");
     mountOmnibox();
 
-    document.querySelector<HTMLButtonElement>('[aria-label="Terminal"]')?.click();
-    document.querySelector<HTMLButtonElement>('[aria-label="Extension panel"]')?.click();
+    // 直控共享 store（2026-10-05）：点顶栏钮 = 翻转 agent-page-panels 真值，
+    // aria-pressed 与按下态样式（bg-primary/10 text-primary）同源渲染。
+    const before = agentPagePanels.terminalOpen;
+    const terminalButton = document.querySelector<HTMLButtonElement>('[aria-label="Terminal"]');
+    terminalButton?.click();
+    flushSync();
+    expect(agentPagePanels.terminalOpen).toBe(!before);
+    expect(terminalButton?.getAttribute("aria-pressed")).toBe(String(!before));
+    expect(terminalButton?.className).toContain("bg-primary/10");
 
-    expect(terminalClick).toHaveBeenCalledOnce();
-    expect(panelClick).toHaveBeenCalledOnce();
+    const panelBefore = agentPagePanels.rightPanelOpen;
+    const panelButton = document.querySelector<HTMLButtonElement>('[aria-label="Extension panel"]');
+    panelButton?.click();
+    flushSync();
+    expect(agentPagePanels.rightPanelOpen).toBe(!panelBefore);
+    expect(panelButton?.getAttribute("aria-pressed")).toBe(String(!panelBefore));
   });
 
   it("uses skills.search with an eight-result cap and carries provider plus skill", async () => {

@@ -35,6 +35,11 @@
   import { getConnectionGeneration, getRpc } from "$lib/stores/connection.svelte";
   import { openSkillSearchConfig } from "$lib/stores/skills.svelte";
   import { agentPanel, setAgentPanelOpen } from "$lib/stores/agent.svelte";
+  import {
+    agentPagePanels,
+    toggleAgentRightPanel,
+    toggleAgentTerminal,
+  } from "$lib/stores/agent-page-panels.svelte";
   import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { workspaceState } from "$lib/stores/workspaces.svelte";
   import { t } from "$lib/i18n";
@@ -312,20 +317,32 @@
       setAgentPanelOpen(!agentPanel.open);
       return;
     }
-    if (action.id === "terminal" || action.id === "right-panel") {
-      const agentToolbar = document.querySelector<HTMLElement>(
-        '[data-agent-page="true"] > div:first-child',
-      );
-      const label = t(
-        action.id === "terminal" ? "agentPage.toggleTerminal" : "agentPage.toggleRightPanel",
-      );
-      [...(agentToolbar?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
-        .find((button) => button.getAttribute("aria-label") === label)
-        ?.click();
+    // terminal/right-panel 直控共享 store（2026-10-05 toggleButton 落地）：
+    // 退役 proxy-click DOM 爬取（旧协议靠 aria-label 匹配页面真钮，无状态源
+    // 也无按下态）；开合真值与页面真钮同源。
+    if (action.id === "terminal") {
+      toggleAgentTerminal();
+      return;
+    }
+    if (action.id === "right-panel") {
+      toggleAgentRightPanel();
       return;
     }
     const next = theme === "dark" ? "light" : "dark";
     setAppearanceTheme(next);
+  }
+
+  /** 顶栏动作钮的按下态（toggleButton 语义+样式同源）：三颗面板开关 = 开合
+   * 真值；theme 等动作钮无二元态 → undefined（不渲染 aria-pressed）。 */
+  function pageActionPressed(action: ShellPageAction): boolean | undefined {
+    if (action.id === "agent-panel") return agentPanel.open;
+    if (action.id === "terminal") return agentPagePanels.terminalOpen;
+    if (action.id === "right-panel") {
+      return agentPagePanels.narrow
+        ? agentPagePanels.narrowRightPanelOpen
+        : agentPagePanels.rightPanelOpen;
+    }
+    return undefined;
   }
 
   function focusOmnibox(): void {
@@ -505,12 +522,19 @@
     <!-- η 线 task 7：settings 齿轮已迁顶栏（+layout 刷新按钮旁）；本行只剩
          per-Page actions 与窄屏溢出菜单。 -->
     {#each availablePageActions as action (action.id)}
+      <!-- 按下态样式与 aria-pressed 同源（pageActionPressed）：面板开着 =
+           bg-primary/10 text-primary（页面真钮同款 toggleButton 视觉），否则
+           常规 muted hover。 -->
       <button
         type="button"
-        class="hidden h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground min-[720px]:flex"
+        class="hidden h-7 w-7 items-center justify-center rounded transition-colors min-[720px]:flex {pageActionPressed(
+          action,
+        )
+          ? 'bg-primary/10 text-primary'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
         aria-label={action.label}
         title={action.label}
-        aria-pressed={action.id === "agent-panel" ? agentPanel.open : undefined}
+        aria-pressed={pageActionPressed(action)}
         onclick={() => runAction(action)}
       >
         {#if action.id === "agent-panel"}<IconMessage
@@ -541,8 +565,12 @@
             {#each availablePageActions as action (action.id)}
               <button
                 type="button"
-                class="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-muted"
-                aria-pressed={action.id === "agent-panel" ? agentPanel.open : undefined}
+                class="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-muted {pageActionPressed(
+                  action,
+                )
+                  ? 'bg-primary/10 text-primary'
+                  : ''}"
+                aria-pressed={pageActionPressed(action)}
                 onclick={() => runAction(action)}
               >
                 {#if action.id === "agent-panel"}<IconMessage
