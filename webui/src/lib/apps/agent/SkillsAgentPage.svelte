@@ -10,13 +10,20 @@
   修订 [2026-10-05]（Owner 裁决「absolute（包括 fixed）尽量别用，尽量用 grid」）：
   窄屏右扩展面板改与 Chat 列 grid 同格堆叠、终端改与列区同格堆叠（self-end 贴底）
   ——两者弃 absolute/z-30，覆盖 = 源序 + 小值 max-[1023px]:z-10（chat 内 composer
-  relative z-10 会穿透 static 覆盖层）；树抽屉 absolute 保留（后续批）；
-  ≥1024 flex 并列/常驻行零变化。
+  relative z-10 会穿透 static 覆盖层）；≥1024 flex 并列/常驻行零变化。
+  修订 [2026-10-05]（Owner 裁决二批：「更建议从结构上使用 grid 布局——grid 可以做到
+  图层层叠的同时也使用 order，布局更稳定可靠」）：树抽屉与 scrim 弃 absolute 同走
+  grid 同格层叠——抽屉态树与 Chat 同格（col-start-2 row-start-1 + justify-self-start
+  + z-20），scrim 同格 z-10；层序 chat(auto) < scrim(z-10) < tree(z-20) < chrome 30 <
+  Dialog 50。同时清除从未生效的死类（基础类恒挂 relative 压过拼上去的 absolute
+  inset-y-0 left-0 z-30——Tailwind 样式序里 .relative 胜出，抽屉一直是 in-flow 列）。
+  行为变化属预期：抽屉开时 Chat 保持满宽垫底被 scrim 罩暗，不再被挤窄。
   正交意图：
     [1] 四区布局：左树（264px 默认/最小，可拖至 50%，折叠 36px）/ 中部 Chat /
         右扩展面板（45% 默认/65% 最大，Chat 保底 320px）/ 底部终端；几何入 DevicePrefs。
-    [2] 窄屏降级（<1024）：树 rail 可开导航 drawer（absolute，后续批）、扩展面板
-        与终端经 grid 同格堆叠转覆盖层（终端 self-end 贴底 + max-h 70%）。
+    [2] 窄屏降级（<1024）：树 rail 可开导航 drawer（与 Chat 同格层叠 z-20，scrim
+        同格 z-10）、扩展面板与终端经 grid 同格堆叠转覆盖层（终端 self-end 贴底 +
+        max-h 70%）。
     [3] 深链与会话上下文：/agent?session=<id> 激活会话（workspace 面板「在
         Agent 页打开」入口）；会话切换驱动扩展面板 rebind（1.5 手动记忆重置）；
         双开角标（agentPanel.open 且同会话 = 「也在 workspace 面板打开」）。
@@ -514,17 +521,22 @@
   </div>
 
   <!-- 主行：左树 | Chat | 右扩展面板。<1024：树折叠为窄条；右面板与 Chat 经 grid
-       同格堆叠为覆盖层（同格 1/2，后声明者在上，免 absolute/z）；≥1024 flex 并列。 -->
+       同格堆叠为覆盖层（同格 1/2，后声明者在上，免 absolute/z）；≥1024 flex 并列。
+       抽屉层序语义（grid item 的 z-index 静态即生效，同格 paint = 源序/order + 小 z）：
+       chat(auto) < scrim(z-10) < tree-drawer(z-20)，全部 < chrome 30 < Dialog 50
+       （shell/__tests__/chrome-z-order.test.ts 阶梯契约）。抽屉开时 col-1（auto）无
+       成员自然塌缩为 0 → Chat 满宽垫底（被 scrim 罩暗），树贴左覆盖。 -->
   <div
     bind:this={columnsElement}
     class="relative col-start-1 row-start-2 grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] min-[1024px]:flex"
     data-agent-columns="true"
   >
     {#if treeDrawerMode}
+      <!-- scrim：与 Chat 同格（col-2/row-1），z-10 盖过 chat(auto)、让位树 z-20；
+           同格铺满（grid 拉伸），不再需要 left 偏移——树右侧区域天然被覆盖。 -->
       <button
         type="button"
-        class="absolute inset-y-0 right-0 z-20 bg-foreground/15"
-        style="left: {treePanelWidth}px"
+        class="col-start-2 row-start-1 z-10 bg-foreground/15"
         aria-label={t("agentPage.closeTreeDrawer")}
         onclick={() => {
           narrowTreeOpen = false;
@@ -534,8 +546,8 @@
     {/if}
     <div
       id="agent-session-sidebar"
-      class="relative shrink-0 overflow-hidden border-r border-border bg-background transition-[width] {treeDrawerMode
-        ? 'absolute inset-y-0 left-0 z-30 shadow-xl'
+      class="shrink-0 overflow-hidden border-r border-border bg-background transition-[width] {treeDrawerMode
+        ? 'col-start-2 row-start-1 z-20 justify-self-start shadow-xl'
         : ''}"
       style="width: {treePanelWidth}px"
       data-tree-region="true"
@@ -595,8 +607,8 @@
     {#if rightPanelVisible}
       <!-- ≥1024：常驻侧栏（左缘拖宽）；<1024：与 Chat 同格堆叠的覆盖层（含关闭钮
            + 背景幕；2026-10-05 grid 化——弃 absolute/z-30；同格源序在后 + 小值
-           max-[1023px]:z-10 盖过 chat 内 composer 的 relative z-10，仍让位树抽屉
-           scrim(z-20)/drawer(z-30)）。
+           max-[1023px]:z-10 盖过 chat 内 composer 的 relative z-10，与树抽屉 scrim
+           同为 z-10、让位树抽屉 z-20）。
            空态 rail（Owner 裁决 4b）：宽屏无 tab 时宽度压到 SIDE_PANE_RAIL_WIDTH_PX
            且不渲染拖宽分隔条；窄屏覆盖层不受影响（空态卡保持）。 -->
       <div

@@ -275,24 +275,31 @@ describe("SkillsAgentPage shell geometry", () => {
     ).toBe("240px");
   });
 
-  it("uses narrow-screen tree and right-pane drawers without an overlay blocking the chat", () => {
+  it("opens the narrow-screen tree drawer as a grid overlay stacked over the chat", () => {
     mediaMatches = true;
     mountPage();
     expect(host.querySelector<HTMLElement>("[data-tree-region]")?.style.width).toBe("36px");
     expect(host.querySelector("[data-agent-tree-resizer]")).toBeNull();
     expect(host.querySelector("[data-right-panel-region]")).toBeNull();
     click(host.querySelector('button[aria-label="agentPage.showTree"]'));
-    expect(host.querySelector<HTMLElement>("[data-tree-region]")?.className).toContain(
-      "absolute inset-y-0 left-0 z-30",
+    // 2026-10-05 grid 同格层叠：抽屉态树与 Chat 同格（col 2/row 1）的 static grid
+    // item（z-20 静态即生效），弃 absolute；基础类不再恒挂 relative。
+    const drawerTree = host.querySelector<HTMLElement>("[data-tree-region]");
+    expect(drawerTree?.className).toContain("col-start-2 row-start-1");
+    expect(drawerTree?.className).toContain("justify-self-start");
+    expect(drawerTree?.className).toContain("z-20");
+    expect(drawerTree?.className).not.toContain("absolute");
+    expect(drawerTree?.className).not.toContain("relative");
+    expect(drawerTree?.className).toContain("bg-background");
+    // scrim：同格 z-10（chat(auto) < scrim(10) < tree(20)），无 inline left 偏移。
+    const scrim = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="agentPage.closeTreeDrawer"]',
     );
-    expect(host.querySelector<HTMLElement>("[data-tree-region]")?.className).toContain(
-      "bg-background",
-    );
-    expect(
-      host.querySelector<HTMLButtonElement>('button[aria-label="agentPage.closeTreeDrawer"]')?.style
-        .left,
-    ).toBe("264px");
-    click(host.querySelector('button[aria-label="agentPage.closeTreeDrawer"]'));
+    expect(scrim?.className).toContain("col-start-2 row-start-1");
+    expect(scrim?.className).toContain("z-10");
+    expect(scrim?.className).not.toContain("absolute");
+    expect(scrim?.style.left).toBe("");
+    click(scrim!);
     expect(host.querySelector<HTMLElement>("[data-tree-region]")?.style.width).toBe("36px");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("agentPage.showTree");
 
