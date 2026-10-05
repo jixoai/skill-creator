@@ -405,7 +405,7 @@
         </button>
         {#if filterMenuOpen}
           <div
-            class="absolute right-0 top-8 z-50 min-w-[200px] rounded-md border border-border bg-popover p-1 shadow-md"
+            class="absolute right-0 top-8 z-10 min-w-[200px] rounded-md border border-border bg-popover p-1 shadow-md"
             role="menu"
           >
             <button

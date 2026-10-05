@@ -22,8 +22,7 @@
   } from "./tab-session.svelte.js";
 
   let addOpen = $state(false);
-  // ＋菜单 fixed 坐标（走查 P1-2：absolute 版被后继兄弟层叠覆盖）。
-  let addPosition = $state({ x: 0, y: 0 });
+  // 右键菜单光标坐标（clientX/Y 锚定——fixed 正当；困于 strip z-30 层）。
   let contextWorkspace = $state<ImportedWorkspace | null>(null);
   let contextPosition = $state({ x: 0, y: 0 });
   let removingWorkspace = $state<ImportedWorkspace | null>(null);
@@ -116,7 +115,10 @@
   }
 </script>
 
-<div class="shrink-0 border-b border-border bg-background">
+<!-- 层叠阶梯（2026-10-05，Owner 实测 ＋菜单浮到 Dialog 遮罩之上）：strip 30 >
+     omnibox 20 > 内容 auto；Dialog 50 是全局顶。root 定位+z 困住所有内部浮层
+     （isolation 双保险）——fixed 菜单与 z-[100] 时代退役。 -->
+<div class="relative z-30 isolation-isolate shrink-0 border-b border-border bg-background">
   <!-- tab 高度 h-7→h-8 / 栏高 h-9→h-10（η 线 task 3）：workspace tab 增设
        subtitle 次行显示真实 path，两行内容（label 16px + path 12px）需要
        32px 内容盒；单行 tab 同步 h-8 保持行内基线一致。 -->
@@ -217,27 +219,22 @@
         </button>
       </div>
     {/if}
-    <div class="shrink-0" data-shell-menu>
+    <div class="relative shrink-0" data-shell-menu>
       <button
         class="flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
         aria-label={t("shell.openTabMenuAria")}
         aria-expanded={addOpen}
         title={t("shell.openTabTitle")}
-        onclick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          addPosition = { x: rect.left, y: rect.bottom + 4 };
-          addOpen = !addOpen;
-        }}
+        onclick={() => (addOpen = !addOpen)}
       >
         <IconPlus class="h-4 w-4" />
       </button>
       {#if addOpen}
-        <!-- fixed 定位复用下方右键菜单模式：absolute 在 tab strip 的层叠
-             上下文内会被 omnibox 行与 dashboard 覆盖（走查 P1-2）。 -->
+        <!-- 锚定弹出（2026-10-05 Owner 布局裁决：absolute/fixed 尽量退场）：
+             旧的 fixed+clientX 是逃层叠剪裁的 hack（走查 P1-2 时代产物）——
+             strip root z-30 困层后锚定 absolute 即可盖住 omnibox 行。 -->
         <div
-          class="fixed z-[100] w-64 rounded border border-border bg-popover p-1 shadow-lg"
-          style:left="{addPosition.x}px"
-          style:top="{addPosition.y}px"
+          class="absolute right-0 top-full z-10 mt-0.5 w-64 rounded border border-border bg-popover p-1 shadow-lg"
         >
           {#each unopenedWorkspaces as workspace (workspace.id)}
             <button
@@ -266,8 +263,10 @@
 </div>
 
 {#if contextWorkspace}
+  <!-- 光标坐标锚定（clientX/Y）——fixed 正当；z 困于 strip root 的 z-30 层
+       （Dialog 50 恒在其上）。 -->
   <div
-    class="fixed z-[100] w-48 rounded border border-border bg-popover p-1 shadow-lg"
+    class="fixed z-10 w-48 rounded border border-border bg-popover p-1 shadow-lg"
     style:left="{contextPosition.x}px"
     style:top="{contextPosition.y}px"
     role="menu"

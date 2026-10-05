@@ -479,7 +479,7 @@
       {#if shownCompletions.length > 0}
         <div
           id="omnibox-completions"
-          class="absolute top-8 left-0 z-[90] max-h-72 w-full min-w-64 overflow-y-auto rounded border border-border bg-popover p-1 shadow-lg"
+          class="absolute top-8 left-0 z-10 max-h-72 w-full min-w-64 overflow-y-auto rounded border border-border bg-popover p-1 shadow-lg"
           role="listbox"
           aria-label={commandMode ? t("omnibox.commandsAria") : t("omnibox.suggestionsAria")}
         >
@@ -566,7 +566,7 @@
         >
         {#if overflowOpen}
           <div
-            class="absolute right-0 top-8 z-[90] w-48 rounded border border-border bg-popover p-1 shadow-lg"
+            class="absolute right-0 top-8 z-10 w-48 rounded border border-border bg-popover p-1 shadow-lg"
           >
             {#each availablePageActions as action (action.id)}
               <button

@@ -160,14 +160,20 @@
 </div>
 
 <style>
+  /* grid 同格堆叠（2026-10-05 Owner 布局裁决：absolute/fixed 尽量退场）：
+     内容视图与 portal 层共享 1/1 格——覆盖关系来自源序（portal 最后）+ z，
+     不再需要 position:absolute inset-0。isolation 困层保留（portal 的 z 只在
+     shell 上下文内有效，恒低于全局 Dialog 50）。 */
   .app-shell {
-    position: relative;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
     isolation: isolate;
     height: 100%;
   }
+  .app-shell > :global(*) {
+    grid-area: 1 / 1;
+  }
   .app-portal-root {
-    position: absolute;
-    inset: 0;
     pointer-events: none;
     z-index: var(--z-app-overlay, 50);
   }

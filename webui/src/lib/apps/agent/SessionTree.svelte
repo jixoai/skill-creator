@@ -519,7 +519,7 @@
   {#if session}
     <div
       bind:this={menuElement}
-      class="fixed z-[100] min-w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      class="fixed z-10 min-w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
       style="top: {openMenu.top}px; left: {openMenu.left}px"
       role="menu"
       tabindex="-1"
