@@ -5,6 +5,7 @@
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconArrowRight from "@lucide/svelte/icons/arrow-right";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
+  import IconCornerDownLeft from "@lucide/svelte/icons/corner-down-left";
   import IconCommand from "@lucide/svelte/icons/command";
   import IconMenu from "@lucide/svelte/icons/menu";
   import IconMoon from "@lucide/svelte/icons/moon";
@@ -468,7 +469,12 @@
             stopEditing();
           }}
         />
-        <span class="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">Enter</span>
+        <!-- 提交提示（Owner 2026-10-05）：裸文字 "Enter" 换 return 图标
+             （corner-down-left）——键名组合（⌘L/⌘K）保留文字惯例，单键提示
+             用符形；aria-hidden（输入框提交是标准行为，读屏无需此提示）。 -->
+        <span class="hidden shrink-0 items-center sm:inline-flex" title="Enter">
+          <IconCornerDownLeft class="h-3 w-3 text-muted-foreground" aria-hidden="true" />
+        </span>
       </div>
       {#if shownCompletions.length > 0}
         <div
