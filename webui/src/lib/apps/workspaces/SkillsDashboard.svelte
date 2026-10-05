@@ -125,46 +125,25 @@
     container-type: inline-size;
     container-name: dashboard;
   }
-  /* Owner 纠偏（2026-10-05 第二轮）：「我强调 list-detail 了，你还均分」——
-     span N 在 1fr 均分网格里只是 N 个普通列宽，不是 list-detail 要的不成比例
-     主宽。改为主副结构：Skills 弹性主列吃全部剩余宽度并跨双行（list-detail
-     的宽与高都成主体），Agents/Repos 共享右侧窄列纵向堆叠。副列 320-360px
-     微弹性（Agents 卡片与 Repos feed 的信息密度不需要更宽）。 */
   .dashboard-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
-    grid-auto-rows: min-content;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
     gap: 12px;
+    /* 单列宽度下防隐式列横向溢出的第二道闸：内容永不撑出轨道。 */
     min-width: 0;
   }
   .grid-item {
     min-width: 0;
   }
+  /* Owner（2026-10-05）：Skills 是 list-detail，最多占三列给 detail 让宽。
+     级联降档（r2 修订语义扩展）：容器 < 3×minmax 轨道 + 2×gap = 1044px 降
+     span 2，< 2 轨道 + 1×gap = 692px 再降 span 1（1 列显式网格内 span>1 会
+     创建隐式列横向溢出；阈值与轨道/间距联动，契约测试钉死）。 */
   .skills-item {
-    grid-column: 1;
-    grid-row: 1 / 3;
-  }
-  .grid-item[data-screen="agents"] {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .grid-item[data-screen="repos"] {
-    grid-column: 2;
-    grid-row: 2;
+    grid-column: span 3;
   }
 
-  /* 中档降级（< 1044px = 主列下限 680 + gap + 副列下限 320 + 余量）：回均分
-     auto-fill 网格 + skills span 2（list-detail 至少两个 340 轨道）。 */
   @container dashboard (width < 1044px) {
-    .dashboard-grid {
-      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    }
-    .skills-item,
-    .grid-item[data-screen="agents"],
-    .grid-item[data-screen="repos"] {
-      grid-column: auto;
-      grid-row: auto;
-    }
     .skills-item {
       grid-column: span 2;
     }

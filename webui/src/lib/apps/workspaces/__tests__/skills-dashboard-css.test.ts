@@ -48,29 +48,13 @@ describe("mobileScreen 网格壳 CSS 契约", () => {
     expect(css).toMatch(/container-name:\s*dashboard/);
   });
 
-  it("main-side structure: skills eats flexible width, agents/repos stack a narrow column", () => {
-    // Owner 纠偏（2026-10-05 二轮）：list-detail 主面板不成比例宽——1fr 主列 +
-    // 320-360px 副列；Skills 跨双行（高也成主体），Agents/Repos 副列纵向堆叠。
-    expect(css).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(320px,\s*360px\)/);
-    expect(css).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*1[\s\S]*?grid-row:\s*1 \/ 3/);
-    expect(css).toMatch(
-      /\.grid-item\[data-screen="agents"\]\s*\{[\s\S]*?grid-column:\s*2[\s\S]*?grid-row:\s*1/,
-    );
-    expect(css).toMatch(
-      /\.grid-item\[data-screen="repos"\]\s*\{[\s\S]*?grid-column:\s*2[\s\S]*?grid-row:\s*2/,
-    );
-  });
-
-  it("mid tier (<1044px) falls back to shared auto-fill grid with skills span 2", () => {
-    const mid = css.match(/@container dashboard \(width < 1044px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
-    expect(mid).toMatch(/grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(340px,\s*1fr\)\)/);
-    expect(mid).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 2/);
-    // 显式放置在中档全部复位（否则跨结构泄漏）。
-    expect(mid).toMatch(/grid-column:\s*auto/);
+  it("uses auto-fill minmax tracks with a 12px gap", () => {
+    expect(css).toMatch(/grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(340px,\s*1fr\)\)/);
+    expect(css).toMatch(/gap:\s*12px/);
   });
 
   it("threshold consistency: container queries == 2/3×min track + gaps (692/1044px)", () => {
-    const track = Number(css.match(/repeat\(auto-fill,\s*minmax\((\d+)px/)?.[1]);
+    const track = Number(css.match(/minmax\((\d+)px/)?.[1]);
     const gap = Number(css.match(/gap:\s*(\d+)px/)?.[1]);
     const thresholds = [...css.matchAll(/@container dashboard \(width < (\d+)px\)/g)].map((m) =>
       Number(m[1]),
@@ -92,6 +76,13 @@ describe("mobileScreen 网格壳 CSS 契约", () => {
     expect(query).toMatch(
       /\.dashboard-grid \.grid-item\[data-active="true"\]\s*\{[\s\S]*?display:\s*block/,
     );
+  });
+
+  it("skills screen spans up to 3 columns (list-detail width), demoting at 1044px", () => {
+    // 基础 span 3（宽容器）；<1044 降 span 2（容器查询内）。
+    expect(css).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 3/);
+    const mid = css.match(/@container dashboard \(width < 1044px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+    expect(mid).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 2/);
   });
 
   it("screens are fixed-height, header-owning, internally scrolling (no bubble)", () => {
