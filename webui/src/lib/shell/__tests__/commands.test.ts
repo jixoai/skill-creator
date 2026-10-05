@@ -23,6 +23,7 @@ describe("shared shell commands", () => {
   it("provides one registry consumed by navigation and command search", () => {
     expect(SHELL_COMMANDS.map(({ id }) => id)).toEqual([
       "skills",
+      "workspaces",
       "creator",
       "wiki",
       "evaluating",
@@ -33,6 +34,21 @@ describe("shared shell commands", () => {
     // 「Repository」一级导航已退役：palette/omnibox 不再注册该命令（V2 回归钉）。
     expect(filterShellCommands("repo")).toEqual([]);
     expect(filterShellCommands("preferences").map(({ id }) => id)).toEqual(["settings"]);
+    // workspace-page-polish：workspace/workspaces 关键词迁至「Workspaces」管理页命令。
+    expect(filterShellCommands("workspace").map(({ id }) => id)).toEqual(["workspaces"]);
+  });
+
+  it("navigates the Workspaces command to the management page (not tab-scoped)", () => {
+    const navigate = vi.fn();
+    const handlers = { navigate, openSearchConfig: vi.fn() };
+
+    // 管理页是全局页面：任意激活 tab（含 ws_）下都直达 /workspace。
+    tabs.navigation.activeId = "ws_alpha";
+    executeShellCommand(command("workspaces"), handlers);
+    tabs.navigation.activeId = "~";
+    executeShellCommand(command("workspaces"), handlers);
+    expect(navigate).toHaveBeenCalledWith("/workspace");
+    expect(navigate).toHaveBeenCalledTimes(2);
   });
 
   it("resolves ws-scoped commands against the active tab workspace, not Global", () => {

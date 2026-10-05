@@ -10,7 +10,6 @@
   import IconMoon from "@lucide/svelte/icons/moon";
   import IconPanelRight from "@lucide/svelte/icons/panel-right";
   import IconSearch from "@lucide/svelte/icons/search";
-  import IconSettings from "@lucide/svelte/icons/settings";
   import IconSun from "@lucide/svelte/icons/sun";
   import IconTerminal from "@lucide/svelte/icons/terminal";
   import IconMessage from "@lucide/svelte/icons/message-square";
@@ -106,7 +105,9 @@
       return;
     }
     const query = input.trim();
-    if (query.length === 0) {
+    // η 线 task 6：focus 载入的是完整规范 URL——未改动前不弹补全面板
+    // （干净起点；一旦编辑（含删字符）即恢复既有 suggestion 机制）。
+    if (query.length === 0 || query === formatOmniboxUrl(currentPath)) {
       completions = [];
       return;
     }
@@ -205,7 +206,9 @@
   function beginEditing(): void {
     editing = true;
     invalid = false;
-    input = currentPath;
+    // η 线 task 6：编辑态载入完整规范 URL（与显示形态一致，host 段承载首段
+    // 路由名），不突变出中间态裸 path。
+    input = formatOmniboxUrl(currentPath);
     focusRequest += 1;
     const request = focusRequest;
     void tick().then(() => {
@@ -443,7 +446,9 @@
           placeholder={t("omnibox.placeholder")}
           onkeydown={handleInputKeydown}
           onblur={() => {
-            if (input.trim().length === 0) stopEditing();
+            // η 线 task 6：blur（未提交）即恢复当前路由的完整 URL 显示；
+            // 补全选项的 mousedown preventDefault 保住焦点，点击选择不受影响。
+            stopEditing();
           }}
         />
         <span class="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">Enter</span>
@@ -465,6 +470,7 @@
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
               onclick={() => choose(completion)}
+              onmousedown={(event) => event.preventDefault()}
               onmouseenter={() => (focusedIndex = index)}
             >
               {#if completion.kind === "command"}<IconCommand
@@ -496,13 +502,8 @@
   </div>
 
   <div class="flex shrink-0 items-center gap-0.5">
-    <button
-      type="button"
-      class="hidden h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground min-[720px]:flex"
-      aria-label={t("omnibox.openSettingsAria")}
-      title={t("omnibox.settingsLabel")}
-      onclick={() => navigateTab("/settings")}><IconSettings class="h-4 w-4" /></button
-    >
+    <!-- η 线 task 7：settings 齿轮已迁顶栏（+layout 刷新按钮旁）；本行只剩
+         per-Page actions 与窄屏溢出菜单。 -->
     {#each availablePageActions as action (action.id)}
       <button
         type="button"
@@ -537,14 +538,6 @@
           <div
             class="absolute right-0 top-8 z-[90] w-48 rounded border border-border bg-popover p-1 shadow-lg"
           >
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-muted"
-              onclick={() => navigate("/settings")}
-            >
-              <IconSettings class="h-4 w-4" />
-              {t("omnibox.settingsLabel")}
-            </button>
             {#each availablePageActions as action (action.id)}
               <button
                 type="button"

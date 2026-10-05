@@ -38,10 +38,17 @@
     ),
   );
   const importedTabs = $derived(
-    tabSession.navigation.order.slice(1).map((id) => ({
-      id,
-      workspace: workspaceState.workspaces.find((item) => item.id === id),
-    })),
+    tabSession.navigation.order.slice(1).map((id) => {
+      const workspace = workspaceState.workspaces.find((item) => item.id === id);
+      return {
+        id,
+        workspace,
+        // η 线 task 3：subtitle = 该 workspace 的真实 path（Global tab 语义
+        // 自足不加次行；workspace 尚未落载的异步窗口期为 null——次行保留
+        // min-h-3 占位，数据落载不引起行高跳动）。
+        path: workspace?.kind === "directory" ? workspace.path : null,
+      };
+    }),
   );
 
   onMount(() => {
@@ -110,12 +117,15 @@
 </script>
 
 <div class="shrink-0 border-b border-border bg-background">
+  <!-- tab 高度 h-7→h-8 / 栏高 h-9→h-10（η 线 task 3）：workspace tab 增设
+       subtitle 次行显示真实 path，两行内容（label 16px + path 12px）需要
+       32px 内容盒；单行 tab 同步 h-8 保持行内基线一致。 -->
   <div
-    class="flex h-9 items-center gap-1 overflow-x-auto px-2"
+    class="flex h-10 items-center gap-1 overflow-x-auto px-2"
     aria-label={t("shell.openPagesAria")}
   >
     <button
-      class="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-xs transition-colors {tabSession
+      class="flex h-8 shrink-0 items-center gap-1.5 rounded px-2 text-xs transition-colors {tabSession
         .navigation.activeId === '~'
         ? 'bg-primary/10 text-primary'
         : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
@@ -127,7 +137,7 @@
       <span>{t("shell.tabGlobal")}</span>
     </button>
     <button
-      class="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-xs transition-colors {tabSession
+      class="flex h-8 shrink-0 items-center gap-1.5 rounded px-2 text-xs transition-colors {tabSession
         .navigation.activeId === 'agent'
         ? 'bg-primary/10 text-primary'
         : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
@@ -140,7 +150,7 @@
     </button>
     {#each importedTabs as tab (tab.id)}
       <div
-        class="group flex h-7 shrink-0 items-center rounded {tabSession.navigation.activeId ===
+        class="group flex h-8 shrink-0 items-center rounded {tabSession.navigation.activeId ===
         tab.id
           ? 'bg-primary/10 text-primary'
           : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
@@ -150,12 +160,18 @@
           tab.workspace?.kind === "directory" && showContextMenu(event, tab.workspace)}
       >
         <button
-          class="h-full max-w-44 truncate rounded-l px-2 text-xs"
+          class="flex h-full min-w-0 max-w-44 flex-col items-start justify-center rounded-l px-2 text-left"
           title={tab.workspace?.label ?? tab.id}
           aria-current={tabSession.navigation.activeId === tab.id ? "page" : undefined}
           onclick={() => openWorkspace(tab.id)}
         >
-          {tab.workspace?.label ?? tab.id}
+          <span class="max-w-full truncate text-xs leading-4">{tab.workspace?.label ?? tab.id}</span
+          >
+          <span
+            class="max-w-full min-h-3 truncate text-[10px] leading-3 text-muted-foreground/75"
+            data-tab-path={tab.path ?? undefined}
+            title={tab.path ?? undefined}>{tab.path ?? ""}</span
+          >
         </button>
         <button
           class="flex h-full w-6 items-center justify-center rounded-r opacity-65 hover:bg-background/70 hover:opacity-100"
@@ -168,7 +184,7 @@
       </div>
     {/each}
     {#if tabSession.navigation.activeId === "settings"}
-      <div class="flex h-7 shrink-0 items-center rounded bg-primary/10 text-xs text-primary">
+      <div class="flex h-8 shrink-0 items-center rounded bg-primary/10 text-xs text-primary">
         <button class="px-2" aria-current="page" onclick={() => openWorkspace("settings")}
           >{t("shell.tabSettings")}</button
         >
@@ -183,7 +199,7 @@
     {/if}
     <div class="shrink-0" data-shell-menu>
       <button
-        class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+        class="flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
         aria-label={t("shell.openTabMenuAria")}
         aria-expanded={addOpen}
         title={t("shell.openTabTitle")}

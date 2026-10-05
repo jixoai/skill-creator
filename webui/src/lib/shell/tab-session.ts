@@ -229,6 +229,9 @@ export function currentTabRoute(state: TabNavigationState, tabId = state.activeI
 export function tabIdForPath(pathname: string): string | null {
   if (pathname === "/agent" || pathname.startsWith("/agent/")) return "agent";
   if (pathname === "/settings" || pathname.startsWith("/settings/")) return "settings";
+  // 工作区管理页（workspace-page-polish）：全局作用域页面，归属 Global tab 的
+  // 路由栈（不入独立 tab kind——tab strip 语义不扩面）。
+  if (pathname === "/workspace") return "~";
   const match = /^\/w\/([^/]+)\//.exec(pathname);
   if (!match) return null;
   try {

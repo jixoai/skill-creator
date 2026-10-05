@@ -36,6 +36,7 @@
   } from "$lib/window-size";
   import IconCommand from "@lucide/svelte/icons/command";
   import IconRefresh from "@lucide/svelte/icons/refresh-cw";
+  import IconSettings from "@lucide/svelte/icons/settings";
   import AgentPanel from "$lib/components/agent/AgentPanel.svelte";
   import { agentPanel } from "$lib/stores/agent.svelte";
   import { resolveShellRoute, sanitizeShellLocation } from "$lib/shell/route-hygiene.js";
@@ -48,6 +49,7 @@
     syncExternalLocation,
   } from "$lib/shell/tab-session.svelte.js";
   import { workspaceState } from "$lib/stores/workspaces.svelte";
+  import { openSettings } from "$lib/stores/settings-ui.svelte";
   import { t } from "$lib/i18n";
 
   // 顶层注册（在任何 $derived 之前执行，确保 appRegistry 在首次渲染时已填充）。
@@ -193,6 +195,16 @@
           onclick={() => globalThis.location.reload()}
         >
           <IconRefresh class="h-3.5 w-3.5" />
+        </button>
+        <!-- η 线 task 7：settings 齿轮自 omnibox 迁入顶栏（刷新按钮旁）；
+             openSettings（settings-ui store）逻辑不变。 -->
+        <button
+          class="no-drag flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground max-[720px]:h-11 max-[720px]:w-11"
+          aria-label={t("shell.openSettings")}
+          title={t("shell.openSettings")}
+          onclick={() => openSettings()}
+        >
+          <IconSettings class="h-3.5 w-3.5" />
         </button>
       {/snippet}
     </WindowDragRegion>

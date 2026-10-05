@@ -27,6 +27,21 @@ describe("omnibox input parsing", () => {
     });
   });
 
+  it("resolves the legacy empty-host triple-slash form to the same route as the host form", () => {
+    // η 线 task 5：host 形态为规范显示（w = hostname，~ 是 host 后合法的 path
+    // 首段）；旧三斜杠 path 形态仅作输入容错，解析到同一路由。
+    expect(parseOmniboxInput("skill-creator:///w/~/wiki")).toEqual({
+      kind: "path",
+      path: "/w/~/wiki",
+    });
+    expect(parseOmniboxInput("skill-creator://w/~")).toEqual({ kind: "path", path: "/w/~" });
+    // URL host 语义大小写不敏感。
+    expect(parseOmniboxInput("skill-creator://W/~/skills")).toEqual({
+      kind: "path",
+      path: "/w/~/skills",
+    });
+  });
+
   it("enters command mode only for a greater-than prefix", () => {
     expect(parseOmniboxInput("> creator")).toEqual({ kind: "command", query: "creator" });
     expect(parseOmniboxInput(">")).toEqual({ kind: "command", query: "" });
@@ -45,9 +60,11 @@ describe("omnibox input parsing", () => {
     expect(parseOmniboxInput(input)).toMatchObject({ kind: "invalid" });
   });
 
-  it("formats paths as the copyable display scheme", () => {
+  it("formats paths with the first route segment as hostname (no empty-host triple slash)", () => {
     expect(formatOmniboxUrl("/w/~/skills?q=a")).toBe("skill-creator://w/~/skills?q=a");
     expect(formatOmniboxUrl("/agent")).toBe("skill-creator://agent");
+    expect(formatOmniboxUrl("/settings/model")).toBe("skill-creator://settings/model");
+    expect(formatOmniboxUrl("/w/~")).toBe("skill-creator://w/~");
   });
 });
 

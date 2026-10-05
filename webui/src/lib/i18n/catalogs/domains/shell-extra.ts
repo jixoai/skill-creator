@@ -5,6 +5,8 @@
  * AppShell 状态面）+ omnibox（C 类出生即 i18n）+ import 对话框（挪顶栏批遗留）
  * 文案迁入；en 值为现网英文逐字快照（web-mode-smoke 断言 Global workspace tab /
  * Agent tab / Skills / Creator / Wiki / Evaluating 依赖逐字节一致）。
+ * 修订 [2026-10-05]（η 线 task 7）：settings 齿轮自 omnibox 迁顶栏——新增
+ * shell.openSettings，退役 omnibox.openSettingsAria / omnibox.settingsLabel。
  * 正交意图：
  *   [1] shell-extra 域词典（en/zh 键成对，keyof 校验齐全）。
  */
@@ -15,6 +17,7 @@ export const shellExtraEn = {
   "shell.commandPaletteTitle": "Command palette (Cmd+K)",
   "shell.reloadApp": "Reload app",
   "shell.reload": "Reload",
+  "shell.openSettings": "Open settings",
   "shell.titlebarAria": "window titlebar",
 
   /** ---------- Shell：AppShell 叶子状态面 ---------- */
@@ -64,8 +67,6 @@ export const shellExtraEn = {
   "omnibox.commandsAria": "Commands",
   "omnibox.suggestionsAria": "Suggestions",
   "omnibox.editAddressAria": "Edit address",
-  "omnibox.openSettingsAria": "Open settings",
-  "omnibox.settingsLabel": "Settings",
   "omnibox.moreActionsAria": "More page actions",
 
   /** ---------- Import workspace 对话框（挪顶栏批遗留） ---------- */
@@ -90,6 +91,7 @@ export const shellExtraZh: Record<keyof typeof shellExtraEn, string> = {
   "shell.commandPaletteTitle": "命令面板（Cmd+K）",
   "shell.reloadApp": "重新加载应用",
   "shell.reload": "重新加载",
+  "shell.openSettings": "打开设置",
   "shell.titlebarAria": "窗口标题栏",
 
   /** ---------- Shell：AppShell 叶子状态面 ---------- */
@@ -138,8 +140,6 @@ export const shellExtraZh: Record<keyof typeof shellExtraEn, string> = {
   "omnibox.commandsAria": "命令",
   "omnibox.suggestionsAria": "建议",
   "omnibox.editAddressAria": "编辑地址",
-  "omnibox.openSettingsAria": "打开设置",
-  "omnibox.settingsLabel": "Settings",
   "omnibox.moreActionsAria": "更多页面操作",
 
   /** ---------- Import workspace 对话框（挪顶栏批遗留） ---------- */

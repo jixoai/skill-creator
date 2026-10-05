@@ -2,10 +2,14 @@
  * Shell omnibox input contract.
  * Original request [2026-10-03]: show `skill-creator://` URLs, accept pasted
  * scheme or local paths, and share command completion with the command palette.
+ * Revision [2026-10-05]（η 线 task 5/6）：显示/编辑统一 host 形态 URL
+ * （`skill-creator://w/...`——首段路由名即 hostname）；解析同时接受 host 形态
+ * 与旧空 host 三斜杠 path 形态。
  * Orthogonal intents:
  *   [1] Parse local path and command input without browser navigation side effects.
  *   [2] Rank route completions deterministically.
  *   [3] Map shell navigation shortcuts.
+ *   [4] Internal route path ↔ host-form display URL 的双向映射单源。
  */
 
 export const OMNIBOX_SCHEME = "skill-creator://";
@@ -55,6 +59,12 @@ export function parseOmniboxInput(input: string): OmniboxInput {
   return { kind: "path", path };
 }
 
+/**
+ * Parse the text after `skill-creator://`. Accepts the canonical host form
+ * (`w/~/skills` → host w) and tolerates the legacy empty-host path form
+ * (`/w/~/skills`)——both resolve to the same internal route path. Host segment
+ * comparison is case-insensitive per URL host semantics.
+ */
 function parseSchemePath(source: string): string | null {
   if (source.length === 0 || source.includes("#") || /[\u0000-\u001f\s]/.test(source)) return null;
   if (source.startsWith("/")) return source;
@@ -64,8 +74,9 @@ function parseSchemePath(source: string): string | null {
   const queryStart = source.indexOf("?");
   const suffix =
     boundary < 0 ? (queryStart < 0 ? "" : source.slice(queryStart)) : source.slice(boundary);
-  if (authority !== "w" && authority !== "agent" && authority !== "settings") return null;
-  return `/${authority}${suffix}`;
+  const host = authority.toLocaleLowerCase();
+  if (host !== "w" && host !== "agent" && host !== "settings") return null;
+  return `/${host}${suffix}`;
 }
 
 function isLocalPath(path: string): boolean {
@@ -129,10 +140,12 @@ export function omniboxShortcut(
   return null;
 }
 
-/** Convert a real shell path to the omnibox's copyable display URL. */
+/**
+ * Convert a real shell path to the omnibox's copyable display URL.
+ * η 线 task 5：首段路由名（w/settings 等）作为 hostname——
+ * `skill-creator://w/~/skills`（host=w，path=/~/skills；~ 是 host 后合法的
+ * path 首段），不再有空 host 的三斜杠形态。
+ */
 export function formatOmniboxUrl(path: string): string {
-  const match = /^\/(w|agent|settings)(?=\/|\?|$)/.exec(path);
-  return match
-    ? `${OMNIBOX_SCHEME}${path.slice(1)}`
-    : `${OMNIBOX_SCHEME}${path.replace(/^\//, "")}`;
+  return `${OMNIBOX_SCHEME}${path.replace(/^\//, "")}`;
 }

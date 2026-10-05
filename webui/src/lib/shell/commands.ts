@@ -4,6 +4,8 @@
  * 按激活 tab 的 wsId 解析（palette/omnibox 是全局浮层，但命令目的地必须跟随
  * 当前 tab——旧实现硬编码 /w/~/ 造成跨 ws 跳转）；「Repository」命令随一级
  * 导航退役移除（repos 屏经 /w/:wsId/skills?screen=repos 抵达）。
+ * 修订 [2026-10-05]（workspace-page-polish）：新增「Workspaces」命令直达
+ * /workspace 标准管理页；workspace/workspaces 关键词随之从 Skills 命令迁出。
  */
 import { tabSession } from "./tab-session.svelte.js";
 
@@ -14,8 +16,16 @@ export const SHELL_COMMANDS = [
   {
     id: "skills",
     label: "Skills",
-    keywords: ["workspace", "workspaces", "manage skills", "global"],
+    keywords: ["manage skills", "global", "list"],
     action: { kind: "workspace", block: "skills" },
+  },
+  {
+    // 工作区管理页（workspace-page-polish）：注册目录索引 + Remove 收口 +
+    // Import 入口；IMPORTED 词汇从用户面退役后的标准管理面。
+    id: "workspaces",
+    label: "Workspaces",
+    keywords: ["workspace", "import", "remove", "directory", "directories", "manage"],
+    action: { kind: "navigate", path: "/workspace" },
   },
   {
     id: "creator",

@@ -16,7 +16,29 @@ import {
   reconcileWorkspaceTabs,
   replaceTabRoute,
   restoreTabNavigationState,
+  tabIdForPath,
 } from "../tab-session.js";
+
+describe("tabIdForPath（workspace-page-polish：/workspace 归 Global tab）", () => {
+  it("maps the management page onto the Global tab stack, not an unknown tab", () => {
+    // 未知路径会被 navigateTab 兜底回 home——管理页必须可解析，否则 /workspace
+    // 导航即弹回 /w/~/skills（页面注册的 tab 归属缝，此处钉死）。
+    expect(tabIdForPath("/workspace")).toBe("~");
+    // 既有语义回归钉：agent/settings 独立 tab kind，ws 路由按段归属。
+    expect(tabIdForPath("/agent")).toBe("agent");
+    expect(tabIdForPath("/settings/model")).toBe("settings");
+    expect(tabIdForPath("/w/ws_a/creator")).toBe("ws_a");
+    expect(tabIdForPath("/unknown")).toBeNull();
+  });
+
+  it("accepts the management page inside the Global tab stack (validStackFor)", () => {
+    // Global tab 栈里的 /workspace 条目必须通过栈合法性校验（tabIdForPath 同 "~"）。
+    let state = createTabNavigationState();
+    state = pushTabRoute(state, "~", "/w/~/skills");
+    state = pushTabRoute(state, "~", "/workspace");
+    expect(currentTabRoute(state)).toBe("/workspace");
+  });
+});
 
 describe("tab route stacks", () => {
   it("pushes routes, truncates forward history, and moves the cursor", () => {

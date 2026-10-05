@@ -143,11 +143,14 @@ afterEach(() => {
 });
 
 describe("Omnibox interactions", () => {
-  it("opens with the active route, accepts pasted scheme paths, and exits on Escape", async () => {
+  it("opens with the canonical host-form URL, accepts pasted scheme paths, and exits on Escape", async () => {
     mountOmnibox();
     editButton().click();
     await tick();
-    expect(inputElement().value).toBe("/w/~/skills");
+    // η 线 task 5/6：focus 载入完整规范 URL（host 形态，非中间态裸 path）；
+    // 未改动前不弹补全面板。
+    expect(inputElement().value).toBe("skill-creator://w/~/skills");
+    expect(inputElement().getAttribute("aria-expanded")).toBe("false");
 
     typeInto(inputElement(), "skill-creator://w/~/wiki");
     await tick();
@@ -164,6 +167,21 @@ describe("Omnibox interactions", () => {
     inputElement().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await tick();
     expect(document.querySelector('[aria-label="Address and command input"]')).toBeNull();
+  });
+
+  it("restores the current route's full URL on blur without submitting (η task 6)", async () => {
+    mountOmnibox();
+    editButton().click();
+    await tick();
+    typeInto(inputElement(), "skill-creator://w/~/wiki");
+    await tick();
+    inputElement().dispatchEvent(new FocusEvent("blur"));
+    await tick();
+    // 未提交的 blur：编辑态退出，显示面回到当前路由的完整 URL。
+    expect(document.querySelector('[aria-label="Address and command input"]')).toBeNull();
+    const display = editButton();
+    expect(display.textContent?.trim()).toContain("skill-creator://w/~/skills");
+    expect(harness.navigate).not.toHaveBeenCalled();
   });
 
   it("resolves ws-scoped commands against the active tab workspace", async () => {
