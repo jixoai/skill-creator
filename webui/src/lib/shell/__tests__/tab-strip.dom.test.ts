@@ -93,13 +93,14 @@ function mountStrip(): void {
 }
 
 function importedTabButton(workspaceId: string): HTMLButtonElement {
-  const group = [...document.querySelectorAll('[role="group"]')].find(
-    (node) =>
-      node.getAttribute("aria-label") === workspaceId || node.textContent?.includes(workspaceId),
+  // APG tabs 接线后（2026-10-05）：激活钮 = role=tab（wrapper 留 data-tab-id
+  // 作稳定钩子——role=group 已随语义清理退役）。
+  const tab = [...document.querySelectorAll('[role="tab"]')].find(
+    (node) => node.id === `shell-tab-${workspaceId}` || node.textContent?.includes(workspaceId),
   );
-  const button = group?.querySelector("button");
-  if (!button) throw new Error(`imported tab for ${workspaceId} missing`);
-  return button as HTMLButtonElement;
+  if (!(tab instanceof HTMLButtonElement))
+    throw new Error(`imported tab for ${workspaceId} missing`);
+  return tab;
 }
 
 beforeEach(() => {

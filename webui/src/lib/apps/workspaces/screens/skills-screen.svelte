@@ -519,7 +519,6 @@
           type="button"
           class="flex min-h-7 shrink-0 items-center gap-1 rounded-full border border-dashed border-border/70 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted/50"
           aria-expanded={zeroChipsVisible}
-          aria-pressed={zeroChips.some((chip) => chip.providerId === providerFilter)}
           title={zeroChips.map((chip) => chip.providerId).join(", ")}
           data-testid="zero-providers-overflow"
           onclick={() => (zeroChipsExpanded = !zeroChipsExpanded)}

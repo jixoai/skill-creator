@@ -233,7 +233,17 @@
            skills-agent-page 1.7：shell 级 drawer 退役——面板 attach 到 workspace
            页（activePageKind 闸；非 workspace 页不挂载）。 -->
       <main class="min-w-0 flex-1 overflow-hidden">
-        <PageOutlet />
+        <!-- tabpanel（toggleButton 普查落地）：TabStrip 的 role=tab 经
+             aria-controls 指向此处；独立于 <main> 地标（role=tabpanel 会覆盖
+             landmark 语义，故用内层 div 承载）。 -->
+        <div
+          id="shell-tab-panel"
+          role="tabpanel"
+          class="h-full min-h-0"
+          aria-label={t("shell.tabPanelAria")}
+        >
+          <PageOutlet />
+        </div>
         {@render children?.()}
       </main>
       {#if activePageKind === "workspace"}

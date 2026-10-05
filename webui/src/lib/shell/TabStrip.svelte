@@ -122,15 +122,25 @@
        32px 内容盒；单行 tab 同步 h-8 保持行内基线一致。 -->
   <div
     class="flex h-10 items-center gap-1 overflow-x-auto px-2"
+    role="tablist"
     aria-label={t("shell.openPagesAria")}
   >
+    <!-- APG tabs 语义（toggleButton 普查落地，2026-10-05）：激活钮 = role=tab +
+         aria-selected（替代 aria-current——tabs 模式下二者并存是双重标记），
+         aria-controls ↔ +layout 的 #shell-tab-panel；关闭钮在 tab 元素外侧
+         （嵌套交互控件不进 role=tab）。键盘：Tab 遍历 + Enter/Space 激活
+         （原生 button）；方向键轮巡留待后续（roving tabindex 与右键菜单/
+         拖拽冲突需单独设计）。 -->
     <button
       class="flex h-8 shrink-0 items-center gap-1.5 rounded px-2 text-xs transition-colors {tabSession
         .navigation.activeId === '~'
         ? 'bg-primary/10 text-primary'
         : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
       aria-label={t("shell.globalTabAria")}
-      aria-current={tabSession.navigation.activeId === "~" ? "page" : undefined}
+      role="tab"
+      id="shell-tab-~"
+      aria-selected={tabSession.navigation.activeId === "~"}
+      aria-controls="shell-tab-panel"
       onclick={() => openWorkspace("~")}
     >
       <IconGlobe class="h-3.5 w-3.5" />
@@ -142,7 +152,10 @@
         ? 'bg-primary/10 text-primary'
         : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
       aria-label={t("shell.agentTabAria")}
-      aria-current={tabSession.navigation.activeId === "agent" ? "page" : undefined}
+      role="tab"
+      id="shell-tab-agent"
+      aria-selected={tabSession.navigation.activeId === "agent"}
+      aria-controls="shell-tab-panel"
       onclick={() => openWorkspace("agent")}
     >
       <IconMessage class="h-3.5 w-3.5" />
@@ -154,16 +167,18 @@
         tab.id
           ? 'bg-primary/10 text-primary'
           : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-        role="group"
-        aria-label={tab.workspace?.label ?? tab.id}
-        oncontextmenu={(event) =>
-          tab.workspace?.kind === "directory" && showContextMenu(event, tab.workspace)}
+        data-tab-id={tab.id}
       >
         <button
           class="flex h-full min-w-0 max-w-44 flex-col items-start justify-center rounded-l px-2 text-left"
           title={tab.workspace?.label ?? tab.id}
-          aria-current={tabSession.navigation.activeId === tab.id ? "page" : undefined}
+          role="tab"
+          id="shell-tab-{tab.id}"
+          aria-selected={tabSession.navigation.activeId === tab.id}
+          aria-controls="shell-tab-panel"
           onclick={() => openWorkspace(tab.id)}
+          oncontextmenu={(event) =>
+            tab.workspace?.kind === "directory" && showContextMenu(event, tab.workspace)}
         >
           <span class="max-w-full truncate text-xs leading-4">{tab.workspace?.label ?? tab.id}</span
           >
@@ -185,8 +200,13 @@
     {/each}
     {#if tabSession.navigation.activeId === "settings"}
       <div class="flex h-8 shrink-0 items-center rounded bg-primary/10 text-xs text-primary">
-        <button class="px-2" aria-current="page" onclick={() => openWorkspace("settings")}
-          >{t("shell.tabSettings")}</button
+        <button
+          class="px-2"
+          role="tab"
+          id="shell-tab-settings"
+          aria-selected={true}
+          aria-controls="shell-tab-panel"
+          onclick={() => openWorkspace("settings")}>{t("shell.tabSettings")}</button
         >
         <button
           class="flex h-full w-6 items-center justify-center"

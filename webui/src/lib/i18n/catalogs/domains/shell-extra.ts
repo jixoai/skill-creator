@@ -27,6 +27,7 @@ export const shellExtraEn = {
 
   /** ---------- Shell：TabStrip（tab 栏 + ＋菜单 + 右键菜单 + 移除确认） ---------- */
   "shell.openPagesAria": "Open pages",
+  "shell.tabPanelAria": "Workspace page content",
   "shell.globalTabAria": "Global workspace tab",
   "shell.tabGlobal": "Global",
   "shell.agentTabAria": "Agent tab",
@@ -102,6 +103,7 @@ export const shellExtraZh: Record<keyof typeof shellExtraEn, string> = {
   /** ---------- Shell：TabStrip（tab 栏 + ＋菜单 + 右键菜单 + 移除确认） ---------- */
   "shell.openPagesAria": "打开的页面",
   "shell.globalTabAria": "全局工作区标签页",
+  "shell.tabPanelAria": "工作区页面内容",
   "shell.tabGlobal": "全局",
   "shell.agentTabAria": "Agent 标签页",
   "shell.tabAgent": "Agent",
