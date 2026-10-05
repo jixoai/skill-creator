@@ -170,9 +170,11 @@ describe("窄容器单列栈机制契约（2.2 处置批 P2-4）", () => {
       fileURLToPath(new URL("../SkillsDashboard.svelte", import.meta.url)),
       "utf-8",
     );
-    const dashThreshold = Number(
-      /@container dashboard \(width < (\d+)px\)/.exec(dashSrc)?.[1] ?? 0,
-    );
+    // dashboard 现为三档级联（1044/692）——双源一致锚定单列降档 692。
+    const dashThreshold =
+      [...dashSrc.matchAll(/@container dashboard \(width < (\d+)px\)/g)]
+        .map((m) => Number(m[1]))
+        .find((value) => value === 692) ?? 0;
     const scanThreshold = Number(/@container \(width < (\d+)px\)/.exec(src)?.[1] ?? 0);
     expect(dashThreshold).toBe(692);
     expect(scanThreshold).toBe(dashThreshold);
