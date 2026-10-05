@@ -24,9 +24,15 @@ export const APP_TITLE = "Skill Creator";
 export const MENU_OPEN_ID = 1;
 export const MENU_QUIT_ID = 2;
 
-/** tray 窗口几何，单位为逻辑桌面像素。 */
-export const WINDOW_WIDTH = 960;
-export const WINDOW_HEIGHT = 680;
+/**
+ * tray 窗口几何，单位为逻辑桌面像素。
+ * workspace-page-polish θ8（2026-10-05，Owner：「窗口目前太小，适当放大」）：
+ * 1280×800 —— 必须不低于任何路由的最小推荐尺寸（Creator 1100×760 为最大项；
+ * 不变量由 test/window-size.test.ts 钉死）。daemon 侧常量：改动需重启生产
+ * daemon（重建 bundle）后生效。
+ */
+export const WINDOW_WIDTH = 1280;
+export const WINDOW_HEIGHT = 800;
 
 /**
  * dev 模式 token 占位符。

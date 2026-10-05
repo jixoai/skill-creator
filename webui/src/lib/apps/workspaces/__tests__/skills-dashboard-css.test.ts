@@ -105,7 +105,6 @@ describe("mobileScreen 网格壳 CSS 契约", () => {
 
 describe("真实目录规模防塌机制契约（走查 13-fix）", () => {
   const screenCss = skillsScreenSrc.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
-  const footerCss = footerSrc.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
 
   it("provider chips render as a single-row horizontal scroller, never multi-line wrap", () => {
     // header 高度与 provider 数量解耦：76 chips wrap 九行曾把 master-detail 挤到
@@ -117,11 +116,14 @@ describe("真实目录规模防塌机制契约（走查 13-fix）", () => {
     expect(skillsScreenSrc).not.toMatch(/class="mt-2 flex flex-wrap gap-1\.5"\s+role="group"/);
   });
 
-  it("caps the Global footer imported-workspaces list with internal scrolling", () => {
-    // 页脚默认高度上限收紧：多 workspace 列表 max-h + 内滚，Remove 入口仍可达。
-    expect(footerSrc).toMatch(/class="imported-list[^"]*"/);
-    expect(footerCss).toMatch(/\.imported-list\s*\{[\s\S]*?max-height:/);
-    expect(footerCss).toMatch(/\.imported-list\s*\{[\s\S]*?overflow-y:\s*auto/);
+  it("retires the imported-workspaces footer block; manager entry links to /workspace", () => {
+    // workspace-page-polish（Owner 裁决）：「IMPORTED WORKSPACES」区块从 Global
+    // 页脚退役——注册目录索引与 Remove 收口到标准管理页 /workspace；页脚只
+    // 保留入口链接（remove 相关 i18n/组件随迁管理页）。
+    expect(footerSrc).not.toMatch(/imported-list/);
+    expect(footerSrc).not.toMatch(/workspacePage\.removeTitle|removeWorkspace|ConfirmDialog/);
+    expect(footerSrc).toMatch(/data-testid="open-workspace-manager"/);
+    expect(footerSrc).toMatch(/goById\("workspaces\.manage"\)/);
   });
 
   it("row descriptions clamp without the display:block override that defeats -webkit-box", () => {

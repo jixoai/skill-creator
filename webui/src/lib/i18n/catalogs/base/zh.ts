@@ -537,14 +537,31 @@ export const zhBase: Record<keyof typeof enBase, string> = {
   "dashboard.librarySnapshot": "{skills} 个技能分布在 {providers} 个 agent 位置。",
   "dashboard.healthCheck": "库健康检查",
   "dashboard.healthCheckTitle": "库健康检查——审计重复、描述含糊与过期技能，然后提出修复建议",
-  "dashboard.importedWorkspaces": "已导入工作区",
-  "dashboard.missing": "缺失",
-  "dashboard.removeTitle": "移除 {label}",
-  "dashboard.removedToast": "已移除 {label}。文件仍保留在磁盘上。",
-  "dashboard.removeDialog.title": "移除工作区注册",
-  "dashboard.removeDialog.description":
+
+  /** ---------- Workspace 管理页（workspace-page-polish：/workspace 标准管理页） ---------- */
+  "workspacePage.aria": "工作区管理",
+  "workspacePage.title": "工作区",
+  "workspacePage.subtitle": "已注册的工作区目录——导入、打开与移除。",
+  "workspacePage.import": "导入工作区",
+  "workspacePage.loading": "正在加载工作区…",
+  "workspacePage.emptyTitle": "还没有工作区",
+  "workspacePage.emptyBody": "导入一个目录，即可浏览与管理其中的技能。",
+  "workspacePage.colWorkspace": "工作区",
+  "workspacePage.colPath": "路径",
+  "workspacePage.colProviders": "Provider",
+  "workspacePage.colSkills": "技能",
+  "workspacePage.colActions": "操作",
+  "workspacePage.open": "打开",
+  "workspacePage.openTitle": "打开 {label}",
+  "workspacePage.missing": "缺失",
+  "workspacePage.removeTitle": "移除 {label}",
+  "workspacePage.removedToast": "已移除 {label}。文件仍保留在磁盘上。",
+  "workspacePage.removeDialog.title": "移除工作区注册",
+  "workspacePage.removeDialog.description":
     "从 Skill Creator 移除 {label}？文件保留在磁盘上；仅删除注册记录。",
-  "dashboard.removeDialog.confirm": "移除",
+  "workspacePage.removeDialog.confirm": "移除",
+  "workspacePage.manage": "管理工作区",
+  "workspacePage.manageTitle": "管理工作区——导入、打开与移除注册记录",
 
   /** ---------- Skills screen（主屏：平铺列表 + 筛选 + master-detail） ---------- */
   "skillsScreen.aria": "Skills 屏幕",

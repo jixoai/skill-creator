@@ -533,6 +533,105 @@ describe("SkillsDashboard 三屏网格", () => {
     expect(root.querySelector(`button[data-skill-id="${SK_B}"]`)).not.toBeNull();
   });
 
+  // ---- loadMore 抖动修复（workspace-page-polish θ4）----
+  // Owner 观察：加载更多时列表抖动、滚动归零（怀疑清空重加）。store 层已是
+  // 增量追加（[...rows, ...incoming] + 同键去重）——根因在渲染层，两处：
+  // (a) 虚拟化启用判定 `visibleRows.length > 200` 在 200→201 追加瞬间切换渲染
+  //     模式，整列 DOM 换成 spacer + 窗口（可视行被销毁 = 抖动 + 滚动跳变）；
+  // (b) 行自然高 59-75px 不等而常量 57（spacer 位移错位）。修复 = 启用判定
+  //     锚定 rows（>= 阈值 == 首页 limit，满页首页初始提交即启用，追加永不
+  //     跨档）+ 行高统一 75px。以下两测试用元素引用相等钉死增量语义。
+
+  it("reuses preceding row nodes on load-more append (element identity, no rebuild)", async () => {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(
+      log,
+      listWorkspaceOutput(
+        [
+          { id: SK_A, providerId: "claude-code", name: "alpha" },
+          { id: SK_B, providerId: "claude-code", name: "beta" },
+          { id: SK_C, providerId: "zcode", name: "gamma" },
+        ],
+        "cur-1",
+      ),
+      listWorkspaceOutput([{ id: `sk_${"d".repeat(24)}`, providerId: "zcode", name: "delta" }]),
+    );
+    const root = mountDashboard();
+    await settle();
+
+    const listEl = root.querySelector<HTMLElement>('[data-testid="skills-list"]');
+    expect(listEl).not.toBeNull();
+    const before = [...root.querySelectorAll<HTMLButtonElement>("button[data-skill-id]")];
+    expect(before).toHaveLength(3);
+
+    click(root.querySelector<HTMLButtonElement>('[data-testid="load-more"]'));
+    await settle();
+
+    // 滚动容器不被替换（容器换节点 = 滚动归零的经典来源）。
+    expect(root.querySelector('[data-testid="skills-list"]')).toBe(listEl);
+    // 前序行节点原引用仍在 DOM（keyed each 增量 appendChild，非清空重建）。
+    const after = [...root.querySelectorAll<HTMLButtonElement>("button[data-skill-id]")];
+    for (const node of before) {
+      expect(node.isConnected).toBe(true);
+      expect(after).toContain(node);
+    }
+    // 追加行按「provider 分组 + name localeCompare」既有行序插入（delta 排在
+    // gamma 前）——keyed each 单节点插入，既有行文档序与节点引用均不动。
+    expect(after.map((node) => node.getAttribute("data-skill-id"))).toEqual([
+      SK_A,
+      SK_B,
+      `sk_${"d".repeat(24)}`,
+      SK_C,
+    ]);
+  });
+
+  it("engages windowing at the full first page so append never crosses the threshold", async () => {
+    const page1Rows = Array.from({ length: 200 }, (_, i) => ({
+      id: `sk_${String(i).padStart(24, "0")}`,
+      providerId: "claude-code",
+      name: `skill-${i}`,
+    }));
+    const page2Rows = Array.from({ length: 50 }, (_, i) => ({
+      id: `sk_${String(200 + i).padStart(24, "0")}`,
+      providerId: "claude-code",
+      name: `skill-${200 + i}`,
+    }));
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(log, listWorkspaceOutput(page1Rows, "cur-1"), listWorkspaceOutput(page2Rows));
+    const root = mountDashboard();
+    await settle(60);
+
+    // 满页首页（存在 nextCursor ⇒ 200 行）初始提交即窗口化——追加前已定型，
+    // 不存在 200→201 的模式切换点。
+    const firstWindow = [...root.querySelectorAll<HTMLButtonElement>("button[data-skill-id]")];
+    expect(firstWindow.length).toBeGreaterThan(0);
+    expect(firstWindow.length).toBeLessThan(200);
+
+    click(root.querySelector<HTMLButtonElement>('[data-testid="load-more"]'));
+    await settle(60);
+
+    // 追加后窗口起点不动（scrollTop 未变）：首窗行节点原引用全部幸存（无重建）。
+    const afterAppend = [...root.querySelectorAll<HTMLButtonElement>("button[data-skill-id]")];
+    for (const node of firstWindow) {
+      expect(node.isConnected).toBe(true);
+      expect(afterAppend).toContain(node);
+    }
+    // 滚到列表底部（jsdom scrollTop 赋值 + scroll 事件驱动窗口滑动）：追加的
+    // 尾行进入窗口（续页可达，非只渲染首页窗口）。
+    const listEl = root.querySelector<HTMLElement>('[data-testid="skills-list"]');
+    expect(listEl).not.toBeNull();
+    // 滚到列表底部（250 行 × 75px；jsdom scrollTop 赋值 + scroll 事件驱动窗口
+    // 滑动）：追加的尾行进入窗口（续页可达，非只渲染首页窗口）。
+    listEl!.scrollTop = 250 * 75;
+    listEl!.dispatchEvent(new Event("scroll"));
+    await settle();
+    expect(
+      root.querySelector(`button[data-skill-id="sk_${String(249).padStart(24, "0")}"]`),
+    ).not.toBeNull();
+  });
+
   it("keeps the web-mode smoke anchor verbatim in the Global footer", async () => {
     const log = makeRpcLog();
     activeLog = log;

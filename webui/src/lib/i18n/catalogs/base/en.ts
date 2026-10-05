@@ -558,14 +558,31 @@ export const enBase = {
   "dashboard.healthCheck": "Health check library",
   "dashboard.healthCheckTitle":
     "Health check library — audit duplicates, vague descriptions, and stale skills, then propose fixes",
-  "dashboard.importedWorkspaces": "Imported workspaces",
-  "dashboard.missing": "Missing",
-  "dashboard.removeTitle": "Remove {label}",
-  "dashboard.removedToast": "Removed {label}. Files remain on disk.",
-  "dashboard.removeDialog.title": "Remove workspace registration",
-  "dashboard.removeDialog.description":
+
+  /** ---------- Workspace 管理页（workspace-page-polish：/workspace 标准管理页） ---------- */
+  "workspacePage.aria": "Workspaces management",
+  "workspacePage.title": "Workspaces",
+  "workspacePage.subtitle": "Registered workspace directories — import, open, and remove.",
+  "workspacePage.import": "Import workspace",
+  "workspacePage.loading": "Loading workspaces…",
+  "workspacePage.emptyTitle": "No workspaces yet",
+  "workspacePage.emptyBody": "Import a directory to browse and manage its skills.",
+  "workspacePage.colWorkspace": "Workspace",
+  "workspacePage.colPath": "Path",
+  "workspacePage.colProviders": "Providers",
+  "workspacePage.colSkills": "Skills",
+  "workspacePage.colActions": "Actions",
+  "workspacePage.open": "Open",
+  "workspacePage.openTitle": "Open {label}",
+  "workspacePage.missing": "Missing",
+  "workspacePage.removeTitle": "Remove {label}",
+  "workspacePage.removedToast": "Removed {label}. Files remain on disk.",
+  "workspacePage.removeDialog.title": "Remove workspace registration",
+  "workspacePage.removeDialog.description":
     "Remove {label} from Skill Creator? Its files stay on disk; only the registration is deleted.",
-  "dashboard.removeDialog.confirm": "Remove",
+  "workspacePage.removeDialog.confirm": "Remove",
+  "workspacePage.manage": "Manage workspaces",
+  "workspacePage.manageTitle": "Manage workspaces — import, open, and remove registrations",
 
   /** ---------- Skills screen（主屏：平铺列表 + 筛选 + master-detail） ---------- */
   "skillsScreen.aria": "Skills screen",

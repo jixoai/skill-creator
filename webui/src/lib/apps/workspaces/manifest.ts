@@ -3,11 +3,14 @@
  * 修订 [2026-10-03]（skills-dashboard）：Skills Page = mobileScreen dashboard
  * （Skills/Agents/Repos 三屏网格；Repository 一级导航退役被吸收；scan 实例迁
  * 子路由 repos/scan/:sourceId；?screen= 深链切屏）。
+ * 修订 [2026-10-05]（workspace-page-polish）：/workspace 标准工作区管理页
+ * （注册目录索引 + Remove 收口 + Import 入口；IMPORTED 词汇从用户面退役）。
  * 正交意图：[1] 声明 Skills dashboard App 的路由树（root = dashboard 网格 +
- * repos scan 子路由；intelligence 平行 activity）。
+ * repos scan 子路由；intelligence 平行 activity）。[2] workspace 管理页
+ * activity（全局作用域页面；tab 归属经 tabIdForPath → Global `~`）。
  */
 import IconBoxes from "@lucide/svelte/icons/boxes";
-import { defineApp, defineActivity, defineRoute } from "$lib/shell";
+import { defineApp, defineActivity, defineRoute, leafRoute } from "$lib/shell";
 import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
 import { SkillIdSchema } from "$shared/contracts/skills.js";
 import { z } from "zod";
@@ -76,6 +79,15 @@ export const workspacesApp = defineApp({
           severity: z.enum(["all", "error", "warning", "info"]).optional(),
         }),
         component: () => import("./IntelligenceView.svelte"),
+      }),
+    }),
+    // 工作区管理页（workspace-page-polish）：全局作用域（非 ws 参数路由）——
+    // 注册进 shell route registry 的方式沿 settings 页先例（独立 activity pattern）。
+    defineActivity({
+      pattern: "/workspace",
+      root: leafRoute({
+        id: "workspaces.manage",
+        component: () => import("./WorkspaceManager.svelte"),
       }),
     }),
   ],

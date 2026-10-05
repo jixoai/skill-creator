@@ -239,7 +239,12 @@
   let scrollTop = $state(0);
   let viewportPx = $state(0);
 
-  const virtualized = $derived(visibleRows.length > DASHBOARD_VIRTUALIZE_THRESHOLD);
+  // 启用判定锚定「已载行数（rows）」且为 >=（loadMore 抖动修复 θ4）：阈值 ==
+  // 首页 limit —— 存在 nextCursor 的首页必满 200 行，初始提交即启用；续页追加
+  // 只会更大、永不跨档，追加时窗口起点不动、新行只入窗口尾（DOM 增量，无重建）。
+  // 旧判定 `visibleRows.length > threshold` 在 200→201 追加瞬间切换渲染模式，
+  // 整列 DOM 换成 spacer + 窗口，可视行被销毁 = Owner 观察到的抖动 + 滚动跳变。
+  const virtualized = $derived(dashboardSkillsState.rows.length >= DASHBOARD_VIRTUALIZE_THRESHOLD);
   const visibleWindow = $derived(computeDashboardWindow(visibleRows.length, scrollTop, viewportPx));
 
   function onListScroll(): void {
@@ -530,12 +535,15 @@
           {/if}
           {#each renderedRows as row (`${row.providerId}:${row.id}`)}
             {@const sameContent = duplicateCounts.get(row.id) ?? 0}
+            <!-- 行高统一 75px（border-box，与 DASHBOARD_ROW_HEIGHT 常量严格一致）：
+                 虚拟化 spacer 位移按常量计算，行高不统一即窗口错位 + 追加抖动
+                 （1 行描述 ~59px / 2 行描述 ~75px 的自然高差被钉平）。 -->
             <button
               type="button"
               data-skill-id={row.id}
               aria-pressed={detailIdentity?.skillId === row.id}
               onclick={() => selectRow(row.providerId, row.id)}
-              class="flex min-h-14 w-full items-start gap-2.5 border-b border-border/70 px-3 py-2.5 text-left transition-colors
+              class="flex h-[75px] w-full items-start gap-2.5 overflow-hidden border-b border-border/70 px-3 py-2.5 text-left transition-colors
                 {detailIdentity?.skillId === row.id
                 ? 'bg-accent text-foreground'
                 : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
@@ -546,7 +554,7 @@
                 <IconFile class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               {/if}
               <span class="min-w-0 flex-1">
-                <span class="flex items-center gap-2">
+                <span class="flex items-center gap-2 leading-5">
                   <span class="truncate text-[13px] font-medium text-foreground">{row.name}</span>
                   <span
                     class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground"

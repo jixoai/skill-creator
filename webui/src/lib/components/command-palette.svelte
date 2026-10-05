@@ -29,6 +29,7 @@
   } from "$lib/store.svelte";
   import type { ProviderId, SkillSearchResult, WorkspaceId } from "$lib/types";
   import IconFolder from "@lucide/svelte/icons/folder-open";
+  import IconFolderClosed from "@lucide/svelte/icons/folder";
   import IconSparkles from "@lucide/svelte/icons/sparkles";
   import IconGrid from "@lucide/svelte/icons/layout-grid";
   import IconPen from "@lucide/svelte/icons/file-pen-line";
@@ -40,6 +41,8 @@
 
   const commandIcons = {
     skills: IconGrid,
+    // workspace-page-polish：「Workspaces」命令直达 /workspace 标准管理页。
+    workspaces: IconFolderClosed,
     creator: IconPen,
     wiki: IconBook,
     evaluating: IconChart,
