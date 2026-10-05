@@ -71,6 +71,10 @@ Skill Creator（当前代码：ChromeTabs Shell，四个 App；DSH composition �
 |                              创建/编辑技能 + change log（单列编辑器；Agent
 |                              会话由 DSH host 承载，内嵌 ACP 面板已移除）
 |
+|-- /workspace --------------- Workspace 管理页（2026-10-05 Owner 八条：IMPORTED
+|                              概念退出用户面——label/真实路径/provider·技能数/
+|                              Open/Remove 确认闸收口 + Import 入口；Global 不入列）
+|
 |-- /wiki -------------------- Wiki App：碎片认知知识库（2026-09-22 第四个一级
 |                              面板；home = scope 索引，/wiki/:wsId = patterns）
 |
