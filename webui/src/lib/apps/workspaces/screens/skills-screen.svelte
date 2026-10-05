@@ -500,7 +500,7 @@
   <div class="skills-master-detail flex min-h-0 flex-1">
     <!-- 列表面（窄屏 ?view=detail 且详情身份有效时隐藏） -->
     <div
-      class="skills-list-pane flex min-h-0 min-w-0 flex-1 flex-col {detailVisible
+      class="skills-list-pane flex min-h-0 w-[min(340px,45%)] shrink-0 flex-col {detailVisible
         ? 'list-hidden'
         : ''}"
     >
@@ -691,6 +691,10 @@
     .list-hidden,
     .detail-hidden {
       display: none;
+    }
+    /* 栈式下列表满宽（索引条的窄宽只服务并列形态）。 */
+    .skills-list-pane {
+      width: 100%;
     }
   }
 </style>
