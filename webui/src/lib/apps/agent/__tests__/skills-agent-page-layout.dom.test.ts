@@ -297,8 +297,9 @@ describe("SkillsAgentPage shell geometry", () => {
     expect(document.activeElement?.getAttribute("aria-label")).toBe("agentPage.showTree");
 
     click(host.querySelector('button[aria-label="agentPage.toggleRightPanel"]'));
+    // 2026-10-05 grid 化：窄屏面板与 Chat 同格堆叠（col 2/row 1），不再 absolute。
     expect(host.querySelector<HTMLElement>("[data-right-panel-region]")?.className).toContain(
-      "absolute inset-y-0 right-0 z-30",
+      "col-start-2 row-start-1",
     );
     click(
       host.querySelector('[data-right-panel-region] button[aria-label="probe-close-extension"]'),
@@ -467,9 +468,11 @@ describe("SkillsAgentPage shell geometry", () => {
     mountPage();
     click(host.querySelector('button[aria-label="agentPage.toggleRightPanel"]'));
     const panel = host.querySelector<HTMLElement>("[data-right-panel-region]");
-    // 窄屏 drawer 是覆盖层（w-full），不参与 rail 收敛；空态由面板内的 launcher 卡承载。
+    // 窄屏面板经 grid 同格堆叠为覆盖层（w-full，后声明者在上），不参与 rail 收敛；
+    // 空态由面板内的 launcher 卡承载。
     expect(panel?.dataset.rightPanelRail).toBeUndefined();
-    expect(panel?.className).toContain("absolute inset-y-0 right-0 z-30");
+    expect(panel?.className).toContain("col-start-2 row-start-1");
+    expect(panel?.className).not.toContain("absolute");
     expect(host.querySelector("[data-extension-panel-probe]")).toBeTruthy();
   });
 });

@@ -6,6 +6,11 @@
   3. 全局浮层（ImportWorkspaceDialog / CommandPalette / ToastContainer）。
   2026-09-30 shell-settings-ui：左侧导航抽为 AppSidebar 组件（展开/折叠双态
   + 标签，偏好持久化 DevicePrefs）。
+  2026-10-05（grid 布局裁决「absolute/fixed 尽量退场」）：内容行 ≤719px 改
+  grid 同格堆叠——nav 抽屉/scrim、main、agent-panel-layer 同格 1/1（行
+  minmax(0,1fr)），z 清理为 scrim 10 ≤ panel-layer 10（源序在后盖 scrim）<
+  抽屉 nav 20，恒低于全局 Dialog 50；≥720px 仍是 flex 侧栏形态（relative
+  保留：App 内部 absolute 锚定仍以本行为包含块）。
 -->
 <script lang="ts">
   import "./layout.css";
@@ -223,8 +228,12 @@
       </div>
     {/if}
 
-    <!-- 主体：Workspace Page 使用左导航；其他 Page 占满内容区。 -->
-    <div class="relative flex min-h-0 flex-1">
+    <!-- 主体：Workspace Page 使用左导航；其他 Page 占满内容区。≤719px grid
+         同格堆叠（2026-10-05 布局裁决）：nav 抽屉/scrim、main、agent 面板层
+         共享 1/1 格，覆盖关系 = 小 z + 源序，无 position:absolute。 -->
+    <div
+      class="relative flex min-h-0 flex-1 max-[719px]:grid max-[719px]:grid-rows-[minmax(0,1fr)]"
+    >
       {#if activePageKind === "workspace"}
         <WorkspaceNavigation />
       {/if}
@@ -232,7 +241,7 @@
       <!-- 右侧：Shell 内容区 + Agent 面板层。R17-C：常驻挂载——开关只是收起。
            skills-agent-page 1.7：shell 级 drawer 退役——面板 attach 到 workspace
            页（activePageKind 闸；非 workspace 页不挂载）。 -->
-      <main class="min-w-0 flex-1 overflow-hidden">
+      <main class="min-w-0 flex-1 overflow-hidden max-[719px]:[grid-area:1/1]">
         <!-- tabpanel（toggleButton 普查落地）：TabStrip 的 role=tab 经
              aria-controls 指向此处；独立于 <main> 地标（role=tabpanel 会覆盖
              landmark 语义，故用内层 div 承载）。 -->
@@ -248,7 +257,7 @@
       </main>
       {#if activePageKind === "workspace"}
         <div
-          class="agent-panel-layer shrink-0 max-[720px]:absolute max-[720px]:inset-0 max-[720px]:z-40 {agentPanel.open
+          class="agent-panel-layer shrink-0 max-[719px]:[grid-area:1/1] max-[719px]:z-10 {agentPanel.open
             ? ''
             : 'pointer-events-none'}"
         >

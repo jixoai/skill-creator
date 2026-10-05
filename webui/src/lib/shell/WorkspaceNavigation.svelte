@@ -1,3 +1,12 @@
+<!--
+  用户原始需求 [2026-09-30]：workspace 页左侧页内导航（Omnibox 汉堡开合）。
+  正交意图：
+    1. 桌面（≥1024 宽标签列 / 721–1023 图标条）：static 侧栏列，随内容行 flex。
+    2. 移动（≤719）：grid 同格抽屉（2026-10-05 布局裁决「absolute/fixed 尽量
+       退场」——scrim 与抽屉列同格 1/1 堆叠，覆盖关系 = 小 z 阶梯 scrim 10 <
+       抽屉 20，恒低于全局 Dialog 50；开合仍由 workspaceNavigation.open 驱动，
+       点 scrim 关闭语义不变）。
+-->
 <script lang="ts">
   import { page } from "$app/state";
   import IconBoxes from "@lucide/svelte/icons/boxes";
@@ -23,13 +32,13 @@
 {#if workspaceNavigation.open}
   <button
     type="button"
-    class="absolute inset-0 z-40 hidden bg-foreground/15 max-[720px]:block"
+    class="hidden bg-foreground/15 max-[719px]:[grid-area:1/1] max-[719px]:z-10 max-[719px]:block"
     aria-label={t("shell.closeNavigationAria")}
     onclick={closeWorkspaceNavigation}
   ></button>
 {/if}
 <nav
-  class="z-50 flex w-44 shrink-0 flex-col gap-1 border-r border-border bg-muted/20 p-2 max-[1023px]:w-11 max-[1023px]:items-center max-[1023px]:px-1 max-[719px]:absolute max-[719px]:inset-y-0 max-[719px]:left-0 max-[719px]:w-56 max-[719px]:items-stretch max-[719px]:border-r max-[719px]:bg-background max-[719px]:p-2 {workspaceNavigation.open
+  class="flex w-44 shrink-0 flex-col gap-1 border-r border-border bg-muted/20 p-2 max-[1023px]:w-11 max-[1023px]:items-center max-[1023px]:px-1 max-[719px]:[grid-area:1/1] max-[719px]:z-20 max-[719px]:w-56 max-[719px]:items-stretch max-[719px]:border-r max-[719px]:bg-background max-[719px]:p-2 {workspaceNavigation.open
     ? 'max-[719px]:flex'
     : 'max-[719px]:hidden'}"
   aria-label={t("shell.workspacePagesAria")}

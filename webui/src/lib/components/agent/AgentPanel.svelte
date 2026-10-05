@@ -13,6 +13,10 @@
   min-w-[320px] 地板（clamp 下限）——宽 var 失效时面板塌缩到 min-content
   （暗色截图实测 ~165px、空态文案 90px 细条），地板兜底可读性；关闭态不加
   （width:0 折叠语义不受影响）。
+  ——2026-10-05（grid 布局裁决「absolute/fixed 尽量退场」）：左缘拖柄退役
+  absolute——面板根 ≥720px 改 grid（6px 柄列 + 1fr 内容列；柄 = 列 1 跨全部
+  行），startResize/pointer 序列与 role=separator 语义不动；<720px 仍 flex
+  抽屉，零布局变化。
   正交意图：
   1. attach 容器：≥720px 常驻侧栏（宽度 = agentPanel.width，DevicePrefs 持久），
      <720px 单屏覆盖；Esc 收起（模态打开时让位）；resize 拖拽（pointer 捕获）。
@@ -127,7 +131,7 @@
 />
 
 <aside
-  class="relative flex h-full w-full flex-col bg-background min-[720px]:w-(--agent-panel-width) min-[720px]:overflow-hidden duration-150 ease-in-out {resizing
+  class="flex h-full w-full flex-col bg-background min-[720px]:grid min-[720px]:grid-cols-[6px_1fr] min-[720px]:grid-rows-[auto_auto_minmax(0,1fr)] min-[720px]:w-(--agent-panel-width) min-[720px]:overflow-hidden duration-150 ease-in-out {resizing
     ? ''
     : 'min-[720px]:transition-[width,border-color] max-[720px]:transition-[transform,visibility]'} {agentPanel.open
     ? 'min-[720px]:min-w-[320px] border-l border-border'
@@ -136,9 +140,10 @@
   aria-label={t("agentPanel.panelAria")}
   data-agent-panel="true"
 >
-  <!-- 左缘拖柄（仅 ≥720px；窄屏抽屉无侧栏宽度语义）：6px col-resize 命中区。 -->
+  <!-- 左缘拖柄（仅 ≥720px；窄屏抽屉无侧栏宽度语义）：6px col-resize 命中区。
+       grid 化（2026-10-05）：柄 = 列 1 跨全部行，不再 absolute 覆盖内容缘。 -->
   <div
-    class="absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 min-[720px]:block"
+    class="hidden w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/30 min-[720px]:col-start-1 min-[720px]:row-span-full min-[720px]:block"
     role="separator"
     aria-orientation="vertical"
     aria-label={t("agentPanel.resizeAria")}
@@ -146,7 +151,9 @@
   ></div>
 
   <!-- 面板头：Agent 标签 + 双开角标 + 深链 + 关闭。 -->
-  <header class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
+  <header
+    class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2 min-[720px]:col-start-2"
+  >
     <span class="px-1 text-xs font-medium text-muted-foreground">{t("agentHeader.agentLabel")}</span
     >
     {#if dualOpenInAgentPage}
@@ -199,7 +206,7 @@
 
   <!-- 本 ws 会话列表（target.workspaceId 过滤；compact 行——续聊入口）。 -->
   <div
-    class="max-h-40 shrink-0 overflow-y-auto border-b border-border py-1"
+    class="max-h-40 shrink-0 overflow-y-auto border-b border-border py-1 min-[720px]:col-start-2"
     data-workspace-sessions="true"
   >
     {#if workspaceSessions.length === 0}

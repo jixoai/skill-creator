@@ -7,10 +7,16 @@
   修订 [2026-10-05]（Owner 裁决 4b，空面板折叠）：宽屏右栏空态（无活动 tab）
   收敛为 48px 图标 rail——空态由「有无 tab」事实派生，不新增 DevicePrefs 字段；
   窄屏 drawer 不受影响。
+  修订 [2026-10-05]（Owner 裁决「absolute（包括 fixed）尽量别用，尽量用 grid」）：
+  窄屏右扩展面板改与 Chat 列 grid 同格堆叠、终端改与列区同格堆叠（self-end 贴底）
+  ——两者弃 absolute/z-30，覆盖 = 源序 + 小值 max-[1023px]:z-10（chat 内 composer
+  relative z-10 会穿透 static 覆盖层）；树抽屉 absolute 保留（后续批）；
+  ≥1024 flex 并列/常驻行零变化。
   正交意图：
     [1] 四区布局：左树（264px 默认/最小，可拖至 50%，折叠 36px）/ 中部 Chat /
         右扩展面板（45% 默认/65% 最大，Chat 保底 320px）/ 底部终端；几何入 DevicePrefs。
-    [2] 窄屏降级（<1024）：树 rail 可开导航 drawer、扩展面板转 overlay、终端转底部 drawer。
+    [2] 窄屏降级（<1024）：树 rail 可开导航 drawer（absolute，后续批）、扩展面板
+        与终端经 grid 同格堆叠转覆盖层（终端 self-end 贴底 + max-h 70%）。
     [3] 深链与会话上下文：/agent?session=<id> 激活会话（workspace 面板「在
         Agent 页打开」入口）；会话切换驱动扩展面板 rebind（1.5 手动记忆重置）；
         双开角标（agentPanel.open 且同会话 = 「也在 workspace 面板打开」）。
@@ -420,14 +426,16 @@
 
 <section
   bind:this={pageElement}
-  class="flex h-full min-h-0 flex-col overflow-hidden bg-background"
+  class="grid h-full min-h-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background min-[1024px]:flex min-[1024px]:flex-col"
   data-agent-page="true"
 >
   <!-- actionsToolbar（1.8 addressBarActions）：[terminal][rightPanel] 切换钮。
        Omnibox（shell/page-actions.ts）的 terminal/right-panel 动作与本地真钮
        同读 agent-page-panels 共享 store（2026-10-05 起 proxy-click aria-label
        协议退役——开合真值/按下态单一真相源）；窄屏溢出菜单同源。 -->
-  <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+  <div
+    class="col-start-1 row-start-1 flex h-9 shrink-0 items-center gap-1 border-b border-border px-2"
+  >
     <button
       bind:this={treeToggleButton}
       type="button"
@@ -505,8 +513,13 @@
     </button>
   </div>
 
-  <!-- 主行：左树 | Chat | 右扩展面板。<1024：树折叠为窄条、右面板转 overlay drawer。 -->
-  <div bind:this={columnsElement} class="relative flex min-h-0 flex-1" data-agent-columns="true">
+  <!-- 主行：左树 | Chat | 右扩展面板。<1024：树折叠为窄条；右面板与 Chat 经 grid
+       同格堆叠为覆盖层（同格 1/2，后声明者在上，免 absolute/z）；≥1024 flex 并列。 -->
+  <div
+    bind:this={columnsElement}
+    class="relative col-start-1 row-start-2 grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] min-[1024px]:flex"
+    data-agent-columns="true"
+  >
     {#if treeDrawerMode}
       <button
         type="button"
@@ -568,7 +581,10 @@
       ></div>
     {/if}
 
-    <main class="flex min-w-0 flex-1 flex-col" data-agent-chat-region="true">
+    <main
+      class="col-start-2 row-start-1 flex min-w-0 flex-1 flex-col"
+      data-agent-chat-region="true"
+    >
       <SessionFace
         showStartDirections
         onOpenFilePreview={openFilePreview}
@@ -577,11 +593,14 @@
     </main>
 
     {#if rightPanelVisible}
-      <!-- ≥1024：常驻侧栏（左缘拖宽）；<1024：overlay drawer（含关闭钮 + 背景幕）。
+      <!-- ≥1024：常驻侧栏（左缘拖宽）；<1024：与 Chat 同格堆叠的覆盖层（含关闭钮
+           + 背景幕；2026-10-05 grid 化——弃 absolute/z-30；同格源序在后 + 小值
+           max-[1023px]:z-10 盖过 chat 内 composer 的 relative z-10，仍让位树抽屉
+           scrim(z-20)/drawer(z-30)）。
            空态 rail（Owner 裁决 4b）：宽屏无 tab 时宽度压到 SIDE_PANE_RAIL_WIDTH_PX
-           且不渲染拖宽分隔条；窄屏 drawer 不受影响（覆盖层，空态卡保持）。 -->
+           且不渲染拖宽分隔条；窄屏覆盖层不受影响（空态卡保持）。 -->
       <div
-        class="absolute inset-y-0 right-0 z-30 flex w-full max-[1023px]:bg-background/95 max-[1023px]:shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:w-(--agent-right-width) min-[1024px]:shrink-0 min-[1024px]:border-l min-[1024px]:border-border max-[1023px]:backdrop-blur-sm"
+        class="col-start-2 row-start-1 flex w-full max-[1023px]:z-10 max-[1023px]:bg-background/95 max-[1023px]:shadow-xl min-[1024px]:w-(--agent-right-width) min-[1024px]:shrink-0 min-[1024px]:border-l min-[1024px]:border-border max-[1023px]:backdrop-blur-sm"
         style="--agent-right-width: {rightPanelRenderWidth}px"
         data-right-panel-region="true"
         data-right-panel-rail={rightPanelRail ? "true" : undefined}
@@ -612,10 +631,12 @@
   </div>
 
   {#if panels.terminalMounted}
-    <!-- ≥1024：常驻底部容器（TerminalDock 自带拖高分隔条）；<1024：底部 overlay
-         drawer。首次打开后关闭只 display:none，TerminalDock/xterm/PTY 不卸载。 -->
+    <!-- ≥1024：常驻底部容器（TerminalDock 自带拖高分隔条）；<1024：与列区同格
+         堆叠的底部覆盖层（self-end 贴底 + max-h 70%；2026-10-05 grid 化——弃
+         absolute/z-30；同格源序在后 + 小值 max-[1023px]:z-10 压过列区内 positioned
+         后代）。首次打开后关闭只 display:none，TerminalDock/xterm/PTY 不卸载。 -->
     <div
-      class="absolute inset-x-0 bottom-0 z-30 max-h-[70%] shadow-xl min-[1024px]:static min-[1024px]:z-auto min-[1024px]:max-h-none min-[1024px]:shadow-none {panels.terminalOpen
+      class="col-start-1 row-start-2 max-h-[70%] max-[1023px]:z-10 max-[1023px]:self-end shadow-xl min-[1024px]:max-h-none min-[1024px]:shadow-none {panels.terminalOpen
         ? ''
         : 'hidden'}"
       data-terminal-region="true"
