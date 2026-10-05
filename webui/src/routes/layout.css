@@ -1,6 +1,8 @@
 /*
  * 工作台视觉基线。
  * 原始需求 [2026-07-14]：移除玻璃浮卡，保留 960x680 密集桌面工作台。
+ * 修订 [2026-10-05]（workspace-page-polish θ8）：默认窗口上调为 1280x800
+ * （src/shared WINDOW_*，密集桌面工作台定位不变）。
  * 正交意图：[1] 主题 tokens；[2] 页面基线；[3] 原生窗口交互；[4] reduced-motion 降级。
  * 妥协声明：CSS tokens、全局基线与原生窗口交互必须共享级联上下文；页面
  * 场景样式已隔离到各 route/component，避免全局 token 漂移。
@@ -14,6 +16,33 @@
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
 @plugin 'tailwind-scrollbar';
+
+/* Owner 裁决（2026-10-05）：全局滚动条 tiny + 轨道透明——标准属性管 Gecko/
+   未来引擎（scrollbar-width: thin + scrollbar-color 第二段即轨道色），webkit
+   伪元素管 Chromium/Safari（6px 宽、透明轨道、token 化 thumb、悬停加深）。
+   局部有意隐藏滚动条的横向行（chips/tabs 的 mask 渐隐模式，display:none）
+   优先级高于此处宽度定义，不受影响。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 
 :root {
   /* 滚动条/表单控件的原生渲染方案跟随 color-scheme；缺省时 Chromium 按

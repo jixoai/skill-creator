@@ -135,13 +135,19 @@
   .grid-item {
     min-width: 0;
   }
+  /* Owner（2026-10-05）：Skills 是 list-detail，最多占三列给 detail 让宽。
+     级联降档（r2 修订语义扩展）：容器 < 3×minmax 轨道 + 2×gap = 1044px 降
+     span 2，< 2 轨道 + 1×gap = 692px 再降 span 1（1 列显式网格内 span>1 会
+     创建隐式列横向溢出；阈值与轨道/间距联动，契约测试钉死）。 */
   .skills-item {
-    grid-column: span 2;
+    grid-column: span 3;
   }
 
-  /* r2 修订：1 列显式网格内 span 2 会创建隐式第二列（横向溢出）——容器窄于
-     2×minmax 轨道 + 1×gap = 692px 时显式降档 span 1（阈值与轨道/间距联动，
-     见 skills-dashboard-css 契约测试）。 */
+  @container dashboard (width < 1044px) {
+    .skills-item {
+      grid-column: span 2;
+    }
+  }
 
   /* screen 隐喻：弹性固定高（--screen-h 自定义属性，未来可拖拽调高）+ 内部滚动
      + 自带 header；网格换行高度不塌（不随内容长高）。默认下限 = max(480px,

@@ -53,20 +53,23 @@ describe("mobileScreen 网格壳 CSS 契约", () => {
     expect(css).toMatch(/gap:\s*12px/);
   });
 
-  it("threshold consistency: container query width == 2×min track + 1×gap (692px)", () => {
+  it("threshold consistency: container queries == 2/3×min track + gaps (692/1044px)", () => {
     const track = Number(css.match(/minmax\((\d+)px/)?.[1]);
     const gap = Number(css.match(/gap:\s*(\d+)px/)?.[1]);
-    const threshold = Number(css.match(/@container dashboard \(width < (\d+)px\)/)?.[1]);
+    const thresholds = [...css.matchAll(/@container dashboard \(width < (\d+)px\)/g)].map((m) =>
+      Number(m[1]),
+    );
     expect(track).toBe(340);
     expect(gap).toBe(12);
-    // 1 列显式网格内 span 2 会创建隐式第二列（横向溢出）——阈值必须精确覆盖
-    // 「auto-fill 只能解析出 1 列」的下边界（r2 修订）。
-    expect(threshold).toBe(2 * track + gap);
-    expect(threshold).toBe(692);
+    // Owner（2026-10-05）Skills 三列级联：中档 = 2 轨道 + 1×gap（692），
+    // 三列档 = 3 轨道 + 2×gap（1044）。1 列显式网格内 span>1 会创建隐式列
+    // （横向溢出）——阈值必须精确覆盖「auto-fill 只能解析出 N 列」的下边界。 */
+    expect(thresholds).toContain(2 * track + gap);
+    expect(thresholds).toContain(3 * track + 2 * gap);
   });
 
   it("explicitly demotes the skills screen to span 1 inside the single-column query", () => {
-    const query = css.match(/@container dashboard \(width < \d+px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+    const query = css.match(/@container dashboard \(width < 692px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
     expect(query).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 1/);
     // 单列容器只显示 active screen（mobileScreen 单屏切换）。
     expect(query).toMatch(/\.dashboard-grid \.grid-item\s*\{[\s\S]*?display:\s*none/);
@@ -75,8 +78,11 @@ describe("mobileScreen 网格壳 CSS 契约", () => {
     );
   });
 
-  it("skills screen spans 2 columns by default", () => {
-    expect(css).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 2/);
+  it("skills screen spans up to 3 columns (list-detail width), demoting at 1044px", () => {
+    // 基础 span 3（宽容器）；<1044 降 span 2（容器查询内）。
+    expect(css).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 3/);
+    const mid = css.match(/@container dashboard \(width < 1044px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+    expect(mid).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 2/);
   });
 
   it("screens are fixed-height, header-owning, internally scrolling (no bubble)", () => {
@@ -160,8 +166,11 @@ describe("窄屏栈切换与 chips 滚动条机制契约（修复批 2）", () =
     expect(screenCss).not.toMatch(/@container \(max-width: 559px\)/);
     expect(screenCss).not.toMatch(/\.skills-master-detail\s*\{[\s\S]*?container-type/);
     // 阈值一致性：与 SkillsDashboard 单列降档逐字相等（改一处不改另一处 = 红）。
+    // dashboard 侧现为三档级联（1044/692）——双源一致锚定的是单列降档 692。
     const dashboardThreshold = Number(
-      dashboardSrc.match(/@container dashboard \(width < (\d+)px\)/)?.[1],
+      [...dashboardSrc.matchAll(/@container dashboard \(width < (\d+)px\)/g)]
+        .map((m) => Number(m[1]))
+        .find((value) => value === 692),
     );
     const screenThreshold = Number(
       skillsScreenSrc.match(/@container dashboard \(width < (\d+)px\)/)?.[1],
