@@ -212,7 +212,7 @@
           session.sessionId
             ? 'bg-primary/10 text-primary'
             : 'text-foreground/80 hover:bg-muted'}"
-          aria-current={agentSession.sessionId === session.sessionId ? "true" : undefined}
+          aria-pressed={agentSession.sessionId === session.sessionId}
           title="{sessionDisplayName(session)} ({session.status})"
           onclick={() => selectAgentSession(session.sessionId)}
         >

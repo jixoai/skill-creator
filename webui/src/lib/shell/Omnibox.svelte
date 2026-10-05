@@ -542,6 +542,7 @@
               <button
                 type="button"
                 class="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-muted"
+                aria-pressed={action.id === "agent-panel" ? agentPanel.open : undefined}
                 onclick={() => runAction(action)}
               >
                 {#if action.id === "agent-panel"}<IconMessage
