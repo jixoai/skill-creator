@@ -437,6 +437,14 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
   daemon: {
     /** Read the live daemon and tray status. */
     status: oc.input(z.object({})).output(DaemonStatusSchema),
+    /**
+     * 以系统默认应用打开 https URL（ext-opener；tray 挂载后为原生通道，
+     * headless 降级 spawn）。server-owned https 闸；用户显式动作触发
+     * （如 Discover 源卡「Open repo」），非 start/open 的启动副作用。
+     */
+    openExternal: oc
+      .input(z.object({ url: z.string().url() }).strict())
+      .output(z.object({ opened: z.literal(true) })),
   },
   selfSkill: {
     /** Live self-skill link state（conflict 折叠 kept；WebUI 首页 banner 数据源）。 */

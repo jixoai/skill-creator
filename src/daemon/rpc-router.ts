@@ -182,6 +182,11 @@ export function createRpcRouter(deps: RpcRouterDeps) {
     },
     daemon: {
       status: rpc.daemon.status.handler(() => status()),
+      // ext-opener 外开（Owner 2026-10-05）：https 闸在 service（server-owned）。
+      openExternal: rpc.daemon.openExternal.handler(async ({ input }) => {
+        await domain.opener.openHttpsUrl(input.url);
+        return { opened: true as const };
+      }),
     },
     selfSkill: {
       // self-skill-symlink：fs 直达的 server-owned 逻辑（与 CLI/daemon 入口同一

@@ -17,6 +17,7 @@
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import ErrorHint from "$lib/components/error-hint.svelte";
   import { showErrorToast, showToast } from "$lib/toast.svelte";
+  import { requireRpc } from "$lib/stores/connection.svelte";
   import { t } from "$lib/i18n";
   import {
     addSource,
@@ -115,6 +116,16 @@
   function openScan(sourceId: string): void {
     // 通过 sourceId 进入扫描实例；RepositoryScan 用 sourceId 反查 gitUrl 触发首扫。
     void goto(`/w/${wsId}/skills/repos/scan/${encodeURIComponent(sourceId)}`);
+  }
+
+  /** Open repo（Owner 2026-10-05）：经 daemon ext-opener 以系统默认浏览器打开
+   * 源仓库页（https 闸 server-owned；headless 自带 spawn 降级）。 */
+  async function openRepoHomepage(homepage: string): Promise<void> {
+    try {
+      await requireRpc().daemon.openExternal({ url: homepage });
+    } catch (error) {
+      showErrorToast(error instanceof Error ? error.message : String(error));
+    }
   }
 
   function openAdd(): void {
@@ -235,6 +246,7 @@
               scanSummary={getScanSummary(source.id)}
               stale={isScanSummaryStale(getScanSummary(source.id))}
               onscan={() => openScan(source.id)}
+              onopenrepo={() => void openRepoHomepage(source.homepage!)}
               onremove={source.builtIn ? undefined : () => requestRemove(source.id, source.label)}
             />
           {/each}

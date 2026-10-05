@@ -20,6 +20,7 @@
     scanSummary,
     stale,
     onscan,
+    onopenrepo,
     onremove,
   }: {
     /** 源标题。 */
@@ -38,6 +39,8 @@
     stale?: boolean;
     /** 点击 "Scan" 的回调。 */
     onscan: () => void;
+    /** 点击 "Open repo" 的回调（经 ext-opener 外开；缺省隐藏入口）。 */
+    onopenrepo?: () => void;
     /** 用户源删除回调（仅用户源传入）。 */
     onremove?: () => void;
   } = $props();
@@ -89,18 +92,19 @@
     >
       Scan
     </button>
-    {#if homepage}
-      <!-- 走查 #5：homepage 恒为源 Git 仓库页——「Home」语义不明，改为按实际行为命名。 -->
-      <a
-        href={homepage}
-        target="_blank"
-        rel="noreferrer noopener"
+    {#if homepage && onopenrepo}
+      <!-- 走查 #5：homepage 恒为源 Git 仓库页——「Home」语义不明，改为按实际行为命名。
+           Owner（2026-10-05）：外开经 OpenTray ext-opener（WebView 内 a[target=_blank]
+           不可靠），回调注入保持卡片纯展示。 -->
+      <button
+        type="button"
+        onclick={onopenrepo}
         class="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted/50"
         aria-label={`Open the ${label} repository`}
       >
         <IconExternal class="h-3 w-3" />
         Open repo
-      </a>
+      </button>
     {/if}
     {#if !builtIn && onremove}
       <button

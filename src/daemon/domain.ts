@@ -35,6 +35,7 @@ import {
 import { createSkillSearchService, type SkillSearchService } from "./skill-search/service.js";
 import { platformOpenFile, type SearchConfigOpener } from "./search-config-opener.js";
 import { createDialogService, type DialogService } from "./dialog-service.js";
+import { createOpenerService, type OpenerService } from "./opener-service.js";
 import {
   createSkillIntelligenceService,
   type SkillIntelligenceService,
@@ -94,6 +95,8 @@ export interface DaemonDomain {
   searchConfigOpener: SearchConfigOpener;
   /** 原生目录选择器（tray 挂载后 attach；ext-dialog 集成）。 */
   dialog: DialogService;
+  /** 系统默认应用打开 https URL（tray 挂载后 attach；ext-opener 集成）。 */
+  opener: OpenerService;
   /** 双级 wiki 知识库（skill-wiki 领域库委派；direct mutation 面）。 */
   wiki: WikiService;
   /** 蒸馏 Job 编排（skill-wiki-maintainer 1.3：run registry + kernel job + 审批桥）。 */
@@ -141,6 +144,8 @@ export function createDaemonDomain(
     /** 测试注入 search-config 打开 stub：避免真实 OS 副作用。 */
     searchConfigOpener?: SearchConfigOpener;
     dialog?: DialogService;
+    /** 测试注入 ext-opener stub（真实 attach 需要 tray）。 */
+    opener?: OpenerService;
     /**
      * 测试注入蒸馏 ephemeral 会话工厂（task 1.5 端到端）：经 DistillJobDeps 的
      * 既有 seam（1.3）替换真实 kernel 驱动；缺省走 kernel handle（生产路径）。
@@ -226,6 +231,7 @@ export function createDaemonDomain(
   const skillIntelligence = createSkillIntelligenceService(skills, creator);
   const searchConfigOpener = options.searchConfigOpener ?? platformOpenFile;
   const dialog = options.dialog ?? createDialogService();
+  const opener = options.opener ?? createOpenerService();
   // wiki 随 workspace 目录同居（目录映射标准 2026-09-22）；global 由库解析。
   const wiki = createWikiService(workspaces);
   // 蒸馏 Job 服务先于 capability registry 构造（handler 闭包消费 domain.wikiDistill）；
@@ -255,6 +261,7 @@ export function createDaemonDomain(
     skillSearch: createSkillSearchService(),
     searchConfigOpener,
     dialog,
+    opener,
     wiki,
     wikiDistill,
     acpBridge: createAcpBridgeService(workspaces),

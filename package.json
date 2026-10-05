@@ -92,6 +92,7 @@
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@opentray/ext-dialog": "0.34.0",
+    "@opentray/ext-opener": "0.34.1",
     "@opentray/ext-webview": "0.34.0",
     "@opentray/vite-plugin": "0.34.0",
     "@orpc/contract": "1.14.6",
