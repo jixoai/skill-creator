@@ -209,13 +209,16 @@ describe("纯投影", () => {
     expect(dashboardRequestKey(WS, "a")).not.toBe(dashboardRequestKey(WS, "b"));
   });
 
-  it("provider counts derive from rows with defensive missing-provider rows", () => {
+  it("provider chips 计数取摘要总量（跨页稳定），rows 只兜底缺席 provider", () => {
+    // workspace-page-polish θ4（loadMore 抖动修复）：facet 计数 = provider 摘要
+    // skillCount（daemon 每页恒同值），不再随已载行数逐页变化/重排。
     const providers = [
       {
         providerId: "claude-code" as ProviderId,
         label: "Claude",
         available: true,
-        skillCount: 2,
+        // 摘要总量 5 > 已载 2 行：chip 显示 5（分页未载满时 facet 语义仍是总量）。
+        skillCount: 5,
         error: undefined,
       },
       {
@@ -228,9 +231,11 @@ describe("纯投影", () => {
     ];
     const rows = [row("claude-code", 1), row("claude-code", 2), row("ghost", 3)];
     const chips = dashboardProviderCounts(providers, rows);
-    expect(chips.find((c) => c.providerId === "claude-code")?.count).toBe(2);
+    expect(chips.find((c) => c.providerId === "claude-code")?.count).toBe(5);
     expect(chips.find((c) => c.providerId === "zcode")?.error).toBe(true);
+    // 摘要缺席的 ghost provider：以已载行数兜底。
     expect(chips.find((c) => c.providerId === "ghost")?.label).toBe("ghost");
+    expect(chips.find((c) => c.providerId === "ghost")?.count).toBe(1);
   });
 
   it("provider chips 零计数倒置（2.2 处置批 P2-2）：非零前置、零计数殿后（组内相对序保持）", () => {
@@ -353,8 +358,11 @@ describe("computeDashboardWindow（虚拟化窗口数学）", () => {
     expect(computeDashboardWindow(0, 0, 100)).toEqual({ start: 0, end: 0 });
   });
 
-  it("virtualization threshold matches the design (>200 rows)", () => {
+  it("virtualization threshold matches the first-page limit (engagement at full first page)", () => {
+    // workspace-page-polish θ4：阈值 == 首页 limit（200）——存在 nextCursor 的首页
+    // 必满 200 行，初始提交即达阈值；续页追加永不跨档（loadMore 抖动根因钉死）。
     expect(DASHBOARD_VIRTUALIZE_THRESHOLD).toBe(200);
-    expect(DASHBOARD_ROW_HEIGHT).toBeGreaterThan(0);
+    // 行高常量 == 渲染层 h-[75px]（border-box 严格一致，spacer 位移依赖）。
+    expect(DASHBOARD_ROW_HEIGHT).toBe(75);
   });
 });

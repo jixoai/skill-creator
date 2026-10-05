@@ -132,25 +132,29 @@ export function resetDashboardSkills(): void {
 
 // ---- 纯投影（可单测） ----
 
-/** provider chips 计数：All = 行总数，其余 = 各 provider 行数（含 error provider 计 0）。
- * 2.2 处置批 P2-2：非零计数前置、零计数殿后（组内保持摘要相对序）——真实目录里
- * 大量空 provider 的 0-chip 不再把有用筛选挤出首屏；零计数 chips 由 UI（skills-screen）
- * 折叠为「+N providers」溢出项。
+/**
+ * provider chips 计数（facet 口径 = provider 摘要的 skillCount 总量，非已载行数）。
+ * 2.2 处置批 P2-2 的排序保留：非零计数前置、零计数殿后（组内保持摘要相对序）。
+ * loadMore 抖动修复（workspace-page-polish θ4）：摘要总量在同一查询的每一页
+ * 响应里恒同值（daemon scanProvider 返回全量计数）——chips 计数/分区跨页
+ * 稳定，不再随「已载行数」逐页重排。平铺行里有、providers 摘要缺席的 provider
+ * （防御）：以 id 兜底补一行（计数退回已载行数）。
  */
 export function dashboardProviderCounts(
   providers: readonly DashboardProviderSummary[],
   rows: readonly DashboardSkillRow[],
 ): Array<{ providerId: ProviderId; label: string; count: number; error: boolean }> {
-  const counts = new Map<string, number>();
-  for (const row of rows) counts.set(row.providerId, (counts.get(row.providerId) ?? 0) + 1);
+  const loadedCounts = new Map<string, number>();
+  for (const row of rows)
+    loadedCounts.set(row.providerId, (loadedCounts.get(row.providerId) ?? 0) + 1);
   const summaries = providers.map((provider) => ({
     providerId: provider.providerId,
     label: provider.label,
-    count: counts.get(provider.providerId) ?? 0,
+    count: provider.skillCount,
     error: provider.error !== undefined,
   }));
   // 平铺行里有、providers 摘要缺席的 provider（防御）：以 id 兜底补一行。
-  for (const [providerId, count] of counts) {
+  for (const [providerId, count] of loadedCounts) {
     if (!summaries.some((entry) => entry.providerId === providerId)) {
       summaries.push({
         providerId: providerId as ProviderId,
@@ -220,9 +224,20 @@ export function dashboardDuplicatesTruncated(
 
 // ---- 虚拟化窗口数学（纯函数） ----
 
-/** 平铺行固定高估算（min-h-14 56px + border 1px；两行描述按 56px 截断由 line-clamp 保证）。 */
-export const DASHBOARD_ROW_HEIGHT = 57;
-/** 虚拟化启用阈值：超过 200 行才窗口化（design §2：>200 rows 时列表虚拟化）。 */
+/**
+ * 平铺行统一行高（border-box，含 1px border-b）：py-2.5(20) + 名字行 leading-5(20)
+ * + mt-0.5(2) + 描述 line-clamp-2 leading-4(32) + border(1) = 75px。
+ * 行高必须与渲染层 CSS 严格一致（skills-screen 行类 h-[75px]）——窗口化 spacer
+ * 位移按本常量计算，行高漂移即滚动错位（loadMore 抖动根因之一：旧行自然高
+ * 59-75px 不等、常量 57，虚拟化后窗口与真实内容错位）。
+ */
+export const DASHBOARD_ROW_HEIGHT = 75;
+/**
+ * 虚拟化启用阈值：== listWorkspace 首页 limit（200）。满页首页（存在 nextCursor
+ * ⇒ 首页必为满 200 行）在初始提交即达阈值——启用判定只发生在首页提交，续页
+ * 追加永不跨档（loadMore 抖动根因之二：旧判定 `visibleRows.length > 200` 在
+ * 200→201 追加瞬间切换渲染模式，整列 DOM 换成窗口 + spacer，可视行被销毁）。
+ */
 export const DASHBOARD_VIRTUALIZE_THRESHOLD = 200;
 /** 视口上下各多渲染的行数（滚动时的安全余量）。 */
 export const DASHBOARD_VIRTUAL_OVERSCAN = 6;

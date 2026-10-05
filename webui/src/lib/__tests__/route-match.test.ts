@@ -67,6 +67,15 @@ describe("Page manifests", () => {
     );
   });
 
+  it("matches the workspace management page at /workspace (workspace-page-polish)", () => {
+    // 标准管理页（注册目录索引 + Remove 收口 + Import 入口）；
+    // IMPORTED 词汇从用户面退役后的承接页。
+    expectActivity(workspacesApp, "/workspace", "", "workspaces.manage");
+    // 管理页 id 可经 route registry 构 href（页脚「管理工作区」入口同链）。
+    const href = buildHrefById("workspaces.manage");
+    expect(href).toBe("/workspace");
+  });
+
   it("keeps ProviderId in the canonical query while adapting it to legacy view params", () => {
     const href = buildHrefById(
       "workspaces.provider",
