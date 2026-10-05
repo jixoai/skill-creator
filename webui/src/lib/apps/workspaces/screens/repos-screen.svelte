@@ -96,6 +96,20 @@
     return items.slice(0, 5);
   });
 
+  /** FD-10 相对时间格式化（简化版：分钟/小时/天前；<1 分钟=刚刚）。 */
+  function formatRelativeTime(timestamp: number): string {
+    const now = Date.now();
+    const diffMs = now - timestamp;
+    const diffMinutes = Math.floor(diffMs / 60000);
+    if (diffMinutes < 1) return t("skillsWorkspace.reposScreen.justNow");
+    if (diffMinutes < 60)
+      return t("skillsWorkspace.reposScreen.minutesAgo", { minutes: diffMinutes });
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return t("skillsWorkspace.reposScreen.hoursAgo", { hours: diffHours });
+    const diffDays = Math.floor(diffHours / 24);
+    return t("skillsWorkspace.reposScreen.daysAgo", { days: diffDays });
+  }
+
   // 新增自定义源表单（瞬时 $state；提交经 RPC；https-only 由 server 契约裁决）。
   let adding = $state(false);
   let newLabel = $state("");
@@ -103,6 +117,11 @@
   let newDescription = $state("");
   let addError = $state<string | null>(null);
   let addBusy = $state(false);
+
+  // FD-22 新增源表单实时校验。
+  const urlValid = $derived(newUrl.trim() === "" || newUrl.trim().startsWith("https://"));
+  const labelValid = $derived(newLabel.trim().length > 0);
+  const canSubmitAdd = $derived(urlValid && labelValid && newUrl.trim().length > 0);
 
   function setRepoSearch(value: string, mode: "REPLACE" | "PUSH"): void {
     goById(
@@ -232,7 +251,9 @@
         </div>
       {:else if filteredSources.length === 0}
         <p class="py-6 text-center text-xs text-muted-foreground">
-          {t("reposScreen.noSources", { query: committedQuery })}
+          {committedQuery
+            ? t("reposScreen.noSources", { query: committedQuery })
+            : t("skillsWorkspace.reposScreen.noSourcesYet")}
         </p>
       {:else}
         <div class="grid grid-cols-1 gap-2.5">
@@ -270,8 +291,16 @@
                 class="flex min-h-9 w-full items-center justify-between rounded px-2 py-1 text-left text-xs transition-colors hover:bg-muted/60"
               >
                 <span class="truncate font-medium text-foreground">{recent.label}</span>
-                <span class="ml-2 shrink-0 text-muted-foreground tabular-nums">
-                  {t("reposScreen.scanCount", { count: recent.summary?.skillCount ?? 0 })}
+                <span
+                  class="ml-2 flex shrink-0 items-center gap-2 text-muted-foreground tabular-nums"
+                >
+                  <!-- FD-10 最近扫描相对时间 -->
+                  <span class="text-[11px]"
+                    >{formatRelativeTime(recent.summary?.scannedAt ?? 0)}</span
+                  >
+                  <span
+                    >{t("reposScreen.scanCount", { count: recent.summary?.skillCount ?? 0 })}</span
+                  >
                 </span>
               </button>
             </li>
@@ -300,9 +329,16 @@
           <span class="text-muted-foreground">{t("reposScreen.addUrl")}</span>
           <input
             bind:value={newUrl}
-            class="mt-1 h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
+            class="mt-1 h-8 w-full rounded-md border px-2 font-mono text-xs {urlValid
+              ? 'border-border bg-background'
+              : 'border-destructive/60 bg-destructive/5'}"
             placeholder="https://github.com/me/skills.git"
           />
+          {#if !urlValid}
+            <span class="mt-0.5 block text-[11px] text-destructive">
+              {t("skillsWorkspace.reposScreen.urlMustHttps")}
+            </span>
+          {/if}
         </label>
         <label class="block text-xs">
           <span class="text-muted-foreground">{t("reposScreen.addDescription")}</span>
@@ -327,7 +363,7 @@
         <button
           type="button"
           onclick={() => void submitAdd()}
-          disabled={addBusy}
+          disabled={addBusy || !canSubmitAdd}
           class="h-9 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {addBusy ? t("reposScreen.adding") : t("reposScreen.addConfirm")}

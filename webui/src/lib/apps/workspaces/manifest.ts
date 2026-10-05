@@ -72,11 +72,12 @@ export const workspacesApp = defineApp({
     defineActivity({
       pattern: "/w/:wsId/skills",
       root: defineRoute({
-        id: "workspaces.intelligence",
-        pattern: "intelligence/:providerId",
+        id: "workspaces.insights",
+        pattern: "insights/:providerId",
         params: z.object({ wsId: WorkspaceIdSchema, providerId: ProviderIdSchema }),
         search: z.object({
           severity: z.enum(["all", "error", "warning", "info"]).optional(),
+          skill: SkillIdSchema.optional(),
         }),
         component: () => import("./IntelligenceView.svelte"),
       }),

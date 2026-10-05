@@ -80,12 +80,12 @@ describe("matchPathPattern", () => {
   });
 
   it("can leave a route suffix while rejecting partial segment matches", () => {
-    expect(
-      matchPathPattern("/w/:wsId/skills", "/w/ws_abc/skills/intelligence/provider", true),
-    ).toEqual({
-      params: { wsId: "ws_abc" },
-      remainder: ["intelligence", "provider"],
-    });
+    expect(matchPathPattern("/w/:wsId/skills", "/w/ws_abc/skills/insights/provider", true)).toEqual(
+      {
+        params: { wsId: "ws_abc" },
+        remainder: ["insights", "provider"],
+      },
+    );
     expect(matchPathPattern("/w/:wsId/skills", "/w/ws_abc/skills-extra", true)).toBeNull();
     expect(matchPathPattern("/w/:wsId/skills", "/w/ws_abc/skills/extra")).toBeNull();
   });

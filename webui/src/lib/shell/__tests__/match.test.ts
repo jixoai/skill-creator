@@ -43,13 +43,13 @@ describe("matchRouteTree", () => {
 
   it("matches a dynamic Page prefix and passes its params into the route tree", () => {
     const root = makeRoute({
-      id: "skills.intelligence",
-      pattern: "intelligence/:providerId",
+      id: "skills.insights",
+      pattern: "insights/:providerId",
       params: z.object({ wsId: z.string(), providerId: z.string() }),
     });
     const result = matchRouteTree(
       root,
-      "/w/ws_abc/skills/intelligence/claude-code",
+      "/w/ws_abc/skills/insights/claude-code",
       "",
       "/w/:wsId/skills",
     );

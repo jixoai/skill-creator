@@ -136,7 +136,8 @@ describe("真实目录规模防塌机制契约（走查 13-fix）", () => {
     // 批评处置 P1-3b 同族根因：Tailwind 输出序 .block 后于 .line-clamp-*，
     // display:block 覆盖 -webkit-box 使 clamp 失效（desk 走查 40 行折叠）——
     // clamp 类禁与 block 同用。
-    expect(skillsScreenSrc).toMatch(/class="mt-0\.5 line-clamp-2 text-xs leading-4"/);
+    // FD-24 修订：leading-4 → leading-[18px] 微调（两行完整空间；75px 不动）。
+    expect(skillsScreenSrc).toMatch(/class="mt-0\.5 line-clamp-2 text-xs leading-\[18px\]"/);
     expect(skillsScreenSrc).not.toMatch(/line-clamp-\d+ block/);
     expect(skillsScreenSrc).not.toMatch(/block line-clamp-\d+/);
   });
@@ -254,8 +255,11 @@ describe("workspace-page-polish 2.2 处置批机制契约（P2-2/P2-9/P2-10）",
 
   it("dashboard 深链滚动（P2-10）：active 非 skills 时 scrollIntoView 落点网格项", () => {
     expect(dashboardSrc).toMatch(/data-screen="(skills|agents|repos)"/);
+    // FD-17 修订：prefers-reduced-motion 检测 → behavior: auto/smooth 分支。
+    expect(dashboardSrc).toMatch(/matchMedia\("\\?\(prefers-reduced-motion: reduce\)\\?"\)/);
+    expect(dashboardSrc).toMatch(/behavior: reducedMotion \? "auto" : "smooth"/);
     expect(dashboardSrc).toMatch(
-      /scrollIntoView\(\{ block: "nearest", inline: "nearest", behavior: "smooth" \}\)/,
+      /scrollIntoView\(\{\s*block: "nearest",\s*inline: "nearest",\s*behavior:/,
     );
     // 高亮强化：active 边框之外追加 ring（落点可寻）。
     expect(dashboardSrc).toMatch(

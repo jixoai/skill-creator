@@ -32,9 +32,9 @@ describe("legacy shell URL migrations", () => {
   it.each([
     ["/workspaces", "", "/w/~/skills"],
     [
-      "/workspaces/intelligence/ws_0123456789abcdef01234567/claude-code",
+      "/workspaces/insights/ws_0123456789abcdef01234567/claude-code",
       "?severity=warning",
-      "/w/ws_0123456789abcdef01234567/skills/intelligence/claude-code?severity=warning",
+      "/w/ws_0123456789abcdef01234567/skills/insights/claude-code?severity=warning",
     ],
     [
       "/workspaces/ws_0123456789abcdef01234567/claude-code",

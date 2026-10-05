@@ -2,11 +2,14 @@
   用户原始需求 [2026-10-02]（skills-dashboard design §3）：「provider 卡片列表：
   agent 名 / root 路径 / skill 计数 / 可写性徽标；点击 = 主屏 provider 筛选联动
   （chips 选中态同步）」。
+  修订 [2026-10-05]（skills-workspace-world-class 批 B）：View findings 改名
+  「Analysis & proposals」+ 待审 proposals 计数徽标（若 proposals 数据无 per-provider
+  聚合则不加徽标）；insights 改名（workspaces.insights）。
   正交意图：
   1. provider catalog 投影（workspace.list 数据源，无新 RPC）：当前 ws 的全部
      provider 卡片（含不可用条目——「Not found on disk」呈现）。
   2. 点击卡片 → 主屏 provider chip 筛选联动（?provider= 选中态同源）。
-  3. per-provider「View findings」→ /w/:wsId/skills/intelligence/:providerId
+  3. per-provider「Analysis & proposals」→ /w/:wsId/skills/insights/:providerId
      （与 skill 详情 Insights 按钮同链同身份，design §3/§6）。
 -->
 <script lang="ts">
@@ -60,7 +63,7 @@
   }
 
   function viewFindings(providerId: ProviderId): void {
-    goById("workspaces.intelligence", { wsId, providerId }, {});
+    goById("workspaces.insights", { wsId, providerId }, {});
   }
 </script>
 
@@ -133,14 +136,15 @@
               </Badge>
             {/if}
           </button>
-          <div class="mt-1">
+          <!-- FD-19 主/次操作区视觉分隔：border-t + 次要区右对齐 ghost。 -->
+          <div class="mt-1 flex justify-end border-t border-border/50 pt-1.5">
             <button
               type="button"
-              class="flex min-h-7 items-center gap-1 rounded-md text-xs text-primary transition-colors hover:bg-primary/10"
+              class="flex min-h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               onclick={() => viewFindings(provider.id)}
             >
               <IconGraph class="h-3.5 w-3.5" />
-              {t("agentsScreen.viewFindings")}
+              {t("skillsWorkspace.agentsScreen.analysisAndProposals")}
               <IconArrowRight class="h-3 w-3" aria-hidden="true" />
             </button>
           </div>

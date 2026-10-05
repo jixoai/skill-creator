@@ -75,11 +75,11 @@ function redirectLegacyPath(pathname: string, search: string): string | null {
   };
 
   if (pathname === "/workspaces") return SHELL_HOME_PATH;
-  if (parts[0] === "workspaces" && parts[1] === "intelligence" && parts.length === 4) {
-    return build(
-      `/w/${encodePathPart(parts[2]!)}/skills/intelligence/${encodePathPart(parts[3]!)}`,
-      { severity: query.get("severity") },
-    );
+  if (parts[0] === "workspaces" && parts[1] === "insights" && parts.length === 4) {
+    return build(`/w/${encodePathPart(parts[2]!)}/skills/insights/${encodePathPart(parts[3]!)}`, {
+      severity: query.get("severity"),
+      skill: query.get("skill"),
+    });
   }
   if (parts[0] === "workspaces" && parts.length === 3) {
     return build(`/w/${encodePathPart(parts[1]!)}/skills`, {

@@ -15,6 +15,8 @@
  *   再点击命中续聊；不自动发送，用户保有最后一步。
  *   [2] 面板开合：入口在 skills dashboard（workspace 页），会话呈现归
  *   workspace attach 面板承载——setAgentPanelOpen(true) 即可续聊/起草。
+ *   [3] [2026-10-05] Chat 启动后上下文衔接（FD-05）：启动会话后返回 onChatStarted
+ *   回调，由调用方决定窄屏关详情 / 宽屏 toast；面板已由 setAgentPanelOpen 开启。
  * （r3 补线后无妥协：seed 落 meta，summary 投影即查找键。）
  */
 import {
@@ -43,8 +45,12 @@ export interface SkillChatEntry {
  * 同技能命中续聊 vs 异技能/无匹配新建。列表未载且已连接时先补拉（await——
  * 查找键以 server 投影为准，不用本地陈旧列表猜）；拉取失败按当前列表降级
  * 查找（可能空 → 新建，不阻塞入口）。
+ * 返回 true = 会话已启动（续聊或新建），调用方可执行上下文衔接（关详情/toast）。
  */
-export async function startSkillChat(entry: SkillChatEntry): Promise<void> {
+export async function startSkillChat(
+  entry: SkillChatEntry,
+  options?: { onChatStarted?: () => void },
+): Promise<boolean> {
   if (
     connectionState.status === "connected" &&
     !agentSessionsList.loaded &&
@@ -60,7 +66,8 @@ export async function startSkillChat(entry: SkillChatEntry): Promise<void> {
   if (hit !== null) {
     selectAgentSession(hit.sessionId);
     setAgentPanelOpen(true);
-    return;
+    options?.onChatStarted?.();
+    return true;
   }
   const workspace = workspaceState.workspaces.find(
     (item) => item.id === (entry.workspaceId as string),
@@ -78,4 +85,6 @@ export async function startSkillChat(entry: SkillChatEntry): Promise<void> {
     ...(cwd !== undefined ? { cwd } : {}),
   });
   setAgentPanelOpen(true);
+  options?.onChatStarted?.();
+  return true;
 }

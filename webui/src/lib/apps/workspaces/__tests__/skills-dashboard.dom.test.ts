@@ -472,13 +472,24 @@ describe("SkillsDashboard 三屏网格", () => {
     const root = mountDashboard();
     await settle();
 
-    const dupToggle = buttons(root).find((b) => textOf(b) === "Duplicates");
-    click(dupToggle);
+    // FD-01 降级后的过滤下拉交互：header「Filter options」按钮 → menuitemcheckbox
+    // 「Same content only」→ URL ?duplicates=1（REPLACE 导航也经 adapter 记录）。
+    const filterButton = buttons(root).find((b) =>
+      (b.getAttribute("aria-label") ?? "").includes("Filter options"),
+    );
+    expect(filterButton).toBeDefined();
+    click(filterButton);
+    await settle();
+    const duplicatesToggle = [
+      ...root.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]'),
+    ].find((item) => textOf(item).toLowerCase().includes("same content"));
+    expect(duplicatesToggle).toBeDefined();
+    click(duplicatesToggle as HTMLElement);
+    await settle();
     expect(log.navigate.at(-1)).toContain("duplicates=1");
 
-    // chip 联动：以已带 duplicates=1 的 search 快照挂载（真实路由下 search 经
-    // 导航回放；本 harness 是静态快照），点击 chip 后保留既有筛选并清详情身份。
-    const root2 = mountDashboard({ duplicates: "1", skill: SK_A, provider: "claude-code" });
+    // chip 联动测试保留（provider 筛选不受 duplicates 降级影响）。
+    const root2 = mountDashboard({ skill: SK_A, provider: "claude-code" });
     await settle();
     const chip = [
       ...root2.querySelectorAll<HTMLButtonElement>('[aria-label="Filter by provider"] button'),
@@ -486,7 +497,6 @@ describe("SkillsDashboard 三屏网格", () => {
     click(chip as HTMLButtonElement);
     const url = new URL(log.navigate.at(-1) as string, "https://skill-creator.invalid");
     expect(url.searchParams.get("provider")).toBe("zcode");
-    expect(url.searchParams.get("duplicates")).toBe("1");
     // chip 切换清掉跨 provider 的旧详情身份。
     expect(url.searchParams.get("skill")).toBeNull();
   });
@@ -653,14 +663,15 @@ describe("SkillsDashboard 三屏网格", () => {
     const root = mountDashboard();
     await settle();
 
-    // 入口一：Agents screen 的 per-provider View findings。
-    const findings = buttons(root).find((b) => textOf(b).includes("View findings"));
-    expect(findings).toBeDefined();
-    click(findings);
+    // 入口一：Agents screen 的 per-provider「Analysis & proposals」（FD-09 改名）。
+    const analysisBtn = buttons(root).find((b) => textOf(b).includes("Analysis"));
+    expect(analysisBtn).toBeDefined();
+    click(analysisBtn);
     const agentsHref = log.navigate.at(-1);
-    expect(agentsHref).toBe("/w/~/skills/intelligence/claude-code");
+    expect(agentsHref).toBe("/w/~/skills/insights/claude-code");
 
-    // 入口二：skill 详情面的 Insights 按钮（同 provider 同链）。
+    // 入口二：skill 详情面的 Insights 按钮（同 route；I4 起 detail 入口携带
+    // ?skill= 上下文预过滤——同路由不同 search 是设计行为，断言 pathname 一致）。
     const root2 = mountDashboard({ provider: "claude-code", skill: SK_A });
     await settle(60);
     const insights = buttons(root2).find((b) =>
@@ -668,7 +679,11 @@ describe("SkillsDashboard 三屏网格", () => {
     );
     expect(insights).toBeDefined();
     click(insights);
-    expect(log.navigate.at(-1)).toBe(agentsHref);
+    const detailNavigate = log.navigate.at(-1) as string;
+    expect(new URL(detailNavigate, "https://x.invalid").pathname).toBe(
+      new URL(agentsHref as string, "https://x.invalid").pathname,
+    );
+    expect(detailNavigate).toContain("skill=");
   });
 
   it("virtualizes long lists (>200 rows render a window, not all rows)", async () => {

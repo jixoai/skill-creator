@@ -39,25 +39,27 @@ describe("工具栏防截断机制契约（P1-3a）", () => {
     expect(src).toMatch(/class="min-w-0 flex-1 basis-56"/);
   });
 
-  it("meta/表单/Discover 同组换行——组是 flex 行的单一 item，行宽不足时整体换行", () => {
+  it("meta/表单/面包屑同组换行——组是 flex 行的单一 item，行宽不足时整体换行", () => {
     const groupMatch = src.match(
       /<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1\.5">/,
     );
     expect(groupMatch).not.toBeNull();
     const groupStart = src.indexOf(groupMatch?.[0] ?? "");
     expect(src.indexOf('data-testid="scan-meta"')).toBeGreaterThan(groupStart);
-    expect(src.indexOf('t("reposScan.discover")')).toBeGreaterThan(groupStart);
+    // 批 B：Discover 按钮已退役并入面包屑（breadcrumbRepos），面包屑在独立块。
+    expect(src.indexOf('t("skillsWorkspace.reposScan.breadcrumbRepos")')).toBeGreaterThan(0);
   });
 
-  it("动作子项不再依赖行内 shrink-0 顶宽（Discover 按钮组内完整）", () => {
-    // Discover 按钮仍在源码内且位于动作组内（上一条已证组内顺序），此处钉
-    // 源头不再出现「header 直接子级散落 shrink-0 动作」的旧结构。
+  it("动作子项不再依赖行内 shrink-0 顶宽（批 B：Discover 已退役改面包屑）", () => {
+    // 批 B FP-04：Discover 按钮退役并入面包屑（Repos ‹ label 可点段）——
+    // 原断言（header 内有 discover 字符串）已不成立；改为钉「不再出现
+    // justify-between 旧结构」且面包屑存在。
     const headerBlock = src.slice(
       src.indexOf("<header"),
       src.indexOf("</header>") + "</header>".length,
     );
-    expect(headerBlock).toMatch(/t\("reposScan\.discover"\)/);
     expect(headerBlock).not.toMatch(/justify-between/);
+    expect(src).toMatch(/data-testid="scan-breadcrumb"/);
   });
 });
 
@@ -191,5 +193,38 @@ describe("scanning 骨架行机制契约（2.2 处置批 P2-10）", () => {
     expect(src).not.toMatch(
       /<p class="px-4 py-8 text-center text-xs text-muted-foreground">\{t\("reposScan\.scanning"\)\}<\/p>/,
     );
+  });
+});
+
+describe("sessionExpired 灰态与面包屑（批 B FP-02/FP-04）", () => {
+  it("sessionExpired 灰态：过期时 scan-split 区增 opacity-50 + pointer-events-none", () => {
+    // 注：判定逻辑在组件 $derived，断言机制存在（CSS class 条件式绑定）。
+    expect(src).toMatch(/class:opacity-50=\{sessionExpired\}/);
+    expect(src).toMatch(/class:pointer-events-none=\{sessionExpired\}/);
+  });
+
+  it("面包屑结构：Repos 可点段 + 分隔符 + 源 label（data-testid=scan-breadcrumb）", () => {
+    expect(src).toMatch(/data-testid="scan-breadcrumb"/);
+    expect(src).toMatch(/t\("skillsWorkspace\.reposScan\.breadcrumbRepos"\)/);
+    expect(src).toMatch(/\{sourceLabel\}/);
+    // 面包屑 Repos 段可点回 screen=repos（批 B 原 Discover 按钮退役）。
+    // \s* 容忍格式化器折行（vp fmt 会把长参数列折成多行调用）。
+    expect(src).toMatch(/goById\(\s*"workspaces\.provider"/);
+    expect(src).toMatch(/\{ screen: "repos" \}/);
+  });
+});
+
+describe("installing 内联进度（批 B FP-13）", () => {
+  it("installing 态内联条：按钮上方显示文案 + spinner（不依赖滚动寻找）", () => {
+    expect(src).toMatch(/data-testid="scan-installing"/);
+    expect(src).toMatch(/t\("skillsWorkspace\.reposScan\.installing"/);
+    // 计数插值：{count} 技能到 {targets} 个位置（实际变量名可能不同，钉住 key）
+    expect(src).toMatch(/count:/);
+    expect(src).toMatch(/targets:/);
+  });
+
+  it("内联进度条包含动画 spinner（animate-spin 旋转反馈）", () => {
+    // 批 B 补契约：installing 状态内联条显示 IconLoader + animate-spin。
+    expect(src).toMatch(/animate-spin/);
   });
 });

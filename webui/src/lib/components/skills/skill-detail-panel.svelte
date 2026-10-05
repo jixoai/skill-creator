@@ -49,10 +49,12 @@
     target,
     skillId,
     onBack,
+    isNarrowScreen = false,
   }: {
     target: WorkspaceProviderTarget;
     skillId: string;
     onBack?: () => void;
+    isNarrowScreen?: boolean;
   } = $props();
 
   const infoRequests = createRequestGenerationGate(getConnectionGeneration);
@@ -205,15 +207,27 @@
 
   // Chat about this skill（1.4）：agent 域入口——resume 键在 action 内解析
   // （target + seedSkill 精确匹配）；本面不持会话逻辑。
+  // FD-05 Chat 启动后上下文衔接：窄屏 backToList() / 宽屏 toast。
   function handleChatAbout(): void {
     const current = detail;
     if (!current) return;
-    void startSkillChat({
-      workspaceId: target.workspaceId,
-      providerId: target.providerId,
-      skillId: current.id,
-      skillName: current.name,
-    });
+    void startSkillChat(
+      {
+        workspaceId: target.workspaceId,
+        providerId: target.providerId,
+        skillId: current.id,
+        skillName: current.name,
+      },
+      {
+        onChatStarted: () => {
+          if (isNarrowScreen) {
+            onBack?.();
+          } else {
+            showToast(t("skillsWorkspace.skillsScreen.chatOpenedInPanel"));
+          }
+        },
+      },
+    );
   }
 </script>
 
@@ -288,10 +302,14 @@
           title={t("skillDetail.insightsTitle")}
           aria-label={t("skillDetail.insightsTitle")}
           onclick={() =>
-            goById("workspaces.intelligence", {
-              wsId: target.workspaceId,
-              providerId: target.providerId,
-            })}
+            goById(
+              "workspaces.insights",
+              {
+                wsId: target.workspaceId,
+                providerId: target.providerId,
+              },
+              { skill: skillId },
+            )}
         >
           <IconGraph class="h-4 w-4" />
         </Button>
@@ -488,11 +506,16 @@
 </div>
 
 <style>
-  /* 窄屏（屏容器 < 560px）显示返回按钮；宽屏由 master-detail 并列承担。 */
+  /* 窄屏栈式态显示返回按钮；宽屏由 master-detail 并列承担。阈值 660px：
+     dashboard 单列降档（<692px）下详情满宽 ≈ 视口 - padding（620 视口 →
+     ~604px pane）——旧的 560px 阈值会在栈式态恰好隐藏返回钮（r2 评图
+     TOP5：最需要返回的时候按钮消失），抬到 660 保证栈式 pane 恒显示；
+     分栏态 detail pane 通常 ≥660 时不显示（中档分栏 pane 偏窄时多显一个
+     返回钮无害——行为与列表返回同族）。 */
   .detail-back {
     display: inline-flex;
   }
-  @container (min-width: 560px) {
+  @container (min-width: 660px) {
     .detail-back {
       display: none;
     }

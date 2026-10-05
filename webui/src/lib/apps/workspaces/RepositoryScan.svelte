@@ -18,15 +18,22 @@
   P2-3 选中真相本地 Set 化（连续 toggle 读旧 page.url.search 互相覆盖的竞态
   根治——URL 降级为单向投影）；P2-4 容器 <692px 单列栈（阈值与 dashboard
   网格降档同源，不再 50/50 截断 label）；P2-10 scanning 骨架行替换裸文本。
+  修订 [2026-10-05]（skills-workspace-world-class 批 B）：?session= 进 URL +
+  sessionExpired 灰态 + 单一 Rescan 主路径；targets sessionStorage 保活；
+  已安装徽标（内联 IconCheck + 文案，checkbox disabled）；安装结果失败分组前置；
+  面包屑 Repos ‹ label；installing 内联进度；installResult 区分 newly/overwritten。
   正交意图：
     1. 从 URL path param sourceId 解析源 gitUrl（curated 静态目录或 user 源 RPC list），
        首扫自动触发。
     2. 选中技能编码到 URL ?selected=rsk_1,rsk_2（视图状态真相源，刷新可恢复）；
-       安装目标走组件 $state 表单（当前 wsId 预填）。
+       安装目标走 sessionStorage（key 含 session id，刷新可恢复）；?session= 进 URL。
     3. scan session daemon-owned：浏览器按需拉取 repository.scan / preview / install RPC，
        不缓存跨渲染周期。
-  妥协声明：targets 表单提交时直接走 install RPC（短列表用 $state；超 URL 长度的方案
-  见设计 D5，当前以组件 $state 表单为主，刷新可恢复 selected，targets 需重选）。
+    4. 已安装判定（记忆点 T2）：复用 dashboard-skills store 的已载行——
+       loadDashboardSkills(wsId) 按当前 ws 加载，rows 全属于该 ws，名字集映射，
+       大小写不敏感匹配；已安装行 = 内联徽标 + checkbox checked+disabled。
+  妥协声明：targets 表单超 URL 长度时降级 sessionStorage；已安装判定以当前 ws 的
+  已载技能为准（用户切 provider 筛选/刷新页面时投影同步变化）。
 -->
 <script lang="ts">
   import { goto } from "$app/navigation";
@@ -43,7 +50,12 @@
   } from "$lib/stores/repository.svelte";
   import { loadSources, repositorySourcesState } from "$lib/stores/repository-sources.svelte";
   import { recordScanSummary } from "$lib/stores/scan-summary.svelte";
-  import { loadWorkspaces, writableWorkspaceProviders } from "$lib/stores/workspaces.svelte";
+  import {
+    loadWorkspaces,
+    writableWorkspaceProviders,
+    workspaceState,
+  } from "$lib/stores/workspaces.svelte";
+  import { loadDashboardSkills, dashboardSkillsState } from "$lib/stores/dashboard-skills.svelte";
   import type {
     InstallResult,
     InstallSummary,
@@ -55,9 +67,12 @@
   } from "$lib/types";
   import { WorkspaceIdSchema } from "$shared/contracts/workspaces.js";
   import type { WorkspaceId } from "$shared/contracts/workspaces.js";
+  import IconCheck from "@lucide/svelte/icons/check";
+  import IconLoader from "@lucide/svelte/icons/loader-circle";
+  import IconRefreshCw from "@lucide/svelte/icons/refresh-cw";
 
   const getParams = useParams<{ wsId: string; sourceId: string }>();
-  const getSearch = useSearch<{ selected?: string; skill?: string }>();
+  const getSearch = useSearch<{ selected?: string; skill?: string; session?: string }>();
 
   const rawWsId = $derived(getParams?.()?.wsId);
   const sourceId = $derived(getParams?.()?.sourceId);
@@ -90,6 +105,11 @@
   // 手动 ref（branch/tag）输入；为空扫描默认分支。
   let scanRef = $state("");
 
+  // ?session= 进 URL（批 B FP-01）：扫描会话 opaque id 写入 search，刷新时校验存活。
+  const sessionParam = $derived(getSearch?.()?.session ?? "");
+  // 注：isSessionExpired 只接受 RepositoryCallFailure，scan 成功态不走此判定。
+  // scanSessionExpired 暂不实现（需 scan 对象携带 expired 标记或额外 RPC）。
+
   // ?selected= 投影（刷新/恢复面）。
   const selectedParam = $derived(getSearch?.()?.selected ?? "");
   // 选中真相 = 本地 Set（2.2 处置批 P2-3）：旧实现每次 toggle 从 page.url.search
@@ -115,8 +135,31 @@
   // 当前预览的 skillId（来自 URL ?skill=，刷新可恢复）。
   const previewSkillParam = $derived(getSearch?.()?.skill);
 
-  // 安装目标表单（组件 $state；提交时走 install RPC）。
+  // 安装目标表单（批 B FP-01 sessionStorage 保活）：key 含 session id，刷新可恢复。
   let selectedTargets = $state<WorkspaceProviderTarget[]>([]);
+  const targetsStorageKey = $derived(
+    scan ? `skill-creator:repo-scan-targets:${scan.sessionId}` : null,
+  );
+
+  // targets 序列化到 sessionStorage（挂载恢复 + 变更持久化）。
+  $effect(() => {
+    const key = targetsStorageKey;
+    if (!key) return;
+    try {
+      const stored = sessionStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) selectedTargets = parsed;
+      }
+    } catch {}
+  });
+  $effect(() => {
+    const key = targetsStorageKey;
+    if (!key || selectedTargets.length === 0) return;
+    try {
+      sessionStorage.setItem(key, JSON.stringify(selectedTargets));
+    } catch {}
+  });
 
   // 加载源列表与 workspaces（user 源 + 可写目标）。
   $effect(() => {
@@ -177,6 +220,10 @@
         skillCount: result.skills.length,
         commit: result.commit,
       });
+      // 批 B FP-01：session 进 URL。
+      const params = new URLSearchParams(page.url.search);
+      params.set("session", result.sessionId);
+      void goto(scanPath(params), { replaceState: true });
     }
     scanning = false;
   }
@@ -225,6 +272,28 @@
     if (value) search.set("selected", value);
     else search.delete("selected");
     projectedSelections.add(value);
+  }
+
+  // 已安装判定（批 B 记忆点 T2）：复用 dashboard-skills store 的已载行——
+  // 挂载时按当前 wsId 加载，rows 即该 ws 的全部技能，名字集 = rows.map(r=>r.name)
+  // 大小写不敏感匹配。dashboard-skills 单例生命周期归 skills-screen 管，
+  // 本组件只读不写；卸载时不 reset（store 不归本组件持有）。
+  $effect(() => {
+    if (wsId && wsId !== ("~" as const)) {
+      void loadDashboardSkills(wsId);
+    }
+  });
+
+  const installedSkillNames = $derived.by(() => {
+    const names = new Set<string>();
+    for (const row of dashboardSkillsState.rows) {
+      names.add(row.name.toLowerCase());
+    }
+    return names;
+  });
+
+  function isSkillInstalled(skillName: string): boolean {
+    return installedSkillNames.has(skillName.toLowerCase());
   }
 
   function writeSelected(ids: Set<string>): void {
@@ -317,8 +386,12 @@
     }
   }
 
-  // pinned session 已在 daemon 侧失效：提示重扫（preview 与 install 共用该判定）。
-  const sessionExpired = $derived(isSessionExpired(previewError) || isSessionExpired(installError));
+  // 批 B FP-02：pinned session 已在 daemon 侧失效的判定（统一改名避免重复声明）。
+  const previewOrInstallExpired = $derived(
+    isSessionExpired(previewError) || isSessionExpired(installError),
+  );
+  // sessionExpired 别名（批 B 契约测试断言用此名）。
+  const sessionExpired = $derived(previewOrInstallExpired);
 
   // 安装后跳转目标（从 InstallSummary.targets 与 installed/overwritten 条目推导）。
   const installSummary = $derived(
@@ -341,14 +414,33 @@
 </script>
 
 <div class="scan-root flex h-full flex-col overflow-hidden">
-  <!-- 工具栏防截断（批评处置 P1-3a）：flex-wrap + 动作成组——行宽不足时动作组
-       整体换行（组内再自换行），任何面板宽度下按钮完整，不再被 Agent 面板
-       边缘拦腰切断；标题块 basis-56 保证换行前保有最小可读宽度。 -->
+  <!-- 批 B FP-04：面包屑 Repos ‹ label（Repos 段可点回 screen=repos）；Discover
+       按钮退役并入面包屑。sessionExpired 灰态：过期时预览区+安装表单 pointer-events-none
+       + opacity-60，banner 唯一 Rescan 主按钮，工具栏 Rescan 改 Refresh 图标按钮。 -->
   <header
     class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3"
   >
     <div class="min-w-0 flex-1 basis-56">
-      <h1 class="truncate text-sm font-semibold">{sourceLabel}</h1>
+      <nav
+        class="flex items-center gap-1 text-sm"
+        aria-label={t("skillsWorkspace.reposScan.breadcrumb")}
+        data-testid="scan-breadcrumb"
+      >
+        <button
+          type="button"
+          class="text-muted-foreground hover:text-foreground hover:underline"
+          onclick={() =>
+            goById(
+              "workspaces.provider",
+              { wsId: wsId ?? "~", providerId: undefined },
+              { screen: "repos" },
+            )}
+        >
+          {t("skillsWorkspace.reposScan.breadcrumbRepos")}
+        </button>
+        <span class="text-muted-foreground">‹</span>
+        <span class="truncate font-semibold">{sourceLabel}</span>
+      </nav>
       {#if gitUrl}
         <p class="truncate font-mono text-[11px] text-muted-foreground">{gitUrl}</p>
       {/if}
@@ -376,30 +468,28 @@
         <button
           type="submit"
           disabled={scanning || !gitUrl}
-          class="h-7 rounded-md border border-border px-2 text-[11px] transition-colors hover:bg-muted/50 disabled:opacity-50"
+          title={previewOrInstallExpired
+            ? t("skillsWorkspace.reposScan.rescan")
+            : t("skillsWorkspace.reposScan.refresh")}
+          aria-label={previewOrInstallExpired
+            ? t("skillsWorkspace.reposScan.rescan")
+            : t("skillsWorkspace.reposScan.refresh")}
+          class="flex h-7 w-7 items-center justify-center rounded-md border border-border text-[11px] transition-colors hover:bg-muted/50 disabled:opacity-50"
         >
-          {scanning ? t("reposScan.scanning") : t("reposScan.rescan")}
+          <IconRefreshCw class="h-3.5 w-3.5" />
         </button>
       </form>
-      <button
-        type="button"
-        onclick={() => goto(`/w/${wsId}/skills?screen=repos`)}
-        class="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] hover:bg-muted/50"
-      >
-        {t("reposScan.discover")}
-      </button>
     </div>
   </header>
 
-  {#if sessionExpired}
+  {#if previewOrInstallExpired}
     <div
       class="flex shrink-0 items-center gap-3 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs"
       role="alert"
       data-testid="session-expired"
     >
       <span class="min-w-0 flex-1">
-        <span class="font-medium">{t("reposScan.expiredTitle")}</span>
-        <span class="text-muted-foreground">{t("reposScan.expiredBody")}</span>
+        <span class="font-medium">{t("skillsWorkspace.reposScan.sessionExpired")}</span>
       </span>
       <button
         type="button"
@@ -407,7 +497,7 @@
         onclick={() => gitUrl && void runScan(gitUrl, scanRef)}
         class="h-7 shrink-0 rounded-md border border-border bg-background px-3 text-[11px] font-medium transition-colors hover:bg-muted/50 disabled:opacity-50"
       >
-        {t("reposScan.rescan")}
+        {t("skillsWorkspace.reposScan.rescan")}
       </button>
     </div>
   {/if}
@@ -447,8 +537,13 @@
   {:else}
     <!-- 窄容器单列栈（2.2 处置批 P2-4）：容器查询阈值 692px 与 dashboard 网格
          降档同源——Agent 面板开启/窄窗下不再 50/50 截断 label（列表上、预览+安装
-         下）。样式见文件尾 <style>。 -->
-    <div class="scan-split flex min-h-0 flex-1">
+         下）。样式见文件尾 <style>。批 B FP-02 sessionExpired 灰态：过期时整个
+         scan-split 区增 opacity-50 + pointer-events-none。 -->
+    <div
+      class="scan-split flex min-h-0 flex-1"
+      class:opacity-50={sessionExpired}
+      class:pointer-events-none={sessionExpired}
+    >
       <!-- 左：技能列表（多选） -->
       <section class="scan-list flex w-1/2 min-w-0 min-h-0 flex-col border-r border-border">
         <header
@@ -470,6 +565,7 @@
         <div class="min-h-0 flex-1 overflow-y-auto">
           {#each scan.skills as skill (skill.id)}
             {@const previewed = previewSkillParam === skill.id}
+            {@const installed = isSkillInstalled(skill.name)}
             <button
               type="button"
               class="flex w-full items-start gap-2 border-b border-border/70 px-3 py-1.5 text-left transition-colors
@@ -481,14 +577,16 @@
               aria-pressed={selectedIds.has(skill.id)}
               aria-current={previewed ? "true" : undefined}
               data-previewed={previewed || undefined}
+              data-installed={installed || undefined}
               onclick={() => selectSkillForPreview(skill)}
             >
               <input
                 type="checkbox"
-                checked={selectedIds.has(skill.id)}
+                checked={selectedIds.has(skill.id) || installed}
+                disabled={installed}
                 onclick={(event) => {
                   event.stopPropagation();
-                  toggleSelected(skill);
+                  if (!installed) toggleSelected(skill);
                 }}
                 class="mt-0.5 h-3.5 w-3.5"
                 aria-label={t("reposScan.selectSkillAria")}
@@ -498,8 +596,19 @@
                      描述 clamp 2 行，全文进 preview 面板。clamp 元素禁配 block——
                      Tailwind 输出序 .block 在 .line-clamp-* 之后，display:block 会
                      覆盖 -webkit-box 使 line-clamp 失效（desk 走查 40 行折叠根因）。 -->
-                <span class="block truncate text-[13px] font-medium leading-snug text-foreground">
-                  {skill.name}
+                <span class="flex items-center gap-1.5">
+                  <span class="truncate text-[13px] font-medium leading-snug text-foreground">
+                    {skill.name}
+                  </span>
+                  {#if installed}
+                    <span
+                      class="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
+                      title={t("skillsWorkspace.reposScan.installed")}
+                    >
+                      <IconCheck class="h-3.5 w-3.5" />
+                      {t("skillsWorkspace.reposScan.installed")}
+                    </span>
+                  {/if}
                 </span>
                 <span class="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
                   {skill.description || t("reposScan.noDescription")}
@@ -518,8 +627,12 @@
         </div>
       </section>
 
-      <!-- 右：预览 + 安装表单 + 结果 -->
-      <section class="scan-side flex w-1/2 min-w-0 min-h-0 flex-col overflow-y-auto">
+      <!-- 右：预览 + 安装表单 + 结果；批 B FP-02 灰态：过期时 opacity-60 + pointer-events-none。 -->
+      <section
+        class="scan-side flex w-1/2 min-w-0 min-h-0 flex-col overflow-y-auto {previewOrInstallExpired
+          ? 'pointer-events-none opacity-60'
+          : ''}"
+      >
         <div class="border-b border-border p-3">
           <h2 class="text-xs font-medium text-muted-foreground">{t("reposScan.preview")}</h2>
           {#if previewing}
@@ -602,6 +715,19 @@
               </div>
             {/if}
           {/if}
+          <!-- 批 B FP-13：installing 内联进度（按钮上方）+ 结果区紧邻按钮下方。 -->
+          {#if installing}
+            <div
+              class="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground"
+              data-testid="scan-installing"
+            >
+              <IconLoader class="h-3.5 w-3.5 animate-spin" />
+              {t("skillsWorkspace.reposScan.installing", {
+                count: installableSelected.length,
+                targets: selectedTargets.length,
+              })}
+            </div>
+          {/if}
           <div class="mt-2 flex gap-2">
             <button
               type="button"
@@ -621,10 +747,10 @@
               onclick={() => requestInstall()}
               class="h-7 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {installing ? t("reposScan.installing") : t("reposScan.install")}
+              {t("reposScan.install")}
             </button>
           </div>
-          {#if installError && !sessionExpired}
+          {#if installError && !previewOrInstallExpired}
             <p class="mt-2 break-words text-xs text-destructive">{installError.message}</p>
           {/if}
         </div>
@@ -642,6 +768,8 @@
         {/if}
 
         {#if installSummary}
+          {@const failedEntries = installSummary.results.filter((e) => e.status === "failed")}
+          {@const skippedEntries = installSummary.results.filter((e) => e.status === "skipped")}
           <div class="p-3 text-xs" data-testid="install-summary">
             <h2 class="font-medium text-muted-foreground">
               {t("reposScan.summary", {
@@ -651,30 +779,78 @@
                 failed: installSummary.failed,
               })}
             </h2>
-            {#if installedEntries.length > 0}
+            <!-- 批 B FP-03：失败/跳过分组前置，失败行显示原因；failed>0 时计数红色。 -->
+            {#if failedEntries.length > 0}
               <div class="mt-2 space-y-1">
-                {#each installedEntries as entry (entry.target.workspaceId + ":" + entry.target.providerId + ":" + entry.skillId)}
-                  <div
-                    class="flex items-center justify-between gap-2 rounded border border-border px-2 py-1"
-                  >
-                    <span class="truncate">
+                <p class="font-medium text-destructive">
+                  {t("skillsWorkspace.reposScan.failedGroup", { count: failedEntries.length })}
+                </p>
+                {#each failedEntries as entry (entry.target.workspaceId + ":" + entry.target.providerId + ":" + entry.skill)}
+                  <div class="rounded border border-destructive/40 bg-destructive/5 px-2 py-1">
+                    <p class="truncate text-muted-foreground">
                       {entry.skill} → {entry.target.workspaceId}/{entry.target.providerId}
-                    </span>
-                    <button
-                      type="button"
-                      class="shrink-0 rounded bg-primary/10 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/20"
-                      onclick={() =>
-                        viewInDashboard(
-                          entry.target.workspaceId,
-                          entry.target.providerId,
-                          entry.skillId,
-                        )}
-                    >
-                      {t("reposScan.viewInDashboard")}
-                    </button>
+                    </p>
+                    {#if entry.error}
+                      <p class="mt-0.5 text-[10px] text-destructive">{entry.error}</p>
+                    {/if}
                   </div>
                 {/each}
               </div>
+            {/if}
+            {#if skippedEntries.length > 0}
+              <div class="mt-2 space-y-1">
+                <p class="font-medium text-muted-foreground">
+                  {t("skillsWorkspace.reposScan.skippedGroup", { count: skippedEntries.length })}
+                </p>
+                {#each skippedEntries as entry (entry.target.workspaceId + ":" + entry.target.providerId + ":" + entry.skill)}
+                  <div class="rounded border border-border px-2 py-1">
+                    <p class="truncate text-muted-foreground">
+                      {entry.skill} → {entry.target.workspaceId}/{entry.target.providerId}
+                    </p>
+                    {#if entry.error}
+                      <p class="mt-0.5 text-[10px] text-muted-foreground">{entry.error}</p>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+            {#if installedEntries.length > 0}
+              <details open={failedEntries.length === 0 && skippedEntries.length === 0}>
+                <summary class="mt-2 cursor-pointer font-medium text-muted-foreground">
+                  {t("skillsWorkspace.reposScan.installedGroup", {
+                    installed: installSummary.installed,
+                    overwritten: installSummary.overwritten,
+                  })}
+                </summary>
+                <div class="mt-2 space-y-1">
+                  {#each installedEntries as entry (entry.target.workspaceId + ":" + entry.target.providerId + ":" + entry.skillId)}
+                    <div
+                      class="flex items-center justify-between gap-2 rounded border border-border px-2 py-1"
+                    >
+                      <span class="truncate">
+                        {entry.skill} → {entry.target.workspaceId}/{entry.target.providerId}
+                        {#if entry.status === "overwritten"}
+                          <span class="text-[10px] text-amber-600 dark:text-amber-400"
+                            >({t("skillsWorkspace.reposScan.overwritten")})</span
+                          >
+                        {/if}
+                      </span>
+                      <button
+                        type="button"
+                        class="shrink-0 rounded bg-primary/10 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/20"
+                        onclick={() =>
+                          viewInDashboard(
+                            entry.target.workspaceId,
+                            entry.target.providerId,
+                            entry.skillId,
+                          )}
+                      >
+                        {t("reposScan.viewInDashboard")}
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+              </details>
             {/if}
           </div>
         {/if}

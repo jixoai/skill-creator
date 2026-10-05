@@ -49,7 +49,7 @@
   import ErrorHint from "$lib/components/error-hint.svelte";
   import SkillDetailPanel from "$lib/components/skills/skill-detail-panel.svelte";
   import DashboardFooter from "./dashboard-footer.svelte";
-  import IconArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
+  import IconCrosshair from "@lucide/svelte/icons/crosshair";
   import IconFile from "@lucide/svelte/icons/file-text";
   import IconLayers from "@lucide/svelte/icons/layers";
   import IconLoader from "@lucide/svelte/icons/loader-circle";
@@ -57,6 +57,7 @@
   import IconSearch from "@lucide/svelte/icons/search";
   import IconSliders from "@lucide/svelte/icons/sliders-horizontal";
   import IconSparkles from "@lucide/svelte/icons/sparkles";
+  import IconFilter from "@lucide/svelte/icons/filter";
 
   type DashboardSearch = {
     screen?: "skills" | "agents" | "repos";
@@ -98,6 +99,24 @@
     };
   });
 
+  // 过滤菜单状态（收尾项 1）：duplicates 开关 + search config 入口。
+  let filterMenuOpen = $state(false);
+  // 点击外部关闭菜单。
+  $effect(() => {
+    if (!filterMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        !target.closest('[aria-label="' + t("skillsWorkspace.skillsScreen.filterMenu") + '"]') &&
+        !target.closest('[role="menu"]')
+      ) {
+        filterMenuOpen = false;
+      }
+    };
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  });
+
   /** URL search patch（保留其余键；undefined 键删除）。 */
   function setSearch(
     patch: Partial<DashboardSearch>,
@@ -112,7 +131,10 @@
     void loadDashboardSkills(wsId, query.trim());
   });
 
-  // 重连自动补救（挂载竞态/断线 error 态：转 connected 即重发当前数据面）。
+  // 重连自愈（FD-14 复盘，2026-10-05 批评环实锤恢复）：快速重导航时
+  // listWorkspace 先于 WS 就绪抢跑失败（其余 RPC 晚于连接成功）——store 的
+  // connection owner generation 只作废旧响应、不重发失败的首载；此 effect
+  // 是该竞态的唯一自愈器（错误态 + 空行 → 转 connected 即重发当前数据面）。
   let lastConnectionStatus = $state(connectionState.status);
   $effect(() => {
     const status = connectionState.status;
@@ -290,10 +312,20 @@
     previousViewMode = mode;
     if (mode !== "list" || wasDetail !== "detail" || !restoreSkillId) return;
     pendingFocusSkillId = null;
-    const row = document.querySelector<HTMLButtonElement>(
-      `button[data-skill-id="${CSS.escape(restoreSkillId)}"]`,
-    );
-    (row ?? filterInputEl)?.focus();
+    // FD-11 焦点恢复加固：先 scrollIntoView 确保行在窗口内，再 focus（RAF 二帧确认）。
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const row = document.querySelector<HTMLButtonElement>(
+          `button[data-skill-id="${CSS.escape(restoreSkillId)}"]`,
+        );
+        if (row) {
+          row.scrollIntoView({ block: "center" });
+          row.focus();
+        } else {
+          filterInputEl?.focus();
+        }
+      });
+    });
   });
 
   /** 补全条点击：优先落位已载行（含跨 provider 名字匹配）；未载则改写 q 服务端重查。 */
@@ -325,6 +357,23 @@
       ? t("skillsScreen.totalCountOne", { count })
       : t("skillsScreen.totalCount", { count });
   });
+
+  // F2 错误态视觉自洽：定义 listFailed，header 搜索/过滤/chips 失败态灰。
+  const listFailed = $derived(
+    dashboardSkillsState.error !== null && dashboardSkillsState.rows.length === 0,
+  );
+
+  // FD-20 Load more 反馈：按钮区 1.5s 瞬时文案（避免自动滚动打断用户）。
+  let loadMoreFeedback = $state<string | null>(null);
+  async function handleLoadMore(): Promise<void> {
+    const addedCount = await loadMoreDashboardSkills();
+    if (addedCount > 0) {
+      loadMoreFeedback = t("skillsWorkspace.skillsScreen.loadedMore", { count: addedCount });
+      setTimeout(() => {
+        loadMoreFeedback = null;
+      }, 1500);
+    }
+  }
 </script>
 
 <section class="screen skills-screen" data-screen="skills" aria-label={t("skillsScreen.aria")}>
@@ -333,37 +382,80 @@
       <h2 class="min-w-0 truncate text-sm font-semibold">{t("skillsScreen.title")}</h2>
       {#if dashboardSkillsState.loading || searchState.searching}
         <IconLoader
-          class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
+          class="h-3 w-3 shrink-0 animate-spin text-muted-foreground"
           title={t("skillsScreen.refreshing")}
         />
       {:else}
-        <Badge variant="secondary" class="tabular-nums">{headerCountText}</Badge>
+        <span class="text-sm font-medium tabular-nums text-foreground">{headerCountText}</span>
       {/if}
-      <div class="ml-auto flex shrink-0 items-center gap-1">
+      <div
+        class="relative ml-auto flex shrink-0 items-center gap-1 {listFailed
+          ? 'opacity-50 pointer-events-none'
+          : ''}"
+      >
         <button
           type="button"
           class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label={t("skillsScreen.searchConfigTitle")}
-          title={t("skillsScreen.searchConfigTitle")}
-          onclick={() => void openSkillSearchConfig()}
+          aria-label={t("skillsWorkspace.skillsScreen.filterMenu")}
+          title={t("skillsWorkspace.skillsScreen.filterMenu")}
+          aria-expanded={filterMenuOpen}
+          onclick={() => (filterMenuOpen = !filterMenuOpen)}
         >
-          <IconSliders class="h-3.5 w-3.5" />
+          <IconFilter class="h-3.5 w-3.5" />
         </button>
-        <button
-          type="button"
-          class="flex h-7 items-center gap-1 rounded-md border px-2 text-xs transition-colors hover:bg-muted/50
-            {duplicatesOnly
-            ? 'border-primary/60 bg-primary/10 text-foreground'
-            : 'border-border text-muted-foreground'}"
-          aria-pressed={duplicatesOnly}
-          onclick={() => setSearch({ duplicates: duplicatesOnly ? undefined : "1" })}
-        >
-          <IconArrowUpRight class="h-3.5 w-3.5" />
-          {t("skillsScreen.duplicatesOnly")}
-        </button>
+        {#if filterMenuOpen}
+          <div
+            class="absolute right-0 top-8 z-50 min-w-[200px] rounded-md border border-border bg-popover p-1 shadow-md"
+            role="menu"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs transition-colors hover:bg-accent"
+              role="menuitemcheckbox"
+              aria-checked={duplicatesOnly}
+              onclick={() => {
+                setSearch({ duplicates: duplicatesOnly ? undefined : "1" });
+                filterMenuOpen = false;
+              }}
+            >
+              <span
+                class="flex h-4 w-4 items-center justify-center rounded-sm border {duplicatesOnly
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-input'}"
+              >
+                {#if duplicatesOnly}
+                  <svg
+                    class="h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="3"
+                    viewBox="0 0 24 24"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                {/if}
+              </span>
+              <span class="flex-1 text-left"
+                >{t("skillsWorkspace.skillsScreen.sameContentOnly")}</span
+              >
+            </button>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs transition-colors hover:bg-accent"
+              role="menuitem"
+              onclick={() => {
+                filterMenuOpen = false;
+                void openSkillSearchConfig();
+              }}
+            >
+              <IconSliders class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span class="flex-1 text-left">{t("skillsWorkspace.skillsScreen.searchConfig")}</span>
+            </button>
+          </div>
+        {/if}
       </div>
     </div>
-    <div class="relative mt-2">
+    <div class="relative mt-2 {listFailed ? 'opacity-50 pointer-events-none' : ''}">
       <IconSearch
         class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
       />
@@ -387,7 +479,11 @@
          单行横滚（走查 13-fix）：真实目录 76 chips wrap 九行会把 master-detail 挤到
          0px——不换行、横向内滚，header 高度退回单行。零计数折叠（2.2 处置批
          P2-2）：非零 chips 前置，零计数收进「+N providers」溢出项按需展开。 -->
-    <div class="chips-row mt-2 flex gap-1.5" role="group" aria-label={t("skillsScreen.chipsAria")}>
+    <div
+      class="chips-row mt-2 flex gap-1.5 {listFailed ? 'opacity-50 pointer-events-none' : ''}"
+      role="group"
+      aria-label={t("skillsScreen.chipsAria")}
+    >
       <button
         type="button"
         class="flex min-h-7 items-center gap-1 rounded-full border px-2.5 text-xs transition-colors
@@ -469,7 +565,8 @@
   {/if}
 
   {#if completionNames.length > 0}
-    <!-- 补全条：BM25 模糊命中且 q 包含式未覆盖（design §2「top-N 延迟补全式」）。 -->
+    <!-- 补全条：BM25 模糊命中且 q 包含式未覆盖（design §2「top-N 延迟补全式」）。
+         FD-04 区分已载/未载图标：已载=定位（Crosshair），未载=搜索（Search）。 -->
     <div class="shrink-0 border-b border-border px-4 py-2" data-testid="search-completions">
       <p class="flex items-center gap-1.5 text-xs text-muted-foreground">
         <IconSparkles class="h-3.5 w-3.5" aria-hidden="true" />
@@ -477,12 +574,21 @@
       </p>
       <ul class="mt-1 flex flex-wrap gap-1.5">
         {#each completionNames as name (name)}
+          {@const isLoaded = dashboardSkillsState.rows.some((r) => r.name === name)}
           <li>
             <button
               type="button"
-              class="flex min-h-7 items-center rounded-full border border-dashed border-border px-2.5 text-xs transition-colors hover:bg-muted/50"
+              class="flex min-h-7 items-center gap-1 rounded-full border border-dashed border-border px-2.5 text-xs transition-colors hover:bg-muted/50"
+              title={isLoaded
+                ? t("skillsWorkspace.skillsScreen.completionLoaded")
+                : t("skillsWorkspace.skillsScreen.completionSearch")}
               onclick={() => selectCompletion(name)}
             >
+              {#if isLoaded}
+                <IconCrosshair class="h-3 w-3" aria-hidden="true" />
+              {:else}
+                <IconSearch class="h-3 w-3" aria-hidden="true" />
+              {/if}
               {name}
             </button>
           </li>
@@ -510,9 +616,9 @@
         onscroll={onListScroll}
         data-testid="skills-list"
       >
-        {#if dashboardSkillsState.error && dashboardSkillsState.rows.length === 0}
+        {#if listFailed}
           <div class="flex flex-col items-start gap-2 px-4 py-6 text-xs text-destructive">
-            <ErrorHint error={dashboardSkillsState.error} />
+            <ErrorHint error={dashboardSkillsState.error!} />
             <button
               class="underline underline-offset-2"
               onclick={() => void loadDashboardSkills(wsId, query.trim())}
@@ -570,13 +676,16 @@
                     </span>
                   {/if}
                   {#if sameContent > 0}
-                    <!-- 重复徽标（2.2 处置批 P2-9）：↗ 换 layers——「同内容多副本」
-                         语义，不再与外链/跳转 affordance 混淆；title 保留计数语义。 -->
+                    <!-- F4 副本徽标可访问语义：加 aria-label + role="img"，视觉不动。 -->
                     <span
                       class="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground/80"
                       title={sameContent === 1
                         ? t("skillsScreen.sameContentOne", { count: sameContent })
                         : t("skillsScreen.sameContentMany", { count: sameContent })}
+                      aria-label={sameContent === 1
+                        ? t("skillsScreen.sameContentOne", { count: sameContent })
+                        : t("skillsScreen.sameContentMany", { count: sameContent })}
+                      role="img"
                     >
                       <IconLayers class="h-3 w-3" aria-hidden="true" />
                       <span class="tabular-nums">{sameContent}</span>
@@ -584,8 +693,9 @@
                   {/if}
                 </span>
                 <!-- clamp 元素禁配 block：Tailwind 输出序 .block 在 .line-clamp-*
-                     之后，display:block 覆盖 -webkit-box 使 clamp 失效。 -->
-                <span class="mt-0.5 line-clamp-2 text-xs leading-4">
+                     之后，display:block 覆盖 -webkit-box 使 clamp 失效。
+                     FD-24 行高/clamp 微调：leading-[18px] 给两行完整空间，不动 75px。 -->
+                <span class="mt-0.5 line-clamp-2 text-xs leading-[18px]">
                   {row.description || t("skillsScreen.noDescription")}
                 </span>
               </span>
@@ -599,14 +709,14 @@
               <button
                 type="button"
                 class="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted/50 disabled:opacity-50"
-                disabled={dashboardSkillsState.loadingMore}
-                onclick={() => void loadMoreDashboardSkills()}
+                disabled={dashboardSkillsState.loadingMore || loadMoreFeedback !== null}
+                onclick={handleLoadMore}
                 data-testid="load-more"
               >
                 {#if dashboardSkillsState.loadingMore}
                   <IconLoader class="h-3.5 w-3.5 animate-spin" />
                 {/if}
-                {t("skillsScreen.loadMore")}
+                {loadMoreFeedback ?? t("skillsScreen.loadMore")}
               </button>
             </div>
           {/if}
@@ -625,10 +735,15 @@
           target={{ workspaceId: wsId, providerId: detailIdentity.providerId }}
           skillId={detailIdentity.skillId}
           onBack={backToList}
+          isNarrowScreen={detailVisible}
         />
       {:else}
+        <!-- 空占位保持中性（r2 评图修正）：错误与 Retry 单实例归列表列拥有，
+             详情占位不重复渲染同错误（同因双报是状态噪音）。 -->
         <div
-          class="m-auto flex flex-col items-center justify-center gap-2 px-8 py-10 text-center text-muted-foreground"
+          class="m-auto flex flex-col items-center justify-center gap-2 px-8 py-10 text-center text-muted-foreground {listFailed
+            ? 'opacity-50'
+            : ''}"
         >
           <IconFile class="h-6 w-6" />
           <p class="text-sm font-medium text-foreground">{t("skillsScreen.selectSkill")}</p>
@@ -638,9 +753,9 @@
     </div>
   </div>
 
-  {#if wsId === ("~" as const)}
+  {#if wsId === "~"}
     <!-- Global 页脚：库快照行（冒烟锚点 en 逐字）+ self-skill banner + 导入管理。 -->
-    <DashboardFooter {wsId} />
+    <DashboardFooter wsId="~" />
   {/if}
 </section>
 
@@ -664,18 +779,19 @@
     overscroll-behavior-x: contain;
     padding-inline: 16px;
     margin-inline: -16px;
+    /* FD-06 chips affordance 增强：右侧 mask 收紧到 8px + 末尾半枚 chip 裁切暗示。 */
     -webkit-mask-image: linear-gradient(
       to right,
       transparent 0,
       #000 16px,
-      #000 calc(100% - 16px),
+      #000 calc(100% - 8px),
       transparent 100%
     );
     mask-image: linear-gradient(
       to right,
       transparent 0,
       #000 16px,
-      #000 calc(100% - 16px),
+      #000 calc(100% - 8px),
       transparent 100%
     );
   }
@@ -695,6 +811,16 @@
     /* 栈式下列表满宽（索引条的窄宽只服务并列形态）。 */
     .skills-list-pane {
       width: 100%;
+    }
+    /* 触达地板（r2 评图 TOP5）：窄容器下 chips 视觉 28px 低于 44px 点击区
+       要求（AGENTS §7.2）——::after 外扩 8px 命中区，视觉尺寸不变。 */
+    .chips-row button {
+      position: relative;
+    }
+    .chips-row button::after {
+      content: "";
+      position: absolute;
+      inset: -8px;
     }
   }
 </style>

@@ -61,9 +61,9 @@ describe("Page manifests", () => {
     );
     expectActivity(
       workspacesApp,
-      `/w/${WS}/skills/intelligence/claude-code`,
+      `/w/${WS}/skills/insights/claude-code`,
       "?severity=warning",
-      "workspaces.intelligence",
+      "workspaces.insights",
     );
   });
 

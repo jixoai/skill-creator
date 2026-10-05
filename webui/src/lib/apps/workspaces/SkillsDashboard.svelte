@@ -62,32 +62,32 @@
   // （skills span 2 + agents/repos 换行）——active 变化时把落点滚进视口；高亮由
   // 既有 data-active 边框承担（下追加 ring 强化落点可寻）。单列窄容器只有
   // active screen 可见，scrollIntoView 无害。
+  // FD-17 prefers-reduced-motion 检测：深链瞬移不晕动。
   let gridEl = $state<HTMLDivElement | null>(null);
   $effect(() => {
     const screen = activeScreen;
     if (screen === "skills") return;
     void tick().then(() => {
-      gridEl
-        ?.querySelector<HTMLElement>(`.grid-item[data-screen="${screen}"]`)
-        ?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      gridEl?.querySelector<HTMLElement>(`.grid-item[data-screen="${screen}"]`)?.scrollIntoView({
+        block: "nearest",
+        inline: "nearest",
+        behavior: reducedMotion ? "auto" : "smooth",
+      });
     });
   });
 </script>
 
 {#if wsId}
   <div class="dashboard-shell flex h-full min-h-0 w-full min-w-0 flex-col">
-    <!-- 单列容器的 screen 切换器（宽屏 display:none——并列全显，无需切换）。 -->
-    <div
-      class="screen-switcher shrink-0 px-4 pt-3"
-      role="tablist"
-      aria-label={t("dashboard.switcherAria")}
-    >
+    <!-- 单列容器的 screen 切换器（宽屏 display:none——并列全显，无需切换）。
+         FD-23 role=navigation 改正：切换器是导航到不同 screen，非 tab 同页内容。 -->
+    <nav class="screen-switcher shrink-0 px-4 pt-3" aria-label={t("dashboard.switcherAria")}>
       <div class="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
         {#each screens as screen (screen.id)}
           <button
             type="button"
-            role="tab"
-            aria-selected={activeScreen === screen.id}
+            aria-current={activeScreen === screen.id ? "page" : undefined}
             class="flex min-h-8 items-center rounded-md px-3 text-xs font-medium transition-colors
               {activeScreen === screen.id
               ? 'bg-background text-foreground shadow-sm'
@@ -98,7 +98,7 @@
           </button>
         {/each}
       </div>
-    </div>
+    </nav>
 
     <div class="dashboard-scroll min-h-0 flex-1 overflow-y-auto p-4">
       <div class="dashboard-grid" bind:this={gridEl} data-testid="dashboard-grid">
@@ -170,11 +170,10 @@
     min-height: 0;
     overscroll-behavior: contain;
   }
-  /* active screen 高亮（宽屏全部并列，深链 ?screen= 指示落点）。2.2 处置批
-     P2-10：ring 强化深链落点可寻（滚动由 script 侧 scrollIntoView 承担）。 */
+  /* F3 active screen 高亮增强（FD-12 旧账复审）：border 实色化 + shadow 提强。 */
   .dashboard-grid .grid-item[data-active="true"] :global(.screen) {
-    border-color: color-mix(in oklab, var(--primary, #7c3aed) 40%, transparent);
-    box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary, #7c3aed) 25%, transparent);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 35%, transparent);
   }
 
   /* 单列容器：显式降档 span 1（r2 修订）+ 只显示 active screen
@@ -188,6 +187,16 @@
     }
     .dashboard-grid .grid-item[data-active="true"] {
       display: block;
+    }
+    /* 触达地板（r2 评图 TOP5）：切换 pill 视觉 32px，窄容器下 ::after 外扩
+       6px 命中区到 44px（AGENTS §7.2），视觉尺寸不变。 */
+    .screen-switcher button {
+      position: relative;
+    }
+    .screen-switcher button::after {
+      content: "";
+      position: absolute;
+      inset: -6px;
     }
   }
   /* 宽屏：切换器退场（并列全显）。 */

@@ -29,19 +29,11 @@
    * workspace 的库快照（管理中枢语义，仅供读屏/冒烟——可见数字已收敛到
    * skills header 的 workspace 总量口径）。锚点格式不变（key 同一、仅数值
    * 语境化，正则 \d+ 恒匹配）。
+   * FD-21 修订 [2026-10-05]：wsId prop 收敛为必需 "~"（调用点 skills-screen
+   * 只在 Global 渲染），删除 Imported ws 分支（永不执行，无调用方）。
    */
-  let { wsId }: { wsId?: string } = $props();
+  let { wsId }: { wsId: "~" } = $props();
   const librarySnapshot = $derived.by(() => {
-    if (wsId !== undefined && wsId !== "~") {
-      const ws = workspaceState.workspaces.find((item) => item.id === wsId);
-      let skills = 0;
-      let providers = 0;
-      for (const provider of ws?.providers ?? []) {
-        providers += 1;
-        skills += provider.skillCount ?? 0;
-      }
-      return { skills, providers };
-    }
     let skills = 0;
     let providers = 0;
     for (const ws of workspaceState.workspaces) {

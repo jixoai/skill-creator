@@ -67,8 +67,8 @@ describe("workspaces dashboard manifest", () => {
     expect(
       buildHrefById("workspaces.provider", { wsId: WS }, { screen: "repos", reposQ: "vue" }),
     ).toBe(`/w/${WS}/skills?screen=repos&reposQ=vue`);
-    expect(buildHrefById("workspaces.intelligence", { wsId: WS, providerId: "claude-code" })).toBe(
-      `/w/${WS}/skills/intelligence/claude-code`,
+    expect(buildHrefById("workspaces.insights", { wsId: WS, providerId: "claude-code" })).toBe(
+      `/w/${WS}/skills/insights/claude-code`,
     );
   });
 });

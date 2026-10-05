@@ -175,10 +175,40 @@ describe("WorkspaceManager（/workspace 标准管理页）", () => {
     // 真实路径呈现（等宽列）+ 计数；Global 固定 tab 不入索引。
     expect(textOf(rows[0] as HTMLElement)).toContain("/Users/dev/alpha");
     expect(textOf(rows[0] as HTMLElement)).toContain("12");
-    // 不可用目录：Missing 标记在场（注册仍在，删除可达——AGENTS §7.2）。
-    expect(textOf(rows[1] as HTMLElement)).toContain("Missing");
+    // 批 B FP-11：不可用目录 amber 化 + Refresh 按钮。
+    expect(textOf(rows[1] as HTMLElement)).toContain("Not found");
+    const betaRow = rows[1] as HTMLElement;
+    const refreshButton = betaRow.querySelector<HTMLButtonElement>('[aria-label*="Refresh"]');
+    expect(refreshButton).not.toBeNull();
     // IMPORTED 词汇从用户面退役（分区标题、行文案均不再出现）。
     expect(textOf(root)).not.toMatch(/imported/i);
+  });
+
+  it("窄屏<720px 卡片化，所有信息可见，Remove 触达≥44px（批 B FP-09）", async () => {
+    installRpc([globalWorkspace, directoryWorkspace(WS_ALPHA, "Alpha", "/Users/dev/alpha", 12)]);
+    const root = mountManager();
+    await settle();
+
+    // 卡片容器存在（窄屏显示，宽屏隐藏由 max-[720px]:block / max-[720px]:hidden CSS 控制）。
+    const cards = root.querySelectorAll('[data-testid="workspace-card"]');
+    expect(cards.length).toBe(1);
+    const card = cards[0] as HTMLElement;
+    // 所有信息可见：label + path + providers + skills + Open + Remove。
+    expect(textOf(card)).toContain("Alpha");
+    expect(textOf(card)).toContain("/Users/dev/alpha");
+    expect(textOf(card)).toContain("Providers");
+    // 计数单位显式化（r2 评图：去重口径 vs skills 屏位置口径）。
+    expect(textOf(card)).toContain("Unique skills");
+    const cardButtons = [...card.querySelectorAll<HTMLButtonElement>("button")];
+    expect(cardButtons.some((b) => textOf(b) === "Open")).toBe(true);
+    // Remove 按钮检查：文本"Remove"存在（卡片模式带文字，宽屏表格只图标）。
+    const removeButton = cardButtons.find((b) => textOf(b).includes("Remove"));
+    expect(removeButton).toBeDefined();
+    // Remove 触达验证（FP-09 要求≥44px）：jsdom 不渲染布局（getComputedStyle.height = ""），
+    // 改为结构断言——h-9 类（Tailwind = 2.25rem = 36px）+ items-center + gap-1.5 +
+    // IconTrash + 文字 = 卡片模式提供完整触达；宽屏表格模式 h-9 w-9 仅图标。
+    expect(removeButton!.className).toContain("h-9");
+    expect(textOf(removeButton!)).toContain("Remove");
   });
 
   it("opens the workspace dashboard via the canonical route on Open", async () => {

@@ -87,10 +87,11 @@ export async function loadDashboardSkills(wsId: WorkspaceId, q = ""): Promise<vo
 /**
  * 经 nextCursor 追加下一页（有界契约的 UI 面：分段续拉不重不漏）。
  * 无游标时静默跳过；新一轮 loadDashboardSkills 会代次失效在途追加。
+ * FD-20 反馈增强：返回新增行数供调用方瞬时反馈（1.5s toast / 按钮区文案）。
  */
-export async function loadMoreDashboardSkills(): Promise<void> {
+export async function loadMoreDashboardSkills(): Promise<number> {
   const { wsId, q, key, nextCursor } = dashboardSkillsState;
-  if (!wsId || !key || !nextCursor) return;
+  if (!wsId || !key || !nextCursor) return 0;
   const request = listRequests.issue();
   dashboardSkillsState.key = key;
   dashboardSkillsState.loadingMore = true;
@@ -98,7 +99,7 @@ export async function loadMoreDashboardSkills(): Promise<void> {
     const output = await requireRpc().skills.listWorkspace(
       q ? { wsId, q, limit: 200, cursor: nextCursor } : { wsId, limit: 200, cursor: nextCursor },
     );
-    if (!request.isCurrent() || dashboardSkillsState.key !== key) return;
+    if (!request.isCurrent() || dashboardSkillsState.key !== key) return 0;
     // 续页不重不漏由服务端游标保证；这里再按 (providerId, id) 键防御一次（同键去重）。
     const seen = new Set(dashboardSkillsState.rows.map((row) => `${row.providerId} ${row.id}`));
     const incoming = output.skills.filter((row) => !seen.has(`${row.providerId} ${row.id}`));
@@ -107,9 +108,11 @@ export async function loadMoreDashboardSkills(): Promise<void> {
     // providers/duplicates 与首页同源（每页都携带最新投影）；末段提交一次即可。
     dashboardSkillsState.providers = output.providers;
     dashboardSkillsState.duplicates = output.duplicates;
+    return incoming.length;
   } catch (error) {
-    if (!request.isCurrent() || dashboardSkillsState.key !== key) return;
+    if (!request.isCurrent() || dashboardSkillsState.key !== key) return 0;
     dashboardSkillsState.error = error instanceof Error ? error.message : String(error);
+    return 0;
   } finally {
     if (request.isLatest()) dashboardSkillsState.loadingMore = false;
   }
