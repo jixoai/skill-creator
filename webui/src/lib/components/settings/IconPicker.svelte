@@ -290,6 +290,7 @@
                 : 'border-border hover:bg-muted'}"
               title={t("settings.icon.noIconTitle")}
               aria-label={t("settings.icon.noIconAria")}
+              aria-pressed={icon === null}
               onclick={() => {
                 // codex R7 B3：No icon = 显式抑制（目录 provider 也走 Letter 头像），
                 // 不再是「清除覆盖后回退目录图标」的隐式语义。
@@ -320,6 +321,7 @@
                   providers:
                     group.providers.length > 1 ? group.providers.join(", ") : group.providers[0],
                 })}
+                aria-pressed={icon === group.icon}
                 onclick={() => pickIcon(group.icon)}
               >
                 <!-- 图标着色（codex R7 B3）：iconColor 同时作用于图片图标——
@@ -415,6 +417,7 @@
                   : 'border-border hover:bg-muted'}"
                 title={hex}
                 aria-label={t("settings.icon.paletteSwatchAria", { hex })}
+                aria-pressed={color.toLowerCase() === hex}
                 onclick={() => onColor?.(hex)}
               >
                 <span class="h-4 w-4 rounded" style="background: {hex}" aria-hidden="true"></span>

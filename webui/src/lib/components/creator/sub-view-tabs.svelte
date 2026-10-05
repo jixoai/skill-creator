@@ -36,11 +36,15 @@
 
 <div class="flex shrink-0 items-center gap-1 border-b border-border px-2">
   {#each TABS as tab (tab.id)}
+    <!-- toggleButton 语义（2026-10-05 全应用扫尾）：单选子视图切换，选中态
+         aria-pressed 与全应用 chips/过滤组惯例同源（tab 外观语义留视觉层）。 -->
     <button
+      type="button"
       class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors {active ===
       tab.id
         ? 'border-b-2 border-primary text-primary'
         : 'text-muted-foreground hover:text-foreground'}"
+      aria-pressed={active === tab.id}
       onclick={() => switchView(tab.id)}
     >
       <tab.icon class="h-3.5 w-3.5" />

@@ -431,7 +431,9 @@
     <button
       bind:this={treeToggleButton}
       type="button"
-      class="relative flex h-6 w-7 items-center justify-center rounded text-muted-foreground transition-colors after:absolute after:-inset-1 after:content-[''] hover:bg-muted hover:text-foreground"
+      class="relative flex h-6 w-7 items-center justify-center rounded transition-colors after:absolute after:-inset-1 after:content-[''] {treeButtonOpen
+        ? 'bg-primary/10 text-primary'
+        : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
       title={treeButtonOpen ? t("agentPage.hideTree") : t("agentPage.showTree")}
       aria-label={treeButtonOpen ? t("agentPage.hideTree") : t("agentPage.showTree")}
       aria-pressed={treeButtonOpen}
