@@ -81,3 +81,37 @@ describe("locale lifecycle", () => {
     expect(readDevicePrefs().language).toBe("en");
   });
 });
+
+describe("t() ICU plural subset (2026-10-05, Load more raw-template fix)", () => {
+  it("selects one/other branches with # substitution (en)", () => {
+    expect(t("skillsWorkspace.skillsScreen.loadedMore", { count: 1 })).toBe("Loaded 1 skill");
+    expect(t("skillsWorkspace.skillsScreen.loadedMore", { count: 3 })).toBe("Loaded 3 skills");
+    expect(t("skillsWorkspace.reposScreen.minutesAgo", { minutes: 1 })).toBe("1 minute ago");
+    expect(t("skillsWorkspace.reposScreen.minutesAgo", { minutes: 30 })).toBe("30 minutes ago");
+  });
+
+  it("prefers =N exact match and interpolates nested placeholders inside branches", () => {
+    expect(t("skillsWorkspace.reposScan.installedGroup", { installed: 3, overwritten: 0 })).toBe(
+      "3 installed",
+    );
+    expect(t("skillsWorkspace.reposScan.installedGroup", { installed: 3, overwritten: 2 })).toBe(
+      "3 installed (2 overwritten)",
+    );
+  });
+
+  it("resolves plural categories by active locale (zh → other + zh nested branches)", () => {
+    setLocale("zh");
+    expect(t("skillsWorkspace.reposScan.installedGroup", { installed: 3, overwritten: 0 })).toBe(
+      "3 个已安装",
+    );
+    expect(t("skillsWorkspace.reposScan.installedGroup", { installed: 3, overwritten: 2 })).toBe(
+      "3 个已安装（2 个覆盖）",
+    );
+  });
+
+  it("keeps raw template when the plural variable is missing (detectable defect)", () => {
+    const raw = t("skillsWorkspace.skillsScreen.loadedMore");
+    expect(raw).toContain("plural");
+    expect(raw).toContain("{count");
+  });
+});
