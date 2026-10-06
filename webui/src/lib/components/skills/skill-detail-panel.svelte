@@ -2,9 +2,13 @@
   用户原始需求 [2026-10-02]（skills-dashboard design §2，r2/r3 修订）：
   「detail = 只读文档详情 + 管理动作；frontmatter/正文编辑唯一真相 = Creator 编辑页。
   现 ProviderView 的 name/description 行内轻量编辑随迁移退役（不迁移）」。
+  修订 [2026-10-06]（skills-tabs-redesign 批 2，Δ3）：宿主从 skills-screen 的
+  master-detail 面板退役为 workspaces.skillDetail 独立路由页（SkillDetailPage）
+  的信息/动作单元；新增外部持有模式（`info` + `onRefresh` 可选 prop——页面拥有
+  数据加载与 not-found 裁决，组件在 info !== undefined 时跳过自载）。
   正交意图：
   1. 只读文档详情：frontmatter 解析表 + markdown 正文渲染（skills.info，组件级
-     $state + request-generation gate，不跨渲染周期缓存）。
+     $state + request-generation gate，不跨渲染周期缓存；外部持有模式跳过）。
   2. 管理动作：Validate / Update check（只读检查，apply 不在此面）/ Toggle
      （skills.toggle = skills 域唯一写 RPC）/ Chat about this skill
      （creator-agent-chat 1.4 实装：resume 键 = target + seedSkill 精确匹配，
@@ -13,7 +17,8 @@
      Agents screen 同链）。
   3. 零编辑写：无 creator.save/delete 调用；除 skills.toggle 外零写 RPC
      （design §7 源扫描断言面）。
-  4. 窄屏返回触发行恢复由父级（skills screen）管理；本组件只回调 onBack。
+  4. 窄屏返回触发行恢复由宿主管理；本组件只回调 onBack（独立路由页宿主用
+     面包屑承担返回，不传 onBack）。
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -27,7 +32,7 @@
   } from "$lib/stores/skills-update.svelte";
   import { showErrorToast, showToast } from "$lib/toast.svelte";
   import { t } from "$lib/i18n";
-  import { SkillIdSchema, type SkillId } from "$shared/contracts/skills.js";
+  import { SkillIdSchema, type SkillId, type SkillInfo } from "$shared/contracts/skills.js";
   import type { WorkspaceProviderTarget } from "$shared/contracts/workspaces.js";
   import { splitSkillContent, renderSkillBody } from "$lib/render-skill-md";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
@@ -50,21 +55,31 @@
     skillId,
     onBack,
     isNarrowScreen = false,
+    info = undefined,
+    onRefresh,
   }: {
     target: WorkspaceProviderTarget;
     skillId: string;
     onBack?: () => void;
     isNarrowScreen?: boolean;
+    /** 外部持有模式（独立路由页宿主）：页面拥有 skills.info 加载与 typed
+     *  not-found 裁决；undefined = 组件自载（历史模式，当前无其他消费方）。 */
+    info?: SkillInfo | null;
+    /** 外部持有模式下 toggle 后的刷新回调（页面重拉 info 投影新状态）。 */
+    onRefresh?: () => void | Promise<void>;
   } = $props();
 
   const infoRequests = createRequestGenerationGate(getConnectionGeneration);
-  let detail = $state<Awaited<ReturnType<typeof fetchSkillInfo>> | null>(null);
+  let loadedDetail = $state<Awaited<ReturnType<typeof fetchSkillInfo>> | null>(null);
   let detailLoading = $state(false);
   let detailError = $state<string | null>(null);
   let validating = $state(false);
   let validation = $state<{ success: boolean; errors: string[]; warnings: string[] } | null>(null);
   let toggling = $state(false);
   let checkingUpdate = $state(false);
+
+  // 外部持有模式优先；自载模式回退组件内数据。
+  const detail = $derived(info !== undefined ? info : loadedDetail);
 
   let detailHeaderEl = $state<HTMLElement | null>(null);
 
@@ -81,7 +96,7 @@
     const request = infoRequests.issue();
     const parsed = SkillIdSchema.safeParse(id);
     if (!parsed.success) {
-      detail = null;
+      loadedDetail = null;
       detailError = t("skillDetail.invalidId");
       return;
     }
@@ -91,24 +106,26 @@
     try {
       const info = await fetchSkillInfo(currentTarget, parsed.data as SkillId);
       if (!request.isCurrent()) return;
-      detail = info;
+      loadedDetail = info;
     } catch (error) {
       if (!request.isCurrent()) return;
-      detail = null;
+      loadedDetail = null;
       detailError = error instanceof Error ? error.message : String(error);
     } finally {
       if (request.isLatest()) detailLoading = false;
     }
   }
 
-  // 详情身份变化即重拉（skills.info；组件级 request-generation gate）。
+  // 详情身份变化即重拉（skills.info；仅自载模式；组件级 request-generation gate）。
   $effect(() => {
+    if (info !== undefined) return;
     void loadDetail(target, skillId);
   });
 
   // 详情就绪后聚焦语义标题（同技能刷新不重复夺焦）。
   $effect(() => {
-    if (detailLoading || !detail) return;
+    if (!detail) return;
+    if (info === undefined && detailLoading) return;
     detailHeaderEl?.focus();
   });
 
@@ -181,7 +198,9 @@
           showToast(t("skillDetail.toastStatus", { name: entry.name, status: entry.status }));
         }
       }
-      await loadDetail(target, current.id);
+      // 外部持有模式：宿主重拉 info 投影新状态；自载模式原地刷新。
+      if (onRefresh) await onRefresh();
+      else await loadDetail(target, current.id);
     } catch (error) {
       showErrorToast(error instanceof Error ? error.message : String(error));
     } finally {

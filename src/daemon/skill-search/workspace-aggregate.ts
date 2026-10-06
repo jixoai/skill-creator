@@ -1,9 +1,13 @@
 /**
- * `skills.listWorkspace` 的 workspace 级有界聚合（skills-dashboard task 1.1）。
+ * `skills.listWorkspace` / `skills.listCanonical` 的 workspace 级有界聚合
+ * （skills-dashboard task 1.1 + skills-tabs-redesign 批 2 Δ1）。
  *
  * 用户原始需求 [2026-10-03]（skills-dashboard design §5，r2-r4 定稿）：
  * 「聚合 RPC `skills.listWorkspace`：有界契约 + typed per-provider error——
  * 单次响应 skills 恒 ≤ limit，超出经 nextCursor 分段；duplicates 双层有界投影」。
+ * 修订 [2026-10-06]（skills-tabs-redesign Δ1 定稿）：新增 `listCanonical` 唯一
+ * name 分组投影——「Skills 默认不得出现重复 skill-name；同名技能跨 Agent 的差异
+ * 归 SkillDetail 展示」（Owner 落地注意 2）。
  *
  * 正交意图：
  *   [1] workspace provider 枚举：catalog + registry 持久态派生 server-owned roots
@@ -14,9 +18,15 @@
  *       （含起始行；续页不重不漏）。
  *   [4] duplicates 同源有界投影：组判定复用 skills.duplicates 的 contentHash
  *       分组（不引入第二份分组逻辑），按 workspace 作用域过滤后做三层有界包装。
- * 妥协声明：四个意图是同一份聚合响应（providers/skills/nextCursor/duplicates）
- * 的四个面，拆文件会让响应组装跨模块；上限 4 意图内可接受。
+ *   [5] 唯一 name 分组（Δ1）：复用 [1][2] 的扫描行按 name 精确匹配分组（plugin
+ *       namespace 原样）；representative = enabled → sourcePriority → providerId →
+ *       path，unavailable copy 顺延；copy 级 unavailable/conflict 投影时体检
+ *       （canonical 目录 lstat + 双文档 exists）；两量纲计数分开返回。
+ * 妥协声明：五个意图是同一对聚合响应（providers/skills/groups）的五个面，拆文件
+ * 会让响应组装跨模块；上限 5 意图内已到警报线，后续意图必须拆分。
  */
+import fs from "node:fs";
+import path from "node:path";
 import type { SkillMetadata } from "../../shared/contracts/skills.js";
 import type { SkillDuplicateGroup } from "../../shared/contracts/search.js";
 import {
@@ -27,8 +37,13 @@ import {
   type WorkspaceProviderTarget,
 } from "../../shared/contracts/workspaces.js";
 import {
+  decodeSkillsListCanonicalCursor,
   decodeSkillsListWorkspaceCursor,
+  encodeSkillsListCanonicalCursor,
   encodeSkillsListWorkspaceCursor,
+  type SkillsCanonicalCopy,
+  type SkillsCanonicalGroup,
+  type SkillsListCanonicalOutput,
   type SkillsListWorkspaceOutput,
 } from "../../shared/rpc-contract.js";
 import { PROVIDER_CATALOG } from "../../shared/provider-catalog.js";
@@ -102,6 +117,120 @@ function compareRowKey(
 ): number {
   if (left.providerId !== right.providerId) return left.providerId < right.providerId ? -1 : 1;
   return left.skillId < right.skillId ? -1 : left.skillId > right.skillId ? 1 : 0;
+}
+
+// ---- Δ1 唯一 name 分组投影（skills-tabs-redesign 批 2） ----
+
+/** copy 投影时体检：canonical 目录不可达 = unavailable；双身份文档并存 = conflict。 */
+function inspectCopyDirectory(skillPath: string): { unavailable: boolean; conflict: boolean } {
+  try {
+    if (!fs.statSync(skillPath).isDirectory()) return { unavailable: true, conflict: false };
+    const conflict =
+      fs.existsSync(path.join(skillPath, "SKILL.md")) &&
+      fs.existsSync(path.join(skillPath, ".SKILL.md"));
+    return { unavailable: false, conflict };
+  } catch {
+    return { unavailable: true, conflict: false };
+  }
+}
+
+/**
+ * representative 优先序（Δ1 冻结）：enabled 优先 → sourcePriority（缺失=最低）→
+ * providerId 字典序 → path 字典序；unavailable copy 不参与代表（顺延到首个可用）。
+ */
+function compareCopyPriority(left: SkillsCanonicalCopy, right: SkillsCanonicalCopy): number {
+  if (left.disabled !== right.disabled) return left.disabled ? 1 : -1;
+  const leftPriority = left.sourcePriority ?? Number.NEGATIVE_INFINITY;
+  const rightPriority = right.sourcePriority ?? Number.NEGATIVE_INFINITY;
+  if (leftPriority !== rightPriority) return leftPriority > rightPriority ? -1 : 1;
+  if (left.providerId !== right.providerId) return left.providerId < right.providerId ? -1 : 1;
+  if (left.path !== right.path) return left.path < right.path ? -1 : 1;
+  return 0;
+}
+
+/** duplicates 同源投影 → skillId → contentHash（组内区分同内容副本；缺席 = 唯一内容）。 */
+async function contentHashBySkillId(
+  duplicates: () => Promise<SkillDuplicateGroup[]>,
+): Promise<Map<string, string>> {
+  const groups = await duplicates();
+  const map = new Map<string, string>();
+  for (const group of groups) {
+    for (const member of group.members) map.set(member.id, group.contentHash);
+  }
+  return map;
+}
+
+/**
+ * 扫描行 → 唯一 name 组（纯函数）：name 精确匹配（trim 外无归一）；组内含任一
+ * q 命中 copy 即整组入列（copies 恒完整，×N 与 copyCount 不随 q 缺角）；组序 =
+ * name 码点升序（游标同一口径）。
+ */
+export interface CanonicalGrouping {
+  groups: SkillsCanonicalGroup[];
+  groupCount: number;
+  copyCount: number;
+}
+
+function buildCanonicalGroups(
+  rows: Array<SkillMetadata & { providerId: ProviderId }>,
+  wsId: WorkspaceId,
+  needle: string,
+  hashById: ReadonlyMap<string, string>,
+): CanonicalGrouping {
+  const byName = new Map<string, Array<SkillMetadata & { providerId: ProviderId }>>();
+  for (const row of rows) {
+    const bucket = byName.get(row.name);
+    if (bucket) bucket.push(row);
+    else byName.set(row.name, [row]);
+  }
+
+  const groups: SkillsCanonicalGroup[] = [];
+  let copyCount = 0;
+  for (const [name, members] of byName) {
+    // 组级 q 闸：组名命中或任一 copy 的 name/description 命中（包含式，大小写不敏感）。
+    if (
+      needle !== "" &&
+      !name.toLowerCase().includes(needle) &&
+      !members.some(
+        (member) =>
+          member.name.toLowerCase().includes(needle) ||
+          member.description.toLowerCase().includes(needle),
+      )
+    ) {
+      continue;
+    }
+    const ordered = [...members].sort((left, right) =>
+      compareRowKey(
+        { providerId: left.providerId, skillId: left.id },
+        { providerId: right.providerId, skillId: right.id },
+      ),
+    );
+    const copies: SkillsCanonicalCopy[] = ordered.map((member) => ({
+      ...member,
+      providerId: member.providerId,
+      workspaceId: wsId,
+      skillId: member.id,
+      ...inspectCopyDirectory(member.path),
+      ...(hashById.has(member.id) ? { contentHash: hashById.get(member.id)! } : {}),
+    }));
+    const availableCopies = copies.filter((copy) => !copy.unavailable);
+    const representative = [...(availableCopies.length > 0 ? availableCopies : copies)].sort(
+      compareCopyPriority,
+    )[0]!;
+    groups.push({
+      name,
+      description: representative.description,
+      representative,
+      copies,
+      groupMeta: {
+        copyCount: copies.length,
+        allUnavailable: availableCopies.length === 0,
+      },
+    });
+    copyCount += copies.length;
+  }
+  groups.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+  return { groups, groupCount: groups.length, copyCount };
 }
 
 /** 创建 workspace 级聚合器（rpc-router 组装；deps 均为既有 domain 成员）。 */
@@ -179,12 +308,15 @@ export function createWorkspaceSkillsAggregator(deps: WorkspaceSkillsAggregateDe
   };
 
   return {
+    /** 全 provider 扫描（listWorkspace / listCanonical 共用的 fan-out 步骤）。 */
+    scanAll: async (wsId: WorkspaceId): Promise<ProviderScan[]> => {
+      const scope = resolveWorkspaceScope(wsId);
+      return Promise.all(PROVIDER_CATALOG.map((provider) => scanProvider(wsId, scope, provider)));
+    },
+
     /** 聚合单一 workspace 全部 provider 的有界平铺投影（readonly）。 */
     async listWorkspace(input: WorkspaceSkillsAggregateInput): Promise<SkillsListWorkspaceOutput> {
-      const scope = resolveWorkspaceScope(input.wsId);
-      const scans = await Promise.all(
-        PROVIDER_CATALOG.map((provider) => scanProvider(input.wsId, scope, provider)),
-      );
+      const scans = await this.scanAll(input.wsId);
 
       const needle = input.q?.trim().toLowerCase() ?? "";
       const rows = scans
@@ -230,6 +362,50 @@ export function createWorkspaceSkillsAggregator(deps: WorkspaceSkillsAggregateDe
               }),
             }),
         duplicates: boundDuplicates(await deps.duplicates(), input.wsId),
+      };
+    },
+
+    /**
+     * 唯一 name 分组投影（Δ1）：复用 listWorkspace 的扫描面；copy 级
+     * unavailable/conflict 投影时体检；组级 q 闸（copies 恒完整）；组名序 +
+     * opaque cursor 分段；groupCount/copyCount 为 (wsId, q) 全量两量纲。
+     */
+    async listCanonical(input: WorkspaceSkillsAggregateInput): Promise<SkillsListCanonicalOutput> {
+      const [scans, hashById] = await Promise.all([
+        this.scanAll(input.wsId),
+        contentHashBySkillId(deps.duplicates),
+      ]);
+
+      const needle = input.q?.trim().toLowerCase() ?? "";
+      const rows = scans.flatMap((scan) =>
+        scan.skills.map((skill) => ({ ...skill, providerId: scan.providerId })),
+      );
+      const { groups, groupCount, copyCount } = buildCanonicalGroups(
+        rows,
+        input.wsId,
+        needle,
+        hashById,
+      );
+
+      // cursor = 下一首组键（含起始组）：schema 已校验可解码，此处仍防御收窄。
+      let start = 0;
+      if (input.cursor !== undefined) {
+        const key = decodeSkillsListCanonicalCursor(input.cursor);
+        if (key === null) {
+          throw new DomainError("INVALID_OPERATION", "malformed skills.listCanonical cursor");
+        }
+        const index = groups.findIndex((group) => group.name >= key);
+        start = index === -1 ? groups.length : index;
+      }
+      const page = groups.slice(start, start + input.limit);
+      const next = groups[start + input.limit];
+
+      return {
+        providers: scans.map(({ skills: _skills, ...provider }) => provider),
+        groups: page,
+        groupCount,
+        copyCount,
+        ...(next === undefined ? {} : { nextCursor: encodeSkillsListCanonicalCursor(next.name) }),
       };
     },
   };

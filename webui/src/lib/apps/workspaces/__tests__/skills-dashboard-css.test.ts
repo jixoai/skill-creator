@@ -1,16 +1,19 @@
 /**
- * SkillsDashboard chrome CSS 契约测试（skills-tabs-redesign 批 1，design 基准
- * = fuse2 融合稿 TabsHeader）。
+ * SkillsDashboard chrome CSS 契约测试（skills-tabs-redesign 批 1/批 2，design 基准
+ * = fuse2 融合稿 TabsHeader + Δ1 唯一 name 行 + Δ3 detail 独立路由）。
  * 用户原始需求 [2026-10-06]：「顶部 TabsHeader 三一等 Tabs，每 Tab 独占整幅
- * 画布」；「窄屏三 tab 单行不换行」；「pulse 统计退役为页题行小字」。
+ * 画布」；「窄屏三 tab 单行不换行」；「pulse 统计退役为页题行小字」；
+ * 「Skills 默认不出现重复 skill-name（×N 副本徽标）」；「detail 归独立路由页」。
  * 正交意图：
  *   [1] TabsHeader 契约：三一等 grid 均分 + nowrap 单行 + 激活底线
- *       （aria-selected 驱动）+ 窄屏触达 44px（692 阈值与 skills-screen 共源）。
+ *       （aria-selected 驱动）+ 窄屏触达 44px（692 阈值共源）。
  *   [2] 画布契约：panel grid 同格独占整幅（禁绝对定位）+ hidden 退场 + .screen
  *       弹性填满 panel（固定高语义由 flex 约束承担）+ 内滚/overscroll 分层。
  *   [3] 页题行统计小字契约（数据缺席不显数）。
  *   [4] detail 面零写源扫描（design §7：除 skills.toggle 外零写 RPC、无
- *       creator.save/delete 调用）——skills-screen 内部本批不动，契约继续有效。
+ *       creator.save/delete 调用）——面板宿主迁独立路由页，契约继续有效。
+ *   [5] 批 2 机制契约：master-detail 退役 + detail 页两栏容器（692 同阈值）
+ *       + chips 横滚/滚动条 mask + ×N 徽标 layers 化。
  * 妥协声明：jsdom 无布局引擎（scrollWidth/clientWidth 恒 0）——真实布局的
  * 不溢出验证归走查门；本测试钉死防溢出的 CSS 机制契约。
  */
@@ -64,7 +67,8 @@ describe("TabsHeader chrome CSS 契约（skills-tabs-redesign 批 1）", () => {
   it("keeps the 692px narrow container query as the shared single-row threshold", () => {
     // 窄屏单行形态：同一 TabsHeader（无第二套切换器），触达 ≥44px（AGENTS §7.2）。
     // 阈值 692 与 skills-screen master-detail 栈切换共源（改一处不改另一处 = 红）。
-    const narrow = css.match(/@container dashboard \(width < 692px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+    const narrow =
+      css.match(/@container dashboard \(width < 692px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
     expect(narrow).toMatch(/\.dashboard-tab\s*\{[\s\S]*?min-height:\s*44px/);
     expect(css).not.toMatch(/screen-switcher|dashboard-grid|grid-item/);
   });
@@ -99,8 +103,8 @@ describe("真实目录规模防塌机制契约（走查 13-fix）", () => {
   const screenCss = skillsScreenSrc.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
 
   it("provider chips render as a single-row horizontal scroller, never multi-line wrap", () => {
-    // header 高度与 provider 数量解耦：76 chips wrap 九行曾把 master-detail 挤到
-    // 0px。机制 = chips 容器 nowrap + overflow-x（jsdom 无布局，钉 CSS 契约）。
+    // header 高度与 provider 数量解耦：76 chips wrap 九行曾把列表挤到 0px。
+    // 机制 = chips 容器 nowrap + overflow-x（jsdom 无布局，钉 CSS 契约）。
     expect(skillsScreenSrc).toMatch(/class="chips-row[^"]*"\s+role="group"/);
     expect(screenCss).toMatch(/\.chips-row\s*\{[\s\S]*?flex-wrap:\s*nowrap/);
     expect(screenCss).toMatch(/\.chips-row\s*\{[\s\S]*?overflow-x:\s*auto/);
@@ -129,41 +133,40 @@ describe("真实目录规模防塌机制契约（走查 13-fix）", () => {
   });
 });
 
-describe("窄屏栈切换与 chips 滚动条机制契约（修复批 2）", () => {
+describe("master-detail 退役与 detail 独立路由布局契约（skills-tabs-redesign 批 2）", () => {
   const screenCss = skillsScreenSrc.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
 
-  it("places narrow-stack hidden classes on the panes, never on the master-detail wrapper", () => {
-    // 450px 盲区根因：@container (max-width: 559px) 的查询容器是匹配元素最近的
-    // 祖先容器。类落在 pane 上 → 解析到 .skills-master-detail（inline-size 容器，
-    // 「屏容器 < 560px」语义成立）；类落在 wrapper 自身 → 上溯到外层
-    // .dashboard-shell 解析，列表行 + 空态 + 详情面整个被藏掉（宽度无关的
-    // 空白盲区，450px 复现 / 700px 不复现正是 shell 容器宽度的两侧）。
-    const wrapperClass = skillsScreenSrc.match(/class="skills-master-detail[^"]*"/)?.[0];
-    expect(wrapperClass).toBeDefined();
-    expect(wrapperClass).not.toMatch(/list-hidden|detail-hidden/);
-    expect(skillsScreenSrc).toMatch(/class="skills-list-pane[^"]*list-hidden/);
-    expect(skillsScreenSrc).toMatch(/class="skills-detail-pane[^"]*detail-hidden/);
-  });
-
-  it("stacks master-detail inside the dashboard's named single-column query (unified 692px)", () => {
-    // 批评处置 P2：dashboard <692px 单列降档与 master-detail 栈切换共享同一
-    // 阈值真相源（560-691px 区间曾出现「dashboard 已单列、master-detail 仍
-    // 双栏挤压」——620px 走查实拍）。skills-screen 不再自带无名容器阈值。
-    expect(screenCss).toMatch(/@container dashboard \(width < 692px\)\s*\{/);
-    expect(screenCss).not.toMatch(/@container \(max-width: 559px\)/);
-    expect(screenCss).not.toMatch(/\.skills-master-detail\s*\{[\s\S]*?container-type/);
-    // 阈值一致性：与 SkillsDashboard 单列降档逐字相等（改一处不改另一处 = 红）。
-    // dashboard 侧现为三档级联（1044/692）——双源一致锚定的是单列降档 692。
-    const dashboardThreshold = Number(
-      [...dashboardSrc.matchAll(/@container dashboard \(width < (\d+)px\)/g)]
-        .map((m) => Number(m[1]))
-        .find((value) => value === 692),
-    );
+  it("retires the master-detail panes from the skills screen (detail owns a route now)", () => {
+    // Δ3：detail 归 workspaces.skillDetail 独立路由页——列表屏满幅单列，
+    // master-detail 双 pane 及其隐藏类不得复活。
+    expect(skillsScreenSrc).not.toMatch(/skills-master-detail|skills-list-pane|skills-detail-pane/);
+    expect(skillsScreenSrc).not.toMatch(/SkillDetailPanel/);
+    expect(skillsScreenSrc).not.toMatch(/list-hidden|detail-hidden/);
+    // 阈值一致性锚点迁移：skills-screen 保留 chips 触达面的 692 容器查询
+    // （与 SkillsDashboard 单列降档逐字相等，改一处不改另一处 = 红）。
     const screenThreshold = Number(
       skillsScreenSrc.match(/@container dashboard \(width < (\d+)px\)/)?.[1],
     );
-    expect(screenThreshold).toBe(dashboardThreshold);
     expect(screenThreshold).toBe(692);
+  });
+
+  it("detail page owns a two-pane container with the same 692px single-column threshold", () => {
+    // Δ3 简化版容器：左信息右内容占位；<692px 单列双行（panel/aside 各占半幅内滚
+    // ——隐式 auto 行被 stretch 分配后放行内容溢出本行，画进下一行透明 aside
+    // 底下，走查 390 实拍重叠——必须显式 minmax(0,1fr) 行约束）。
+    const detailSrc = readFileSync(
+      fileURLToPath(new URL("../SkillDetailPage.svelte", import.meta.url)),
+      "utf-8",
+    );
+    const detailCss = detailSrc.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+    expect(detailCss).toMatch(/container-type:\s*inline-size/);
+    expect(detailCss).toMatch(/@container skill-detail \(min-width:\s*692px\)/);
+    expect(detailCss).toMatch(/grid-template-rows:\s*minmax\(0,\s*1fr\)\s*minmax\(0,\s*1fr\)/);
+    expect(detailCss).toMatch(
+      /grid-template-columns:\s*minmax\(0,\s*1\.1fr\)\s*minmax\(0,\s*1fr\)/,
+    );
+    expect(detailCss).toMatch(/overflow:\s*hidden/);
+    expect(detailCss).not.toMatch(/position:\s*absolute/);
   });
 
   it("hides the chips-row scrollbar behind an edge fade mask without losing scroll", () => {
@@ -222,13 +225,14 @@ describe("workspace-page-polish 2.2 处置批机制契约（P2-2/P2-9）+ 批 1 
     expect(skillsScreenSrc).not.toMatch(/\{#each providerChips as chip \(chip\.providerId\)\}/);
   });
 
-  it("重复徽标图标 layers 化（P2-9）：↗（外链语义）不再承担「同内容多副本」", () => {
+  it("副本徽标图标 layers 化（批 2 ×N 语义）：×N 副本徽标块携带 layers 图标", () => {
     expect(skillsScreenSrc).toMatch(/icons\/layers/);
-    const start = skillsScreenSrc.indexOf("{#if sameContent > 0}");
+    const start = skillsScreenSrc.indexOf("{#if copyCount > 1}");
     const end = skillsScreenSrc.indexOf("{/if}", start);
     expect(start).toBeGreaterThan(-1);
     const badgeBlock = skillsScreenSrc.slice(start, end);
     expect(badgeBlock).toMatch(/<IconLayers class="h-3 w-3"/);
+    expect(badgeBlock).toMatch(/data-testid="copies-badge"/);
     expect(badgeBlock).not.toMatch(/IconArrowUpRight/);
   });
 

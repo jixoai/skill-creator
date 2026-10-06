@@ -38,8 +38,10 @@ describe("legacy shell URL migrations", () => {
     ],
     [
       "/workspaces/ws_0123456789abcdef01234567/claude-code",
+      // skills-tabs-redesign 批 2：dashboard 的 skill 搜索参数退役（detail 走
+      // 独立路由）——legacy redirect 不再转发死键。
       "?q=hello+world&skill=sk_0123456789abcdef01234567&view=detail",
-      "/w/ws_0123456789abcdef01234567/skills?q=hello+world&provider=claude-code&skill=sk_0123456789abcdef01234567",
+      "/w/ws_0123456789abcdef01234567/skills?q=hello+world&provider=claude-code",
     ],
     [
       "/workspaces/ws_0123456789abcdef01234567/claude-code",

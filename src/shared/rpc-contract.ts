@@ -289,6 +289,96 @@ export const SkillsListWorkspaceOutputSchema = z.strictObject({
   duplicates: SkillListWorkspaceDuplicatesSchema,
 });
 export type SkillsListWorkspaceOutput = z.infer<typeof SkillsListWorkspaceOutputSchema>;
+
+/**
+ * skills.listCanonical 游标 codec（skills-tabs-redesign 批 2，Δ1 定稿）：opaque
+ * 起始组键（组名；含起始组）。纯字符串往返（base64 + `g:` 前缀），输入 schema
+ * refine 与 daemon 分页共用同一判定源。
+ */
+export function encodeSkillsListCanonicalCursor(name: string): string {
+  return btoa(`g:${name}`);
+}
+
+/** 解码 listCanonical 游标；非法形状返回 null（schema refine 据此拒绝 typed 校验错误）。 */
+export function decodeSkillsListCanonicalCursor(value: string): string | null {
+  let decoded: string;
+  try {
+    decoded = atob(value);
+  } catch {
+    return null;
+  }
+  if (!decoded.startsWith("g:")) return null;
+  return decoded.slice(2);
+}
+
+const SkillsListCanonicalCursorSchema = z
+  .string()
+  .min(1)
+  .refine((value) => decodeSkillsListCanonicalCursor(value) !== null, {
+    message: "malformed skills.listCanonical cursor",
+  });
+
+/** skills.listCanonical 输入（Δ1：workspace-scoped `{wsId, q?, pagination?}`）。 */
+export const SkillsListCanonicalInputSchema = z.strictObject({
+  wsId: WorkspaceIdSchema,
+  /** server 端预过滤（组名或任一 copy 的 description 包含式，大小写不敏感）。 */
+  q: z.string().optional(),
+  limit: z.number().int().min(1).max(500).default(200),
+  cursor: SkillsListCanonicalCursorSchema.optional(),
+});
+
+/**
+ * 组内 copy 行（Δ1：representative 与每个 copy 都携带完整 WorkspaceProviderTarget
+ * 三元组——info/toggle/validate 按 target 解析是安全边界；workspaceId/skillId 是
+ * id 的显式 target 形态，客户端不经推导直接组装 target）。unavailable = 投影时
+ * canonical 目录已不可达（代表顺延、全组置灰的依据）；conflict = SKILL.md 与
+ * .SKILL.md 并存（copy 级标记，组不丢行）；contentHash 来自 duplicates 同源投影，
+ * 仅组内区分「同内容副本 / 同名不同内容」，不作列表身份（缺席 = 无重复内容）。
+ */
+export const SkillsCanonicalCopySchema = SkillMetadataSchema.extend({
+  providerId: ProviderIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  skillId: SkillIdSchema,
+  unavailable: z.boolean(),
+  conflict: z.boolean(),
+  contentHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+});
+export type SkillsCanonicalCopy = z.infer<typeof SkillsCanonicalCopySchema>;
+
+/**
+ * 唯一 name 组行（Δ1）：分组键 = skill name 精确匹配（trim 外无归一，plugin
+ * namespace 原样入键）；representative = enabled 优先 → sourcePriority（缺失=最低）
+ * → providerId → path 字典序，unavailable copy 顺延；groupMeta.copyCount 与
+ * allUnavailable 显式给出（UI 两量纲明示，禁止单数字推导）。
+ */
+export const SkillsCanonicalGroupSchema = z.strictObject({
+  name: z.string(),
+  description: z.string(),
+  representative: SkillsCanonicalCopySchema,
+  copies: z.array(SkillsCanonicalCopySchema).min(1),
+  groupMeta: z.strictObject({
+    copyCount: z.number().int().positive(),
+    allUnavailable: z.boolean(),
+  }),
+});
+export type SkillsCanonicalGroup = z.infer<typeof SkillsCanonicalGroupSchema>;
+
+/**
+ * skills.listCanonical 输出（Δ1）：providers 摘要同 listWorkspace 同源（单
+ * provider 失败 typed 隔离）；groupCount/copyCount 为 (wsId, q) 作用域内全量
+ * 两量纲计数（与分页窗口无关）；groups 恒 ≤ limit，nextCursor = 下一首组键。
+ */
+export const SkillsListCanonicalOutputSchema = z.strictObject({
+  providers: z.array(SkillsListWorkspaceProviderSchema),
+  groups: z.array(SkillsCanonicalGroupSchema),
+  groupCount: z.number().int().nonnegative(),
+  copyCount: z.number().int().nonnegative(),
+  nextCursor: z.string().optional(),
+});
+export type SkillsListCanonicalOutput = z.infer<typeof SkillsListCanonicalOutputSchema>;
 /** repository.scan 输入。 */
 export const RepositoryScanInputSchema = z.object({
   source: z.string().trim().min(1),
@@ -342,6 +432,14 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
      * truncated}；完整数据走 skills.duplicates）。
      */
     listWorkspace: oc.input(SkillsListWorkspaceInputSchema).output(SkillsListWorkspaceOutputSchema),
+    /**
+     * workspace 级唯一 name 分组投影（skills-tabs-redesign 批 2，Δ1 定稿）：
+     * 复用 listWorkspace 的 provider fan-out（不建第二套扫描）；组 = name 精确
+     * 匹配（plugin namespace 原样），representative 携带完整 target（安全边界），
+     * unavailable/conflict 为 copy 级标记（组保留不隐藏）；groupCount/copyCount
+     * 两量纲分开返回；组名序 + opaque cursor 分段（groups 恒 ≤ limit）。
+     */
+    listCanonical: oc.input(SkillsListCanonicalInputSchema).output(SkillsListCanonicalOutputSchema),
     update: {
       /** Compare skills-CLI lock hashes against upstream and report outdated skills. */
       check: oc.input(UpdateCheckInputSchema).output(UpdateCheckResultSchema),

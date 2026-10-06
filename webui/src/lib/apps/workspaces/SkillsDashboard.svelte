@@ -20,7 +20,7 @@
   import { useParams, useSearch, goById } from "$lib/shell";
   import { t } from "$lib/i18n";
   import { workspaceState } from "$lib/store.svelte";
-  import { dashboardSkillsState } from "$lib/stores/dashboard-skills.svelte";
+  import { dashboardCanonicalState } from "$lib/stores/dashboard-canonical.svelte";
   import { WorkspaceIdSchema, type WorkspaceId } from "$shared/contracts/workspaces.js";
   import SkillsScreen from "./screens/skills-screen.svelte";
   import AgentsScreen from "./screens/agents-screen.svelte";
@@ -31,8 +31,6 @@
     provider?: string;
     q?: string;
     reposQ?: string;
-    skill?: string;
-    view?: "list" | "detail";
     duplicates?: "1";
   };
 
@@ -56,9 +54,10 @@
     workspaceState.workspaces.find((workspace) => workspace.id === wsId)?.label ?? wsId,
   );
 
-  /** 页题行统计小字：providers 摘要聚合的真实计数；摘要未载不显数（不造假）。 */
+  /** 页题行统计小字：providers 摘要聚合的真实计数；摘要未载不显数（不造假）。
+   *  批 2 起数据源 = skills.listCanonical 的 providers 摘要（skills 屏数据面）。 */
   const stats = $derived.by(() => {
-    const providers = dashboardSkillsState.providers;
+    const providers = dashboardCanonicalState.providers;
     if (providers.length === 0) return null;
     return {
       skills: providers.reduce((total, provider) => total + (provider.skillCount ?? 0), 0),

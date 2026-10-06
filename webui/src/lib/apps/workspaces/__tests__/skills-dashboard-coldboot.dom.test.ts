@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 /**
- * SkillsDashboard 冷直载深链 DOM 测试（走查 15-fix 诊断 repro）。
+ * SkillsDashboard 冷直载深链 DOM 测试（走查 15-fix 诊断 repro + 批 2 detail 冷链）。
  * 用户原始需求 [2026-10-03]（ego-browser 走查 23 项之 15）：
- * 「带 ?provider&skill&view=detail 的 URL 直接打开（冷载）100% 白屏；
- * 同 URL 应用内导航正常。疑似 hydration/首帧竞态（leaf 懒加载 vs search
- * 解析时序）。」
+ * 「带深链参数的 URL 直接打开（冷载）100% 白屏；同 URL 应用内导航正常。
+ * 疑似 hydration/首帧竞态（leaf 懒加载 vs search 解析时序）。」
+ * 修订 [2026-10-06]（skills-tabs-redesign 批 2，Δ3）：detail 冷链改钉独立路由
+ * `/w/:wsId/skills/:providerId/:skillId`（真实 PageOutlet→AppShell→SkillDetailPage
+ * 全链）+ wellformed 但不存在的 skillId = 页级 typed not-found（不 fallback）。
  * 正交意图：
  *   [1] 全真链路冷载 repro：kit-fake page（冷深链 URL）→ 真实 PageOutlet →
  *       真实 AppShell（leaf 懒加载 + router 上下文 + search 解析）→ 真实
- *       workspaces manifest → 真实 SkillsDashboard（master-detail detail 态）。
+ *       workspaces manifest → 真实 leaf 组件。
  *   [2] +layout boot 链路复刻（initializeTabSession matched → 零重定向）。
- *   [3] 批 1（skills-tabs-redesign）：?tab= 冷载深链 = Tab 直接选中
- *       （tablist ARIA + panel hidden 同源）。
+ *   [3] 批 1：?tab= 冷载深链 = Tab 直接选中；批 2：detail 冷载渲染信息面。
  * 仿真边界：与 skills-dashboard.dom.test.ts 同一 mock 集（connection/rpc/ui
  * 原语/dialog/banner/agent store），$app/navigation 换 kit-fake goto（tab-session
  * 需要可完成的真实导航语义）。
@@ -76,6 +77,7 @@ vi.mock("$lib/components/self-skill-conflict-banner.svelte", async () => {
 import "$lib/apps/workspaces/manifest.js";
 import { flushSync, mount, unmount } from "$lib/__tests__/svelte-client";
 import type { Component } from "svelte";
+import { ORPCError } from "@orpc/client";
 import PageOutlet from "$lib/shell/PageOutlet.svelte";
 import { resetKitFake } from "$lib/shell/__tests__/kit-fake.svelte.js";
 import {
@@ -85,7 +87,7 @@ import {
 } from "$lib/shell/tab-session.svelte.js";
 import { beforeNavigate } from "$app/navigation";
 import { workspaceState } from "$lib/stores/workspaces.svelte";
-import { resetDashboardSkills } from "$lib/stores/dashboard-skills.svelte";
+import { resetDashboardCanonical } from "$lib/stores/dashboard-canonical.svelte";
 import { resetSkillDuplicates, resetSkillSearch } from "$lib/stores/skills.svelte";
 import { clearUpdateReport } from "$lib/stores/skills-update.svelte";
 import type { Workspace } from "$shared/contracts/workspaces.js";
@@ -100,6 +102,7 @@ beforeNavigate((navigation) => {
 });
 
 const SK_A = `sk_${"a".repeat(24)}`;
+const SK_MISSING = `sk_${"f".repeat(24)}`;
 
 let mounted: ReturnType<typeof mount> | null = null;
 
@@ -132,34 +135,74 @@ beforeEach(() => {
           skillCount: 1,
         },
       ],
-    } as unknown as Workspace,
-  ];
+    },
+  ] as unknown as typeof workspaceState.workspaces;
   rpcClient = {
     skills: {
-      listWorkspace: () =>
+      listCanonical: () =>
         Promise.resolve({
           providers: [
             { providerId: "claude-code", label: "Claude Code", available: true, skillCount: 1 },
           ],
-          skills: [
+          groups: [
             {
-              id: SK_A,
-              providerId: "claude-code",
               name: "alpha",
               description: "alpha desc",
-              directoryName: "alpha",
-              disabled: false,
-              provider: "claude-code",
-              location: { workspaceId: "~", providerId: "claude-code" },
-              path: "/skills/alpha",
-              hasReferences: false,
-              hasScripts: false,
+              representative: {
+                id: SK_A,
+                skillId: SK_A,
+                workspaceId: "~",
+                providerId: "claude-code",
+                name: "alpha",
+                description: "alpha desc",
+                directoryName: "alpha",
+                disabled: false,
+                provider: "claude-code",
+                location: { workspaceId: "~", providerId: "claude-code" },
+                path: "/skills/alpha",
+                hasReferences: false,
+                hasScripts: false,
+                hasAssets: false,
+                pluginInfo: null,
+                installedVia: "unknown",
+                updatable: false,
+                unavailable: false,
+                conflict: false,
+              },
+              copies: [
+                {
+                  id: SK_A,
+                  skillId: SK_A,
+                  workspaceId: "~",
+                  providerId: "claude-code",
+                  name: "alpha",
+                  description: "alpha desc",
+                  directoryName: "alpha",
+                  disabled: false,
+                  provider: "claude-code",
+                  location: { workspaceId: "~", providerId: "claude-code" },
+                  path: "/skills/alpha",
+                  hasReferences: false,
+                  hasScripts: false,
+                  hasAssets: false,
+                  pluginInfo: null,
+                  installedVia: "unknown",
+                  updatable: false,
+                  unavailable: false,
+                  conflict: false,
+                },
+              ],
+              groupMeta: { copyCount: 1, allUnavailable: false },
             },
           ],
-          duplicates: { groups: [], groupsTruncated: false },
+          groupCount: 1,
+          copyCount: 1,
         }),
-      info: () =>
-        Promise.resolve({
+      info: (input: Record<string, unknown>) => {
+        if (input.skillId === SK_MISSING) {
+          return Promise.reject(new ORPCError("NOT_FOUND", { message: "Skill not found" }));
+        }
+        return Promise.resolve({
           id: SK_A,
           name: "alpha",
           description: "alpha desc",
@@ -170,10 +213,15 @@ beforeEach(() => {
           path: "/skills/alpha",
           hasReferences: false,
           hasScripts: false,
+          hasAssets: false,
+          pluginInfo: null,
+          installedVia: "unknown",
+          updatable: false,
           size: 128,
           content: "---\nname: alpha\ndescription: alpha desc\n---\n\n# Body\n",
           revision: `sha256:${"0".repeat(64)}`,
-        }),
+        });
+      },
       validate: () => Promise.resolve({ success: true, errors: [], warnings: [] }),
       search: () => Promise.resolve({ results: [] }),
       duplicates: () => Promise.resolve({ groups: [] }),
@@ -192,7 +240,7 @@ beforeEach(() => {
 afterEach(async () => {
   if (mounted) await unmount(mounted);
   mounted = null;
-  resetDashboardSkills();
+  resetDashboardCanonical();
   resetSkillSearch();
   resetSkillDuplicates();
   clearUpdateReport();
@@ -200,25 +248,42 @@ afterEach(async () => {
   rpcClient = null;
 });
 
-describe("SkillsDashboard 冷直载深链（走查 15-fix 回归钉）", () => {
-  it("cold-loads the detail deep link through the real PageOutlet→AppShell→dashboard chain", async () => {
-    const search = `?provider=claude-code&skill=${SK_A}&view=detail`;
-    resetKitFake(`/w/~/skills${search}`);
+describe("Skills 冷直载深链（走查 15-fix 回归钉 + 批 2 detail 冷链）", () => {
+  it("cold-loads the skill detail deep link through the real PageOutlet→AppShell→SkillDetailPage chain", async () => {
+    resetKitFake(`/w/~/skills/claude-code/${SK_A}`);
     const target = document.createElement("div");
     document.body.appendChild(target);
     mounted = mount(PageOutlet as unknown as Component, { target });
     flushSync();
 
     // +layout boot 链路：matched URL → 零重定向。
-    const redirect = initializeTabSession([], "/w/~/skills", search);
+    const redirect = initializeTabSession([], `/w/~/skills/claude-code/${SK_A}`, "");
     expect(redirect).toBeNull();
     await settle();
 
-    // 断言：主屏 + detail 面渲染（非白屏、非 page-outlet-empty、非 app-shell-empty）。
+    // 断言：detail 页渲染（非白屏、非 page-outlet-empty、非 app-shell-empty）。
     expect(document.querySelector(".page-outlet-empty")).toBeNull();
     expect(document.querySelector(".app-shell-empty")).toBeNull();
-    expect(document.querySelector('[data-screen="skills"]')).not.toBeNull();
+    // 页级数据面：skills.info 经页面持有（面板外部持有模式消费）。
     expect(document.body.textContent ?? "").toContain("alpha");
+    // 副本组差异 + 内容占位（批 3 前的简化容器右栏）。
+    expect(document.querySelector('[data-testid="detail-viewer-placeholder"]')).not.toBeNull();
+  });
+
+  it("renders the typed not-found page for a wellformed but unknown skillId (cold)", async () => {
+    resetKitFake(`/w/~/skills/claude-code/${SK_MISSING}`);
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    mounted = mount(PageOutlet as unknown as Component, { target });
+    flushSync();
+
+    const redirect = initializeTabSession([], `/w/~/skills/claude-code/${SK_MISSING}`, "");
+    expect(redirect).toBeNull();
+    await settle();
+
+    // typed not-found（RPC NOT_FOUND → 页级裁决；不 fallback 掩盖）。
+    expect(document.querySelector('[data-testid="skill-not-found"]')).not.toBeNull();
+    expect(document.body.textContent ?? "").not.toContain("alpha desc");
   });
 
   it("cold-loads the ?tab= deep link straight into the selected tab (batch 1)", async () => {

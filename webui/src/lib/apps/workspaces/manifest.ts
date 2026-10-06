@@ -7,9 +7,17 @@
  * （注册目录索引 + Remove 收口 + Import 入口；IMPORTED 词汇从用户面退役）。
  * 修订 [2026-10-06]（skills-tabs-redesign 批 1）：三屏网格 → TabsHeader 三一等
  * Tabs；深链参数 screen→tab 直切（无别名，AGENTS §8 无兼容策略）。
+ * 修订 [2026-10-06]（skills-tabs-redesign 批 2，Δ3 定稿）：SkillDetail 独立路由
+ * `/w/:wsId/skills/:providerId/:skillId`（独立 activity——providerId 是 path
+ * param，不经 entry activity 的 providerId→provider search 别名注入，insights
+ * 先例）；load-time 三 schema 收窄（非法身份 parse-error → hygiene 渲染前
+ * redirect）；`?from=` 列表态回传（≤512，白名单解析在 skill-detail-route.ts）；
+ * master-detail 身份参数 skill/view 同版本退役（AGENTS §8）。
  * 正交意图：[1] 声明 Skills dashboard App 的路由树（root = dashboard 网格 +
  * repos scan 子路由；intelligence 平行 activity）。[2] workspace 管理页
  * activity（全局作用域页面；tab 归属经 tabIdForPath → Global `~`）。
+ * [3] skill detail activity（detail 永远绑定具体 provider copy；copies 是展示
+ * 关系不承担权限/定位）。
  */
 import IconBoxes from "@lucide/svelte/icons/boxes";
 import { defineApp, defineActivity, defineRoute, leafRoute } from "$lib/shell";
@@ -17,7 +25,8 @@ import { ProviderIdSchema, WorkspaceIdSchema } from "$shared/contracts/workspace
 import { SkillIdSchema } from "$shared/contracts/skills.js";
 import { z } from "zod";
 
-/** dashboard 根 search（?tab= 切屏 + 主屏筛选/详情身份 + repos 源过滤）。 */
+/** dashboard 根 search（?tab= 切屏 + 主屏筛选 + repos 源过滤；批 2 起 detail
+ *  身份走独立路由，skill/view 参数退役）。 */
 const DashboardSearchSchema = z.object({
   /** 深链 Tab（缺省 skills；skills-tabs-redesign 批 1 起参数名 screen→tab 直切，
    *  无别名——仓库无兼容策略，旧 URL 迁移归发布层）。 */
@@ -26,8 +35,6 @@ const DashboardSearchSchema = z.object({
   q: z.string().optional(),
   /** repos screen 的源过滤（与主屏技能搜索 q 分道）。 */
   reposQ: z.string().optional(),
-  skill: SkillIdSchema.optional(),
-  view: z.enum(["list", "detail"]).optional(),
   /** duplicates-only 过滤开关（出现 = 开）。 */
   duplicates: z.literal("1").optional(),
 });
@@ -83,6 +90,23 @@ export const workspacesApp = defineApp({
           skill: SkillIdSchema.optional(),
         }),
         component: () => import("./IntelligenceView.svelte"),
+      }),
+    }),
+    // SkillDetail 独立路由（批 2 Δ3）：detail 永远绑定具体 provider copy；
+    // 三 schema load-time 收窄——非法身份 parse-error → hygiene 渲染前 redirect
+    // （AGENTS §3.2 动态路由法则），wellformed 但不存在 → 页内 typed not-found。
+    defineActivity({
+      pattern: "/w/:wsId/skills",
+      root: defineRoute({
+        id: "workspaces.skillDetail",
+        pattern: ":providerId/:skillId",
+        params: z.object({
+          wsId: WorkspaceIdSchema,
+          providerId: ProviderIdSchema,
+          skillId: SkillIdSchema,
+        }),
+        search: z.object({ from: z.string().max(512).optional() }),
+        component: () => import("./SkillDetailPage.svelte"),
       }),
     }),
     // 工作区管理页（workspace-page-polish）：全局作用域（非 ws 参数路由）——

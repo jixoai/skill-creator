@@ -82,10 +82,11 @@ function redirectLegacyPath(pathname: string, search: string): string | null {
     });
   }
   if (parts[0] === "workspaces" && parts.length === 3) {
+    // skills-tabs-redesign 批 2：detail 身份走独立路由，dashboard 的 skill 搜索
+    // 参数退役（§8）——legacy redirect 不再转发死键。
     return build(`/w/${encodePathPart(parts[1]!)}/skills`, {
       q: query.get("q"),
       provider: parts[2]!,
-      skill: query.get("skill"),
     });
   }
   if (pathname === "/creator") return "/w/~/creator";

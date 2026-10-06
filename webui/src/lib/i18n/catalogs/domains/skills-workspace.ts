@@ -5,6 +5,9 @@
  * 新 key 全部进 domains/；存量 base 禁改；zh 缺键=编译错）。
  * 修订 [2026-10-06]（skills-tabs-redesign 批 1）：TabsHeader chrome 新增 key
  * （三 tab 文案 / tablist aria / 页题行统计小字；徽标数据缺席不造 key）。
+ * 修订 [2026-10-06]（skills-tabs-redesign 批 2）：唯一 name 列表两量纲计数
+ * （groupsCopies/showingGroupsCopies/copiesBadge/allCopiesUnavailable）+
+ * SkillDetail 独立路由页 key（not-found / 面包屑 / 副本组差异 / 内容占位）。
  *
  * 正交意图：
  *   [1] 批 A 三屏新增 key（补全条图标 title / Chat 启动反馈 / Agents 按钮改名 /
@@ -82,8 +85,28 @@ export const skillsWorkspaceEn = {
   "skillsWorkspace.tabs.agents": "Agents",
   "skillsWorkspace.tabs.repos": "Discover repos",
   "skillsWorkspace.tabs.skillsCount": "{count, plural, one {# skill} other {# skills}}",
-  "skillsWorkspace.tabs.providersCount":
-    "{count, plural, one {# provider} other {# providers}}",
+  "skillsWorkspace.tabs.providersCount": "{count, plural, one {# provider} other {# providers}}",
+
+  // ---- Canonical skills list + SkillDetail route (skills-tabs-redesign batch 2) ----
+  "skillsWorkspace.skillsScreen.groupsCopies":
+    "{groups, plural, one {# skill group} other {# skill groups}} · {copies, plural, one {# installation} other {# installations}}",
+  "skillsWorkspace.skillsScreen.showingGroupsCopies":
+    "Showing {visible} of {groups, plural, one {# skill group} other {# skill groups}} · {copies, plural, one {# installation} other {# installations}}",
+  "skillsWorkspace.skillsScreen.copiesBadge": "{count, plural, one {# copy} other {# copies}}",
+  "skillsWorkspace.skillsScreen.allCopiesUnavailable": "All copies unavailable",
+  "skillsWorkspace.skillDetail.backToSkills": "Back to Skills",
+  "skillsWorkspace.skillDetail.notFoundTitle": "Skill not found",
+  "skillsWorkspace.skillDetail.notFoundBody":
+    "This skill copy is not present in the Workspace Provider. It may have been removed or renamed.",
+  "skillsWorkspace.skillDetail.copiesHeading": "Copies in this workspace",
+  "skillsWorkspace.skillDetail.copiesHint": "Cross-provider copies of the same skill name",
+  "skillsWorkspace.skillDetail.representativeMark": "Representative",
+  "skillsWorkspace.skillDetail.conflictMark": "Conflict",
+  "skillsWorkspace.skillDetail.unavailableMark": "Unavailable",
+  "skillsWorkspace.skillDetail.openCopy": "Open this copy",
+  "skillsWorkspace.skillDetail.viewerTitle": "Content viewer",
+  "skillsWorkspace.skillDetail.viewerPlaceholder":
+    "The file tree and read-only viewer land with the SkillDetail editor batch.",
 } as const;
 
 export const skillsWorkspaceZh: Record<keyof typeof skillsWorkspaceEn, string> = {
@@ -153,4 +176,24 @@ export const skillsWorkspaceZh: Record<keyof typeof skillsWorkspaceEn, string> =
   "skillsWorkspace.tabs.repos": "发现仓库",
   "skillsWorkspace.tabs.skillsCount": "{count} 个技能",
   "skillsWorkspace.tabs.providersCount": "{count} 个 provider",
+
+  // ---- Canonical skills list + SkillDetail route (skills-tabs-redesign batch 2) ----
+  "skillsWorkspace.skillsScreen.groupsCopies": "{groups} 个技能组 · {copies} 个安装副本",
+  "skillsWorkspace.skillsScreen.showingGroupsCopies":
+    "显示 {visible}/{groups} 个技能组 · {copies} 个安装副本",
+  "skillsWorkspace.skillsScreen.copiesBadge": "{count} 个安装副本",
+  "skillsWorkspace.skillsScreen.allCopiesUnavailable": "全部副本不可用",
+  "skillsWorkspace.skillDetail.backToSkills": "返回 Skills",
+  "skillsWorkspace.skillDetail.notFoundTitle": "技能未找到",
+  "skillsWorkspace.skillDetail.notFoundBody":
+    "该技能副本不在当前 Workspace Provider 中，可能已被移除或改名。",
+  "skillsWorkspace.skillDetail.copiesHeading": "工作区内的副本",
+  "skillsWorkspace.skillDetail.copiesHint": "同名技能的跨 provider 副本",
+  "skillsWorkspace.skillDetail.representativeMark": "组代表",
+  "skillsWorkspace.skillDetail.conflictMark": "冲突",
+  "skillsWorkspace.skillDetail.unavailableMark": "不可用",
+  "skillsWorkspace.skillDetail.openCopy": "打开此副本",
+  "skillsWorkspace.skillDetail.viewerTitle": "内容查看器",
+  "skillsWorkspace.skillDetail.viewerPlaceholder":
+    "文件树与只读查看器随 SkillDetail 编辑器批次落地。",
 };

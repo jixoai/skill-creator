@@ -107,6 +107,15 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
         }),
       ),
+      // skills-tabs-redesign 批 2 Δ1：唯一 name 分组投影（同一聚合器，不建第二套扫描）。
+      listCanonical: rpc.skills.listCanonical.handler(async ({ input }) =>
+        workspaceSkills.listCanonical({
+          wsId: input.wsId,
+          ...(input.q === undefined ? {} : { q: input.q }),
+          limit: input.limit ?? 200,
+          ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+        }),
+      ),
       update: {
         check: rpc.skills.update.check.handler(async ({ input }) => {
           const discovered = await domain.skills.list(input, true);

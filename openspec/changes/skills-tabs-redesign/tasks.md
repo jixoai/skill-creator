@@ -2,7 +2,7 @@
 
 > 接口形态以 design.md（Codex 评审收窄版）为准。
 
-## 批 1 · TabsHeader chrome（无接口依赖，进行中）
+## 批 1 · TabsHeader chrome（无接口依赖，已完成）
 
 - [x] TabsHeader 组件：三一等 Tabs（Skills / Agents / Discover repos），tablist/tab/tabpanel ARIA + roving tabindex（←→/Home/End），切换瞬时 — webui/src/lib/apps/workspaces/ — 新组件 + SkillsDashboard 改造 — skills-dashboard-css.test.ts + skills-dashboard.dom.test.ts
 - [x] SkillsDashboard 三屏并列网格退役：每 Tab 独占整幅画布（grid 布局，禁绝对定位）；窄屏 segmented 切换器退役为同一 TabsHeader 单行形态 — SkillsDashboard.svelte — skills-dashboard-css.test.ts
@@ -14,11 +14,11 @@
 
 ## 批 2 · 唯一技能投影 + SkillDetail 路由（Δ1+Δ3 定稿）
 
-- [ ] `skills.listCanonical` 契约 + daemon 投影：复用 skills.listWorkspace/workspace-aggregate（不建第二套扫描）；workspace-scoped 输入 `{wsId,q?,pagination?}`；group 项（representative+每个 copy）都携带完整 WorkspaceProviderTarget；name 精确匹配分组、plugin namespace 原样；groupCount/copyCount 分开 — contracts/skills.ts + skill-service.ts + rpc-contract.ts — daemon 契约测试（含 unavailable provider、conflict copy、代表顺延规则）
-- [ ] Skills Tab 默认唯一 name 行 + ×N 副本徽标 + 两量纲计数明示（技能组/安装副本）；chips/搜索/启停作用于组代表 — screens/skills-screen.svelte + stores — skills-dashboard.dom.test.ts
-- [ ] 路由 `/w/:wsId/skills/:providerId/:skillId`：load-time 三 schema 收窄、非法身份 typed not-found/redirect；manifest 登记 — manifest.ts + shell route registry — manifest 测试
-- [ ] `?from=` 白名单 `{tab,q,p,dup,scroll,sel,file}`：≤512 字符、未知/重复键丢弃、枚举校验、状态对象重组 route、不拼 href；detail 返回完整还原列表态；浏览器原生 back 并存 — detail 页 + skills-screen — dom 测试
-- [ ] detail 面板从 skills-screen 退役 — screens/skills-screen.svelte — dom/coldboot 测试更新
+- [x] `skills.listCanonical` 契约 + daemon 投影：复用 skills.listWorkspace/workspace-aggregate（不建第二套扫描）；workspace-scoped 输入 `{wsId,q?,pagination?}`；group 项（representative+每个 copy）都携带完整 WorkspaceProviderTarget；name 精确匹配分组、plugin namespace 原样；groupCount/copyCount 分开 — contracts/skills.ts + skill-service.ts + rpc-contract.ts — daemon 契约测试（含 unavailable provider、conflict copy、代表顺延规则）
+- [x] Skills Tab 默认唯一 name 行 + ×N 副本徽标 + 两量纲计数明示（技能组/安装副本）；chips/搜索/启停作用于组代表 — screens/skills-screen.svelte + stores — skills-dashboard.dom.test.ts
+- [x] 路由 `/w/:wsId/skills/:providerId/:skillId`：load-time 三 schema 收窄、非法身份 typed not-found/redirect；manifest 登记 — manifest.ts + shell route registry — manifest 测试
+- [x] `?from=` 白名单 `{tab,q,p,dup,scroll,sel,file}`：≤512 字符、未知/重复键丢弃、枚举校验、状态对象重组 route、不拼 href；detail 返回完整还原列表态；浏览器原生 back 并存 — detail 页 + skills-screen — dom 测试
+- [x] detail 面板从 skills-screen 退役 — screens/skills-screen.svelte — dom/coldboot 测试更新
 
 ## 批 3 · SkillDetail CodeEditor（Δ2 定稿）
 
