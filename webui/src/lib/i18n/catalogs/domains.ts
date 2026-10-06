@@ -13,6 +13,7 @@ import { dashCountsEn, dashCountsZh } from "./domains/dash-counts.js";
 import { errorHintsEn, errorHintsZh } from "./domains/error-hints.js";
 import { settingsEn, settingsZh } from "./domains/settings.js";
 import { shellExtraEn, shellExtraZh } from "./domains/shell-extra.js";
+import { skillsAgentsEn, skillsAgentsZh } from "./domains/skills-agents.js";
 import { skillsWorkspaceEn, skillsWorkspaceZh } from "./domains/skills-workspace.js";
 import { slashModesEn, slashModesZh } from "./domains/slash-modes.js";
 
@@ -29,6 +30,8 @@ export {
   settingsZh,
   shellExtraEn,
   shellExtraZh,
+  skillsAgentsEn,
+  skillsAgentsZh,
   skillsWorkspaceEn,
   skillsWorkspaceZh,
   slashModesEn,

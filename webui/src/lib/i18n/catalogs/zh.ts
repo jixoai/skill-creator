@@ -14,6 +14,7 @@ import {
   dashCountsZh,
   errorHintsZh,
   skillsWorkspaceZh,
+  skillsAgentsZh,
   slashModesZh,
 } from "./domains.js";
 
@@ -27,4 +28,5 @@ export const zh: Record<MessageKey, string> = {
   ...errorHintsZh,
   ...skillsWorkspaceZh,
   ...slashModesZh,
+  ...skillsAgentsZh,
 };

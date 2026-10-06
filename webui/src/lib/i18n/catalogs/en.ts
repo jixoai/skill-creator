@@ -13,6 +13,7 @@ import {
   dashCountsEn,
   errorHintsEn,
   skillsWorkspaceEn,
+  skillsAgentsEn,
   slashModesEn,
 } from "./domains.js";
 
@@ -26,6 +27,7 @@ export const en = {
   ...errorHintsEn,
   ...skillsWorkspaceEn,
   ...slashModesEn,
+  ...skillsAgentsEn,
 } as const;
 export type EnCatalog = typeof en;
 export type MessageKey = keyof EnCatalog;

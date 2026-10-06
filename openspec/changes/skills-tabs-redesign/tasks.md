@@ -27,12 +27,12 @@
 - [ ] 副本组差异呈现（跨 provider disabled/描述差异；conflict 标记） — detail 页 — dom 测试
 - [ ] 620 窄屏：树降级横向 chips、内容单列、动作 ≥44px — detail 页 — css 测试
 
-## 批 4 · Agents 规模化（Δ5 路径 1：现有字段收窄）
+## 批 4 · Agents 规模化（Δ5 路径 1：现有字段收窄，已完成）
 
-- [ ] 诊断行紧凑化（标识/路径/可写徽标/技能数——只用现有投影字段）+ 搜索过滤 + 可写|只读分组头 + 计数 — screens/agents-screen.svelte — dom/css 测试
-- [ ] provider 行点击（跳 Skills Tab 带 provider 筛选）与行尾动作是两个独立可聚焦操作；往返保留 — agents-screen + SkillsDashboard — dom 测试
-- [ ] 30+ provider fixture 走查（行 DOM/键盘导航/搜索响应测量记录；不虚拟化为当前假设） — 走查证据 — 无
-- [ ] 【不做】健康点/finding 短标（无数据源，假数据禁令）；providerHealth projection 另立 change — 记录在案 — 无
+- [x] 诊断行紧凑化（标识/路径/可写徽标/技能数——只用现有投影字段）+ 搜索过滤 + 可写|只读分组头 + 计数 — screens/agents-screen.svelte — dom/css 测试
+- [x] provider 行点击（跳 Skills Tab 带 provider 筛选）与行尾动作是两个独立可聚焦操作；往返保留 — agents-screen + SkillsDashboard — dom 测试
+- [x] 30+ provider fixture 走查（行 DOM/键盘导航/搜索响应测量记录；不虚拟化为当前假设） — 走查证据 — 无
+- [x] 【不做】健康点/finding 短标（无数据源，假数据禁令）；providerHealth projection 另立 change — 记录在案 — 无
 
 ## 批 5 · ccski remove 原语 + install 审计（Δ4 定稿，跨仓 ../ccski）
 
