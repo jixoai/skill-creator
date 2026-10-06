@@ -198,9 +198,7 @@ describe("Agents 分组渲染（Δ5 路径 1）", () => {
 
     const writableSection = root.querySelector('[data-testid="agents-group-writable"]');
     const readonlySection = root.querySelector('[data-testid="agents-group-readonly"]');
-    expect(textOf(writableSection?.querySelector(".agents-group-head") ?? null)).toBe(
-      "Writable 3",
-    );
+    expect(textOf(writableSection?.querySelector(".agents-group-head") ?? null)).toBe("Writable 3");
     expect(textOf(readonlySection?.querySelector(".agents-group-head") ?? null)).toBe(
       "Read-only 1",
     );
@@ -400,9 +398,7 @@ describe("Agents i18n 域键（skills-agents）", () => {
 
     setLocale("zh");
     expect(t("agentsScreen.searchPlaceholder")).toBe("按名称或路径筛选 provider");
-    expect(t("agentsScreen.showingOf", { visible: 1, total: 2 })).toBe(
-      "显示 1 / 共 2 个 provider",
-    );
+    expect(t("agentsScreen.showingOf", { visible: 1, total: 2 })).toBe("显示 1 / 共 2 个 provider");
     expect(t("agentsScreen.skillsCountAria", { count: 3 })).toBe("3 个技能");
   });
 });

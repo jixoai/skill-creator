@@ -530,10 +530,6 @@ export const zhBase: Record<keyof typeof enBase, string> = {
   "evaluating.timeDaysAgo": "{n} 天前",
 
   /** ---------- Skills dashboard（skills-dashboard：mobileScreen 三屏网格） ---------- */
-  "dashboard.screenSkills": "Skills",
-  "dashboard.screenAgents": "Agents",
-  "dashboard.screenRepos": "Repos",
-  "dashboard.switcherAria": "Dashboard 屏幕",
   "dashboard.librarySnapshot": "{skills} 个技能分布在 {providers} 个 agent 位置。",
   "dashboard.healthCheck": "库健康检查",
   "dashboard.healthCheckTitle": "库健康检查——审计重复、描述含糊与过期技能，然后提出修复建议",

@@ -20,11 +20,7 @@
   import { useSearch, goById } from "$lib/shell";
   import { workspaceState } from "$lib/store.svelte";
   import { t } from "$lib/i18n";
-  import type {
-    ProviderId,
-    WorkspaceId,
-    WorkspaceProvider,
-  } from "$shared/contracts/workspaces.js";
+  import type { ProviderId, WorkspaceId, WorkspaceProvider } from "$shared/contracts/workspaces.js";
   import { Badge } from "$lib/components/ui/badge";
   import IconArrowRight from "@lucide/svelte/icons/arrow-right";
   import IconGraph from "@lucide/svelte/icons/network";
@@ -162,9 +158,7 @@
             {/if}
           {/if}
           {#if providerFilter === provider.id}
-            <span
-              class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-primary"
-            >
+            <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-primary">
               {t("agentsScreen.filtered")}
             </span>
           {/if}
@@ -176,7 +170,9 @@
         {/if}
       </span>
       <span class="agents-count mr-1 shrink-0 {provider.skillCount === 0 ? 'opacity-50' : ''}">
-        <span class="sr-only">{t("agentsScreen.skillsCountAria", { count: provider.skillCount })}</span>
+        <span class="sr-only"
+          >{t("agentsScreen.skillsCountAria", { count: provider.skillCount })}</span
+        >
         <span aria-hidden="true">{provider.skillCount}</span>
       </span>
     </button>
@@ -246,7 +242,10 @@
           class="mt-1.5 text-[11px] tabular-nums text-muted-foreground"
           data-testid="agents-showing"
         >
-          {t("agentsScreen.showingOf", { visible: filteredProviders.length, total: providers.length })}
+          {t("agentsScreen.showingOf", {
+            visible: filteredProviders.length,
+            total: providers.length,
+          })}
         </p>
       {/if}
     </div>

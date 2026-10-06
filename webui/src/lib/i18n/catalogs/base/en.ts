@@ -548,10 +548,6 @@ export const enBase = {
   "evaluating.timeDaysAgo": "{n}d ago",
 
   /** ---------- Skills dashboard（skills-dashboard：mobileScreen 三屏网格） ---------- */
-  "dashboard.screenSkills": "Skills",
-  "dashboard.screenAgents": "Agents",
-  "dashboard.screenRepos": "Repos",
-  "dashboard.switcherAria": "Dashboard screens",
   // 库快照屏读摘要 = web-mode 冒烟锚点（test/web-mode-smoke.test.ts 正则
   // /skills across \d+ agent locations/）；en 值逐字保留，zh 正常翻译（冒烟跑 en）。
   "dashboard.librarySnapshot": "{skills} skills across {providers} agent locations.",

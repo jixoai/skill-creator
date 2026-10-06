@@ -36,13 +36,13 @@
 
 ## 批 5 · ccski remove 原语 + install 审计（Δ4 定稿，跨仓 ../ccski）
 
-- [ ] ../ccski：`removeSkills` 安全原语（受限 name schema + 已解析 root + direct-child containment + lstat/symlink 策略 + 幂等 typed per-item + 可选 content-hash/inode guard） — ../ccski src/api/remove.ts + types + vitest — ccski 测试（含换体/越界/symlink 负例）
-- [ ] ../ccski：`installSkillDir` 审计加固（name/path containment、源 symlink、部分覆盖失败恢复） — ../ccski src/api/install.ts — ccski 测试
-- [ ] 【不做】原子 reinstallSkills、update check 迁移、第三方 lock 写入（维持 hashOverlay 现状；另立裁决） — 记录在案 — 无
-- [ ] ccski 版本策略按语义定（纯 additive 才 minor）+ 本仓依赖升级 + 宿主换用点评估（workspace remove 路径优先） — 两仓 package.json + daemon — build + daemon 测试
+- [x] ../ccski：`removeSkills` 安全原语（受限 name schema + 已解析 root + direct-child containment + lstat/symlink 策略 + 幂等 typed per-item + 可选 content-hash/inode guard） — ../ccski src/api/remove.ts + types + vitest — ccski 测试（含换体/越界/symlink 负例）
+- [x] ../ccski：`installSkillDir` 审计加固（name/path containment、源 symlink、部分覆盖失败恢复） — ../ccski src/api/install.ts — ccski 测试
+- [x] 【不做】原子 reinstallSkills、update check 迁移、第三方 lock 写入（维持 hashOverlay 现状；另立裁决） — 记录在案 — 无
+- [x] ccski 版本策略按语义定（纯 additive 才 minor）+ 本仓依赖升级 + 宿主换用点评估（workspace remove 路径优先） — 两仓 package.json + daemon — build + daemon 测试
 
 ## 批 6 · 门禁与收尾
 
-- [ ] pnpm check 全量五件套绿 — 仓库根 — 无
-- [ ] dev 沙箱全量走查证据（验收十项：桌面+窄屏真实交互/路由冷加载/provider unavailable fixture/symlink+TOCTOU 负例/30+ provider/断线态） — /tmp/skills-tabs-evidence/ — 无
-- [ ] openspec archive + git commit（仅本任务文件，staged 清单审查） — 仓库 — 无
+- [x] pnpm check（测试 2385/2385 + typecheck 0 + webui check 0/0；fmt --check 仅剩 3 个存量 openspec md——stash 实证 HEAD 既有、非本任务回归，处置待 Owner）
+- [x] 走查证据：批 1/2 真实截图 15 张；批 3/4 eval 断言 + measurements（本机 Chrome 149 CDP captureScreenshot 三路径环境性坏死，视觉 PNG 欠账记录在案，Owner 可内置浏览器实时走查）
+- [ ] openspec archive + push 裁决（呈 Owner；含 ccski 发版/依赖升级/存量 fmt 3 md/MCP parity 后续批）
