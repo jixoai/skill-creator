@@ -23,7 +23,7 @@
   import IconShieldOff from "@lucide/svelte/icons/shield-off";
 
   type DashboardSearch = {
-    screen?: "skills" | "agents" | "repos";
+    tab?: "skills" | "agents" | "repos";
     provider?: ProviderId;
     q?: string;
     skill?: string;
@@ -52,7 +52,7 @@
       { wsId },
       {
         ...search,
-        screen: undefined,
+        tab: undefined,
         provider: providerFilter === providerId ? undefined : providerId,
         // 切 provider = 回主屏列表态：skill/view 一并清空（走查 14-fix——detail
         // 态点卡片曾残留无身份 ?view=detail，主屏落空白详情位）。

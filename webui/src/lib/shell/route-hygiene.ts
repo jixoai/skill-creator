@@ -105,8 +105,8 @@ function redirectLegacyPath(pathname: string, search: string): string | null {
     return `/w/${encodePathPart(parts[1]!)}/wiki`;
   }
   // Repository App 退役（skills-dashboard 1.8）：legacy 路由直指 dashboard 的
-  // Repos screen 深链（?screen=repos；scan 实例子路由原样保留参数）。
-  if (pathname === "/repository") return `${SHELL_HOME_PATH}?screen=repos`;
+  // Repos Tab 深链（?tab=repos，批 1 起参数名 screen→tab；scan 实例子路由原样保留参数）。
+  if (pathname === "/repository") return `${SHELL_HOME_PATH}?tab=repos`;
   if (parts[0] === "repository" && parts[1] === "scan" && parts.length === 3) {
     return build(`/w/~/skills/repos/scan/${encodePathPart(parts[2]!)}`, {
       selected: query.get("selected"),

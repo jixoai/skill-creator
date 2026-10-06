@@ -1,19 +1,18 @@
 /**
- * mobileScreen 网格 CSS 契约测试（skills-dashboard 1.2，design §1/§7）。
- * 用户原始需求 [2026-10-02]：「三块是并列 mobileScreen——每个 screen 有自身
- * height 概念，自动换行适应单/双/三/四列。」
+ * SkillsDashboard chrome CSS 契约测试（skills-tabs-redesign 批 1，design 基准
+ * = fuse2 融合稿 TabsHeader）。
+ * 用户原始需求 [2026-10-06]：「顶部 TabsHeader 三一等 Tabs，每 Tab 独占整幅
+ * 画布」；「窄屏三 tab 单行不换行」；「pulse 统计退役为页题行小字」。
  * 正交意图：
- *   [1] 网格壳契约：named container + auto-fill minmax 轨道 + gap（数值联动）。
- *   [2] 单列回落契约：container query 阈值 = 2×minmax 轨道 + 1×gap（692px）——
- *       数值一致性从源码提取后断言（改轨道不改阈值 = 此测试红）。
- *   [3] 一栏容器不溢出防线：span 2 → span 1 显式降档 + min-width:0 双闸 +
- *       screen 固定高/内滚/overscroll 不冒泡分层。
+ *   [1] TabsHeader 契约：三一等 grid 均分 + nowrap 单行 + 激活底线
+ *       （aria-selected 驱动）+ 窄屏触达 44px（692 阈值与 skills-screen 共源）。
+ *   [2] 画布契约：panel grid 同格独占整幅（禁绝对定位）+ hidden 退场 + .screen
+ *       弹性填满 panel（固定高语义由 flex 约束承担）+ 内滚/overscroll 分层。
+ *   [3] 页题行统计小字契约（数据缺席不显数）。
  *   [4] detail 面零写源扫描（design §7：除 skills.toggle 外零写 RPC、无
- *       creator.save/delete 调用）。
- *   [5] 窄屏栈切换类放置 + chips 滚动条隐藏契约（修复批 2：450px 盲区 /
- *       滚动条残段）。
+ *       creator.save/delete 调用）——skills-screen 内部本批不动，契约继续有效。
  * 妥协声明：jsdom 无布局引擎（scrollWidth/clientWidth 恒 0）——真实布局的
- * 不溢出验证归 1.10 ego-browser 走查门；本测试钉死防溢出的 CSS 机制契约。
+ * 不溢出验证归走查门；本测试钉死防溢出的 CSS 机制契约。
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -40,7 +39,7 @@ function styleBlock(source: string): string {
   return match[1] ?? "";
 }
 
-describe("mobileScreen 网格壳 CSS 契约", () => {
+describe("TabsHeader chrome CSS 契约（skills-tabs-redesign 批 1）", () => {
   const css = styleBlock(dashboardSrc);
 
   it("declares a named inline-size container on the shell", () => {
@@ -48,64 +47,51 @@ describe("mobileScreen 网格壳 CSS 契约", () => {
     expect(css).toMatch(/container-name:\s*dashboard/);
   });
 
-  it("uses auto-fill minmax tracks with a 12px gap", () => {
-    expect(css).toMatch(/grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(340px,\s*1fr\)\)/);
-    expect(css).toMatch(/gap:\s*12px/);
+  it("renders three equal tabs on a single non-wrapping row (grid, nowrap)", () => {
+    // 三一等 Tabs：grid 均分轨道 + nowrap 单行（窄屏不换行不挤压）。
+    expect(css).toMatch(/\.dashboard-tabs\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*1fr\)/);
+    expect(css).toMatch(/\.dashboard-tab\s*\{[\s\S]*?white-space:\s*nowrap/);
+    expect(css).toMatch(/\.dashboard-tab\s*\{[\s\S]*?min-width:\s*0/);
   });
 
-  it("threshold consistency: container queries == 2/3×min track + gaps (692/1044px)", () => {
-    const track = Number(css.match(/minmax\((\d+)px/)?.[1]);
-    const gap = Number(css.match(/gap:\s*(\d+)px/)?.[1]);
-    const thresholds = [...css.matchAll(/@container dashboard \(width < (\d+)px\)/g)].map((m) =>
-      Number(m[1]),
-    );
-    expect(track).toBe(340);
-    expect(gap).toBe(12);
-    // Owner（2026-10-05）Skills 三列级联：中档 = 2 轨道 + 1×gap（692），
-    // 三列档 = 3 轨道 + 2×gap（1044）。1 列显式网格内 span>1 会创建隐式列
-    // （横向溢出）——阈值必须精确覆盖「auto-fill 只能解析出 N 列」的下边界。 */
-    expect(thresholds).toContain(2 * track + gap);
-    expect(thresholds).toContain(3 * track + 2 * gap);
-  });
-
-  it("explicitly demotes the skills screen to span 1 inside the single-column query", () => {
-    const query = css.match(/@container dashboard \(width < 692px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
-    expect(query).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 1/);
-    // 单列容器只显示 active screen（mobileScreen 单屏切换）。
-    expect(query).toMatch(/\.dashboard-grid \.grid-item\s*\{[\s\S]*?display:\s*none/);
-    expect(query).toMatch(
-      /\.dashboard-grid \.grid-item\[data-active="true"\]\s*\{[\s\S]*?display:\s*block/,
-    );
-  });
-
-  it("skills screen spans up to 3 columns (list-detail width), demoting at 1044px", () => {
-    // 基础 span 3（宽容器）；<1044 降 span 2（容器查询内）。
-    expect(css).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 3/);
-    const mid = css.match(/@container dashboard \(width < 1044px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
-    expect(mid).toMatch(/\.skills-item\s*\{[\s\S]*?grid-column:\s*span 2/);
-  });
-
-  it("screens are fixed-height, header-owning, internally scrolling (no bubble)", () => {
-    // 弹性下限（走查 13-fix）：默认高 = max(480px, 100dvh - 240px)——固定高语义
-    // 不变（不随内容长高），但大视口按视口分配更多高度，480px 不再挤塌
-    // master-detail。--screen-h 显式赋值仍优先（拖拽调高入口保留）。
-    const elasticFloor = /max\(480px,\s*calc\(100dvh - 240px\)\)/;
-    expect(css).toMatch(new RegExp(`height:\\s*var\\(--screen-h,\\s*${elasticFloor.source}\\)`));
+  it("marks the selected tab with an accent underline driven by aria-selected", () => {
+    // 激活 tab 底线（fuse2 语义）：aria-selected 属性选择器驱动，无 JS 类切换。
     expect(css).toMatch(
-      new RegExp(`min-height:\\s*var\\(--screen-h,\\s*${elasticFloor.source}\\)`),
+      /\.dashboard-tab\[aria-selected="true"\]\s*\{[\s\S]*?border-bottom-color:\s*var\(--primary/,
     );
-    expect(css).toMatch(/:global\(\.screen\)[\s\S]*?overflow:\s*hidden/);
+  });
+
+  it("keeps the 692px narrow container query as the shared single-row threshold", () => {
+    // 窄屏单行形态：同一 TabsHeader（无第二套切换器），触达 ≥44px（AGENTS §7.2）。
+    // 阈值 692 与 skills-screen master-detail 栈切换共源（改一处不改另一处 = 红）。
+    const narrow = css.match(/@container dashboard \(width < 692px\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+    expect(narrow).toMatch(/\.dashboard-tab\s*\{[\s\S]*?min-height:\s*44px/);
+    expect(css).not.toMatch(/screen-switcher|dashboard-grid|grid-item/);
+  });
+
+  it("panels own the full canvas via same-cell grid stacking, never absolute positioning", () => {
+    // 每 Tab 独占整幅画布：panel 同格堆叠（1×1）+ hidden 退场（author 显式
+    // display:none——UA [hidden] 样式会被 author display 覆盖）；禁绝对定位。
+    expect(css).toMatch(/\.dashboard-panel\s*\{[\s\S]*?grid-area:\s*1\s*\/\s*1/);
+    expect(css).toMatch(/\.dashboard-panel\[hidden\]\s*\{[\s\S]*?display:\s*none/);
+    expect(css).not.toMatch(/position:\s*absolute/);
+  });
+
+  it("screens elastically fill their panel with internal scroll layering", () => {
+    // .screen 填满 panel（Tab 化后画布 = 弹性剩余空间；固定高语义由 flex 约束
+    // 承担，不随内容长高）+ body 内滚 + overscroll 不冒泡。
+    expect(css).toMatch(/:global\(\.screen\)\s*\{[\s\S]*?flex:\s*1/);
+    expect(css).toMatch(/:global\(\.screen\)\s*\{[\s\S]*?overflow:\s*hidden/);
     expect(css).toMatch(/:global\(\.screen > \.screen-body\)[\s\S]*?overflow-y:\s*auto/);
     expect(css).toMatch(/:global\(\.screen > \.screen-body\)[\s\S]*?min-height:\s*0/);
-    // screen 内滚不冒泡（design §7）。
     expect(css).toMatch(/overscroll-behavior:\s*contain/);
   });
 
-  it("guards the grid against implicit-column overflow with min-width: 0", () => {
-    // 双闸之二：轨道内容永不撑出轨道（一栏容器 scrollWidth ≤ clientWidth 的
-    // CSS 前提——溢出只能来自隐式列或内容 min-width，两处都已钉死）。
-    expect(css).toMatch(/\.dashboard-grid\s*\{[\s\S]*?min-width:\s*0/);
-    expect(css).toMatch(/\.grid-item\s*\{[\s\S]*?min-width:\s*0/);
+  it("pagehead renders stats as small secondary text (data-gated, no fake numbers)", () => {
+    // 页题行统计小字（pulse 压缩退役）：小号次级文本 + tabular-nums；渲染闸在
+    // DOM 测试钉（providers 摘要缺席不渲染），此处钉字号/降调机制。
+    expect(css).toMatch(/\.dashboard-stats\s*\{[\s\S]*?font-size:\s*11\.5px/);
+    expect(css).toMatch(/\.dashboard-stats\s*\{[\s\S]*?font-variant-numeric:\s*tabular-nums/);
   });
 });
 
@@ -215,7 +201,7 @@ describe("skill-detail-panel 编辑所有权源扫描（design §7）", () => {
   });
 });
 
-describe("workspace-page-polish 2.2 处置批机制契约（P2-2/P2-9/P2-10）", () => {
+describe("workspace-page-polish 2.2 处置批机制契约（P2-2/P2-9）+ 批 1 深链 Tab", () => {
   const agentsSrc = readFileSync(
     fileURLToPath(new URL("../screens/agents-screen.svelte", import.meta.url)),
     "utf-8",
@@ -253,17 +239,16 @@ describe("workspace-page-polish 2.2 处置批机制契约（P2-2/P2-9/P2-10）",
     expect(agentsSrc).toMatch(/agentsScreen\.notFound/);
   });
 
-  it("dashboard 深链滚动（P2-10）：active 非 skills 时 scrollIntoView 落点网格项", () => {
-    expect(dashboardSrc).toMatch(/data-screen="(skills|agents|repos)"/);
-    // FD-17 修订：prefers-reduced-motion 检测 → behavior: auto/smooth 分支。
-    expect(dashboardSrc).toMatch(/matchMedia\("\\?\(prefers-reduced-motion: reduce\)\\?"\)/);
-    expect(dashboardSrc).toMatch(/behavior: reducedMotion \? "auto" : "smooth"/);
-    expect(dashboardSrc).toMatch(
-      /scrollIntoView\(\{\s*block: "nearest",\s*inline: "nearest",\s*behavior:/,
-    );
-    // 高亮强化：active 边框之外追加 ring（落点可寻）。
-    expect(dashboardSrc).toMatch(
-      /\.grid-item\[data-active="true"\] :global\(\.screen\)\s*\{[\s\S]*?box-shadow:/,
-    );
+  it("dashboard 深链 Tab 选择（批 1）：?tab= 驱动 aria-selected + panel hidden 同源", () => {
+    // 三屏网格退役后 ?tab= 深链语义 = Tab 选择：panel hidden 与 tab
+    // aria-selected 绑定同一真相源（manifest zod enum 不动，值域测试归
+    // dashboard-manifest.test.ts）；roving 键盘自动激活落同一 selectScreen。
+    expect(dashboardSrc).toMatch(/activeScreen[^=]*=\s*\$derived\(search\.tab \?\? "skills"\)/);
+    expect(dashboardSrc).toMatch(/hidden=\{activeScreen !== "skills"\}/);
+    expect(dashboardSrc).toMatch(/hidden=\{activeScreen !== "agents"\}/);
+    expect(dashboardSrc).toMatch(/hidden=\{activeScreen !== "repos"\}/);
+    expect(dashboardSrc).toMatch(/aria-selected=\{activeScreen === tab\.id\}/);
+    expect(dashboardSrc).toMatch(/role="tablist"/);
+    expect(dashboardSrc).toMatch(/selectScreen\(SCREEN_IDS\[next\], true\)/);
   });
 });

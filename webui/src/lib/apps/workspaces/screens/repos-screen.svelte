@@ -2,9 +2,9 @@
   用户原始需求 [2026-07-27]（RepositoryHome 迁入 dashboard，skills-dashboard
   design §4）：「Repository home Tab 呈现 Discover 体验：搜索 + 精选源卡片 +
   用户源 + 最近扫描。」
-  迁移修订 [2026-10-03]（skills-dashboard 1.5）：路由迁 /w/:wsId/skills?screen=repos
-  （源过滤参数 reposQ，与主屏技能搜索 q 分道）；Scan 实例 → 子路由
-  /w/:wsId/skills/repos/scan/:sourceId；文案出生即 i18n（C 类面）。
+  迁移修订 [2026-10-03]（skills-dashboard 1.5）：路由迁 /w/:wsId/skills 深链 Tab
+  （reposQ 源过滤参数，与主屏技能搜索 q 分道；批 1 起参数名 screen→tab）；Scan
+  实例 → 子路由 /w/:wsId/skills/repos/scan/:sourceId；文案出生即 i18n（C 类面）。
   正交意图：
   1. 卡片数据来自 repository.sources.list RPC（不缓存跨渲染周期、不写 localStorage）。
   2. 搜索纯客户端过滤；未提交文本是组件局部 $state，提交后走 URL ?reposQ=。
@@ -29,7 +29,7 @@
   import type { WorkspaceId } from "$shared/contracts/workspaces.js";
 
   type DashboardSearch = {
-    screen?: "skills" | "agents" | "repos";
+    tab?: "skills" | "agents" | "repos";
     provider?: string;
     q?: string;
     reposQ?: string;
@@ -127,7 +127,7 @@
     goById(
       "workspaces.provider",
       { wsId },
-      { ...search, screen: "repos", reposQ: value.trim() || undefined },
+      { ...search, tab: "repos", reposQ: value.trim() || undefined },
       mode,
     );
   }

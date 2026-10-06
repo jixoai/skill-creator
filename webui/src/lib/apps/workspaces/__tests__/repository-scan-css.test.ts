@@ -207,10 +207,10 @@ describe("sessionExpired 灰态与面包屑（批 B FP-02/FP-04）", () => {
     expect(src).toMatch(/data-testid="scan-breadcrumb"/);
     expect(src).toMatch(/t\("skillsWorkspace\.reposScan\.breadcrumbRepos"\)/);
     expect(src).toMatch(/\{sourceLabel\}/);
-    // 面包屑 Repos 段可点回 screen=repos（批 B 原 Discover 按钮退役）。
+    // 面包屑 Repos 段可点回 tab=repos（批 B 原 Discover 按钮退役；批 1 起参数名 screen→tab）。
     // \s* 容忍格式化器折行（vp fmt 会把长参数列折成多行调用）。
     expect(src).toMatch(/goById\(\s*"workspaces\.provider"/);
-    expect(src).toMatch(/\{ screen: "repos" \}/);
+    expect(src).toMatch(/\{ tab: "repos" \}/);
   });
 });
 

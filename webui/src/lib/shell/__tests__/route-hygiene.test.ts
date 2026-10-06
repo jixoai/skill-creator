@@ -60,7 +60,7 @@ describe("legacy shell URL migrations", () => {
     ["/wiki", "", "/w/~/wiki"],
     ["/wiki/%7E", "", "/w/~/wiki"],
     ["/wiki/ws_0123456789abcdef01234567", "", "/w/ws_0123456789abcdef01234567/wiki"],
-    ["/repository", "", "/w/~/skills?screen=repos"],
+    ["/repository", "", "/w/~/skills?tab=repos"],
     [
       "/repository/scan/curated-source",
       "?selected=a&targets=b&skill=c",

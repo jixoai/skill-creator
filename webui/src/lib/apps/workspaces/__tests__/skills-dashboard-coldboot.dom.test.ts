@@ -10,6 +10,8 @@
  *       真实 AppShell（leaf 懒加载 + router 上下文 + search 解析）→ 真实
  *       workspaces manifest → 真实 SkillsDashboard（master-detail detail 态）。
  *   [2] +layout boot 链路复刻（initializeTabSession matched → 零重定向）。
+ *   [3] 批 1（skills-tabs-redesign）：?tab= 冷载深链 = Tab 直接选中
+ *       （tablist ARIA + panel hidden 同源）。
  * 仿真边界：与 skills-dashboard.dom.test.ts 同一 mock 集（connection/rpc/ui
  * 原语/dialog/banner/agent store），$app/navigation 换 kit-fake goto（tab-session
  * 需要可完成的真实导航语义）。
@@ -217,5 +219,25 @@ describe("SkillsDashboard 冷直载深链（走查 15-fix 回归钉）", () => {
     expect(document.querySelector(".app-shell-empty")).toBeNull();
     expect(document.querySelector('[data-screen="skills"]')).not.toBeNull();
     expect(document.body.textContent ?? "").toContain("alpha");
+  });
+
+  it("cold-loads the ?tab= deep link straight into the selected tab (batch 1)", async () => {
+    resetKitFake("/w/~/skills?tab=agents");
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    mounted = mount(PageOutlet as unknown as Component, { target });
+    flushSync();
+
+    const redirect = initializeTabSession([], "/w/~/skills", "?tab=agents");
+    expect(redirect).toBeNull();
+    await settle();
+
+    // 冷载深链 = Tab 直接选中 agents（tablist ARIA + panel hidden 同源）。
+    const agentsTab = document.querySelector<HTMLButtonElement>("#tab-agents");
+    expect(agentsTab?.getAttribute("aria-selected")).toBe("true");
+    expect(agentsTab?.getAttribute("tabindex")).toBe("0");
+    expect(document.querySelector<HTMLDivElement>("#panel-agents")?.hidden).toBe(false);
+    expect(document.querySelector<HTMLDivElement>("#panel-skills")?.hidden).toBe(true);
+    expect(document.querySelector('[data-screen="agents"]')).not.toBeNull();
   });
 });

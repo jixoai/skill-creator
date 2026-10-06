@@ -414,7 +414,8 @@
 </script>
 
 <div class="scan-root flex h-full flex-col overflow-hidden">
-  <!-- 批 B FP-04：面包屑 Repos ‹ label（Repos 段可点回 screen=repos）；Discover
+  <!-- 批 B FP-04：面包屑 Repos ‹ label（Repos 段可点回 tab=repos，批 1 起参数名
+       screen→tab）；Discover
        按钮退役并入面包屑。sessionExpired 灰态：过期时预览区+安装表单 pointer-events-none
        + opacity-60，banner 唯一 Rescan 主按钮，工具栏 Rescan 改 Refresh 图标按钮。 -->
   <header
@@ -433,7 +434,7 @@
             goById(
               "workspaces.provider",
               { wsId: wsId ?? "~", providerId: undefined },
-              { screen: "repos" },
+              { tab: "repos" },
             )}
         >
           {t("skillsWorkspace.reposScan.breadcrumbRepos")}

@@ -60,7 +60,7 @@
   import IconFilter from "@lucide/svelte/icons/filter";
 
   type DashboardSearch = {
-    screen?: "skills" | "agents" | "repos";
+    tab?: "skills" | "agents" | "repos";
     provider?: ProviderId;
     q?: string;
     skill?: SkillId;

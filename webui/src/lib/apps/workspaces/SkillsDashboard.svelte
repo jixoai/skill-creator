@@ -1,28 +1,33 @@
 <!--
-  用户原始需求 [2026-10-02]（skills-dashboard design §1，Owner Q4/Q11 拍板）：
-  「三块是并列 mobileScreen——每个 screen 有自身 height 概念，自动换行适应
-  单/双/三/四列。Repository 作为一级导航退役，被 dashboard 吸收。」
+  用户原始需求 [2026-10-06]（skills-tabs-redesign 批 1，Owner 批准 fuse2 融合稿）：
+  「顶部 TabsHeader 三一等 Tabs（Skills / Agents / Discover repos），每 Tab 独占
+  整幅画布」；「pulse 不再是第四个面，压缩为页题行小字 + Tab 徽标」。
   正交意图：
-  1. mobileScreen 网格壳：container-type/named container + auto-fill minmax(340px,1fr)
-     网格；Skills 主屏 span 2，单列容器（< 692px = 2×340 + 1×gap）经 container
-     query 显式降档 span 1（r2 修订：CSS Grid 不保证自然回落，隐式列会横向溢出）。
-  2. screen 分层：固定高（--screen-h 自定义属性）+ overflow hidden + 自带 header；
-     body 内滚（overscroll-contain 不冒泡）；网格换行高度不塌。
-  3. ?screen= 深链：宽屏全部 screens 并列（active 高亮）；单列容器只显示 active
-     screen + 顶部 segmented 切换（窄屏单屏切换，AGENTS §7.2 窄屏法则）。
-  4. wsId 身份解析（manifest zod 已校验；此处二次 safeParse 为 branded 类型）。
+  1. TabsHeader chrome：tablist/tab/tabpanel ARIA + roving tabindex（←→/Home/End
+     自动激活）；Tab 切换瞬时——三 panel 常驻挂载、hidden 切换，不重挂数据面
+     （screen 组件内部本批不动，skills-screen 的 detail 面保留到批 2）。
+  2. ?tab= 深链：参数名 tab 与 skills|agents|repos 取值语义（批 1 修订：screen→tab
+     直切，无别名——AGENTS §8 无兼容策略，旧 URL 迁移归发布层；manifest zod
+     enum 值域不变）；Tab 切换写 URL（skills 为缺省省略参数）。
+  3. 页题行：workspace label + 统计小字（skills.listWorkspace providers 摘要的
+     真实计数，数据缺席不显数）；Tab 徽标（findings/新增数）无现成 store 数据源
+     ——本批一律留空不造假。
+  4. 画布契约：grid 布局 panel 独占整幅画布（禁绝对定位）；.screen 弹性填满
+     panel（固定高语义由 flex 约束承担，不随内容长高）+ 内滚分层（screen-body
+     overscroll contain）；窄屏同一 TabsHeader 单行形态（三 tab 不换行不挤压）。
 -->
 <script lang="ts">
-  import { tick } from "svelte";
   import { useParams, useSearch, goById } from "$lib/shell";
   import { t } from "$lib/i18n";
+  import { workspaceState } from "$lib/store.svelte";
+  import { dashboardSkillsState } from "$lib/stores/dashboard-skills.svelte";
   import { WorkspaceIdSchema, type WorkspaceId } from "$shared/contracts/workspaces.js";
   import SkillsScreen from "./screens/skills-screen.svelte";
   import AgentsScreen from "./screens/agents-screen.svelte";
   import ReposScreen from "./screens/repos-screen.svelte";
 
   type DashboardSearch = {
-    screen?: "skills" | "agents" | "repos";
+    tab?: "skills" | "agents" | "repos";
     provider?: string;
     q?: string;
     reposQ?: string;
@@ -31,90 +36,153 @@
     duplicates?: "1";
   };
 
+  const SCREEN_IDS = ["skills", "agents", "repos"] as const;
+  type ScreenId = (typeof SCREEN_IDS)[number];
+
   const getParams = useParams<{ wsId: string }>();
   const getSearch = useSearch<DashboardSearch>();
 
   const rawWsId = $derived(getParams?.()?.wsId);
   const search = $derived(getSearch?.() ?? {});
-  const activeScreen = $derived(search.screen ?? "skills");
+  const activeScreen: ScreenId = $derived(search.tab ?? "skills");
 
   const wsId = $derived.by(() => {
     const parsed = WorkspaceIdSchema.safeParse(rawWsId);
     return parsed.success ? (parsed.data as WorkspaceId) : null;
   });
 
-  function switchScreen(screen: "skills" | "agents" | "repos"): void {
-    if (!wsId || screen === activeScreen) return;
-    goById(
-      "workspaces.provider",
-      { wsId },
-      { ...search, screen: screen === "skills" ? undefined : screen },
-    );
-  }
+  /** 页题行 h1：workspace 身份（缺席时以 opaque id 兜底，不渲染假名）。 */
+  const workspaceLabel = $derived(
+    workspaceState.workspaces.find((workspace) => workspace.id === wsId)?.label ?? wsId,
+  );
 
-  const screens = $derived([
-    { id: "skills" as const, label: t("dashboard.screenSkills") },
-    { id: "agents" as const, label: t("dashboard.screenAgents") },
-    { id: "repos" as const, label: t("dashboard.screenRepos") },
+  /** 页题行统计小字：providers 摘要聚合的真实计数；摘要未载不显数（不造假）。 */
+  const stats = $derived.by(() => {
+    const providers = dashboardSkillsState.providers;
+    if (providers.length === 0) return null;
+    return {
+      skills: providers.reduce((total, provider) => total + (provider.skillCount ?? 0), 0),
+      providers: providers.length,
+    };
+  });
+
+  const tabs = $derived([
+    { id: "skills" as const, label: t("skillsWorkspace.tabs.skills") },
+    { id: "agents" as const, label: t("skillsWorkspace.tabs.agents") },
+    { id: "repos" as const, label: t("skillsWorkspace.tabs.repos") },
   ]);
 
-  // 深链滚动（2.2 处置批 P2-10）：?screen= 深链落点在换行网格里可能在折叠线下
-  // （skills span 2 + agents/repos 换行）——active 变化时把落点滚进视口；高亮由
-  // 既有 data-active 边框承担（下追加 ring 强化落点可寻）。单列窄容器只有
-  // active screen 可见，scrollIntoView 无害。
-  // FD-17 prefers-reduced-motion 检测：深链瞬移不晕动。
-  let gridEl = $state<HTMLDivElement | null>(null);
-  $effect(() => {
-    const screen = activeScreen;
-    if (screen === "skills") return;
-    void tick().then(() => {
-      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      gridEl?.querySelector<HTMLElement>(`.grid-item[data-screen="${screen}"]`)?.scrollIntoView({
-        block: "nearest",
-        inline: "nearest",
-        behavior: reducedMotion ? "auto" : "smooth",
-      });
-    });
-  });
+  let tablistEl = $state<HTMLDivElement | null>(null);
+
+  function focusTab(screen: ScreenId): void {
+    tablistEl?.querySelector<HTMLButtonElement>(`#tab-${screen}`)?.focus();
+  }
+
+  /** Tab 切换 = URL search 写入（tab 深链参数；skills 为缺省省略）。 */
+  function selectScreen(screen: ScreenId, restoreFocus = false): void {
+    if (!wsId) return;
+    if (screen !== activeScreen) {
+      goById(
+        "workspaces.provider",
+        { wsId },
+        { ...search, tab: screen === "skills" ? undefined : screen },
+      );
+    }
+    if (restoreFocus) focusTab(screen);
+  }
+
+  /** Tabs 键盘可达：←→/Home/End roving tabindex + 自动激活（APG tabs 模式）。 */
+  function onTablistKeydown(event: KeyboardEvent): void {
+    const index = SCREEN_IDS.indexOf(activeScreen);
+    const next =
+      event.key === "ArrowLeft"
+        ? (index + SCREEN_IDS.length - 1) % SCREEN_IDS.length
+        : event.key === "ArrowRight"
+          ? (index + 1) % SCREEN_IDS.length
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? SCREEN_IDS.length - 1
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    selectScreen(SCREEN_IDS[next], true);
+  }
 </script>
 
 {#if wsId}
   <div class="dashboard-shell flex h-full min-h-0 w-full min-w-0 flex-col">
-    <!-- 单列容器的 screen 切换器（宽屏 display:none——并列全显，无需切换）。
-         FD-23 role=navigation 改正：切换器是导航到不同 screen，非 tab 同页内容。 -->
-    <nav class="screen-switcher shrink-0 px-4 pt-3" aria-label={t("dashboard.switcherAria")}>
-      <div class="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
-        {#each screens as screen (screen.id)}
-          <button
-            type="button"
-            aria-current={activeScreen === screen.id ? "page" : undefined}
-            class="flex min-h-8 items-center rounded-md px-3 text-xs font-medium transition-colors
-              {activeScreen === screen.id
-              ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'}"
-            onclick={() => switchScreen(screen.id)}
-          >
-            {screen.label}
-          </button>
-        {/each}
-      </div>
-    </nav>
+    <!-- 页题行：workspace 身份 + 压缩统计小字（fuse2 pagehead 语义）。 -->
+    <header class="dashboard-pagehead shrink-0">
+      <h1 class="dashboard-title truncate">{workspaceLabel}</h1>
+      {#if stats}
+        <p class="dashboard-stats" data-testid="dashboard-stats">
+          <span>{t("skillsWorkspace.tabs.skillsCount", { count: stats.skills })}</span>
+          <span aria-hidden="true">·</span>
+          <span>{t("skillsWorkspace.tabs.providersCount", { count: stats.providers })}</span>
+        </p>
+      {/if}
+    </header>
 
-    <div class="dashboard-scroll min-h-0 flex-1 overflow-y-auto p-4">
-      <div class="dashboard-grid" bind:this={gridEl} data-testid="dashboard-grid">
-        <div
-          class="grid-item skills-item"
-          data-screen="skills"
-          data-active={activeScreen === "skills"}
+    <!-- TabsHeader：三一等 tab（grid 均分，激活 = 底线）；tablist 键盘 roving。
+         svelte-ignore a11y_interactive_supports_focus —— APG tabs 模式：tablist
+         自身不是 tab stop，焦点经 roving tabindex 由 role=tab 子按钮管理。 -->
+    <!-- svelte-ignore a11y_interactive_supports_focus -->
+    <div
+      class="dashboard-tabs shrink-0"
+      role="tablist"
+      aria-label={t("skillsWorkspace.tabs.tablistAria")}
+      bind:this={tablistEl}
+      onkeydown={onTablistKeydown}
+    >
+      {#each tabs as tab (tab.id)}
+        <button
+          type="button"
+          role="tab"
+          id="tab-{tab.id}"
+          class="dashboard-tab"
+          aria-selected={activeScreen === tab.id}
+          aria-controls="panel-{tab.id}"
+          tabindex={activeScreen === tab.id ? 0 : -1}
+          onclick={() => selectScreen(tab.id)}
         >
-          <SkillsScreen {wsId} />
-        </div>
-        <div class="grid-item" data-screen="agents" data-active={activeScreen === "agents"}>
-          <AgentsScreen {wsId} />
-        </div>
-        <div class="grid-item" data-screen="repos" data-active={activeScreen === "repos"}>
-          <ReposScreen {wsId} />
-        </div>
+          {tab.label}
+        </button>
+      {/each}
+    </div>
+
+    <!-- Tab 工作面：panel 独占整幅画布（grid 同格堆叠 + hidden 切换；三 panel
+         常驻挂载保切换瞬时与各屏内滚态）。 -->
+    <div class="dashboard-panels min-h-0 flex-1">
+      <div
+        role="tabpanel"
+        id="panel-skills"
+        aria-labelledby="tab-skills"
+        class="dashboard-panel"
+        tabindex="-1"
+        hidden={activeScreen !== "skills"}
+      >
+        <SkillsScreen {wsId} />
+      </div>
+      <div
+        role="tabpanel"
+        id="panel-agents"
+        aria-labelledby="tab-agents"
+        class="dashboard-panel"
+        tabindex="-1"
+        hidden={activeScreen !== "agents"}
+      >
+        <AgentsScreen {wsId} />
+      </div>
+      <div
+        role="tabpanel"
+        id="panel-repos"
+        aria-labelledby="tab-repos"
+        class="dashboard-panel"
+        tabindex="-1"
+        hidden={activeScreen !== "repos"}
+      >
+        <ReposScreen {wsId} />
       </div>
     </div>
   </div>
@@ -125,38 +193,91 @@
     container-type: inline-size;
     container-name: dashboard;
   }
-  .dashboard-grid {
+
+  /* 页题行（fuse2 pagehead）：workspace 身份 + 统计小字（tabular-nums）。 */
+  .dashboard-pagehead {
+    min-width: 0;
+    padding: 12px 16px 0;
+  }
+  .dashboard-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+  }
+  .dashboard-stats {
+    margin: 2px 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 7px;
+    font-size: 11.5px;
+    color: var(--muted-foreground, #71717a);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* TabsHeader：三一等 tab（grid 均分），激活 = 底线；切 tab 无过渡（瞬时）。 */
+  .dashboard-tabs {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 12px;
-    /* 单列宽度下防隐式列横向溢出的第二道闸：内容永不撑出轨道。 */
-    min-width: 0;
+    grid-template-columns: repeat(3, 1fr);
+    margin: 6px 16px 10px;
+    border-bottom: 1px solid var(--border, #e5e7eb);
   }
-  .grid-item {
+  .dashboard-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 42px;
     min-width: 0;
+    padding: 0 10px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--muted-foreground, #71717a);
+    font-size: 12.5px;
+    font-weight: 500;
+    /* 单行不换行（窄屏三 tab 不挤压）：nowrap + 超极端窄宽裁切兜底。 */
+    white-space: nowrap;
+    overflow: hidden;
+    cursor: pointer;
   }
-  /* Owner（2026-10-05）：Skills 是 list-detail，最多占三列给 detail 让宽。
-     级联降档（r2 修订语义扩展）：容器 < 3×minmax 轨道 + 2×gap = 1044px 降
-     span 2，< 2 轨道 + 1×gap = 692px 再降 span 1（1 列显式网格内 span>1 会
-     创建隐式列横向溢出；阈值与轨道/间距联动，契约测试钉死）。 */
-  .skills-item {
-    grid-column: span 3;
+  .dashboard-tab:hover {
+    color: var(--foreground, #18181b);
+  }
+  .dashboard-tab[aria-selected="true"] {
+    color: var(--primary, #7c3aed);
+    font-weight: 600;
+    border-bottom-color: var(--primary, #7c3aed);
   }
 
-  @container dashboard (width < 1044px) {
-    .skills-item {
-      grid-column: span 2;
-    }
+  /* Tab 工作面：panel 独占整幅画布——grid 同格堆叠（1×1），hidden 面退场，
+     禁绝对定位。 */
+  .dashboard-panels {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    min-width: 0;
+    padding: 0 16px 16px;
+  }
+  .dashboard-panel {
+    grid-area: 1 / 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  /* hidden 属性退场必须显式（author display 覆盖 UA [hidden] 样式）。 */
+  .dashboard-panel[hidden] {
+    display: none;
   }
 
-  /* screen 隐喻：弹性固定高（--screen-h 自定义属性，未来可拖拽调高）+ 内部滚动
-     + 自带 header；网格换行高度不塌（不随内容长高）。默认下限 = max(480px,
-     100dvh - 240px)：真实目录规模（多行 header chips + Global 页脚）下 480px 会把
-     master-detail 挤到 0px（走查 13-fix）——大视口按视口高度分配更多 screen 高，
-     小视口退回 480px 桌面下限；「固定高、内部滚动、换行不塌」语义不变。 */
-  .dashboard-grid :global(.screen) {
-    height: var(--screen-h, max(480px, calc(100dvh - 240px)));
-    min-height: var(--screen-h, max(480px, calc(100dvh - 240px)));
+  /* screen 弹性填满 panel（Tab 化后画布 = 弹性剩余空间）：固定高语义由 flex
+     约束承担（不随内容长高），内滚分层（body 滚 + overscroll 不冒泡）不变。 */
+  .dashboard-panels :global(.screen) {
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -165,44 +286,18 @@
     background: var(--background, #fff);
     min-width: 0;
   }
-  .dashboard-grid :global(.screen > .screen-body) {
+  .dashboard-panels :global(.screen > .screen-body) {
     overflow-y: auto;
     min-height: 0;
     overscroll-behavior: contain;
   }
-  /* F3 active screen 高亮增强（FD-12 旧账复审）：border 实色化 + shadow 提强。 */
-  .dashboard-grid .grid-item[data-active="true"] :global(.screen) {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 35%, transparent);
-  }
 
-  /* 单列容器：显式降档 span 1（r2 修订）+ 只显示 active screen
-     （mobileScreen 单屏切换；切换器接管导航）。 */
+  /* 窄屏：同一 TabsHeader 单行形态（不换行不挤压）+ 触达 ≥44px（AGENTS §7.2）。
+     阈值与 skills-screen master-detail 栈切换共享 692px 真相源（同容器名）。 */
   @container dashboard (width < 692px) {
-    .skills-item {
-      grid-column: span 1;
-    }
-    .dashboard-grid .grid-item {
-      display: none;
-    }
-    .dashboard-grid .grid-item[data-active="true"] {
-      display: block;
-    }
-    /* 触达地板（r2 评图 TOP5）：切换 pill 视觉 32px，窄容器下 ::after 外扩
-       6px 命中区到 44px（AGENTS §7.2），视觉尺寸不变。 */
-    .screen-switcher button {
-      position: relative;
-    }
-    .screen-switcher button::after {
-      content: "";
-      position: absolute;
-      inset: -6px;
-    }
-  }
-  /* 宽屏：切换器退场（并列全显）。 */
-  @container dashboard (width >= 692px) {
-    .screen-switcher {
-      display: none;
+    .dashboard-tab {
+      min-height: 44px;
+      font-size: 11.5px;
     }
   }
 </style>

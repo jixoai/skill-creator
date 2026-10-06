@@ -1,20 +1,24 @@
 // @vitest-environment jsdom
 /**
- * SkillsDashboard 组件级 DOM 断言（skills-dashboard 1.3/1.4/1.6/1.7）。
- * 用户原始需求 [2026-10-02]：「Skills 主屏 = 跨 provider 平铺 + master-detail；
- * Agents/Repos 并列 mobileScreen；WorkspacesHome 退役（冒烟锚点随迁 Global 页脚）。」
+ * SkillsDashboard 组件级 DOM 断言（skills-dashboard 1.3/1.4/1.6/1.7 + 
+ * skills-tabs-redesign 批 1）。
+ * 用户原始需求 [2026-10-06]：「顶部 TabsHeader 三一等 Tabs（Skills / Agents /
+ * Discover repos），每 Tab 独占整幅画布」；「?tab= 深链（批 1 修订：screen→tab
+ * 直切，无别名）」；
+ * 「页题行统计小字来自现有 store 真实数据」。
  * 正交意图：
- *   [1] 三屏网格渲染 + listWorkspace 数据驱动（行/provider chips 计数）。
- *   [2] master-detail 身份 = ?provider=&skill= 双参数导航（行点击）。
- *   [3] detail 零写纪律（运行时面）：除 skills.toggle 外零写 RPC、无
+ *   [1] TabsHeader chrome：tablist/tab/tabpanel ARIA + roving tabindex（←→/
+ *       Home/End 自动激活）+ ?tab= 深链与 Tab 点击同源写 URL。
+ *   [2] Skills panel 数据驱动（行/provider chips 计数；screen 组件内部不动）。
+ *   [3] master-detail 身份 = ?provider=&skill= 双参数导航（行点击）。
+ *   [4] detail 零写纪律（运行时面）：除 skills.toggle 外零写 RPC、无
  *       creator 或 repository 域调用（与源扫描测试互为表里）。
- *   [4] 筛选 URL 面：duplicates-only / provider chip。
- *   [5] Global 页脚冒烟锚点 en 逐字（/skills across \d+ agent locations/）。
- *   [6] Intelligence 双入口同链（Agents screen 与 detail 面同 href）。
- *   [7] 窄屏栈切换 + detail 头部布局机制契约（修复批 2）：隐藏类只落在 pane、
- *       无身份 view=detail 落回列表；标题块全宽、动作行独立（文本柱不塌缩）。
- * 妥协声明：jsdom 无布局——网格列数/容器查询回落由 skills-dashboard-css.test
- * 钉契约，真实布局归 1.10 ego-browser 走查门。
+ *   [5] 筛选 URL 面：duplicates-only / provider chip。
+ *   [6] Global 页脚冒烟锚点 en 逐字（/skills across \d+ agent locations/）。
+ *   [7] Intelligence 双入口同链（Agents screen 与 detail 面同 href）。
+ *   [8] 页题行统计小字：providers 摘要真实计数，缺席不渲染（不造假）。
+ * 妥协声明：jsdom 无布局——单行不换行/画布独占由 skills-dashboard-css.test
+ * 钉 CSS 契约，真实布局归走查门。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount, type Component } from "svelte";
@@ -314,8 +318,153 @@ afterEach(async () => {
   rpcClient = null;
 });
 
-describe("SkillsDashboard 三屏网格", () => {
-  it("renders all three mobileScreens with RPC-driven rows and provider chip counts", async () => {
+describe("SkillsDashboard TabsHeader chrome（批 1）", () => {
+  function threeRows(): RpcLog {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(
+      log,
+      listWorkspaceOutput([
+        { id: SK_A, providerId: "claude-code", name: "alpha" },
+        { id: SK_B, providerId: "claude-code", name: "beta" },
+        { id: SK_C, providerId: "zcode", name: "gamma" },
+      ]),
+    );
+    return log;
+  }
+
+  it("renders the tablist with three ARIA tabs wired to their tabpanels", async () => {
+    const log = threeRows();
+    const root = mountDashboard();
+    await settle();
+
+    const tablist = root.querySelector('[role="tablist"]');
+    expect(tablist).not.toBeNull();
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    expect(tabs.map((tab) => tab.id)).toEqual(["tab-skills", "tab-agents", "tab-repos"]);
+    expect(tabs.map((tab) => textOf(tab as HTMLElement))).toEqual([
+      "Skills",
+      "Agents",
+      "Discover repos",
+    ]);
+    // tab ↔ tabpanel 双向 ARIA 关联。
+    for (const tab of tabs) {
+      const panel = root.querySelector(`#${tab.getAttribute("aria-controls")}`);
+      expect(panel?.getAttribute("role")).toBe("tabpanel");
+      expect(panel?.getAttribute("aria-labelledby")).toBe(tab.id);
+    }
+    // 缺省屏 = skills：仅它 selected + 可 Tab 聚焦（roving），其余面板退场。
+    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false", "false"]);
+    expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
+    expect(root.querySelector<HTMLDivElement>("#panel-skills")?.hidden).toBe(false);
+    expect(root.querySelector<HTMLDivElement>("#panel-agents")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLDivElement>("#panel-repos")?.hidden).toBe(true);
+    expect(log.calls.some((call) => call.startsWith("skills.listWorkspace:"))).toBe(true);
+  });
+
+  it("keeps ?tab= deep-link semantics (values unchanged, tab state follows)", async () => {
+    threeRows();
+    const root = mountDashboard({ tab: "agents" });
+    await settle();
+
+    const agentsTab = root.querySelector<HTMLButtonElement>("#tab-agents");
+    expect(agentsTab?.getAttribute("aria-selected")).toBe("true");
+    expect(agentsTab?.getAttribute("tabindex")).toBe("0");
+    expect(root.querySelector<HTMLDivElement>("#panel-agents")?.hidden).toBe(false);
+    expect(root.querySelector<HTMLDivElement>("#panel-skills")?.hidden).toBe(true);
+  });
+
+  it("writes the tab param on tab click; skills drops the param (default)", async () => {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(log, listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]));
+    const root = mountDashboard({ tab: "repos" });
+    await settle();
+
+    click(root.querySelector<HTMLButtonElement>("#tab-skills"));
+    expect(log.navigate).toHaveLength(1);
+    const url = new URL(log.navigate[0] as string, "https://skill-creator.invalid");
+    expect(url.pathname).toBe("/w/~/skills");
+    expect(url.searchParams.has("tab")).toBe(false);
+
+    const root2 = mountDashboard();
+    await settle();
+    click(root2.querySelector<HTMLButtonElement>("#tab-repos"));
+    const reposUrl = new URL(log.navigate.at(-1) as string, "https://skill-creator.invalid");
+    expect(reposUrl.searchParams.get("tab")).toBe("repos");
+  });
+
+  it("roves focus and activates with ArrowRight/End/Home (tabindex follows selection)", async () => {
+    const log = makeRpcLog();
+    activeLog = log;
+    installRpc(log, listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]));
+    const root = mountDashboard();
+    await settle();
+
+    const tablist = root.querySelector<HTMLDivElement>('[role="tablist"]');
+    const tabSkills = root.querySelector<HTMLButtonElement>("#tab-skills");
+    const tabAgents = root.querySelector<HTMLButtonElement>("#tab-agents");
+    const tabRepos = root.querySelector<HTMLButtonElement>("#tab-repos");
+    tabSkills?.focus();
+    expect(document.activeElement).toBe(tabSkills);
+
+    // →：自动激活 agents + 焦点随移。
+    tablist?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(document.activeElement).toBe(tabAgents);
+    expect(new URL(log.navigate.at(-1) as string, "https://x.invalid").searchParams.get("tab")).toBe(
+      "agents",
+    );
+
+    // End：直达 repos。
+    tablist?.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+    expect(document.activeElement).toBe(tabRepos);
+    expect(new URL(log.navigate.at(-1) as string, "https://x.invalid").searchParams.get("tab")).toBe(
+      "repos",
+    );
+
+    // Home：回 skills（当前激活屏）——不重复导航（同屏激活无 URL 写入），焦点仍随移。
+    const navigationsBeforeHome = log.navigate.length;
+    tablist?.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    expect(document.activeElement).toBe(tabSkills);
+    expect(log.navigate).toHaveLength(navigationsBeforeHome);
+  });
+
+  it("shows pagehead stats from the providers summary and hides them without data", async () => {
+    threeRows();
+    const root = mountDashboard();
+    await settle();
+
+    // providers 摘要：claude-code 2 + zcode 1 → 真实计数小字。
+    const statsEl = root.querySelector('[data-testid="dashboard-stats"]');
+    expect(statsEl).not.toBeNull();
+    expect(textOf(statsEl as HTMLElement)).toBe("3 skills · 2 providers");
+
+    // 数据缺席（providers 摘要为空）不渲染数字（不造假）。
+    const emptyOutput = listWorkspaceOutput([{ id: SK_A, providerId: "claude-code", name: "alpha" }]);
+    (emptyOutput as { providers: unknown[] }).providers = [];
+    const emptyLog = makeRpcLog();
+    activeLog = emptyLog;
+    installRpc(emptyLog, emptyOutput);
+    const emptyRoot = mountDashboard();
+    await settle();
+    expect(emptyRoot.querySelector('[data-testid="dashboard-stats"]')).toBeNull();
+  });
+
+  it("keeps all three panels mounted so tab switching is instant (no remount)", async () => {
+    threeRows();
+    const root = mountDashboard({ tab: "agents" });
+    await settle();
+
+    // 三 panel 常驻挂载（hidden 切换）：skills 行数据面不因切 Tab 重挂。
+    expect(root.querySelector('[data-screen="skills"]')).not.toBeNull();
+    expect(root.querySelector('[data-screen="agents"]')).not.toBeNull();
+    expect(root.querySelector('[data-screen="repos"]')).not.toBeNull();
+    expect(root.querySelector(`button[data-skill-id="${SK_A}"]`)).not.toBeNull();
+  });
+});
+
+describe("Skills panel 数据面", () => {
+  it("renders RPC-driven rows and provider chip counts inside the skills panel", async () => {
     const log = makeRpcLog();
     activeLog = log;
     installRpc(
@@ -329,9 +478,6 @@ describe("SkillsDashboard 三屏网格", () => {
     const root = mountDashboard();
     await settle();
 
-    expect(root.querySelector('[data-screen="skills"]')).not.toBeNull();
-    expect(root.querySelector('[data-screen="agents"]')).not.toBeNull();
-    expect(root.querySelector('[data-screen="repos"]')).not.toBeNull();
     expect(log.calls.some((call) => call.startsWith("skills.listWorkspace:"))).toBe(true);
 
     // 平铺行：跨 provider + provider 归属角标。

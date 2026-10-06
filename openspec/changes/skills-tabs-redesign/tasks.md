@@ -4,13 +4,13 @@
 
 ## 批 1 · TabsHeader chrome（无接口依赖，进行中）
 
-- [ ] TabsHeader 组件：三一等 Tabs（Skills / Agents / Discover repos），tablist/tab/tabpanel ARIA + roving tabindex（←→/Home/End），切换瞬时 — webui/src/lib/apps/workspaces/ — 新组件 + SkillsDashboard 改造 — skills-dashboard-css.test.ts + skills-dashboard.dom.test.ts
-- [ ] SkillsDashboard 三屏并列网格退役：每 Tab 独占整幅画布（grid 布局，禁绝对定位）；窄屏 segmented 切换器退役为同一 TabsHeader 单行形态 — SkillsDashboard.svelte — skills-dashboard-css.test.ts
-- [ ] **`?tab=` 直切**（Codex Δ3 裁决）：`screen` 参数同版本退役，manifest zod 字段改名 `tab`（值 skills|agents|repos 不变），route-hygiene/测试同步；不做双读别名 — SkillsDashboard.svelte + manifest.ts + route-hygiene — dom/manifest 测试
-- [ ] 页题行统计小字（现有 store 真实数据；无数据的徽标留空不造假） — SkillsDashboard.svelte — skills-dashboard-css.test.ts
-- [ ] i18n：新 key 进 domains/skills-workspace.ts（en/zh 成对，base 不动） — i18n domain — 无
-- [ ] 受影响测试全量复核（css/dom/coldboot/manifest + route-hygiene） — tests/webui/ — 绿
-- [ ] 走查证据：dev 沙箱桌面 1280 三 Tab 切换/深链/键盘 + 620 窄屏单行 Tabs — /tmp/skills-tabs-evidence/ — 截图 + console 干净
+- [x] TabsHeader 组件：三一等 Tabs（Skills / Agents / Discover repos），tablist/tab/tabpanel ARIA + roving tabindex（←→/Home/End），切换瞬时 — webui/src/lib/apps/workspaces/ — 新组件 + SkillsDashboard 改造 — skills-dashboard-css.test.ts + skills-dashboard.dom.test.ts
+- [x] SkillsDashboard 三屏并列网格退役：每 Tab 独占整幅画布（grid 布局，禁绝对定位）；窄屏 segmented 切换器退役为同一 TabsHeader 单行形态 — SkillsDashboard.svelte — skills-dashboard-css.test.ts
+- [x] **`?tab=` 直切**（Codex Δ3 裁决）：`screen` 参数同版本退役，manifest zod 字段改名 `tab`（值 skills|agents|repos 不变），route-hygiene/测试同步；不做双读别名 — SkillsDashboard.svelte + manifest.ts + route-hygiene — dom/manifest 测试
+- [x] 页题行统计小字（现有 store 真实数据；无数据的徽标留空不造假） — SkillsDashboard.svelte — skills-dashboard-css.test.ts
+- [x] i18n：新 key 进 domains/skills-workspace.ts（en/zh 成对，base 不动） — i18n domain — 无
+- [x] 受影响测试全量复核（css/dom/coldboot/manifest + route-hygiene） — tests/webui/ — 绿
+- [x] 走查证据：dev 沙箱桌面 1280 三 Tab 切换/深链/键盘 + 620 窄屏单行 Tabs — /tmp/skills-tabs-evidence/ — 截图 + console 干净
 
 ## 批 2 · 唯一技能投影 + SkillDetail 路由（Δ1+Δ3 定稿）
 

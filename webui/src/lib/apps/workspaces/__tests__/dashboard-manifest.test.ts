@@ -1,11 +1,12 @@
 /**
  * workspaces dashboard manifest 路由测试（skills-dashboard 1.5/1.8）。
  * 用户原始需求 [2026-10-02]：「Repository 作为一级导航退役，被 dashboard 吸收」
- * ——scan 实例迁子路由 repos/scan/:sourceId；?screen= 深链切屏。
+ * ——scan 实例迁子路由 repos/scan/:sourceId；深链切屏（批 1 起参数名 screen→tab）。
  * 正交意图：
  *   [1] reposScan 子路由匹配/参数校验（sourceId 字符集；非法 = parse-error）。
- *   [2] 根 search schema：screen 枚举（非法值 parse-error → hygiene 清理）。
- *   [3] buildHrefById：reposScan 深链与 screen 参数序列化。
+ *   [2] 根 search schema：tab 枚举（批 1 起参数名 screen→tab 直切；非法值
+ *       parse-error → hygiene 清理）。
+ *   [3] buildHrefById：reposScan 深链与 tab 参数序列化。
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -45,12 +46,12 @@ describe("workspaces dashboard manifest", () => {
     if (result.kind === "parse-error") expect(result.reason).toBe("params");
   });
 
-  it("keeps the dashboard root matching with ?screen= deep links", () => {
-    for (const screen of ["skills", "agents", "repos"] as const) {
-      const result = match(`/w/${WS}/skills`, `?screen=${screen}`);
+  it("keeps the dashboard root matching with ?tab= deep links", () => {
+    for (const tab of ["skills", "agents", "repos"] as const) {
+      const result = match(`/w/${WS}/skills`, `?tab=${tab}`);
       expect(result.kind).toBe("matched");
     }
-    const bogus = match(`/w/${WS}/skills`, "?screen=bogus");
+    const bogus = match(`/w/${WS}/skills`, "?tab=bogus");
     expect(bogus.kind).toBe("parse-error");
     if (bogus.kind === "parse-error") expect(bogus.reason).toBe("search");
   });
@@ -60,13 +61,13 @@ describe("workspaces dashboard manifest", () => {
     expect(result.kind).not.toBe("matched");
   });
 
-  it("builds reposScan and screen deep links via id", () => {
+  it("builds reposScan and tab deep links via id", () => {
     expect(buildHrefById("workspaces.reposScan", { wsId: WS, sourceId: "curated-source" })).toBe(
       `/w/${WS}/skills/repos/scan/curated-source`,
     );
     expect(
-      buildHrefById("workspaces.provider", { wsId: WS }, { screen: "repos", reposQ: "vue" }),
-    ).toBe(`/w/${WS}/skills?screen=repos&reposQ=vue`);
+      buildHrefById("workspaces.provider", { wsId: WS }, { tab: "repos", reposQ: "vue" }),
+    ).toBe(`/w/${WS}/skills?tab=repos&reposQ=vue`);
     expect(buildHrefById("workspaces.insights", { wsId: WS, providerId: "claude-code" })).toBe(
       `/w/${WS}/skills/insights/claude-code`,
     );

@@ -3,6 +3,8 @@
  *
  * 用户原始需求：批 A Dashboard 三屏新增 i18n key 的收口（AGENTS §7.2 UI 法则：
  * 新 key 全部进 domains/；存量 base 禁改；zh 缺键=编译错）。
+ * 修订 [2026-10-06]（skills-tabs-redesign 批 1）：TabsHeader chrome 新增 key
+ * （三 tab 文案 / tablist aria / 页题行统计小字；徽标数据缺席不造 key）。
  *
  * 正交意图：
  *   [1] 批 A 三屏新增 key（补全条图标 title / Chat 启动反馈 / Agents 按钮改名 /
@@ -73,6 +75,15 @@ export const skillsWorkspaceEn = {
 
   // ---- Repos Screen (Empty states) ----
   "skillsWorkspace.reposScreen.noSourcesYet": "No sources yet — add a source to get started.",
+
+  // ---- Dashboard TabsHeader (skills-tabs-redesign batch 1) ----
+  "skillsWorkspace.tabs.tablistAria": "Workspace views",
+  "skillsWorkspace.tabs.skills": "Skills",
+  "skillsWorkspace.tabs.agents": "Agents",
+  "skillsWorkspace.tabs.repos": "Discover repos",
+  "skillsWorkspace.tabs.skillsCount": "{count, plural, one {# skill} other {# skills}}",
+  "skillsWorkspace.tabs.providersCount":
+    "{count, plural, one {# provider} other {# providers}}",
 } as const;
 
 export const skillsWorkspaceZh: Record<keyof typeof skillsWorkspaceEn, string> = {
@@ -134,4 +145,12 @@ export const skillsWorkspaceZh: Record<keyof typeof skillsWorkspaceEn, string> =
 
   // ---- Repos Screen (Empty states) ----
   "skillsWorkspace.reposScreen.noSourcesYet": "还没有源——添加一个源开始发现技能。",
+
+  // ---- Dashboard TabsHeader (skills-tabs-redesign batch 1) ----
+  "skillsWorkspace.tabs.tablistAria": "工作区视图",
+  "skillsWorkspace.tabs.skills": "Skills",
+  "skillsWorkspace.tabs.agents": "Agents",
+  "skillsWorkspace.tabs.repos": "发现仓库",
+  "skillsWorkspace.tabs.skillsCount": "{count} 个技能",
+  "skillsWorkspace.tabs.providersCount": "{count} 个 provider",
 };
