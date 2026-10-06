@@ -20,12 +20,12 @@
 - [x] `?from=` 白名单 `{tab,q,p,dup,scroll,sel,file}`：≤512 字符、未知/重复键丢弃、枚举校验、状态对象重组 route、不拼 href；detail 返回完整还原列表态；浏览器原生 back 并存 — detail 页 + skills-screen — dom 测试
 - [x] detail 面板从 skills-screen 退役 — screens/skills-screen.svelte — dom/coldboot 测试更新
 
-## 批 3 · SkillDetail CodeEditor（Δ2 定稿）
+## 批 3 · SkillDetail CodeEditor（Δ2 定稿，已完成）
 
-- [ ] `skills.files` / `skills.fileRead` 契约 + daemon：每次调用重解析（不信任先前列表）；lstat 拒文档 symlink + O_NOFOLLOW + fstat 身份校验；相对路径校验（拒绝对对/`..`/NUL/反斜杠）；预算 4 深/300 项/树 64KB/单文件 256KiB 超限截断；二进制 typed 拒读；conflict 双文件展示；typed errors 六类（NOT_FOUND/UNAVAILABLE/INVALID_PATH/BINARY/TOO_LARGE/TRUNCATED） — contracts + skill-service + path-safety — daemon 契约测试（含 symlink 三层/TOCTOU/越界/超限/二进制负例）
-- [ ] detail 页编辑器布局：左文件树（折叠+高亮+?file= 深链）+ 中内容查看器（SKILL.md 默认、frontmatter 身份源块、代码等宽+行号、只读状态条）+ 元信息/校验/副本收纳 — detail 页组件 — dom 测试
-- [ ] 副本组差异呈现（跨 provider disabled/描述差异；conflict 标记） — detail 页 — dom 测试
-- [ ] 620 窄屏：树降级横向 chips、内容单列、动作 ≥44px — detail 页 — css 测试
+- [x] `skills.files` / `skills.fileRead` 契约 + daemon：每次调用重解析（不信任先前列表）；lstat 拒文档 symlink + O_NOFOLLOW + fstat 身份校验；相对路径校验（拒绝对对/`..`/NUL/反斜杠）；预算 4 深/300 项/树 64KB/单文件 256KiB 超限截断；二进制 typed 拒读；conflict 双文件展示；typed errors 六类（NOT_FOUND/UNAVAILABLE/INVALID_PATH/BINARY/TOO_LARGE/TRUNCATED） — contracts + skill-service + path-safety — daemon 契约测试（含 symlink 三层/TOCTOU/越界/超限/二进制负例）
+- [x] detail 页编辑器布局：左文件树（折叠+高亮+?file= 深链）+ 中内容查看器（SKILL.md 默认、frontmatter 身份源块、代码等宽+行号、只读状态条）+ 元信息/校验/副本收纳 — detail 页组件 — dom 测试
+- [x] 副本组差异呈现（跨 provider disabled/描述差异；conflict 标记） — detail 页 — dom 测试
+- [x] 620 窄屏：树降级横向 chips、内容单列、动作 ≥44px — detail 页 — css 测试
 
 ## 批 4 · Agents 规模化（Δ5 路径 1：现有字段收窄，已完成）
 

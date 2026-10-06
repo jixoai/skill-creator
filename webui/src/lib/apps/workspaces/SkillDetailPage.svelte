@@ -11,12 +11,13 @@
   2. 数据面：页面拥有 skills.info 加载（typed NOT_FOUND → 页级 not-found），
      SkillDetailPanel 以外部持有模式消费（info + onRefresh）；副本组差异经
      skills.listCanonical(q=name) 精确匹配组（跨 provider 的 disabled/描述
-     差异/conflict 标记；批 3 内容查看器落地前右侧为占位容器）。
+     差异/conflict 标记）；内容查看器（批 3 Δ2）= skill-detail-editor
+     （skills.files 树 + skills.fileRead 有界读；?from= 的 file 键深链）。
   3. 回程：显式返回 = parse ?from= → 状态对象经 goById 重组 route（不拼 href）
      + handoff stash（scroll/sel/p）；浏览器原生 back 并存（列表 URL 自带
      筛选语义，滚动/焦点归 handoff）。
   4. 布局：简化版两栏容器（左信息/动作 = SkillDetailPanel，右 = 副本组差异 +
-     内容占位——文件树批 3）；<692px 单列堆叠（与 dashboard 单列降档同阈值）。
+     CodeEditor 查看器）；<692px 单列堆叠（与 dashboard 单列降档同阈值）。
 -->
 <script lang="ts">
   import { useParams, useSearch, goById } from "$lib/shell";
@@ -26,6 +27,7 @@
   import { fetchSkillInfo } from "$lib/store.svelte";
   import { workspaceState } from "$lib/store.svelte";
   import SkillDetailPanel from "$lib/components/skills/skill-detail-panel.svelte";
+  import SkillDetailEditor from "./skill-detail-editor.svelte";
   import {
     listStateToDashboardSearch,
     parseListStateParam,
@@ -183,6 +185,9 @@
   }
 
   // ---- 面包屑身份与回程 ----
+
+  /** `?from=` 列表态解析（批 3：file 键 = 编辑器文件深链；回程复用同一解析）。 */
+  const fromState = $derived(parseListStateParam(getSearch?.()?.from));
 
   const workspaceLabel = $derived(
     workspaceState.workspaces.find((workspace) => workspace.id === thisIdentity?.wsId)?.label ??
@@ -373,17 +378,14 @@
           {/if}
         </section>
 
-        <!-- 内容查看器占位（批 3：左文件树 + 中内容查看器）。 -->
+        <!-- 内容查看器（批 3：左文件树 + 中内容查看器；只读 CodeEditor）。 -->
         <section class="mt-4" aria-label={t("skillsWorkspace.skillDetail.viewerTitle")}>
-          <h3 class="text-xs font-medium text-muted-foreground">
-            {t("skillsWorkspace.skillDetail.viewerTitle")}
-          </h3>
-          <div
-            class="mt-2 flex min-h-[120px] items-center justify-center rounded-md border border-dashed border-border/70 px-4 py-6 text-center text-xs text-muted-foreground/70"
-            data-testid="detail-viewer-placeholder"
-          >
-            {t("skillsWorkspace.skillDetail.viewerPlaceholder")}
-          </div>
+          <SkillDetailEditor
+            target={thisIdentity.target}
+            skillId={thisIdentity.skillId}
+            {info}
+            initialFile={fromState.file}
+          />
         </section>
       </aside>
     </div>

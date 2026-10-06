@@ -136,6 +136,7 @@ import {
   ToggleSummarySchema,
   ValidateResultSchema,
 } from "./contracts/skills.js";
+import { SkillFileReadResultSchema, SkillFilesResultSchema } from "./contracts/skill-files.js";
 import {
   ImportedWorkspaceIdSchema,
   ProviderIdSchema,
@@ -379,6 +380,21 @@ export const SkillsListCanonicalOutputSchema = z.strictObject({
   nextCursor: z.string().optional(),
 });
 export type SkillsListCanonicalOutput = z.infer<typeof SkillsListCanonicalOutputSchema>;
+
+// skills-tabs-redesign 批 3（design.md Δ2 定稿）：有界文件树与文件读。
+// 每次调用重新 resolve（不信任先前 files 列表）；路径规则与预算语义见
+// contracts/skill-files.ts；typed errors 六类中的 TOO_LARGE/TRUNCATED 为带内
+// typed 字段（SkillFilesResult.truncationReason / SkillFileReadResult.truncated），
+// INVALID_PATH/BINARY 为可抛错误码（contracts/errors.ts），客户端不解析字符串。
+/** skills.files 输入（target + opaque skillId；每次重解析）。 */
+export const SkillsFilesInputSchema = z.strictObject({
+  ...WorkspaceProviderTargetSchema.shape,
+  skillId: SkillIdSchema,
+});
+/** skills.fileRead 输入（path = `/` 分隔相对路径；绝对/`..`/NUL/反斜杠在 daemon 拒绝）。 */
+export const SkillsFileReadInputSchema = SkillsFilesInputSchema.extend({
+  path: z.string().min(1).max(1024),
+});
 /** repository.scan 输入。 */
 export const RepositoryScanInputSchema = z.object({
   source: z.string().trim().min(1),
@@ -440,6 +456,19 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
      * 两量纲分开返回；组名序 + opaque cursor 分段（groups 恒 ≤ limit）。
      */
     listCanonical: oc.input(SkillsListCanonicalInputSchema).output(SkillsListCanonicalOutputSchema),
+    /**
+     * 有界文件树（skills-tabs-redesign 批 3，Δ2 定稿）：target + opaque skillId
+     * 每次重解析；遍历 ≤4 深、≤300 entries、响应 ≤64KB（超限 = 带内 typed
+     * truncationReason:"TOO_LARGE"）；symlink 分量省略、conflict 双文件展示。
+     */
+    files: oc.input(SkillsFilesInputSchema).output(SkillFilesResultSchema),
+    /**
+     * 有界文件读（Δ2）：每次调用重新 resolve 后逐级验证相对路径（lstat 拒
+     * symlink 分量 + O_NOFOLLOW fd + fstat 身份校验防 TOCTOU 换体）；单文件
+     * ≤256KiB 超限返回前 256KiB + truncated:true（不拒读）；二进制 typed 拒读
+     * （BINARY）。typed NOT_FOUND/UNAVAILABLE/INVALID_PATH/BINARY 经错误闭集。
+     */
+    fileRead: oc.input(SkillsFileReadInputSchema).output(SkillFileReadResultSchema),
     update: {
       /** Compare skills-CLI lock hashes against upstream and report outdated skills. */
       check: oc.input(UpdateCheckInputSchema).output(UpdateCheckResultSchema),

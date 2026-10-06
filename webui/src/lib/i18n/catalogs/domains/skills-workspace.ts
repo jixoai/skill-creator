@@ -105,8 +105,19 @@ export const skillsWorkspaceEn = {
   "skillsWorkspace.skillDetail.unavailableMark": "Unavailable",
   "skillsWorkspace.skillDetail.openCopy": "Open this copy",
   "skillsWorkspace.skillDetail.viewerTitle": "Content viewer",
-  "skillsWorkspace.skillDetail.viewerPlaceholder":
-    "The file tree and read-only viewer land with the SkillDetail editor batch.",
+
+  // ---- SkillDetail CodeEditor (skills-tabs-redesign batch 3, Δ2) ----
+  "skillsWorkspace.skillDetail.fileTree": "Files",
+  "skillsWorkspace.skillDetail.fileTreeEmpty": "No readable files",
+  "skillsWorkspace.skillDetail.treeTruncated": "File list truncated",
+  "skillsWorkspace.skillDetail.readonlyStatus": "Read-only — editing lives in Creator",
+  "skillsWorkspace.skillDetail.frontmatterSource": "Identity source",
+  "skillsWorkspace.skillDetail.binaryFile": "Binary file — preview unavailable",
+  "skillsWorkspace.skillDetail.fileReadFailed": "Could not read this file",
+  "skillsWorkspace.skillDetail.truncatedNote": "truncated",
+  "skillsWorkspace.skillDetail.linesCount": "{count, plural, one {# line} other {# lines}}",
+  "skillsWorkspace.skillDetail.conflictDisabledHint":
+    "Inactive identity document (SKILL.md/.SKILL.md conflict)",
 } as const;
 
 export const skillsWorkspaceZh: Record<keyof typeof skillsWorkspaceEn, string> = {
@@ -194,6 +205,16 @@ export const skillsWorkspaceZh: Record<keyof typeof skillsWorkspaceEn, string> =
   "skillsWorkspace.skillDetail.unavailableMark": "不可用",
   "skillsWorkspace.skillDetail.openCopy": "打开此副本",
   "skillsWorkspace.skillDetail.viewerTitle": "内容查看器",
-  "skillsWorkspace.skillDetail.viewerPlaceholder":
-    "文件树与只读查看器随 SkillDetail 编辑器批次落地。",
+
+  // ---- SkillDetail CodeEditor (skills-tabs-redesign batch 3, Δ2) ----
+  "skillsWorkspace.skillDetail.fileTree": "文件",
+  "skillsWorkspace.skillDetail.fileTreeEmpty": "没有可读文件",
+  "skillsWorkspace.skillDetail.treeTruncated": "文件列表已截断",
+  "skillsWorkspace.skillDetail.readonlyStatus": "只读 — 编辑入口在 Creator",
+  "skillsWorkspace.skillDetail.frontmatterSource": "身份源",
+  "skillsWorkspace.skillDetail.binaryFile": "二进制文件 — 无法预览",
+  "skillsWorkspace.skillDetail.fileReadFailed": "无法读取该文件",
+  "skillsWorkspace.skillDetail.truncatedNote": "已截断",
+  "skillsWorkspace.skillDetail.linesCount": "{count} 行",
+  "skillsWorkspace.skillDetail.conflictDisabledHint": "非激活身份文档（SKILL.md/.SKILL.md 冲突）",
 };

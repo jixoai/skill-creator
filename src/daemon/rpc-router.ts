@@ -116,6 +116,14 @@ export function createRpcRouter(deps: RpcRouterDeps) {
           ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
         }),
       ),
+      // skills-tabs-redesign 批 3 Δ2：有界文件树/文件读（重解析 + TOCTOU 防线在
+      // skill-service/skill-files；INVALID_PATH/BINARY 经统一 DomainError 边界）。
+      files: rpc.skills.files.handler(async ({ input }) =>
+        domain.skills.files(input, input.skillId),
+      ),
+      fileRead: rpc.skills.fileRead.handler(async ({ input }) =>
+        domain.skills.fileRead(input, input.skillId, input.path),
+      ),
       update: {
         check: rpc.skills.update.check.handler(async ({ input }) => {
           const discovered = await domain.skills.list(input, true);

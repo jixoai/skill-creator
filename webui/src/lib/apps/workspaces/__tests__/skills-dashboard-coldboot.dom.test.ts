@@ -226,6 +226,19 @@ beforeEach(() => {
       search: () => Promise.resolve({ results: [] }),
       duplicates: () => Promise.resolve({ groups: [] }),
       list: () => Promise.resolve({ skills: [] }),
+      // 批 3 Δ2：编辑器冷链（files 树 + fileRead 默认文档）。
+      files: () =>
+        Promise.resolve({
+          entries: [
+            { path: "SKILL.md", kind: "file", size: 64 },
+            { path: "references", kind: "dir", size: 0 },
+            { path: "references/advanced.md", kind: "file", size: 30 },
+          ],
+        }),
+      fileRead: (input: Record<string, unknown>) => {
+        const content = input.path === "references/advanced.md" ? "# Advanced\n" : "";
+        return Promise.resolve({ content, size: content.length, truncated: false });
+      },
       searchConfig: { open: () => Promise.resolve({ opened: true }) },
       update: { check: () => Promise.resolve({ results: [] }) },
     },
@@ -266,8 +279,9 @@ describe("Skills 冷直载深链（走查 15-fix 回归钉 + 批 2 detail 冷链
     expect(document.querySelector(".app-shell-empty")).toBeNull();
     // 页级数据面：skills.info 经页面持有（面板外部持有模式消费）。
     expect(document.body.textContent ?? "").toContain("alpha");
-    // 副本组差异 + 内容占位（批 3 前的简化容器右栏）。
-    expect(document.querySelector('[data-testid="detail-viewer-placeholder"]')).not.toBeNull();
+    // 副本组差异 + 批 3 编辑器（占位容器已同版本退役——§8 无双读）。
+    expect(document.querySelector('[data-testid="skill-detail-editor"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="filebar-path"]')?.textContent).toBe("SKILL.md");
   });
 
   it("renders the typed not-found page for a wellformed but unknown skillId (cold)", async () => {

@@ -12,6 +12,11 @@
  *   [2] Read enabled and disabled skill documents reliably.
  *   [3] Toggle and validate resolved skill IDs without caller paths.
  *   [4] Project skills-CLI provenance (installedVia / updatable) from the probe map.
+ *   [5] Delegate bounded file tree/read to skill-files (skills-tabs-redesign 批 3
+ *       Δ2：每次调用经 discovery 重解析身份后进入 skill-files 有界实现——安全
+ *       逻辑物理隔离在专属模块，此处只做身份解析委托).
+ * 妥协声明：[5] 是传输接线不是第 5 个领域意图的实现地；文件预算/symlink/TOCTOU
+ * 法则全部住在 skill-files.ts。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -34,6 +39,7 @@ import {
 } from "../shared/contracts/skills.js";
 import { safeParseExternal } from "../shared/external-input.js";
 import { DomainError } from "./domain-error.js";
+import { listSkillFiles, readSkillFile } from "./skill-files.js";
 import {
   assertPathInside,
   canonicalDirectory,
@@ -182,6 +188,16 @@ export function createSkillService(
       resolveSkill(cachedList, target, skillId),
     skillFile,
     info: (target: WorkspaceProviderTarget, skillId: SkillId) => info(cachedList, target, skillId),
+    /** 有界文件树（Δ2）：重解析身份后进入 skill-files 有界枚举。 */
+    files: (target: WorkspaceProviderTarget, skillId: SkillId) =>
+      resolveSkill(cachedList, target, skillId).then((skill) =>
+        listSkillFiles(skill.path, { disabled: skill.disabled }),
+      ),
+    /** 有界文件读（Δ2）：重解析身份后逐级验证相对路径（TOCTOU 防线在 skill-files）。 */
+    fileRead: (target: WorkspaceProviderTarget, skillId: SkillId, filePath: string) =>
+      resolveSkill(cachedList, target, skillId).then((skill) =>
+        readSkillFile(skill.path, filePath),
+      ),
     toggle: (target: WorkspaceProviderTarget, skillIds: SkillId[], mode: "enable" | "disable") =>
       toggle(
         cachedList,
