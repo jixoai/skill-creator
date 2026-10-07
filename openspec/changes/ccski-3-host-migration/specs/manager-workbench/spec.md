@@ -28,7 +28,7 @@ Repository preview and install MUST use the same pinned scan session and MUST re
 
 ### Requirement: Creator applies reviewed drafts
 
-Creator MUST keep unsaved edits in a draft, save with an expected revision, and distinguish success, conflict and failure. Creator 删除 MUST 保留宿主 revision 契约（删除前身份文件内容 sha256 对 expectedRevision 的校验为第一层），并按发现层 ownership 双路由执行：`ownership === "ccski"` 的技能 MUST 经内核删除——单 face 删除 = `removeEntityProjections`（该 provider root 的投影摘除，实体与其余投影保留）；末投影删除升级全清（内核 last-reference GC 退役实体）；实体 face（provider root === 实体根）= 实体 + 全部投影 + state 记录全清零残留（零投影时直接 `deleteEntity` 受 GUARD_ENTITY 第二层守卫）；判定基准 = state 投影表该实体的注册投影数，state 缺失/不兼容/实体记录缺席 MUST 按保守路径 typed 拒绝（不回落直删制造残留、不假装内核管辖）。其余技能（external/unknown/普通目录）MUST 保留宿主直删路径（provider-root containment + rmSync）。内核 typed error MUST 经有限词表映射（GUARD_* 家族与 FOREIGN_OWNERSHIP/PROJECTIONS_REMAIN/GC_UNKNOWN_REFERENCE → conflict），不透传内核 message。
+Creator MUST keep unsaved edits in a draft, save with an expected revision, and distinguish success, conflict and failure. Creator 删除 MUST 保留宿主 revision 契约（删除前身份文件内容 sha256 对 expectedRevision 的校验为第一层），并按发现层 ownership 双路由执行：`ownership === "ccski"` 的技能 MUST 经内核删除——单 face 删除 = `removeEntityProjections`（该 provider root 的投影摘除，实体与其余投影保留）；末投影删除升级全清（内核 last-reference GC 退役实体）；实体 face（provider root === 实体根）= 实体 + 全部投影 + state 记录全清零残留（零投影时直接 `deleteEntity` 受 GUARD_ENTITY 第二层守卫）；判定基准 = state 投影表该实体的注册投影数，state 缺失/不兼容/实体记录缺席 MUST 按保守路径 typed 拒绝（不回落直删制造残留、不假装内核管辖）。其余技能（external/unknown/普通目录）MUST 保留宿主直删路径（provider-root containment + rmSync），但实体库根 face 例外（宿主修复批 6，P0-2）：provider root 即 `<ws>/.agents/skills` 实体库根时，无论 ownership 标注如何（unknown 只说明 state 缺失/降级、external 只说明外部占位）MUST 保守拒绝直删——typed INVALID_OPERATION 指路 `ccski state repair`（直删会留下其它 provider 的悬空投影与 stale state 记录）。删除事务 revision MUST 贯穿内核（宿主修复批 7，P1-D）：ccski 删除路径在第一层内容校验前观察 state 实体 revision（内核 GUARD_ENTITY 的 CAS 币种；宿主侧 SKILL.md sha256 与之不同币不可直传），经 `expectedEntityRevision` 传入末投影 GC 退役；内核 CAS 不一致返回 GUARD_ENTITY 时 MUST 映射 conflict（复用现有有限词表），实体/投影不动。内核 typed error MUST 经有限词表映射（GUARD_* 家族与 FOREIGN_OWNERSHIP/PROJECTIONS_REMAIN/GC_UNKNOWN_REFERENCE → conflict），不透传内核 message。
 
 #### Scenario: revision conflict
 
@@ -49,6 +49,16 @@ Creator MUST keep unsaved edits in a draft, save with an expected revision, and 
 
 - **WHEN** 删除一个非 ccski 管辖的普通目录技能
 - **THEN** 走宿主直删路径（containment + rmSync），目录消失
+
+#### Scenario: 实体库根 face 保守拒绝（P0-2 契约同步）
+
+- **WHEN** 删除发生在实体库根 face（provider root === 实体根）且 ownership 非 ccski（state 缺失/降级标 unknown，或外部占位 external）
+- **THEN** 以 typed INVALID_OPERATION 保守拒绝并指路 `ccski state repair`，磁盘零副作用（实体与其余 provider 投影原样），不回落直删
+
+#### Scenario: 删除事务并发冲突（P1-D）
+
+- **WHEN** 删除请求通过第一层 revision 校验后、内核 GC 退役提交前，实体被并发更新（state 实体 revision 换新）
+- **THEN** 内核以 GUARD_ENTITY 拒绝退役，宿主投影为 conflict（有限词表携带 ccski code token），实体/投影/state 记录原样
 
 #### Scenario: 内核 guard 冲突映射
 

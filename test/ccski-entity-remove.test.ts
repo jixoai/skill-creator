@@ -16,7 +16,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureEntity, projectEntity } from "ccski";
-import { removeCcskiEntity } from "../src/daemon/ccski-entity-remove.js";
+import {
+  createCcskiEntityRemover,
+  observeCcskiEntityRevision,
+  removeCcskiEntity,
+} from "../src/daemon/ccski-entity-remove.js";
 import { createCreatorService } from "../src/daemon/creator-service.js";
 import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
@@ -556,5 +560,173 @@ describe("creator remove dual routing (ccski-3-host-migration 批 5)", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(fs.existsSync(fixture.entityDir)).toBe(true);
     expect(fs.existsSync(path.join(fixture.providerRoots.openclaw, "offpath-skill"))).toBe(true);
+  });
+
+  it("conflicts when the entity was concurrently updated after the delete request passed its revision check (P1-D 竞态 seam)", async () => {
+    // 终审 P1-D 现场：creator 只在调用 remover 前验 UI revision；末投影
+    // removeEntityProjections 不携带版本 → 校验通过后实体被并发换新，旧删除
+    // 请求仍可删新实体。修复后（内核新契约 expectedEntityRevision，seam 注入）：
+    // 宿主把观察时点 revision 传入内核 GC 退役，CAS 不一致 → GUARD_ENTITY →
+    // conflict 有限词表，实体/投影原样。
+    const fixture = await kernelFixture({ name: "racy-gc-skill", projectTo: ["openclaw"] });
+    const skill = (await fixture.skills.list(fixture.targets.openclaw, true)).find(
+      (row) => row.name === "racy-gc-skill",
+    );
+    if (!skill) throw new Error("Expected the projected skill.");
+    const document = await fixture.skills.info(fixture.targets.openclaw, skill.id);
+    // 观察时点基准 = creator 删除路径将读到的 state 实体 revision（P1-D 币种）。
+    const observedRevision = observeCcskiEntityRevision({
+      workspaceDirectory: fixture.canonicalWorkspace,
+      skillName: "racy-gc-skill",
+    });
+    expect(observedRevision).toMatch(/^[0-9a-f]{16,}$/);
+
+    const creator = createCreatorService(fixture.workspaces, fixture.skills, {
+      entityRemoveKernel: {
+        // 模拟内核末投影 GC 退役 CAS：调用时点并发更新已换新 state 实体
+        // revision；expectedEntityRevision（观察时点旧值）≠ 当前 state → GUARD_ENTITY。
+        removeEntityProjections: async (options) => {
+          const raw = JSON.parse(fs.readFileSync(fixture.statePath, "utf8")) as {
+            entities: Record<string, { revision?: string }>;
+          };
+          raw.entities["racy-gc-skill"]!.revision = "concurrent-new-revision";
+          fs.writeFileSync(fixture.statePath, JSON.stringify(raw));
+          if (options.expectedEntityRevision !== observedRevision) {
+            throw new Error(
+              `host must pass the revision observed at delete-request time, got ${String(options.expectedEntityRevision)}`,
+            );
+          }
+          return {
+            kind: "error" as const,
+            code: "GUARD_ENTITY" as const,
+            message: "RAW KERNEL INTERNAL DETAIL must not leak",
+          };
+        },
+        deleteEntity: async () => {
+          throw new Error("unexpected deleteEntity call on a projected face");
+        },
+      },
+    });
+
+    await expect(
+      creator.remove(fixture.targets.openclaw, skill.id, document.revision),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("ccski code: GUARD_ENTITY"),
+    });
+    // 实体/投影/state 记录原样（除模拟并发换新的 revision 字段），零磁盘副作用。
+    expect(fs.existsSync(fixture.entityDir)).toBe(true);
+    expect(
+      fs.lstatSync(path.join(fixture.providerRoots.openclaw, "racy-gc-skill")).isSymbolicLink(),
+    ).toBe(true);
+    expect(entityRecordExists(fixture.statePath, "racy-gc-skill")).toBe(true);
+    expect(projectionRecordsFor(fixture.statePath, "racy-gc-skill")).toBe(1);
+  });
+
+  it("prefers the delete-transaction observed revision over the routing mirror on the zero-projection deleteEntity path (P1-D seam 贯穿)", async () => {
+    const fixture = await kernelFixture({ name: "observed-skill", projectTo: [] });
+    let deleteReceived: string | undefined;
+    const remover = createCcskiEntityRemover({
+      deleteEntity: async (options) => {
+        deleteReceived = options.expectedRevision;
+        return { kind: "ok" as const, directoryDeleted: true };
+      },
+      removeEntityProjections: async () => {
+        throw new Error("unexpected removeEntityProjections call");
+      },
+    });
+
+    // 观察值 ≠ state 当前 revision（模拟：观察后 state 已被并发换新，路由镜像
+    // 读到新值）——恒用观察值 = 更严的 CAS 基准，绝不放大窗口。
+    await remover({
+      workspaceDirectory: fixture.canonicalWorkspace,
+      providerRoot: fixture.providerRoots.amp,
+      skillName: "observed-skill",
+      expectedEntityRevision: "observed-old-revision",
+    });
+
+    expect(deleteReceived).toBe("observed-old-revision");
+    expect(deleteReceived).not.toBe(
+      observeCcskiEntityRevision({
+        workspaceDirectory: fixture.canonicalWorkspace,
+        skillName: "observed-skill",
+      }),
+    );
+  });
+
+  it("prefers the delete-transaction observed revision on the entity-face GC retirement path (P1-D seam 贯穿)", async () => {
+    const fixture = await kernelFixture({ name: "observed-gc-skill", projectTo: ["claude-code"] });
+    let received: string | undefined;
+    const remover = createCcskiEntityRemover({
+      removeEntityProjections: async (options) => {
+        received = options.expectedEntityRevision;
+        return {
+          kind: "ok" as const,
+          entityRemoved: true,
+          results: [
+            {
+              root: fixture.providerRoots["claude-code"],
+              rootId: "root",
+              path: path.join(fixture.providerRoots["claude-code"], "observed-gc-skill"),
+              status: "removed" as const,
+            },
+          ],
+          removed: 1,
+          skipped: 0,
+          failed: 0,
+          gc: { attempted: true, entityDeleted: true, warnings: [] },
+          generation: 2,
+        };
+      },
+      deleteEntity: async () => {
+        throw new Error("unexpected deleteEntity call with projections present");
+      },
+    });
+
+    await remover({
+      workspaceDirectory: fixture.canonicalWorkspace,
+      providerRoot: fixture.providerRoots.amp,
+      skillName: "observed-gc-skill",
+      expectedEntityRevision: "observed-old-revision",
+    });
+
+    expect(received).toBe("observed-old-revision");
+  });
+
+  it("observes the state entity revision before the first-layer content check and returns null on degraded state (P1-D 观察面)", async () => {
+    const setup = await kernelFixture({ name: "observe-skill", projectTo: [] });
+    const revision = observeCcskiEntityRevision({
+      workspaceDirectory: setup.canonicalWorkspace,
+      skillName: "observe-skill",
+    });
+    // 与 state 实体记录同币种（folder hash hex）。
+    expect(revision).toMatch(/^[0-9a-f]{16,}$/);
+    const raw = JSON.parse(fs.readFileSync(setup.statePath, "utf8")) as {
+      entities: Record<string, { revision?: string }>;
+    };
+    expect(revision).toBe(raw.entities["observe-skill"]!.revision);
+
+    // 降级/缺失 state → null（不抛错；后续删除路由按同源镜像保守拒绝）。
+    fs.writeFileSync(setup.statePath, "{ not json", "utf8");
+    expect(
+      observeCcskiEntityRevision({
+        workspaceDirectory: setup.canonicalWorkspace,
+        skillName: "observe-skill",
+      }),
+    ).toBeNull();
+    fs.rmSync(setup.statePath);
+    expect(
+      observeCcskiEntityRevision({
+        workspaceDirectory: setup.canonicalWorkspace,
+        skillName: "observe-skill",
+      }),
+    ).toBeNull();
+    // 实体记录缺席（未跟踪逻辑名）→ null。
+    expect(
+      observeCcskiEntityRevision({
+        workspaceDirectory: setup.canonicalWorkspace,
+        skillName: "never-registered-skill",
+      }),
+    ).toBeNull();
   });
 });

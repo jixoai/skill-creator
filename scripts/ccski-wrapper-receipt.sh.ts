@@ -12,8 +12,14 @@
  *   [2] 逐字段收据：七字段消费口径（provider/location/sourceKind/sourcePriority/
  *       disabled/canonicalPath(=mutation target)/directoryName）逐行落 JSON +
  *       md 逐字段值表（key 不进表格单元格，杜绝 `|` 拆列）。
+ *   [3] 收据门禁（宿主修复批 7，P1-F）：字段漂移 / 缺行（仅单侧）/ 重复行键
+ *       六项任一非零 → exit 1。旧门禁只看字段漂移，缺行只进报告不进门禁，且
+ *       Map 折叠吞掉同键多行 → 行集合不一致仍假绿。门禁判定提炼为可测纯函数
+ *       evaluateReceiptGate（main 经 isMainModule 守卫，测试可直接 import）。
  * 妥协声明：wrapper 已从主干删除，复跑依赖 git 历史在场（ref 可经首个参数覆盖，
  * 默认 fe52b62^ = 删除提交的父）；产物确定性（无时间戳），复跑 diff 为空即无漂移。
+ * 缓存目录走 mkdtemp 唯一后缀（宿主修复批 7，P2-H：固定名 + recursive 清理可能
+ * 删掉同名既有目录；仓库内位置是为 wrapper 源码的 node_modules 裸说明符可达）。
  *
  * 运行：bun scripts/ccski-wrapper-receipt.sh.ts [wrapperGitRef]
  */
@@ -30,8 +36,6 @@ const repoRoot = path.resolve(__dirname, "..");
 const changeDir = path.join(repoRoot, "openspec", "changes", "ccski-3-host-migration");
 const wrapperRef = process.argv[2] ?? "fe52b62^";
 const wrapperPathInHistory = "src/daemon/ccski-symlink-entries.ts";
-/** wrapper 动态 import 的缓存目录（仓库内 → node_modules 解析可达；跑完即删）。 */
-const cacheDir = path.join(repoRoot, ".wrapper-receipt-cache");
 
 /** 七字段消费口径（宿主消费面投影）。 */
 const FIELDS = [
@@ -45,6 +49,8 @@ const FIELDS = [
 ] as const;
 type FieldName = (typeof FIELDS)[number];
 type ProjectedRow = { name: string } & Record<FieldName, string>;
+
+export type { FieldName, ProjectedRow };
 
 function projectRow(row: SkillMetadata, fixtureRoot: string): ProjectedRow {
   // canonicalPath 口径 = ccski 原生增量字段（realpath 身份源；缺席时回退 path），
@@ -112,9 +118,24 @@ interface ShapeResult {
   drift: Array<{ key: string; field: FieldName; wrapper: string; direct: string }>;
   missingInDirect: string[];
   missingInWrapper: string[];
+  /** 重复行键（P1-F）：Map 折叠会把同键多行并成一行，行集合不一致被静默吞掉。 */
+  duplicateWrapperKeys: string[];
+  duplicateDirectKeys: string[];
 }
 
-function compareShape(
+export type { ShapeResult };
+
+/** 找出一侧行集合里出现多于一次的行键（排序稳定，供门禁与报告）。 */
+function duplicateKeys(rows: ProjectedRow[]): string[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(rowKey(row), (counts.get(rowKey(row)) ?? 0) + 1);
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([key]) => key)
+    .sort();
+}
+
+export function compareShape(
   shape: string,
   wrapperRows: ProjectedRow[],
   directRows: ProjectedRow[],
@@ -139,7 +160,53 @@ function compareShape(
   for (const key of directByKey.keys()) {
     if (!wrapperByKey.has(key)) missingInWrapper.push(key);
   }
-  return { shape, wrapperRows, directRows, drift, missingInDirect, missingInWrapper };
+  return {
+    shape,
+    wrapperRows,
+    directRows,
+    drift,
+    missingInDirect,
+    missingInWrapper,
+    duplicateWrapperKeys: duplicateKeys(wrapperRows),
+    duplicateDirectKeys: duplicateKeys(directRows),
+  };
+}
+
+/**
+ * 收据门禁判定（宿主修复批 7，P1-F）：字段漂移、行集合不一致（仅单侧在场的
+ * missing rows）、任一侧重复行键——任一非零即收据不绿（exit 1）。旧门禁只看
+ * 字段漂移：缺行只进报告不进门禁，且 compareShape 的 Map 折叠把同键多行并成
+ * 一行，行集合不一致仍 exit 0（假绿）。
+ */
+export function evaluateReceiptGate(shapes: ReadonlyArray<ShapeResult>): {
+  ok: boolean;
+  reasons: string[];
+} {
+  const reasons: string[] = [];
+  for (const shape of shapes) {
+    if (shape.drift.length > 0) {
+      reasons.push(`${shape.shape}: ${shape.drift.length} drifted field(s)`);
+    }
+    if (shape.missingInDirect.length > 0) {
+      reasons.push(
+        `${shape.shape}: ${shape.missingInDirect.length} row(s) missing in direct ccski`,
+      );
+    }
+    if (shape.missingInWrapper.length > 0) {
+      reasons.push(`${shape.shape}: ${shape.missingInWrapper.length} row(s) missing in wrapper`);
+    }
+    if (shape.duplicateWrapperKeys.length > 0) {
+      reasons.push(
+        `${shape.shape}: duplicate wrapper row key(s): ${shape.duplicateWrapperKeys.join(", ")}`,
+      );
+    }
+    if (shape.duplicateDirectKeys.length > 0) {
+      reasons.push(
+        `${shape.shape}: duplicate direct row key(s): ${shape.duplicateDirectKeys.join(", ")}`,
+      );
+    }
+  }
+  return { ok: reasons.length === 0, reasons };
 }
 
 function renderMarkdown(receipt: {
@@ -183,15 +250,23 @@ function renderMarkdown(receipt: {
     lines.push(
       `- 行数：wrapper=${shape.wrapperRows.length}，直连=${shape.directRows.length}；` +
         `字段漂移=${shape.drift.length}；仅 wrapper=${shape.missingInDirect.length}；` +
-        `仅直连=${shape.missingInWrapper.length}。`,
+        `仅直连=${shape.missingInWrapper.length}；重复键 wrapper=${shape.duplicateWrapperKeys.length}、` +
+        `直连=${shape.duplicateDirectKeys.length}（P1-F：以上六项任一非零 → 门禁 exit 1）。`,
     );
   }
   lines.push("");
   lines.push("## 结论");
   lines.push("");
   const totalDrift = receipt.shapes.reduce((sum, shape) => sum + shape.drift.length, 0);
+  const gate = evaluateReceiptGate(receipt.shapes);
   lines.push(
     `漂移字段总数 = ${totalDrift}（0 = 全等；wrapper 增补在 ccski 3.0 一等发现下为 no-op）。`,
+  );
+  lines.push("");
+  lines.push(
+    gate.ok
+      ? "门禁：绿（字段漂移 / 缺行 / 重复键全部为零，P1-F 六项门禁全过）。"
+      : "门禁：红（见上方行数统计；P1-F 门禁任一非零即 exit 1，不再假绿）。",
   );
   lines.push("");
   lines.push("已知分析性差异（不进入上表口径）：ccski 3.0 发现行额外携带 entryKind/canonicalPath/");
@@ -214,7 +289,9 @@ async function main(): Promise<void> {
     encoding: "utf8",
     maxBuffer: 1024 * 1024,
   });
-  fs.mkdirSync(cacheDir, { recursive: true });
+  // P2-H：mkdtemp 唯一缓存目录——固定名 + recursive 清理可能删掉同名既有目录；
+  // 唯一后缀保证只清理本次创建的路径（崩溃残留由 .gitignore 的前缀规则兜底）。
+  const cacheDir = fs.mkdtempSync(path.join(repoRoot, ".wrapper-receipt-cache-"));
   const wrapperFile = path.join(cacheDir, "ccski-symlink-entries.generated.ts");
   fs.writeFileSync(wrapperFile, wrapperSource, "utf8");
   const wrapperModule = (await import(pathToFileUrlHref(wrapperFile))) as {
@@ -259,15 +336,32 @@ async function main(): Promise<void> {
   });
 
   const totalDrift = shapes.reduce((sum, shape) => sum + shape.drift.length, 0);
+  const gate = evaluateReceiptGate(shapes);
   console.log(
     `receipt regenerated: ${shapes.length} shapes, drift fields = ${totalDrift}, ` +
       `ccski ${ccskiVersion.version}, wrapper @ ${wrapperRef}`,
   );
-  if (totalDrift > 0) process.exitCode = 1;
+  // P1-F 门禁：字段漂移、缺行、重复键任一非零 → exit 1（不再只看 drift 假绿）。
+  if (!gate.ok) {
+    console.error(`receipt gate failed:\n  ${gate.reasons.join("\n  ")}`);
+    process.exitCode = 1;
+  }
+}
+
+function isMainModule(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return fs.realpathSync(path.resolve(entry)) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  await main();
 }
 
 function pathToFileUrlHref(target: string): string {
   return `file://${target.split(path.sep).map(encodeURIComponent).join("/")}`;
 }
-
-await main();

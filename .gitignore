@@ -19,3 +19,6 @@ webui/build-island
 .cache/
 .svelte-kit/
 /static/
+
+# ccski wrapper receipt script mkdtemp cache (P2-H crash leftovers)
+.wrapper-receipt-cache-/

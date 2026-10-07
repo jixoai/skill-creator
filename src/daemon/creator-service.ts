@@ -26,7 +26,11 @@ import {
 import type { SkillId } from "../shared/contracts/skills.js";
 import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import { safeParseExternal } from "../shared/external-input.js";
-import { createCcskiEntityRemover, type CcskiEntityRemoveKernel } from "./ccski-entity-remove.js";
+import {
+  createCcskiEntityRemover,
+  observeCcskiEntityRevision,
+  type CcskiEntityRemoveKernel,
+} from "./ccski-entity-remove.js";
 import { ccskiEntityLibraryRoot } from "./ccski-state-disabled.js";
 import { DomainError } from "./domain-error.js";
 import { assertPathInside, atomicWriteUtf8, contentRevision, directChild } from "./path-safety.js";
@@ -267,17 +271,28 @@ async function remove(
   const workspaceRoot = scope.directory;
   const skill = await skills.resolve(target, skillId);
   if (skill.ownership === "ccski") {
-    assertRevisionCurrent(skills, skill, expectedRevision);
     if (scope.workspaceDirectory === undefined) {
       throw new DomainError(
         "UNAVAILABLE",
         `Provider skills directory is not writable: ${scope.workspaceLabel}`,
       );
     }
+    // P1-D 删除事务 revision 贯穿（宿主修复批 7）：在第一层内容校验【前】观察
+    // state 实体 revision，经 expectedEntityRevision 传入内核末投影 GC 退役 CAS。
+    // 币种依据：内核 GUARD_ENTITY 基准是 state 实体 revision（folder hash），宿主
+    // 侧 SKILL.md sha256 与之不同币不可直传；先观察再校验使并发交叠全覆盖——
+    // 观察→校验间换新由第一层内容校验拒绝，校验→内核提交间换新由内核 CAS 拒绝
+    // （旧内核快照忽略该字段，无 CAS 保护，属已记录的过渡期缺口）。
+    const observedEntityRevision = observeCcskiEntityRevision({
+      workspaceDirectory: scope.workspaceDirectory,
+      skillName: skill.name,
+    });
+    assertRevisionCurrent(skills, skill, expectedRevision);
     await removeCcskiEntity({
       workspaceDirectory: scope.workspaceDirectory,
       providerRoot: scope.directory,
       skillName: skill.name,
+      expectedEntityRevision: observedEntityRevision ?? undefined,
     });
   } else {
     refuseEntityLibraryFaceDeletion(scope);

@@ -61,7 +61,7 @@
 | canonicalPath  | `/private<fixture>/provider-root/real-enabled` | `/private<fixture>/provider-root/real-enabled` | 全等 |
 | directoryName  | `real-enabled`                                 | `real-enabled`                                 | 全等 |
 
-- 行数：wrapper=4，直连=4；字段漂移=0；仅 wrapper=0；仅直连=0。
+- 行数：wrapper=4，直连=4；字段漂移=0；仅 wrapper=0；仅直连=0；重复键 wrapper=0、直连=0（P1-F：以上六项任一非零 → 门禁 exit 1）。
 
 ## 调用形状：all:false
 
@@ -89,11 +89,13 @@
 | canonicalPath  | `/private<fixture>/provider-root/real-enabled` | `/private<fixture>/provider-root/real-enabled` | 全等 |
 | directoryName  | `real-enabled`                                 | `real-enabled`                                 | 全等 |
 
-- 行数：wrapper=2，直连=2；字段漂移=0；仅 wrapper=0；仅直连=0。
+- 行数：wrapper=2，直连=2；字段漂移=0；仅 wrapper=0；仅直连=0；重复键 wrapper=0、直连=0（P1-F：以上六项任一非零 → 门禁 exit 1）。
 
 ## 结论
 
 漂移字段总数 = 0（0 = 全等；wrapper 增补在 ccski 3.0 一等发现下为 no-op）。
+
+门禁：绿（字段漂移 / 缺行 / 重复键全部为零，P1-F 六项门禁全过）。
 
 已知分析性差异（不进入上表口径）：ccski 3.0 发现行额外携带 entryKind/canonicalPath/
 ownership/mode 增量字段（z.object 收窄剥离，宿主投影不受影响，且为批 2.3 toggle 双路由

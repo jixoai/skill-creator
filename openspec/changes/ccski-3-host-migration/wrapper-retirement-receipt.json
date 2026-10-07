@@ -90,7 +90,9 @@
       ],
       "drift": [],
       "missingInDirect": [],
-      "missingInWrapper": []
+      "missingInWrapper": [],
+      "duplicateWrapperKeys": [],
+      "duplicateDirectKeys": []
     },
     {
       "shape": "all:false",
@@ -140,7 +142,9 @@
       ],
       "drift": [],
       "missingInDirect": [],
-      "missingInWrapper": []
+      "missingInWrapper": [],
+      "duplicateWrapperKeys": [],
+      "duplicateDirectKeys": []
     }
   ]
 }

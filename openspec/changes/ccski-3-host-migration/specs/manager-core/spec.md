@@ -28,7 +28,7 @@
 
 ### Requirement: skills 更新以内核单源 hash 与代际收敛
 
-`skills.update` 的 hash 对比 MUST 消费内核导出的 `computeSkillFolderHash` 单源（宿主不得维护第二实现）；apply MUST 走内核实体 update（2.x 重装路径退役）。存量 lock 的 40-hex 旧算法条目 MUST 视为 stale 触发重装收敛——收敛的 hash 覆盖层是 daemon 内存态（npm lock 唯一写者是 skills CLI，宿主不落盘），因此收敛语义为「daemon 生命周期内一次」：同一 daemon 内 apply 后 recheck 为 already-current，不伪装成功；daemon 重启后若 lock 仍持 40-hex 旧值，该项再次判 stale 重新收敛。lock 或 GitHub API 不可用 MUST 投影为 skipped/unavailable（不抛基础设施错误、不伪装成功）；apply 成功条目 MUST 诚实携带 `lockSyncPending: true`（分层单写者恒定，宿主只在内存覆盖层刷新 hash）。
+`skills.update` 的 hash 对比 MUST 消费内核导出的 `computeSkillFolderHash` 单源（宿主不得维护第二实现）；apply MUST 走内核实体 update（2.x 重装路径退役）。apply 的逐投影收据 MUST 按下述边界裁决（宿主修复批 6 P0-1 + 批 7 P0-C）：收据在场且 failed（GUARD_PROJECTION 等）= 如实失败、绝不触碰该 root 文件系；legacy 清理（rmSync 未登记物化副本后补投影）仅在能正向证明该 root 未登记时允许——内核 ok 变体报告 `degradedProjectionState: true`（state 投影表有损坏记录被丢弃）时，本轮对全部物化/疑似物化 root MUST fail closed（typed 失败指路 `ccski state repair`）；内核显式 `degradedProjectionState: false`（投影表完整解析）时收据缺席 = 正向证明未登记，legacy 收敛允许；内核未报告投影表健康度（旧内核）时，收据缺席 + 物化目录（非 symlink、非实体本地形态）MUST 同样保守 fail closed——收据缺席 ≠ 未登记（损坏记录被丢弃后同样无收据）。存量 lock 的 40-hex 旧算法条目 MUST 视为 stale 触发重装收敛——收敛的 hash 覆盖层是 daemon 内存态（npm lock 唯一写者是 skills CLI，宿主不落盘），因此收敛语义为「daemon 生命周期内一次」：同一 daemon 内 apply 后 recheck 为 already-current，不伪装成功；daemon 重启后若 lock 仍持 40-hex 旧值，该项再次判 stale 重新收敛。lock 或 GitHub API 不可用 MUST 投影为 skipped/unavailable（不抛基础设施错误、不伪装成功）；apply 成功条目 MUST 诚实携带 `lockSyncPending: true`（分层单写者恒定，宿主只在内存覆盖层刷新 hash）。
 
 #### Scenario: 40-hex 代际收敛
 
@@ -44,3 +44,8 @@
 
 - **WHEN** apply 成功重装一项技能
 - **THEN** 该项结果携带 `lockSyncPending: true`（宿主不写 npm lock）
+
+#### Scenario: 损坏投影记录 fail closed（P0-C）
+
+- **WHEN** state 投影记录损坏（mode 等字段坏）被内核丢弃 → 该 root 无更新收据，且该 root 上是（疑似）物化目录
+- **THEN** apply 对该项 typed 失败并指路 `ccski state repair`，物化目录与用户修改原样保留（绝不 legacy 清理 rmSync），hash 覆盖层不刷新；仅当内核显式证明投影表完整解析（degradedProjectionState: false）时，收据缺席才按未登记 legacy 副本收敛为投影

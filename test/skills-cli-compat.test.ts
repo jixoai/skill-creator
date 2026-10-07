@@ -1390,6 +1390,364 @@ describe("skills-CLI apply-update", () => {
     expect(fs.readFileSync(path.join(canonical, "SKILL.md"), "utf8")).toContain("Local skill.");
     await repository.dispose();
   });
+
+  it("fails closed without legacy cleanup when a corrupted projection record leaves no update receipt (P0-C 回归)", async () => {
+    // 终审 P0-C 现场（真实内核复现）：state 投影记录 mode 损坏 → 内核
+    // parseProjectionTable 丢弃该记录 → 该 root 无收据 → 旧逻辑把「无收据」解释
+    // 为「未登记 root」执行 legacy 清理 rmSync 用户改过的物化副本并打 link。
+    // 修复后（快照过渡语义：内核未报告投影表健康度时收据缺席 ≠ 未登记）：
+    // typed 失败指路 ccski state repair，磁盘原样、绝不 legacy 清理。
+    const repo = buildGitRepo("git-degraded-record");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream skill.",
+      "# Upstream\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "init");
+
+    const workspaceRoot = path.join(sandbox, "ws-degraded-record");
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    const source = writeSkillDocument(path.join(sandbox, "degraded-src"), "demo-skill");
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "degraded-record");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openclawProviderId,
+    };
+    const scope = workspaces.resolve(target, true);
+    const canonicalWorkspace = scope.workspaceDirectory ?? workspaceRoot;
+    const providerRoot = scope.directory;
+    fs.mkdirSync(providerRoot, { recursive: true });
+
+    // 实体 + 物化投影（真实内核），随后用户修改物化副本。
+    const ensured = await ensureEntity({
+      scope: "project",
+      workspaceDir: canonicalWorkspace,
+      source: { dir: source },
+    });
+    if (ensured.kind !== "ok") throw new Error(`ensureEntity failed: ${JSON.stringify(ensured)}`);
+    const projected = await projectEntity({
+      scope: "project",
+      workspaceDir: canonicalWorkspace,
+      name: "demo-skill",
+      roots: [providerRoot],
+      mode: "materialized",
+      reason: "user-request",
+    });
+    if (projected.kind !== "ok")
+      throw new Error(`projectEntity failed: ${JSON.stringify(projected)}`);
+    const materializedDir = path.join(providerRoot, "demo-skill");
+    fs.writeFileSync(
+      path.join(materializedDir, "SKILL.md"),
+      '---\nname: "demo-skill"\ndescription: "USER EDIT"\n---\n# USER EDIT\n',
+      "utf8",
+    );
+
+    // 损坏该投影记录的 mode 字段（Codex 实测口径：改为无效值）。
+    const statePath = path.join(canonicalWorkspace, ".agents", ".ccski-state.json");
+    const rawState = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
+      projections: Record<string, { folderName?: string; mode?: string }>;
+    };
+    let corrupted = 0;
+    for (const record of Object.values(rawState.projections)) {
+      if (record.folderName === "demo-skill") {
+        record.mode = "corrupted-mode";
+        corrupted += 1;
+      }
+    }
+    expect(corrupted).toBe(1);
+    fs.writeFileSync(statePath, JSON.stringify(rawState), "utf8");
+
+    const canonical = fs.realpathSync(materializedDir);
+    const probe = createSkillsCliProbe({
+      run: async () => ({
+        stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
+      }),
+    });
+    await probe.probe();
+    const skills = createSkillService(workspaces, {
+      skillsCliProbe: probe,
+      discoverSkills: discovererFor([{ directory: canonical }]),
+    });
+    const repository = createRepositoryService(workspaces, skills);
+    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+      readGlobalLock: () =>
+        JSON.stringify({
+          version: 3,
+          skills: {
+            "demo-skill": {
+              source: repo,
+              sourceType: "local",
+              sourceUrl: repo,
+              skillPath: "skills/demo-skill",
+              skillFolderHash: "OLDHASH",
+              installedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        }),
+      readProjectLock: () => null,
+    });
+
+    const discovered = await skills.list(target);
+    const skillId = discovered[0]?.id as SkillId;
+    const result = await service.applyUpdates(target, [skillId], {
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillIds: [skillId],
+    });
+    const entry = result.results[0];
+    expect(entry).toMatchObject({ status: "failed" });
+    // 断言钉住裁决面：这是宿主侧 fail-closed 裁决（无 ccski code token），不是
+    // 内核 typed error（STATE_RECOVERY_REQUIRED 文案也含 state repair 字样）。
+    expect(entry?.error).toContain(
+      "cannot prove whether the materialized provider entry is registered",
+    );
+    expect(entry?.error).toContain("ccski state repair");
+    expect(entry?.error).not.toContain("ccski code:");
+    expect(entry).not.toHaveProperty("lockSyncPending");
+    // 用户修改字节保留；目录仍是物化目录（未被 legacy 清理、未变 link）。
+    expect(fs.lstatSync(materializedDir).isDirectory()).toBe(true);
+    expect(fs.readFileSync(path.join(materializedDir, "SKILL.md"), "utf8")).toContain("USER EDIT");
+    // 宿主不修 state：损坏记录原样在场（folderName 仍可辨认）。
+    const afterState = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
+      projections: Record<string, { folderName?: string; mode?: string }>;
+    };
+    expect(
+      Object.values(afterState.projections).some(
+        (record) => record.folderName === "demo-skill" && record.mode === "corrupted-mode",
+      ),
+    ).toBe(true);
+    // 覆盖层未刷新（失败不伪装成功）。
+    expect(service._hashOverlayForTest().size).toBe(0);
+    await repository.dispose();
+  });
+
+  it("fails closed for materialized roots when the kernel reports degradedProjectionState (P0-C 新契约 seam)", async () => {
+    // 内核新契约（并行落地，形状钉死）：ok 变体携带 degradedProjectionState=true +
+    // invalidProjectionKeys。宿主消费：本轮对物化/疑似物化 root 一律 typed 失败
+    // 指路 state repair，绝不 legacy 清理（即使收据缺席看起来像未登记 root）。
+    const repo = buildGitRepo("git-degraded-flag");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream skill.",
+      "# Upstream\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "init");
+
+    const workspaceRoot = path.join(sandbox, "ws-degraded-flag");
+    const localSkillDir = writeSkillDocument(
+      path.join(workspaceRoot, "skills", "demo-skill"),
+      "demo-skill",
+      "Local skill.",
+      "# Local\n",
+    );
+    const canonical = fs.realpathSync(localSkillDir);
+
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "degraded-flag");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openclawProviderId,
+    };
+    const probe = createSkillsCliProbe({
+      run: async () => ({
+        stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
+      }),
+    });
+    await probe.probe();
+    const skills = createSkillService(workspaces, {
+      skillsCliProbe: probe,
+      discoverSkills: discovererFor([{ directory: canonical }]),
+    });
+    const repository = createRepositoryService(workspaces, skills);
+    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+      kernel: {
+        updateEntity: async () => ({
+          kind: "ok" as const,
+          status: "updated" as const,
+          entity: { folderName: "demo-skill" },
+          projections: [],
+          degradedProjectionState: true,
+          invalidProjectionKeys: ["proj#<root>/demo-skill"],
+          updated: 1,
+          unchanged: 0,
+          skipped: 0,
+          failed: 0,
+          generation: 1,
+          lockSyncPending: true,
+          warnings: [],
+        }),
+        ensureEntity: async () => {
+          throw new Error(
+            "must not be reached when the kernel reports a degraded projection table",
+          );
+        },
+        projectEntity: async () => {
+          throw new Error(
+            "must not be reached when the kernel reports a degraded projection table",
+          );
+        },
+      },
+      readGlobalLock: () =>
+        JSON.stringify({
+          version: 3,
+          skills: {
+            "demo-skill": {
+              source: repo,
+              sourceType: "local",
+              sourceUrl: repo,
+              skillPath: "skills/demo-skill",
+              skillFolderHash: "OLDHASH",
+              installedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        }),
+      readProjectLock: () => null,
+    });
+
+    const discovered = await skills.list(target);
+    const skillId = discovered[0]?.id as SkillId;
+    const result = await service.applyUpdates(target, [skillId], {
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillIds: [skillId],
+    });
+    const entry = result.results[0];
+    expect(entry).toMatchObject({ status: "failed" });
+    expect(entry?.error).toContain(
+      "cannot prove whether the materialized provider entry is registered",
+    );
+    expect(entry?.error).toContain("ccski state repair");
+    expect(entry).not.toHaveProperty("lockSyncPending");
+    // 物化目录不被 legacy 清理触碰，内容原样。
+    expect(fs.lstatSync(localSkillDir).isDirectory()).toBe(true);
+    expect(fs.readFileSync(path.join(localSkillDir, "SKILL.md"), "utf8")).toContain("Local skill.");
+    expect(service._hashOverlayForTest().size).toBe(0);
+    await repository.dispose();
+  });
+
+  it("still converges an unregistered materialized copy when the kernel certifies a healthy projection table (P0-C 正向证明边界)", async () => {
+    // 新内核显式 degradedProjectionState=false = 投影表完整解析（无记录被丢弃）：
+    // 收据缺席 = 正向证明该 root 未登记（真 legacy 副本）→ legacy 清理收敛为投影
+    // 的既有语义恢复。此测试钉住「保守不等于永久禁用」——快照刷新后多 provider
+    // legacy 副本的收敛路径不回退。
+    const repo = buildGitRepo("git-certified");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream skill.",
+      "# Upstream\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "init");
+
+    const workspaceRoot = path.join(sandbox, "ws-certified");
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    // 实体已注册（真实内核），provider root 上另有一个未登记的物化 legacy 副本。
+    const source = writeSkillDocument(path.join(sandbox, "certified-src"), "demo-skill");
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "certified");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openclawProviderId,
+    };
+    const scope = workspaces.resolve(target, true);
+    const canonicalWorkspace = scope.workspaceDirectory ?? workspaceRoot;
+    const providerRoot = scope.directory;
+    fs.mkdirSync(providerRoot, { recursive: true });
+    const ensured = await ensureEntity({
+      scope: "project",
+      workspaceDir: canonicalWorkspace,
+      source: { dir: source },
+    });
+    if (ensured.kind !== "ok") throw new Error(`ensureEntity failed: ${JSON.stringify(ensured)}`);
+    const legacyDir = writeSkillDocument(
+      path.join(providerRoot, "demo-skill"),
+      "demo-skill",
+      "Legacy copy.",
+      "# Legacy\n",
+    );
+    const canonical = fs.realpathSync(legacyDir);
+
+    const probe = createSkillsCliProbe({
+      run: async () => ({
+        stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
+      }),
+    });
+    await probe.probe();
+    const skills = createSkillService(workspaces, {
+      skillsCliProbe: probe,
+      discoverSkills: discovererFor([{ directory: canonical }]),
+    });
+    const repository = createRepositoryService(workspaces, skills);
+    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+      kernel: {
+        updateEntity: async () => ({
+          kind: "ok" as const,
+          status: "updated" as const,
+          entity: { folderName: "demo-skill" },
+          projections: [],
+          degradedProjectionState: false,
+          updated: 1,
+          unchanged: 0,
+          skipped: 0,
+          failed: 0,
+          generation: 1,
+          lockSyncPending: true,
+          warnings: [],
+        }),
+        ensureEntity: async () => {
+          throw new Error("must not be reached when the entity already updated");
+        },
+        projectEntity,
+      },
+      readGlobalLock: () =>
+        JSON.stringify({
+          version: 3,
+          skills: {
+            "demo-skill": {
+              source: repo,
+              sourceType: "local",
+              sourceUrl: repo,
+              skillPath: "skills/demo-skill",
+              skillFolderHash: "OLDHASH",
+              installedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        }),
+      readProjectLock: () => null,
+    });
+
+    const discovered = await skills.list(target);
+    const skillId = discovered[0]?.id as SkillId;
+    const result = await service.applyUpdates(target, [skillId], {
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillIds: [skillId],
+    });
+    expect(result.results[0]).toMatchObject({ status: "updated", lockSyncPending: true });
+    // legacy 物化副本被收敛为指向实体的 link 投影，state 记账在场。
+    const projected = path.join(providerRoot, "demo-skill");
+    expect(fs.lstatSync(projected).isSymbolicLink()).toBe(true);
+    const entityDir = path.join(canonicalWorkspace, ".agents", "skills", "demo-skill");
+    expect(fs.realpathSync(projected)).toBe(fs.realpathSync(entityDir));
+    const state = JSON.parse(
+      fs.readFileSync(path.join(canonicalWorkspace, ".agents", ".ccski-state.json"), "utf8"),
+    ) as { projections: Record<string, { folderName?: string; mode?: string }> };
+    expect(
+      Object.values(state.projections).some(
+        (record) => record.folderName === "demo-skill" && record.mode === "link",
+      ),
+    ).toBe(true);
+    await repository.dispose();
+  });
 });
 
 describe("skills-CLI default branch resolution (P1-5)", () => {

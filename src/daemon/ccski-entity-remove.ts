@@ -37,6 +37,7 @@ import {
   ccskiEntityPathBound,
   ccskiProjectionPathBound,
   readCcskiState,
+  type CcskiStateRead,
 } from "./ccski-state-disabled.js";
 import { DomainError } from "./domain-error.js";
 import { safeParseExternal } from "../shared/external-input.js";
@@ -64,9 +65,19 @@ const ProjectionRecordMirrorSchema = z.object({
 
 /** ccski 实体/投影删除内核 seam（批 5）；typed result 不属于异常流。 */
 export interface CcskiEntityRemoveKernel {
-  removeEntityProjections: (options: EntityRemoveOptions) => Promise<EntityRemoveResult>;
+  removeEntityProjections: (options: PinnedEntityRemoveOptions) => Promise<EntityRemoveResult>;
   deleteEntity: (options: DeleteEntityOptions) => Promise<DeleteEntityResult>;
 }
+
+/**
+ * 内核新契约增量（宿主修复批 7，P1-D；与内核并行落地，形状钉死）：
+ * EntityRemoveOptions 新增可选 `expectedEntityRevision`——GC 退役实体前的 CAS
+ * 复核基准，与 state 实体 revision 不一致 → GUARD_ENTITY。快照未刷新前真实
+ * 内核忽略该未知字段（无 CAS 保护），宿主照传；刷新后天然对齐。
+ */
+export type PinnedEntityRemoveOptions = EntityRemoveOptions & {
+  expectedEntityRevision?: string;
+};
 
 /** 真实内核默认实现。 */
 export const ccskiEntityRemoveKernel: CcskiEntityRemoveKernel = {
@@ -82,6 +93,15 @@ export interface CcskiEntityRemoveInput {
   providerRoot: string;
   /** 实体逻辑名（发现行 frontmatter name）。 */
   skillName: string;
+  /**
+   * 删除事务 CAS 基准（P1-D）：creator 在第一层内容校验【前】观察到的 state
+   * 实体 revision。依据：内核 GUARD_ENTITY 的比较基准是 state 实体 revision
+   * （computeSkillFolderHash 币种），宿主侧 SKILL.md sha256 与之不同币不可直传。
+   * 观察先于校验使并发交叠全覆盖：观察→校验间换新由第一层内容校验拒绝，
+   * 校验→内核提交间换新由本 CAS 拒绝。缺席 = 观察不可用（直接调用方/降级
+   * 路径），路由退回自身镜像读取的 revision（窗口较宽但仍有界）。
+   */
+  expectedEntityRevision?: string;
 }
 
 /**
@@ -140,11 +160,16 @@ function conservativeRefusal(detail: string): DomainError {
  * ccski 管辖技能的内核删除（批 5 双路由的内核半区）。判定基准 = state 投影表
  * 该实体的注册投影数：
  * - 实体 face（provider root === 实体根）：零投影 → deleteEntity（GUARD_ENTITY
- *   第二层守卫；expectedRevision = state 实体 revision）；带投影 → 对全部注册
- *   投影根 removeEntityProjections，内核 last-reference GC 退役实体（全清）。
+ *   第二层守卫；expectedRevision = 删除请求观察时点的实体 revision，缺省回退
+ *   state 镜像）；带投影 → 对全部注册投影根 removeEntityProjections，内核
+ *   last-reference GC 退役实体（全清）。
  * - 投影 face：末投影 → removeEntityProjections（内核 GC 全清，断言实体已退役，
  *   被引用阻塞时如实 conflict）；否则单 face 摘除（实体与其余投影保留）。
  * face 无投影记录（未注册条目）= 内核只读拒绝 → conflict，宿主不自行摘除。
+ * P1-D（宿主修复批 7）：全部 removeEntityProjections 调用携带
+ * expectedEntityRevision（观察值优先，镜像值兜底）——内核仅在 GC 退役时消费
+ * （CAS 复核，不一致 GUARD_ENTITY）；宿主自身对「末投影」的判定是时点快照，
+ * 并发摘面可能使单 face 调用在内核侧成为末投影，恒传使退役 CAS 无死角。
  */
 export function createCcskiEntityRemover(
   kernel: CcskiEntityRemoveKernel = ccskiEntityRemoveKernel,
@@ -160,16 +185,7 @@ export function createCcskiEntityRemover(
       );
     }
 
-    const entity = Object.values(state.entities)
-      .map((value) => safeParseExternal(EntityRecordMirrorSchema, value))
-      .find(
-        (record) =>
-          record !== null &&
-          record.logicalName === input.skillName &&
-          // 路径绑定（P1-4，与 disabled 补充面同源）：伪造实体路径不得驱动删除
-          // 路由（词法 + realpath 双 containment，绑定失败 = 记录不可信不匹配）。
-          ccskiEntityPathBound(stateBase, record.folderName, record.path),
-      );
+    const entity = findEntityRecord(state, stateBase, input.skillName);
     if (!entity) {
       throw conservativeRefusal(
         `does not track a skill named "${input.skillName}" in this workspace`,
@@ -191,13 +207,15 @@ export function createCcskiEntityRemover(
       workspaceDir: input.workspaceDirectory,
       name: input.skillName,
     };
+    // GC 退役 CAS 基准（P1-D）：删除请求观察时点优先（更早 = 更严），路由镜像兜底。
+    const expectedEntityRevision = input.expectedEntityRevision ?? entity.revision;
 
     // 实体 face：删除语义 = 实体（+ 全部投影）全清，绝不留悬空链与 stale 记录。
     if (providerRoot === path.resolve(entityRoot)) {
       if (projections.length === 0) {
         const result = await kernel.deleteEntity({
           ...scope,
-          expectedRevision: entity.revision,
+          expectedRevision: expectedEntityRevision,
           roots: [providerRoot],
         });
         if (result.kind === "error") throw removalDomainError(result.code);
@@ -210,7 +228,11 @@ export function createCcskiEntityRemover(
         return;
       }
       const roots = [...new Set(projections.map((record) => path.resolve(record.rootPath)))];
-      const result = await kernel.removeEntityProjections({ ...scope, roots });
+      const result = await kernel.removeEntityProjections({
+        ...scope,
+        roots,
+        expectedEntityRevision,
+      });
       if (result.kind === "error") throw removalDomainError(result.code);
       const failedRoot = result.results.find((rootResult) => rootResult.status === "failed");
       if (failedRoot) throw removalDomainError(failedRoot.errorCode);
@@ -233,7 +255,11 @@ export function createCcskiEntityRemover(
       );
     }
 
-    const result = await kernel.removeEntityProjections({ ...scope, roots: [providerRoot] });
+    const result = await kernel.removeEntityProjections({
+      ...scope,
+      roots: [providerRoot],
+      expectedEntityRevision,
+    });
     if (result.kind === "error") throw removalDomainError(result.code);
     const faceResult = result.results.find(
       (rootResult) => path.resolve(rootResult.root) === providerRoot,
@@ -252,6 +278,45 @@ export function createCcskiEntityRemover(
       );
     }
   };
+}
+
+/**
+ * 按逻辑名解析 state 实体记录（删除路由与 P1-D 观察共用）。路径绑定（P1-4，与
+ * disabled 补充面同源）：伪造实体路径不得驱动删除路由（词法 + realpath 双
+ * containment，绑定失败 = 记录不可信不匹配）。
+ */
+function findEntityRecord(
+  state: Extract<CcskiStateRead, { kind: "ok" }>,
+  stateBase: string,
+  skillName: string,
+): z.infer<typeof EntityRecordMirrorSchema> | null {
+  return (
+    Object.values(state.entities)
+      .map((value) => safeParseExternal(EntityRecordMirrorSchema, value))
+      .find(
+        (record) =>
+          record !== null &&
+          record.logicalName === skillName &&
+          ccskiEntityPathBound(stateBase, record.folderName, record.path),
+      ) ?? null
+  );
+}
+
+/**
+ * 观察一个逻辑名的当前 state 实体 revision（P1-D 删除事务 CAS 基准）。creator
+ * 删除路径在第一层内容校验【前】调用；state 缺失/不兼容/实体记录缺席/绑定失败
+ * → null（不抛错——后续删除路由自身会按同源镜像保守拒绝）；非环 IO 故障上抛
+ * （与 readCcskiState 同法，不伪装可观察）。
+ */
+export function observeCcskiEntityRevision(input: {
+  workspaceDirectory: string;
+  skillName: string;
+}): string | null {
+  const stateBase = path.join(path.resolve(input.workspaceDirectory), ".agents");
+  const state = readCcskiState(stateBase);
+  if (state.kind !== "ok") return null;
+  const entity = findEntityRecord(state, stateBase, input.skillName);
+  return entity?.revision ?? null;
 }
 
 /** 默认 remover（真实内核）。 */

@@ -15,6 +15,13 @@
  *   逐投影收据裁决（宿主修复批 6，P0-1）：顶层 ok ≠ 每 root 成功——物化投影被
  *   用户改过时内核收据 GUARD_PROJECTION failed 且保留被改副本，宿主对该 root
  *   如实失败、绝不走 legacy 清理；legacy 收敛仅在收据缺席（该 root 未注册）时执行。
+ * - legacy 清理正向证明闸（宿主修复批 7，P0-C）：收据缺席 ≠ 未登记——state 投影
+ *   记录损坏（mode 等字段坏）被内核 parseProjectionTable 丢弃后同样无收据。消费
+ *   内核 ok 变体钉死增量字段 degradedProjectionState：true → 本轮对全部物化/疑似
+ *   物化 root fail closed（typed 失败指路 ccski state repair）；显式 false → 投影
+ *   表完整解析，收据缺席 = 正向证明未登记，legacy 收敛恢复；字段缺席（旧内核
+ *   快照）→ 收据缺席 + 物化目录（非 symlink）同样保守 fail closed（过渡期语义：
+ *   无收据的物化目录无法区分未登记 vs 记录损坏）。
  * - GitHub 无 ref 探针跟随真实默认分支（宿主修复批 6，P1-5）：git ls-remote
  *   --symref 解析（不占 API 限额、与克隆同通道），解析失败按探针不可达处理，
  *   不假设 main——默认分支非 main 的仓库不再被误判 unavailable。
@@ -74,11 +81,30 @@ import type { WorkspaceRegistry } from "./workspace-registry/index.js";
 export const computeSkillFolderHash = ccskiComputeSkillFolderHash;
 
 /**
+ * 内核新契约增量（宿主修复批 7，P0-C；与内核并行落地，形状钉死）：updateEntity
+ * ok 变体新增可选 `degradedProjectionState` / `invalidProjectionKeys`——state 投影
+ * 表存在被 parseProjectionTable 丢弃的损坏记录（mode 等字段损坏）时，内核置
+ * degradedProjectionState=true 并列出损坏键。快照未刷新前真实内核不带这两个
+ * 字段（undefined = 旧内核），宿主按可选字段消费；快照刷新后真实 ok 变体天然
+ * assignable 到本钉死类型。invalidProjectionKeys 仅为诊断信息，不进宿主判定链
+ * 与有限词表（键名是内核内部标识，不外泄）。
+ */
+type EntityUpdateOkPinned = Extract<EntityUpdateResult, { kind: "ok" }> & {
+  degradedProjectionState?: boolean;
+  invalidProjectionKeys?: readonly string[];
+};
+
+/** seam 视角的 updateEntity 结果（ok 变体携带钉死的新契约增量字段）。 */
+export type PinnedEntityUpdateResult =
+  | EntityUpdateOkPinned
+  | Extract<EntityUpdateResult, { kind: "error" }>;
+
+/**
  * ccski store-link 内核实体 API seam（批 2.2）：apply 重装的注入面。
  * typed result 不属于异常流；宿主按冻结码映射有限词表，不裸透传内核 message。
  */
 export interface SkillsUpdateKernel {
-  updateEntity: (options: EntityUpdateOptions) => Promise<EntityUpdateResult>;
+  updateEntity: (options: EntityUpdateOptions) => Promise<PinnedEntityUpdateResult>;
   ensureEntity: (options: EnsureEntityOptions) => Promise<EnsureEntityResult>;
   projectEntity: (options: ProjectEntityOptions) => Promise<ProjectEntityResult>;
 }
@@ -139,6 +165,17 @@ function updateProjectionFailureMessage(code: string | undefined): string {
       : "The skill store reported an unexpected failure while updating the provider entry.";
   return code !== undefined ? `${text} (ccski code: ${code})` : text;
 }
+
+/**
+ * P0-C fail-closed 文案（宿主修复批 7）：legacy 清理仅在能正向证明该 root 未登记
+ * 时允许；证明不可得时 typed 失败指路 state repair，绝不 rmSync 物化条目。
+ * 两个触发面共用同一条恢复路径（ccski state repair）：
+ * - degradedProjectionState===true（新内核显式报告投影表损坏）；
+ * - 收据缺席 + 物化目录 + 内核未报告投影表健康度（旧内核快照过渡语义）。
+ */
+const UNPROVABLE_REGISTRATION_MESSAGE =
+  "The update cannot prove whether the materialized provider entry is registered with the skill store " +
+  "(degraded projection records); the entry was left untouched. Run ccski state repair, then retry the update.";
 
 /**
  * 默认实现（P1-5）：`git ls-remote --symref <source> HEAD` 第一行形如
@@ -672,6 +709,15 @@ export function createSkillsUpdateService(
     } else if (updated.kind === "error") {
       return { kind: "error", message: kernelFailureMessage(updated.code) };
     } else {
+      // P0-C fail closed（宿主修复批 7）：内核 ok 变体的钉死增量字段
+      // degradedProjectionState===true = state 投影表有损坏记录被 parseProjectionTable
+      // 丢弃——本轮 update 对全部物化/疑似物化 root 一律 typed 失败指路 state
+      // repair，绝不 legacy 清理（Codex 实测：损坏记录被丢弃 → 该 root 无收据 →
+      // 旧逻辑按「未登记」rmSync 用户改过的物化副本并打 link）。
+      const suspectedMaterialized = entryStats !== null && !entryStats.isSymbolicLink();
+      if (updated.degradedProjectionState === true && suspectedMaterialized) {
+        return { kind: "error", message: UNPROVABLE_REGISTRATION_MESSAGE };
+      }
       // 逐投影收据裁决（宿主修复批 6，P0-1）：顶层 ok 不等于本 provider 的投影
       // 已换新——物化投影被用户改过时内核收据 GUARD_PROJECTION failed 并保留
       // 被改副本，宿主必须如实失败，绝不对该 root 做 legacy 清理（那会删掉用户
@@ -684,20 +730,28 @@ export function createSkillsUpdateService(
       }
       if (!receipt) {
         if (entryStats !== null && !entryStats.isSymbolicLink()) {
-          // 收据缺席 = 该 root 未注册（真 legacy 副本）：重装语义收敛为投影。
           // entity-local 形态（realpath 在实体库内 = 实体路径本身）保留不动。
           const entityRootDir = path.join(workspaceDirectory, ".agents", "skills");
           const real = fs.realpathSync(entryPath);
           const relative = path.relative(entityRootDir, real);
           const insideEntityRoot =
             relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
-          if (!insideEntityRoot) {
+          if (insideEntityRoot) {
+            // updateEntity 已原地换新实体，entity-local 形态自然反映新内容。
+          } else if (updated.degradedProjectionState === false) {
+            // 新内核显式证明投影表完整解析（无记录被丢弃）：收据缺席 = 正向
+            // 证明该 root 未登记（真 legacy 副本）→ 重装语义收敛为投影。
             const removeFailure = removeLegacyEntry();
             if (removeFailure !== null) return { kind: "error", message: removeFailure };
             const projectionFailure = await projectToProvider();
             if (projectionFailure !== null) {
               return { kind: "error", message: projectionFailure };
             }
+          } else {
+            // P0-C 快照过渡语义（旧内核，字段缺席）：收据缺席 ≠ 未登记——无收据
+            // 的物化目录无法区分「真 legacy 副本」与「投影记录损坏被丢弃」，
+            // 保守 typed 失败指路 state repair，绝不 legacy 清理。
+            return { kind: "error", message: UNPROVABLE_REGISTRATION_MESSAGE };
           }
         } else if (entryStats === null) {
           // 实体已在（updateEntity ok）但本 provider 尚无条目 → 补投影。
