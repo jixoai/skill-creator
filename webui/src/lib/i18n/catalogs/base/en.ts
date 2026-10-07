@@ -717,6 +717,13 @@ export const enBase = {
   "skillDetail.unknownError": "unknown error",
   "skillDetail.alreadyEnabled": "already enabled.",
   "skillDetail.alreadyDisabled": "already disabled.",
+  "skillDetail.toggleDisableLink":
+    "Disable — removes this skill's symlink from the provider root; content stays in the skill library",
+  "skillDetail.toggleEnableLink": "Enable — recreates the symlink from the skill library",
+  "skillDetail.toggleDisableRename": "Disable — renames SKILL.md to .SKILL.md",
+  "skillDetail.toggleEnableRename": "Enable — renames .SKILL.md back to SKILL.md",
+  "skillDetail.entityPathLabel": "Canonical content path",
+  "skillDetail.projectionPathLabel": "Projection path (symlink location)",
 
   /** ---------- Creator 首屏（会话工作台 + capture 引导卡 + Global 空态；creator-agent-chat 1.1/1.5/1.8） ---------- */
   "creatorHome.title": "Creator",

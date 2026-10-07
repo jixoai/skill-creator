@@ -22,6 +22,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  listSkills as listCcskiSkills,
   toggleEntityProjection as ccskiToggleEntityProjection,
   validateSkill as validateCcskiSkill,
   type EntityToggleOptions,
@@ -29,7 +30,6 @@ import {
   type ListOptions,
   type ValidateOptions,
 } from "ccski";
-import { listSkillsWithSymlinkedEntries } from "./ccski-symlink-entries.js";
 import { z } from "zod";
 import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import type {
@@ -47,6 +47,7 @@ import {
 } from "../shared/contracts/skills.js";
 import { safeParseExternal } from "../shared/external-input.js";
 import { homeDir } from "../shared/paths.js";
+import { readStateDisabledRows } from "./ccski-state-disabled.js";
 import { DomainError } from "./domain-error.js";
 import { listSkillFiles, readSkillFile } from "./skill-files.js";
 import {
@@ -154,6 +155,8 @@ function projectMetadata(
       updatable: provenance.updatable,
       ...(skill.entryKind !== undefined ? { entryKind: skill.entryKind } : {}),
       ...(skill.ownership !== undefined ? { ownership: skill.ownership } : {}),
+      // 批 3.3 四名区分：发现位置（symlink 投影路径）≠ canonical 实体路径时携带。
+      ...(skill.path !== canonicalPath ? { projectionPath: skill.path } : {}),
     });
   } catch {
     return null;
@@ -165,9 +168,10 @@ export function createSkillService(
   workspaces: WorkspaceRegistry,
   options: SkillServiceOptions = {},
 ) {
-  // 默认发现面带 symlink 条目增补（self-skill-symlink：ccski root 扫描跳过
-  // symlink 目录条目；注入桩语义不变）。
-  const discoverSkills = options.discoverSkills ?? listSkillsWithSymlinkedEntries;
+  // 默认发现面 = ccski 3.0 listSkills（顶层 symlink 一等条目；批 3.1 退役
+  // ccski-symlink-entries 增补——3.0 下 wrapper 已实证 no-op，见 change 目录
+  // wrapper-retirement-receipt.md）。注入桩语义不变。
+  const discoverSkills = options.discoverSkills ?? listCcskiSkills;
   const validateSkill = options.validateSkill ?? validateCcskiSkill;
   const entityToggle = options.entityToggle ?? ccskiToggleEntityProjection;
   const skillsCliProbe = options.skillsCliProbe;
@@ -263,6 +267,24 @@ async function list(
     const existing = byId.get(projected.id);
     if (!existing || (existing.disabled && !projected.disabled)) byId.set(projected.id, projected);
   }
+  // state-backed disabled 补充面（批 3.2）：link 摘链后文件系发现面消失的投影，
+  // 经 state 记录 + 实体内容源补回 disabled 行，UI 启停往返闭合。仅 disabled
+  // 请求面补充；文件系已见（canonical path 重复/投影路径被占位）不补。
+  if (includeDisabled) {
+    const seenCanonicalPaths = new Set([...byId.values()].map((skill) => skill.path));
+    const stateBase = path.join(
+      path.resolve(scope.workspaceDirectory ?? scope.options.userDir ?? homeDir()),
+      ".agents",
+    );
+    for (const row of readStateDisabledRows({
+      providerRoot: scope.directory,
+      stateBase,
+      providerId: target.providerId,
+      seenCanonicalPaths,
+    })) {
+      if (!byId.has(row.id)) byId.set(row.id, row);
+    }
+  }
   return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
@@ -284,15 +306,31 @@ async function resolveSkill(
   return skill;
 }
 
-/** Resolve the available enabled or disabled document for a discovered skill. */
+/**
+ * Resolve the available enabled or disabled document for a discovered skill.
+ * 身份文件缺席时的对侧回退（批 3.2）：state 补充的 disabled 行内容源在实体库，
+ * 实体恒保持 enabled 形态 SKILL.md（link 模式禁用永不换名）——按禁用旗标首选
+ * `.SKILL.md`，缺席则回退读取真实在场的另一身份文件；两份俱缺才是 UNAVAILABLE。
+ */
 function skillFile(skill: SkillMetadata): string {
   const filename = skill.disabled ? ".SKILL.md" : "SKILL.md";
+  const alternate = skill.disabled ? "SKILL.md" : ".SKILL.md";
   const file = path.join(skill.path, filename);
   assertPathInside(skill.path, file);
-  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
-    throw new DomainError("UNAVAILABLE", `Skill document is unavailable: ${skill.name}`);
+  if (isRegularFile(file)) return file;
+  const fallback = path.join(skill.path, alternate);
+  assertPathInside(skill.path, fallback);
+  if (isRegularFile(fallback)) return fallback;
+  throw new DomainError("UNAVAILABLE", `Skill document is unavailable: ${skill.name}`);
+}
+
+/** lstat 确认真实 regular file（不跟进 symlink）。 */
+function isRegularFile(candidate: string): boolean {
+  try {
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
   }
-  return file;
 }
 
 /** Read one Workspace Provider skill document and its current content revision. */

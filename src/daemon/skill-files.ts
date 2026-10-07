@@ -14,8 +14,8 @@
  *   [3] 路径闭包校验：`/` 分隔相对路径的规范化歧义拒绝（typed INVALID_PATH）。
  *
  * 安全基线对齐（AGENTS §5）：不弱于搜索面 SKILL.md 读取的 lstat + O_NOFOLLOW +
- * fstat 身份校验；顶层技能目录 symlink 允许（入口层跟进一次，与
- * ccski-symlink-entries 先例一致——本模块收到的 root 已是发现层 realpath 产物），
+ * fstat 身份校验；顶层技能目录 symlink 允许（入口层跟进一次，与 ccski 3.0
+ * 一等 symlink 发现语义一致——本模块收到的 root 已是发现层 realpath 产物），
  * 子目录/文件 symlink 拒绝，broken link 同为可解释省略/拒绝。
  */
 import fs from "node:fs";

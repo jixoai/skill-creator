@@ -258,7 +258,7 @@ describe("skills.files（Δ2 有界文件树）", () => {
     }
   });
 
-  it("follows a top-level symlinked skill entry once (ccski-symlink-entries parity)", async () => {
+  it("follows a top-level symlinked skill entry once (ccski 3.0 first-class symlink parity)", async () => {
     const client = createClient();
     const realDirectory = path.join(sandbox, "real-skill-dir");
     fs.mkdirSync(realDirectory, { recursive: true });

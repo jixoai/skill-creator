@@ -14,8 +14,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import type { ListOptions } from "ccski";
-import { listSkillsWithSymlinkedEntries } from "../ccski-symlink-entries.js";
+import { listSkills, type ListOptions } from "ccski";
 import {
   GLOBAL_WORKSPACE_ID,
   ImportedWorkspaceIdSchema,
@@ -206,9 +205,10 @@ export function createWorkspaceRegistry(options: WorkspaceRegistryOptions = {}):
   };
 }
 
-/** 默认 ccski 技能扫描适配器：单遍 listSkills 同时供计数与去重键（含 symlink 增补）。 */
+/** 默认 ccski 技能扫描适配器：单遍 listSkills 同时供计数与去重键（3.0 顶层
+ * symlink 一等发现；批 3.1 退役宿主增补 wrapper）。 */
 async function listCcskiSkills(options: ListOptions) {
-  const skills = await listSkillsWithSymlinkedEntries(options);
+  const skills = await listSkills(options);
   return skills.map((skill) => ({ directoryName: path.basename(skill.path) }));
 }
 

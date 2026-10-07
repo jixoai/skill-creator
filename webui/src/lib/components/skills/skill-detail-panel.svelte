@@ -213,6 +213,32 @@
     skillsUpdateState.results.find((entry) => entry.skillId === detail?.id) ?? null,
   );
 
+  // 启停物理语义文案（ccski-3-host-migration 批 3.4）：ccski 管辖的 link 投影
+  // （symlink 条目，或禁用补充行的 projectionPath）= 摘链/重链；其余（普通目录、
+  // materialized 副本、非 ccski 条目）= 文件改名。外部链接按改名文案发起、由
+  // typed conflict 如实拒绝。
+  const toggleHint = $derived.by(() => {
+    const current = detail;
+    if (!current) return "";
+    const linkProjection =
+      current.ownership === "ccski" &&
+      (current.entryKind === "symlink" || current.projectionPath !== undefined);
+    if (linkProjection) {
+      return current.disabled
+        ? t("skillDetail.toggleEnableLink")
+        : t("skillDetail.toggleDisableLink");
+    }
+    return current.disabled
+      ? t("skillDetail.toggleEnableRename")
+      : t("skillDetail.toggleDisableRename");
+  });
+
+  // 双路径（批 3.3 四名区分）：path = canonical 实体/内容路径；projectionPath =
+  // provider root 下的投影（符号链接）路径，仅在两者不同（symlink 投影/禁用补充行）时显示。
+  const showProjectionPath = $derived(
+    detail?.projectionPath !== undefined && detail.projectionPath !== detail.path,
+  );
+
   async function handleCheckUpdate(): Promise<void> {
     const current = detail;
     if (!current || checkingUpdate || skillsUpdateState.checking) return;
@@ -308,6 +334,16 @@
         <div class="min-w-0 flex-1">
           <h2 class="truncate text-base font-semibold" title={detail.name}>{detail.name}</h2>
           <p class="mt-0.5 text-xs leading-5 text-muted-foreground">{detail.description}</p>
+          <!-- 双路径（批 3.3）：canonical 内容/实体路径恒显；投影路径仅 symlink
+               投影/禁用补充行携带（与 path 不同）时追加。 -->
+          <p class="mt-1 break-all font-mono text-[11px] leading-4 text-muted-foreground/70">
+            <span title={t("skillDetail.entityPathLabel")}>{detail.path}</span>
+            {#if showProjectionPath}
+              <span class="block" title={t("skillDetail.projectionPathLabel")}>
+                ⇢ {detail.projectionPath}
+              </span>
+            {/if}
+          </p>
         </div>
       </div>
       <!-- 动作行（2.2 处置批 P2-9）：nowrap + 行内横滚（chips-row 同族）——四个
@@ -369,6 +405,8 @@
           variant={detail.disabled ? "default" : "outline"}
           class="h-8 shrink-0 gap-1.5"
           disabled={toggling}
+          title={toggleHint}
+          aria-label={`${detail.disabled ? t("skillDetail.enable") : t("skillDetail.disable")} — ${toggleHint}`}
           onclick={() => void handleToggle()}
         >
           {#if toggling}

@@ -689,6 +689,13 @@ export const zhBase: Record<keyof typeof enBase, string> = {
   "skillDetail.unknownError": "未知错误",
   "skillDetail.alreadyEnabled": "已处于启用状态。",
   "skillDetail.alreadyDisabled": "已处于停用状态。",
+  "skillDetail.toggleDisableLink":
+    "禁用 — 移除该技能在 Provider 根下的符号链接（内容保留在技能库）",
+  "skillDetail.toggleEnableLink": "启用 — 从技能库重新建立符号链接",
+  "skillDetail.toggleDisableRename": "禁用 — 将 SKILL.md 改名为 .SKILL.md",
+  "skillDetail.toggleEnableRename": "启用 — 将 .SKILL.md 改回 SKILL.md",
+  "skillDetail.entityPathLabel": "内容路径（实体）",
+  "skillDetail.projectionPathLabel": "投影路径（符号链接位置）",
 
   /** ---------- Creator 首屏（会话工作台 + capture 引导卡 + Global 空态；creator-agent-chat 1.1/1.5/1.8） ---------- */
   "creatorHome.title": "Creator",

@@ -151,6 +151,7 @@ describe("skill service toggle dual routing (ccski-3-host-migration 批 2.3)", (
     workspace: ImportedWorkspace;
     providerRoot: string;
     entityDir: string;
+    statePath: string;
   }> {
     const name = options.name ?? "managed-skill";
     const workspaceRoot = path.join(sandbox, "ws-managed");
@@ -197,8 +198,11 @@ describe("skill service toggle dual routing (ccski-3-host-migration 批 2.3)", (
       skills: createSkillService(workspaces),
       target: { workspaceId: workspace.id, providerId: openClawProviderId },
       workspace,
-      providerRoot,
-      entityDir: path.join(workspaceRoot, ".agents", "skills", name),
+      // canonical provider root（= scope.directory；内核投影与发现面同源路径形态）。
+      providerRoot: canonicalProviderRoot,
+      entityDir: path.join(canonicalWorkspace, ".agents", "skills", name),
+      // 内核 project scope 的 state 文件（批 3.2 补充面读取处）。
+      statePath: path.join(canonicalWorkspace, ".agents", ".ccski-state.json"),
     };
   }
 
@@ -209,17 +213,65 @@ describe("skill service toggle dual routing (ccski-3-host-migration 批 2.3)", (
     const [skill] = await skills.list(target, true);
     if (!skill) throw new Error("Expected the projected skill in discovery.");
     expect(skill).toMatchObject({ ownership: "ccski", entryKind: "symlink" });
+    // 批 3.3 四名区分：path = canonical 实体路径；projectionPath = provider root
+    // 下的投影（链接）路径。批 3.1 退役 wrapper 的形状保证在此钉住（provider/
+    // location/sourceKind/sourcePriority 与发现面 customDir 形状一致）。
+    expect(skill.path).toBe(fs.realpathSync(entityDir));
+    expect(skill.projectionPath).toBe(path.join(providerRoot, "managed-skill"));
+    expect(skill).toMatchObject({
+      provider: "openclaw",
+      location: "user",
+      sourceKind: "custom",
+      sourcePriority: 500,
+    });
 
     const summary = await skills.toggle(target, [skill.id], "disable");
     expect(summary.succeeded).toBe(1);
-    // 物理禁用：链不在了（该 root 的发现面随之消失——批 3 UI 复核面）。
+    // 物理禁用：链不在了（该 root 的文件系发现面消失——由批 3.2 state 补充面接回）。
     expect(fs.existsSync(path.join(providerRoot, "managed-skill"))).toBe(false);
     // 共享实体永不换名、原样在场。
     expect(fs.existsSync(path.join(entityDir, "SKILL.md"))).toBe(true);
 
-    // 同一 RPC 面上 re-enable 不可达（技能已不可发现）→ typed failed，不伪装成功。
-    const enableAgain = await skills.toggle(target, [skill.id], "enable");
-    expect(enableAgain.results[0]?.status).toBe("failed");
+    // 批 3.2：禁用后列表仍见 disabled 补充行（state 记录 + 实体内容源；同一 id）。
+    const [disabledRow] = await skills.list(target, true);
+    expect(disabledRow).toBeDefined();
+    expect(disabledRow).toMatchObject({
+      id: skill.id,
+      name: "managed-skill",
+      disabled: true,
+      ownership: "ccski",
+      path: fs.realpathSync(entityDir),
+      projectionPath: path.join(providerRoot, "managed-skill"),
+    });
+    // 补充行详情可读（实体恒保持 enabled 形态 SKILL.md；skillFile 对侧回退）。
+    const info = await skills.info(target, disabledRow!.id);
+    expect(info.content).toContain("managed-skill");
+
+    // 补充面只在 disabled 请求面出现（includeDisabled=false 不补）。
+    const enabledOnly = await skills.list(target, false);
+    expect(enabledOnly.find((row) => row.id === skill.id)).toBeUndefined();
+
+    // 同一 RPC 面上 re-enable 经补充行闭合（批 2 遗留边界解除）。
+    const enableAgain = await skills.toggle(target, [disabledRow!.id], "enable");
+    expect(enableAgain.succeeded).toBe(1);
+    expect(fs.existsSync(path.join(providerRoot, "managed-skill", "SKILL.md"))).toBe(true);
+    const [reEnabled] = await skills.list(target, true);
+    expect(reEnabled).toMatchObject({ id: skill.id, disabled: false, entryKind: "symlink" });
+  });
+
+  it("degrades a corrupt ccski state file to zero supplementation without failing the list", async () => {
+    const { skills, target, providerRoot, statePath } = await workspaceWithKernelProjection({
+      mode: "link",
+    });
+    const [skill] = await skills.list(target, true);
+    if (!skill) throw new Error("Expected the projected skill in discovery.");
+    await skills.toggle(target, [skill.id], "disable");
+
+    // 数据不兼容（坏 JSON）→ 零补充降级不计错：列表成功、补充行缺席。
+    fs.writeFileSync(statePath, "{ not json", "utf8");
+    const rows = await skills.list(target, true);
+    expect(rows.find((row) => row.id === skill.id)).toBeUndefined();
+    expect(fs.existsSync(path.join(providerRoot, "managed-skill"))).toBe(false);
   });
 
   it("disables and re-enables a ccski materialized projection through the kernel", async () => {

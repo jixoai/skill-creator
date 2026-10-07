@@ -169,8 +169,10 @@ Self Skill         = 产品自描述技能 skill-creator-v2（~/.agents/skills/s
                       指向旧安装/v1 legacy 拷贝 → （重）建链；用户自维护条目 → 冲突不
                       触碰，CLI（顶层 setup 命令 + self-skill status|keep + start 提醒）
                       与 WebUI 首页 banner 双面裁决（覆盖[可选备份至 ~/.agents/skills-backup 时间戳目录] / 保留+
-                      指纹记忆）；ccski root 扫描跳过 symlink 条目 → 两个调用点
-                      （skill-service/workspace-registry）经 ccski-symlink-entries 增补；
+                      指纹记忆）；发现面 = ccski 3.0 顶层 symlink 一等发现
+                      （skill-service/workspace-registry 直连 listSkills；批 3.1 已退役
+                      ccski-symlink-entries 增补 wrapper——3.0 下实证 no-op，无漂移收据
+                      在 changes/ccski-3-host-migration/wrapper-retirement-receipt.md）；
                       setup 同时注入/刷新 ~/.agents/AGENTS.md 的
                       <skill-creator-v2> 引导块（agents-md-block：标签对整块替换、
                       块外逐字保留、残缺/多块 typed 拒绝；仅显式 setup 触发，daemon

@@ -363,6 +363,63 @@ describe("SkillDetailPage（批 2 Δ3 独立路由页）", () => {
     ).toEqual([]);
   });
 
+  it("words the toggle by physical semantics and shows dual paths for ccski link projections (批 3.3/3.4)", async () => {
+    // ccski link 投影（enabled）：摘链文案 + 双路径（canonical 实体路径 + 投影路径）。
+    const linkLog = makeRpcLog();
+    activeLog = linkLog;
+    installRpc(linkLog, {
+      info: skillInfo({
+        ownership: "ccski",
+        entryKind: "symlink",
+        path: "/ws/.agents/skills/alpha",
+        projectionPath: "/ws/skills/alpha",
+      }),
+      group: null,
+    });
+    const linkRoot = mountPage();
+    await settle();
+    const disable = buttons(linkRoot).find((b) => textOf(b) === "Disable");
+    expect(disable).toBeDefined();
+    expect(disable!.getAttribute("title")).toContain("removes this skill's symlink");
+    expect(disable!.getAttribute("title")).toContain("content stays in the skill library");
+    // 双路径：实体路径恒显 + 投影路径（与 path 不同时）追加。
+    expect(textOf(linkRoot)).toContain("/ws/.agents/skills/alpha");
+    expect(textOf(linkRoot)).toContain("/ws/skills/alpha");
+
+    // 禁用补充行（批 3.2 形状：entryKind=directory + projectionPath）：仍按
+    // link 投影语义给出重链文案。
+    const disabledLog = makeRpcLog();
+    activeLog = disabledLog;
+    installRpc(disabledLog, {
+      info: skillInfo({
+        disabled: true,
+        ownership: "ccski",
+        entryKind: "directory",
+        path: "/ws/.agents/skills/alpha",
+        projectionPath: "/ws/skills/alpha",
+      }),
+      group: null,
+    });
+    const disabledRoot = mountPage();
+    await settle();
+    const enable = buttons(disabledRoot).find((b) => textOf(b) === "Enable");
+    expect(enable).toBeDefined();
+    expect(enable!.getAttribute("title")).toContain("recreates the symlink");
+
+    // 非 ccski 技能（缺省无 ownership/projectionPath）：文件改名语义不误导 +
+    // 单路径（无投影行）。
+    const plainLog = makeRpcLog();
+    activeLog = plainLog;
+    installRpc(plainLog, { group: null });
+    const plainRoot = mountPage();
+    await settle();
+    const plainDisable = buttons(plainRoot).find((b) => textOf(b) === "Disable");
+    expect(plainDisable).toBeDefined();
+    expect(plainDisable!.getAttribute("title")).toContain("renames SKILL.md to .SKILL.md");
+    expect(textOf(plainRoot)).toContain("/ws/alpha");
+    expect(textOf(plainRoot)).not.toContain("⇢");
+  });
+
   it("renders the typed not-found page when skills.info rejects NOT_FOUND", async () => {
     const log = makeRpcLog();
     activeLog = log;

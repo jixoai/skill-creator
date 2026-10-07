@@ -66,6 +66,14 @@ export const SkillMetadataSchema = z.object({
    * 外部链接或未入账条目（保留宿主文件改名启停路径）。
    */
   ownership: z.enum(["ccski", "external", "unknown"]).optional(),
+  /**
+   * 投影路径（批 3.3 canonical 四名区分；可选）：发现位置在 provider root 下的
+   * 绝对路径。`path` 恒为 canonical（realpath）身份——对 store-link 技能即实体
+   * 库内路径（实体路径）；当发现条目是顶层符号链接（或 state 记录的禁用投影，
+   * 物理缺席的重链落点）时两者不同，此字段携带投影路径。directory 条目与
+   * `path` 一致时缺省。
+   */
+  projectionPath: z.string().min(1).optional(),
 });
 /** 技能列表项。 */
 export type SkillMetadata = z.infer<typeof SkillMetadataSchema>;
