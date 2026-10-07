@@ -81,11 +81,11 @@ import type { WorkspaceRegistry } from "./workspace-registry/index.js";
 export const computeSkillFolderHash = ccskiComputeSkillFolderHash;
 
 /**
- * 内核新契约增量（宿主修复批 7，P0-C；与内核并行落地，形状钉死）：updateEntity
- * ok 变体新增可选 `degradedProjectionState` / `invalidProjectionKeys`——state 投影
- * 表存在被 parseProjectionTable 丢弃的损坏记录（mode 等字段损坏）时，内核置
- * degradedProjectionState=true 并列出损坏键。快照未刷新前真实内核不带这两个
- * 字段（undefined = 旧内核），宿主按可选字段消费；快照刷新后真实 ok 变体天然
+ * 内核新契约增量（宿主修复批 7，P0-C；终审第四轮 APPROVE 后契约定稿）：
+ * updateEntity ok 变体必填 `degradedProjectionState`（健康显式 false / 损坏 true）
+ * + 可选诊断 `invalidProjectionKeys`——投影表存在被 parseProjectionTable 丢弃的
+ * 损坏记录时置 true 并列键。宿主类型仍按可选消费：字段缺席 = 旧快照运行时兼容
+ * （fail closed），缺席不再出现于当前内核（c314236 起健康态恒显式 false）。
  * assignable 到本钉死类型。invalidProjectionKeys 仅为诊断信息，不进宿主判定链
  * 与有限词表（键名是内核内部标识，不外泄）。
  */
