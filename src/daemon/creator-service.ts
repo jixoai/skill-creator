@@ -10,6 +10,8 @@
  *   [1] Create only safe direct-child skill directories.
  *   [2] Round-trip passthrough YAML frontmatter with gray-matter.
  *   [3] Reject stale updates/deletes and atomically write valid documents.
+ *   [4] Route deletion by ownership (ccski-3-host-migration 批 5)：ccski 管辖 →
+ *       内核投影先行 remove + 末投影全清（ccski-entity-remove）；其余 → 直删。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -24,6 +26,7 @@ import {
 import type { SkillId } from "../shared/contracts/skills.js";
 import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import { safeParseExternal } from "../shared/external-input.js";
+import { createCcskiEntityRemover, type CcskiEntityRemoveKernel } from "./ccski-entity-remove.js";
 import { DomainError } from "./domain-error.js";
 import { assertPathInside, atomicWriteUtf8, contentRevision, directChild } from "./path-safety.js";
 import type { SkillService } from "./skill-service.js";
@@ -61,8 +64,17 @@ function incompatibleDocument(): DomainError {
   );
 }
 
+/** Creator 可注入 seam（批 5：ccski 删除内核；默认真实内核）。 */
+export interface CreatorServiceOptions {
+  entityRemoveKernel?: CcskiEntityRemoveKernel;
+}
+
 /** Bind Creator operations to one Workspace Registry and skill module. */
-export function createCreatorService(workspaces: WorkspaceRegistry, skills: SkillService) {
+export function createCreatorService(
+  workspaces: WorkspaceRegistry,
+  skills: SkillService,
+  options: CreatorServiceOptions = {},
+) {
   // revision 日志：按 skill canonical path 维护最近 N 条 {revision, timestamp, content} 快照。
   // daemon 内存态（不持久化到磁盘）；daemon 重启后历史清空，仅当前 revision 可见。
   const revisionLog = new Map<
@@ -70,6 +82,7 @@ export function createCreatorService(workspaces: WorkspaceRegistry, skills: Skil
     Array<{ revision: string; timestamp: number; content: string }>
   >();
   const REVISION_LOG_LIMIT = 20;
+  const removeCcskiEntity = createCcskiEntityRemover(options.entityRemoveKernel);
 
   return {
     load: (target: WorkspaceProviderTarget, skillId: SkillId) =>
@@ -77,7 +90,7 @@ export function createCreatorService(workspaces: WorkspaceRegistry, skills: Skil
     save: (input: SaveSkillInput) =>
       save(workspaces, skills, input, revisionLog, REVISION_LOG_LIMIT),
     remove: (target: WorkspaceProviderTarget, skillId: SkillId, expectedRevision: string) =>
-      remove(workspaces, skills, target, skillId, expectedRevision),
+      remove(workspaces, skills, target, skillId, expectedRevision, removeCcskiEntity),
     revisions: (input: {
       workspaceId: unknown;
       providerId: unknown;
@@ -228,23 +241,56 @@ function computeUnifiedDiff(oldText: string, newText: string): string {
   return lines.join("\n") || "(no changes)";
 }
 
-/** Delete a Workspace Provider-scoped skill only when its observed revision still matches. */
+/**
+ * Delete a Workspace Provider-scoped skill only when its observed revision still matches.
+ * 双路由（ccski-3-host-migration 批 5）：发现层 `ownership === "ccski"` 的技能删除
+ * 走内核（单 face = 投影摘除；末投影/实体 face = 实体+全部投影+state 全清零残留；
+ * 路径/守卫权威在内核，provider-root containment 不适用于 canonical 实体路径）；
+ * 其余（external/unknown/普通目录）保留宿主直删路径不变。宿主 revision 契约
+ * （SKILL.md 内容 sha256 对 expectedRevision）是第一层，内核 guard 是第二层。
+ */
 async function remove(
   workspaces: WorkspaceRegistry,
   skills: SkillService,
   target: WorkspaceProviderTarget,
   skillId: SkillId,
   expectedRevision: string,
+  removeCcskiEntity: ReturnType<typeof createCcskiEntityRemover>,
 ): Promise<void> {
   const workspaceRoot = writableDirectory(workspaces, target);
   const skill = await skills.resolve(target, skillId);
-  assertPathInside(workspaceRoot, skill.path);
+  if (skill.ownership === "ccski") {
+    assertRevisionCurrent(skills, skill, expectedRevision);
+    const scope = workspaces.resolveWritable(target);
+    if (scope.workspaceDirectory === undefined) {
+      throw new DomainError(
+        "UNAVAILABLE",
+        `Provider skills directory is not writable: ${scope.workspaceLabel}`,
+      );
+    }
+    await removeCcskiEntity({
+      workspaceDirectory: scope.workspaceDirectory,
+      providerRoot: scope.directory,
+      skillName: skill.name,
+    });
+  } else {
+    assertPathInside(workspaceRoot, skill.path);
+    assertRevisionCurrent(skills, skill, expectedRevision);
+    fs.rmSync(skill.path, { recursive: true, force: false });
+  }
+  skills.invalidateDiscovery(target);
+}
+
+/** 宿主 revision 契约：身份文件内容 sha256 必须仍等于 expectedRevision。 */
+function assertRevisionCurrent(
+  skills: SkillService,
+  skill: Awaited<ReturnType<SkillService["resolve"]>>,
+  expectedRevision: string,
+): void {
   const current = fs.readFileSync(skills.skillFile(skill), "utf8");
   if (contentRevision(current) !== expectedRevision) {
     throw new DomainError("CONFLICT", "This skill changed on disk. Reload it before deleting.");
   }
-  fs.rmSync(skill.path, { recursive: true, force: false });
-  skills.invalidateDiscovery(target);
 }
 
 function writableDirectory(workspaces: WorkspaceRegistry, target: WorkspaceProviderTarget): string {

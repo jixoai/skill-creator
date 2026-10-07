@@ -44,6 +44,37 @@ const StateEnvelopeSchema = z.object({
   projections: z.record(z.string(), z.unknown()),
 });
 
+/** state 信封读取结果（批 5：absent/incompatible 显式区分，供删除路由保守裁决）。 */
+export type CcskiStateRead =
+  | { kind: "absent" }
+  | { kind: "incompatible" }
+  | { kind: "ok"; entities: Record<string, unknown>; projections: Record<string, unknown> };
+
+/**
+ * 读取一个 stateBase 的 `.ccski-state.json` 信封（只读、零写副作用）。
+ * 文件缺失 = absent；JSON/schema 不兼容 = incompatible（不迁移不重建）；非环
+ * IO 故障（EACCES/EIO…）向上传播，不伪装空值（与 readStateDisabledRows 同法）。
+ */
+export function readCcskiState(stateBase: string): CcskiStateRead {
+  const statePath = path.join(path.resolve(stateBase), CCSKI_STATE_FILENAME);
+  let text: string;
+  try {
+    text = fs.readFileSync(statePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") return { kind: "absent" };
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "incompatible" };
+  }
+  const envelope = safeParseExternal(StateEnvelopeSchema, parsed);
+  if (!envelope) return { kind: "incompatible" };
+  return { kind: "ok", entities: envelope.entities, projections: envelope.projections };
+}
+
 /** 禁用 link 投影记录的最小消费面（kernel ProjectionRecord 的字段子集）。 */
 const DisabledLinkProjectionSchema = z.object({
   mode: z.literal("link"),
@@ -83,33 +114,20 @@ function skillId(canonicalPath: string): SkillId {
  * （内容源与 mutation 身份），`projectionPath` = 记录的投影路径（重链落点）。
  */
 export function readStateDisabledRows(input: StateDisabledInput): SkillMetadata[] {
-  const statePath = path.join(path.resolve(input.stateBase), CCSKI_STATE_FILENAME);
-  let text: string;
-  try {
-    text = fs.readFileSync(statePath, "utf8");
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException | null)?.code;
-    if (code === "ENOENT") return [];
-    throw error;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // 数据不兼容 → 零补充降级不计错（同发现层法则）。
+  const state = readCcskiState(input.stateBase);
+  if (state.kind !== "ok") {
+    // absent/不兼容 → 零补充降级不计错（同发现层法则）。
     return [];
   }
-  const envelope = safeParseExternal(StateEnvelopeSchema, parsed);
-  if (!envelope) return [];
 
   const rows: SkillMetadata[] = [];
-  for (const recordValue of Object.values(envelope.projections)) {
+  for (const recordValue of Object.values(state.projections)) {
     const record = safeParseExternal(DisabledLinkProjectionSchema, recordValue);
     if (!record) continue;
     if (path.resolve(record.rootPath) !== path.resolve(input.providerRoot)) continue;
     // 重复防护：投影路径已有文件系条目 = 记录过时或被外部占位，文件系胜出。
     if (fs.existsSync(record.path)) continue;
-    const entityValue = envelope.entities[record.folderName];
+    const entityValue = state.entities[record.folderName];
     const entity =
       entityValue === undefined ? null : safeParseExternal(EntityRecordSchema, entityValue);
     if (!entity) continue;
