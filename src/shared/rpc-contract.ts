@@ -472,7 +472,11 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     update: {
       /** Compare skills-CLI lock hashes against upstream and report outdated skills. */
       check: oc.input(UpdateCheckInputSchema).output(UpdateCheckResultSchema),
-      /** Reinstall approved outdated skills via the repository install pipeline. */
+      /**
+       * Reinstall approved outdated skills via the ccski entity kernel (updateEntity,
+       * legacy 回退 ensureEntity+projectEntity)；成功条目携带 lockSyncPending
+       * （分层单写者：npm lock 由 skills CLI 写，宿主只在内存覆盖层刷新）。
+       */
       apply: oc.input(ApplyUpdateInputSchema).output(ApplyUpdateResultSchema),
     },
   },

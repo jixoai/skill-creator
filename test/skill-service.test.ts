@@ -13,11 +13,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ensureEntity, projectEntity } from "ccski";
 import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import {
   GLOBAL_WORKSPACE_ID,
   ProviderIdSchema,
+  type ImportedWorkspace,
   type WorkspaceProviderTarget,
 } from "../src/shared/contracts/workspaces.js";
 import { setHomeOverride } from "../src/shared/paths.js";
@@ -123,6 +125,212 @@ describe("skill service", () => {
       errors: ["ccski returned an incompatible validation result."],
       warnings: [],
     });
+  });
+});
+
+describe("skill service toggle dual routing (ccski-3-host-migration 批 2.3)", () => {
+  const openClawProviderId = ProviderIdSchema.parse("openclaw");
+
+  function writeSkillDocument(directory: string, name: string): string {
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(directory, "SKILL.md"),
+      `---\nname: ${JSON.stringify(name)}\ndescription: "Managed."\n---\n# ${name}\n`,
+      "utf8",
+    );
+    return directory;
+  }
+
+  /** Imported Workspace + 内核实体 +（默认 link）投影；返回真实发现链的 service。 */
+  async function workspaceWithKernelProjection(options: {
+    mode: "link" | "materialized";
+    name?: string;
+  }): Promise<{
+    skills: ReturnType<typeof createSkillService>;
+    target: WorkspaceProviderTarget;
+    workspace: ImportedWorkspace;
+    providerRoot: string;
+    entityDir: string;
+  }> {
+    const name = options.name ?? "managed-skill";
+    const workspaceRoot = path.join(sandbox, "ws-managed");
+    const providerRoot = path.join(workspaceRoot, "skills");
+    fs.mkdirSync(providerRoot, { recursive: true });
+    const source = writeSkillDocument(path.join(sandbox, "src", name), name);
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "managed");
+    // 与生产链路同源：registry 解析出的 scope 恒为 canonical 路径（macOS
+    // /private/var 前缀）；内核 rootId 按 resolve(root) 文本哈希，非 canonical
+    // 输入会让 projection 记录与 toggle 的 rootId 失配（PROJECTION_NOT_FOUND）。
+    const scope = workspaces.resolve(
+      { workspaceId: workspace.id, providerId: openClawProviderId },
+      true,
+    );
+    const canonicalWorkspace = scope.workspaceDirectory ?? workspaceRoot;
+    const canonicalProviderRoot = scope.directory;
+    const ensured = await ensureEntity({
+      scope: "project",
+      workspaceDir: canonicalWorkspace,
+      source: { dir: source },
+    });
+    if (ensured.kind !== "ok") throw new Error(`ensureEntity failed: ${JSON.stringify(ensured)}`);
+    const projected = await projectEntity(
+      options.mode === "materialized"
+        ? {
+            scope: "project",
+            workspaceDir: canonicalWorkspace,
+            name,
+            roots: [canonicalProviderRoot],
+            mode: "materialized",
+            reason: "user-request",
+          }
+        : {
+            scope: "project",
+            workspaceDir: canonicalWorkspace,
+            name,
+            roots: [canonicalProviderRoot],
+          },
+    );
+    if (projected.kind !== "ok")
+      throw new Error(`projectEntity failed: ${JSON.stringify(projected)}`);
+    return {
+      skills: createSkillService(workspaces),
+      target: { workspaceId: workspace.id, providerId: openClawProviderId },
+      workspace,
+      providerRoot,
+      entityDir: path.join(workspaceRoot, ".agents", "skills", name),
+    };
+  }
+
+  it("disables a ccski link projection by unlinking (物理摘链) and keeps the entity intact", async () => {
+    const { skills, target, providerRoot, entityDir } = await workspaceWithKernelProjection({
+      mode: "link",
+    });
+    const [skill] = await skills.list(target, true);
+    if (!skill) throw new Error("Expected the projected skill in discovery.");
+    expect(skill).toMatchObject({ ownership: "ccski", entryKind: "symlink" });
+
+    const summary = await skills.toggle(target, [skill.id], "disable");
+    expect(summary.succeeded).toBe(1);
+    // 物理禁用：链不在了（该 root 的发现面随之消失——批 3 UI 复核面）。
+    expect(fs.existsSync(path.join(providerRoot, "managed-skill"))).toBe(false);
+    // 共享实体永不换名、原样在场。
+    expect(fs.existsSync(path.join(entityDir, "SKILL.md"))).toBe(true);
+
+    // 同一 RPC 面上 re-enable 不可达（技能已不可发现）→ typed failed，不伪装成功。
+    const enableAgain = await skills.toggle(target, [skill.id], "enable");
+    expect(enableAgain.results[0]?.status).toBe("failed");
+  });
+
+  it("disables and re-enables a ccski materialized projection through the kernel", async () => {
+    const { skills, target, providerRoot, entityDir } = await workspaceWithKernelProjection({
+      mode: "materialized",
+    });
+    const [skill] = await skills.list(target, true);
+    if (!skill) throw new Error("Expected the materialized projection in discovery.");
+    expect(skill).toMatchObject({ ownership: "ccski", entryKind: "directory" });
+
+    const disabled = await skills.toggle(target, [skill.id], "disable");
+    expect(disabled.succeeded).toBe(1);
+    expect(fs.existsSync(path.join(providerRoot, "managed-skill", ".SKILL.md"))).toBe(true);
+    // 实体保持 enabled 形态（link 面 SKILL.md 永不换名；物化摘名只发生在副本上）。
+    expect(fs.existsSync(path.join(entityDir, "SKILL.md"))).toBe(true);
+
+    const [listedDisabled] = await skills.list(target, true);
+    expect(listedDisabled?.disabled).toBe(true);
+
+    const enabled = await skills.toggle(target, [skill.id], "enable");
+    expect(enabled.succeeded).toBe(1);
+    expect(fs.existsSync(path.join(providerRoot, "managed-skill", "SKILL.md"))).toBe(true);
+  });
+
+  it("keeps the legacy file-rename path for non-ccski plain directory skills", async () => {
+    const workspaceRoot = path.join(sandbox, "ws-plain");
+    const skillDir = writeSkillDocument(
+      path.join(workspaceRoot, "skills", "plain-skill"),
+      "plain-skill",
+    );
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "plain");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openClawProviderId,
+    };
+    const skills = createSkillService(workspaces);
+    const [skill] = await skills.list(target, true);
+    if (!skill) throw new Error("Expected the plain skill in discovery.");
+    expect(skill.ownership === undefined || skill.ownership === "unknown").toBe(true);
+
+    const summary = await skills.toggle(target, [skill.id], "disable");
+    expect(summary.succeeded).toBe(1);
+    expect(fs.existsSync(path.join(skillDir, ".SKILL.md"))).toBe(true);
+  });
+
+  it("maps kernel typed errors to conflict outcomes without leaking kernel messages (enable conflict)", async () => {
+    const skillDir = writeSkillDocument(path.join(sandbox, "entry"), "mapped-skill");
+    const cases: Array<{
+      code: "GUARD_PROJECTION" | "ENTITY_REVISED" | "FOREIGN_OWNERSHIP";
+      expected: string;
+    }> = [
+      { code: "GUARD_PROJECTION", expected: "conflict" },
+      { code: "ENTITY_REVISED", expected: "conflict" },
+      { code: "FOREIGN_OWNERSHIP", expected: "conflict" },
+    ];
+    for (const testCase of cases) {
+      const workspaces = createWorkspaceRegistry();
+      const skills = createSkillService(workspaces, {
+        discoverSkills: async () => [
+          {
+            ...discoveredSkill(skillDir),
+            ownership: "ccski" as const,
+            entryKind: "symlink" as const,
+          },
+        ],
+        entityToggle: async () => ({
+          kind: "error" as const,
+          code: testCase.code,
+          message: "RAW KERNEL INTERNAL DETAIL must not leak",
+        }),
+      });
+      const [skill] = await skills.list(codexTarget);
+      if (!skill) throw new Error("Expected the mapped skill fixture.");
+      const summary = await skills.toggle(codexTarget, [skill.id], "enable");
+      expect(summary.results[0]).toMatchObject({ status: testCase.expected });
+      expect(summary.results[0]?.error).toContain(`ccski code: ${testCase.code}`);
+      expect(summary.results[0]?.error).not.toContain("RAW KERNEL INTERNAL DETAIL");
+      expect(summary.conflicts).toBe(1);
+    }
+  });
+
+  it("routes entity-local kernel skips to the skipped outcome", async () => {
+    const skillDir = writeSkillDocument(path.join(sandbox, "entry"), "local-skill");
+    const workspaces = createWorkspaceRegistry();
+    const skills = createSkillService(workspaces, {
+      discoverSkills: async () => [
+        {
+          ...discoveredSkill(skillDir),
+          ownership: "ccski" as const,
+          entryKind: "directory" as const,
+        },
+      ],
+      entityToggle: async () => ({
+        kind: "ok" as const,
+        action: "disable" as const,
+        status: "skipped" as const,
+        mode: "entity-local" as const,
+        path: skillDir,
+        disabled: false,
+        targetKind: "entity" as const,
+        reason: "canonical-root" as const,
+        generation: 1,
+        warnings: [],
+      }),
+    });
+    const [skill] = await skills.list(codexTarget);
+    if (!skill) throw new Error("Expected the local skill fixture.");
+    const summary = await skills.toggle(codexTarget, [skill.id], "disable");
+    expect(summary.results[0]).toMatchObject({ status: "skipped" });
+    expect(summary.succeeded).toBe(0);
   });
 });
 

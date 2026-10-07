@@ -17,7 +17,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createRepositoryService,
-  type RepositoryInstaller,
+  type RepositoryKernel,
   type RepositoryService,
 } from "../src/daemon/repository-service.js";
 import { createSkillService } from "../src/daemon/skill-service.js";
@@ -131,29 +131,66 @@ describe("repository service lifecycle", () => {
       releaseInstall = resolve;
     });
     let leasedSnapshot = "";
-    const install: RepositoryInstaller = async (options) => {
-      leasedSnapshot = options.source;
-      signalInstallStarted();
-      await installReleased;
-      const sourceFile = path.join(leasedSnapshot, "skills", "leased", "SKILL.md");
-      expect(fs.existsSync(sourceFile)).toBe(true);
-      const installedDirectory = path.join(destination, "leased");
-      fs.mkdirSync(installedDirectory, { recursive: true });
-      fs.copyFileSync(sourceFile, path.join(installedDirectory, "SKILL.md"));
-      return {
+    let stagedSnapshot = "";
+    const kernel: RepositoryKernel = {
+      ensureEntity: async (options) => {
+        stagedSnapshot = options.source.dir;
+        signalInstallStarted();
+        await installReleased;
+        // 租约期间快照必须仍在（淘汰只 retire 不删盘）。
+        expect(fs.existsSync(path.join(leasedSnapshot, "skills", "leased", "SKILL.md"))).toBe(true);
+        expect(fs.existsSync(path.join(stagedSnapshot, "SKILL.md"))).toBe(true);
+        const installedDirectory = path.join(destination, "leased");
+        fs.mkdirSync(installedDirectory, { recursive: true });
+        fs.copyFileSync(
+          path.join(stagedSnapshot, "SKILL.md"),
+          path.join(installedDirectory, "SKILL.md"),
+        );
+        return {
+          kind: "ok",
+          status: "created",
+          entity: {
+            scope: "project",
+            logicalName: "leased",
+            folderName: "leased",
+            path: installedDirectory,
+            revision: "l".repeat(64),
+            provenance: { source: "", installedAt: "", updatedAt: "" },
+            createdAt: "",
+            updatedAt: "",
+          },
+          generation: 1,
+          lockSyncPending: true,
+          warnings: [],
+        };
+      },
+      projectEntity: async () => ({
+        kind: "ok",
+        entity: {
+          scope: "project",
+          logicalName: "leased",
+          folderName: "leased",
+          path: path.join(destination, "leased"),
+          revision: "l".repeat(64),
+          provenance: { source: "", installedAt: "", updatedAt: "" },
+          createdAt: "",
+          updatedAt: "",
+        },
         results: [
           {
-            skill: "leased",
-            destination,
-            path: installedDirectory,
-            status: "installed",
+            root: destination,
+            rootId: "",
+            path: path.join(destination, "leased"),
+            status: "projected",
+            mode: "link",
+            targetKind: "projection",
           },
         ],
-        installed: 1,
-        skipped: 0,
-        overwritten: 0,
+        projected: 1,
+        unchanged: 0,
         failed: 0,
-      };
+        generation: 1,
+      }),
     };
     repository = createRepositoryService(workspaces, createSkillService(workspaces), {
       clone: async () => {
@@ -169,12 +206,13 @@ describe("repository service lifecycle", () => {
         );
         return { directory: snapshot, commit: cloneIndex.toString(16).padStart(40, "0") };
       },
-      installSkills: install,
+      kernel,
     });
-
+    // 内核 fake 需要 install 时仍能读到首个快照目录（staging 源）。
     const oldest = await repository.scan("fixture://oldest");
     const selected = oldest.skills[0];
     if (!selected) throw new Error("Expected the oldest scan to discover a skill.");
+    leasedSnapshot = snapshots[0] ?? "";
     const installing = repository.install({
       sessionId: oldest.sessionId,
       skillIds: [selected.id],

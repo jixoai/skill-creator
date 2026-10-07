@@ -81,6 +81,12 @@ export const ApplyUpdateResultEntrySchema = z.object({
   status: ApplyUpdateStatusSchema,
   /** 失败原因（可选）。 */
   error: z.string().optional(),
+  /**
+   * ccski-3-host-migration 批 2.2：npm lock 分层单写者（唯一写者 = skills CLI）。
+   * 宿主 apply 成功只在内存覆盖层刷新 hash，lock 文件未同步——如实携带
+   * `lockSyncPending: true`，UI 不得把该条目渲染成「lock 已更新」。
+   */
+  lockSyncPending: z.boolean().optional(),
 });
 /** apply-update 单条结果。 */
 export type ApplyUpdateResultEntry = z.infer<typeof ApplyUpdateResultEntrySchema>;

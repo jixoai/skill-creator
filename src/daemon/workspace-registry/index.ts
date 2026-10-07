@@ -27,6 +27,7 @@ import {
 } from "../../shared/contracts/workspaces.js";
 import { DomainError } from "../domain-error.js";
 import { canonicalDirectory, opaquePathId } from "../path-safety.js";
+import { homeDir } from "../../shared/paths.js";
 import { globalProviderRoot, importedProviderRoot, requireProvider } from "../provider-roots.js";
 import { createWorkspaceRegistryPersistence } from "./persistence.js";
 import {
@@ -50,6 +51,13 @@ export interface WorkspaceProviderScope {
   workspaceKind: "global" | "directory";
   workspaceLabel: string;
   directory: string;
+  /**
+   * Imported Workspace 根目录（directory kind 恒有；global 恒缺省）。
+   * ccski 3.0 映射（ccski-3-host-migration 批 2）：Imported Workspace = 内核
+   * project scope 的 workspaceDir（实体库 = `<workspaceDirectory>/.agents/skills`），
+   * Provider root = 投影 root。mutation 调用点从这里取 scope，不从调用方路径取。
+   */
+  workspaceDirectory?: string;
   options: ListOptions;
 }
 
@@ -168,6 +176,7 @@ export function createWorkspaceRegistry(options: WorkspaceRegistryOptions = {}):
         entry.label,
         importedProviderRoot(workspaceDirectory, provider),
         includeDisabled,
+        workspaceDirectory,
       );
     },
 
@@ -209,17 +218,29 @@ function providerScope(
   workspaceLabel: string,
   directory: string,
   includeDisabled: boolean,
+  workspaceDirectory?: string,
 ): WorkspaceProviderScope {
   return {
     target,
     workspaceKind,
     workspaceLabel,
     directory,
+    ...(workspaceDirectory === undefined ? {} : { workspaceDirectory }),
     options: {
       customDirs: [directory],
       customProvider: target.providerId,
       scanDefaultDirs: false,
       all: includeDisabled,
+      // ccski 3.0 ownership 视图（ccski-3-host-migration 批 2.3）：stateBases 默认
+      // [<workspaceDir>/.agents, <userDir>/.agents]；scanDefaultDirs:false 下 userDir
+      // 只影响 state 读取面（不扫描默认 roots）。Imported = workspaceDirectory（读
+      // `<ws>/.agents/.ccski-state.json`，与内核 project scope 的 resolveScopeBase 一致）；
+      // Global = 宿主 homeDir()（尊重 SKILL_CREATOR_HOME/测试 override，隔离态不读真实 home）。
+      ...(workspaceKind === "directory" && workspaceDirectory !== undefined
+        ? { userDir: workspaceDirectory }
+        : workspaceKind === "global"
+          ? { userDir: homeDir() }
+          : {}),
     },
   };
 }

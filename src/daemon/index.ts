@@ -55,6 +55,13 @@ export interface DaemonOptions {
    * 既有 seam 转发 createDaemonDomain；生产 daemon 不传（走真实 kernel）。
    */
   distillSession?: DistillJobDeps["createSession"];
+  /**
+   * ccski-3-host-migration 批 2 注记：转发 createDaemonDomain 的 probeWarmup
+   * （同 CLI 短命进程先例）。生命周期类测试关闭——probe 预热每次 boot spawn
+   * 的 npx 在途期间，execa 的 signal-exit 会注册外部信号监听器，污染监听器
+   * 生命周期断言（与被测的 daemon 监听器无关）。
+   */
+  probeWarmup?: boolean;
   exitProcess?: (code: number) => void;
 }
 
@@ -190,10 +197,10 @@ export async function bootDaemon(opts: DaemonOptions): Promise<DaemonHandles | n
 
   let domain: DaemonDomain;
   try {
-    domain = createDaemonDomain(
-      undefined,
-      opts.distillSession ? { distillSession: opts.distillSession } : {},
-    );
+    domain = createDaemonDomain(undefined, {
+      ...(opts.distillSession ? { distillSession: opts.distillSession } : {}),
+      ...(opts.probeWarmup === false ? { probeWarmup: false } : {}),
+    });
   } catch (error) {
     await ipc.stop();
     throw error;

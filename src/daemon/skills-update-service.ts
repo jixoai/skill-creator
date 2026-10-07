@@ -1,25 +1,51 @@
 /**
- * skills-CLI 更新检查与应用：读 lock、对比上游 hash、复用 repository install 重装。
+ * skills-CLI 更新检查与应用：读 lock、对比上游 hash、经 ccski 3.0 内核实体 API 重装。
  *
  * 用户原始需求 [2026-07-27]：「读取 lock 文件、对比上游 hash、按需重装并刷新 lock 条目。」
+ * 架构决策 [2026-10-07]（ccski-3-host-migration 批 2.2）：
+ * - hash 单源：本仓第二 computeSkillFolderHash 实现删除，import 自 ccski
+ *   （SKILL_FOLDER_HASH_VERSION="1.7.1"，与 npm:skills 1.7.1 逐位一致）。
+ * - hash 代际裁决：存量 lock 的 40-hex（tree-SHA 旧算法）条目视为 stale，触发一次
+ *   重装收敛；收敛后覆盖层持有 64-hex 新算法 hash，后续按位对比。
+ * - 上游对比统一走浅克隆 + 单源 folder-hash（GitHub Trees API 只作限流/可达性探针：
+ *   1.7.1 lock 的 skillFolderHash 是 64-hex folder hash，与 tree SHA 永不相等，
+ *   旧 tree-SHA 等值比较对两代条目都失效——见 import-audit.md 批 2 注记）。
+ * - apply 重装直连内核：updateEntity（实体稳路径换新，link 投影按路径语义自然解析；
+ *   ENTITY_NOT_FOUND 回退 ensureEntity+projectEntity，legacy 物化目录先迁移再投影）。
+ * - lockSyncPending 诚实化：npm lock 唯一写者是 skills CLI（分层单写者），宿主只在
+ *   内存覆盖层刷新 hash，apply 成功条目如实携带 lockSyncPending:true。
  * 正交意图：
  *   [1] 读取全局 v3 / 项目 v1 lock（safeParse，失败降级为 null，绝不抛错）。
- *   [2] 对比 lock hash 与上游 hash（GitHub 源走 Trees API，其余浅克隆算 on-disk hash）。
- *   [3] 复用 repository-service 安装流水线重装过时技能，并在内存覆盖层刷新 hash。
- * 妥协声明：按 Open Question 与 D4，apply 成功后仅在 Skill Creator 内存覆盖层刷新 hash，
- * 不写第三方 lock 文件；用户下次纯用 CLI 时仍会被 CLI 视作过时，由后续决策定稿。
+ *   [2] 对比 lock hash 与上游 hash（统一新算法；40-hex 旧代际条目 stale 收敛）。
+ *   [3] 经 ccski 内核实体 API 重装过时技能，并在内存覆盖层刷新 hash。
+ * 妥协声明：按 D4，apply 成功后仅在 Skill Creator 内存覆盖层刷新 hash，不写第三方
+ * lock 文件；用户下次纯用 CLI 时仍会被 CLI 视作过时（lockSyncPending 如实上报），由
+ * 后续决策定稿。
  */
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execa } from "execa";
+import matter from "gray-matter";
+import {
+  computeSkillFolderHash as ccskiComputeSkillFolderHash,
+  ensureEntity as ccskiEnsureEntity,
+  projectEntity as ccskiProjectEntity,
+  updateEntity as ccskiUpdateEntity,
+  type EnsureEntityOptions,
+  type EnsureEntityResult,
+  type EntityUpdateOptions,
+  type EntityUpdateResult,
+  type ProjectEntityOptions,
+  type ProjectEntityResult,
+} from "ccski";
 import {
   parseGlobalSkillLock,
   parseProjectSkillLock,
   type LocalSkillLockEntry,
   type SkillLockEntry,
 } from "../shared/contracts/skills-lock.js";
+import { SkillFrontmatterSchema } from "../shared/contracts/creator.js";
 import type {
   ApplyUpdateInput,
   ApplyUpdateResultEntry,
@@ -30,9 +56,35 @@ import type { SkillId, SkillMetadata } from "../shared/contracts/skills.js";
 import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import { DomainError } from "./domain-error.js";
 import type { RepositoryService } from "./repository-service.js";
+import { kernelFailureMessage, stageSkillSource } from "./repository-service.js";
 import type { SkillsCliProbe } from "./skills-cli-probe.js";
 import type { SkillService } from "./skill-service.js";
 import type { WorkspaceRegistry } from "./workspace-registry/index.js";
+
+/**
+ * ccski folder-hash 单源转发（批 2.2）：签名与 ccski 一致（异步、返回 64-hex）。
+ * 本仓历史上的第二实现已删除——两份实现一旦漂移，lock 对比与 stale 裁决全部失真。
+ */
+export const computeSkillFolderHash = ccskiComputeSkillFolderHash;
+
+/**
+ * ccski store-link 内核实体 API seam（批 2.2）：apply 重装的注入面。
+ * typed result 不属于异常流；宿主按冻结码映射有限词表，不裸透传内核 message。
+ */
+export interface SkillsUpdateKernel {
+  updateEntity: (options: EntityUpdateOptions) => Promise<EntityUpdateResult>;
+  ensureEntity: (options: EnsureEntityOptions) => Promise<EnsureEntityResult>;
+  projectEntity: (options: ProjectEntityOptions) => Promise<ProjectEntityResult>;
+}
+
+/**
+ * hash 代际裁决（批 2.2）：40-hex = 旧算法条目（GitHub tree SHA 时代），无新算法
+ * 语义，视为 stale 触发一次重装收敛；64-hex = npm:skills 1.7.1 folder hash（新代际，
+ * 与 ccski 单源实现逐位一致）。非 hex 形状（测试桩/未知来源）按新代际对比处理。
+ */
+export function isLegacyLockHash(hash: string): boolean {
+  return /^[0-9a-f]{40}$/.test(hash);
+}
 
 /** GitHub Trees API 响应的最小子集；多余字段忽略。 */
 interface GithubTreeResponse {
@@ -83,42 +135,6 @@ export function parseGithubSource(source: string): { owner: string; repo: string
   const urlMatch = trimmed.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/|$)/);
   if (urlMatch) return { owner: urlMatch[1], repo: urlMatch[2] };
   return null;
-}
-
-/** 按 vercel-labs/skills 算法计算技能目录的 SHA-256（路径升序、拼接路径+内容）。 */
-export function computeSkillFolderHash(skillDir: string): string {
-  const files: Array<{ relativePath: string; content: Buffer }> = [];
-  collectFiles(skillDir, skillDir, files);
-  files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-  const hash = createHash("sha256");
-  for (const file of files) {
-    hash.update(file.relativePath);
-    hash.update(file.content);
-  }
-  return hash.digest("hex");
-}
-
-function collectFiles(
-  baseDir: string,
-  currentDir: string,
-  results: Array<{ relativePath: string; content: Buffer }>,
-): void {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(currentDir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (entry.name === ".git" || entry.name === "node_modules") continue;
-    const fullPath = path.join(currentDir, entry.name);
-    if (entry.isDirectory()) {
-      collectFiles(baseDir, fullPath, results);
-    } else if (entry.isFile()) {
-      const relativePath = path.relative(baseDir, fullPath).split(path.sep).join("/");
-      results.push({ relativePath, content: fs.readFileSync(fullPath) });
-    }
-  }
 }
 
 /** 判断 sourceType 是否为 GitHub 源。 */
@@ -296,6 +312,8 @@ export interface SkillsUpdateServiceOptions {
   fetch?: FetchLike;
   /** 克隆适配器；默认走 execa git clone。 */
   clone?: UpdateCloner;
+  /** ccski 内核实体 API seam；默认走真实内核（批 2.2）。 */
+  kernel?: SkillsUpdateKernel;
   /** 全局 lock 内容读取；默认读 `globalSkillLockPath()`。 */
   readGlobalLock?: () => string | null;
   /** 项目 lock 内容读取；默认读 `projectSkillLockPath(cwd)`。 */
@@ -330,6 +348,11 @@ export function createSkillsUpdateService(
 ) {
   const doFetch = options.fetch ?? defaultFetch;
   const doClone = options.clone ?? defaultClone;
+  const kernel: SkillsUpdateKernel = options.kernel ?? {
+    updateEntity: ccskiUpdateEntity,
+    ensureEntity: ccskiEnsureEntity,
+    projectEntity: ccskiProjectEntity,
+  };
   const readGlobal = options.readGlobalLock ?? readGlobalLockContent;
   const readProject = options.readProjectLock ?? readProjectLockContent;
   const resolveCwd = options.resolveCwd ?? (() => process.cwd());
@@ -338,15 +361,16 @@ export function createSkillsUpdateService(
   // apply 成功后的内存覆盖层：技能名 → 新 hash。优先于 lock 文件中的旧值。
   const hashOverlay = new Map<string, string>();
 
-  /** 取 GitHub tree SHA：命中缓存或调 Trees API；限流 / 网络失败返回 null。 */
+  /**
+   * 取 GitHub tree SHA：仅作可达性/限流探针（批 2.2：tree SHA 与 folder hash 是
+   * 两个算法域，不再是对比值，也不进 upstream hash 缓存——缓存只存单源
+   * folder-hash，防止跨算法域污染等值比较）。
+   */
   async function fetchGithubTreeSha(
     source: string,
     ref: string | undefined,
     skillPath: string | undefined,
   ): Promise<{ sha: string | null; unavailable: boolean }> {
-    const key = upstreamCacheKey(source, ref, skillPath);
-    const cached = upstreamHashCache.get(key);
-    if (cached) return { sha: cached, unavailable: false };
     const parsed = parseGithubSource(source);
     if (!parsed) return { sha: null, unavailable: true };
     const refOrMain = ref ?? "main";
@@ -373,7 +397,6 @@ export function createSkillsUpdateService(
       const entries = parseGithubTree(jsonValue);
       if (!entries) return { sha: null, unavailable: true };
       const sha = matchSkillFolderSha(entries, skillPath);
-      if (sha) upstreamHashCache.set(key, sha);
       return { sha, unavailable: sha === null };
     } catch {
       return { sha: null, unavailable: true };
@@ -399,7 +422,7 @@ export function createSkillsUpdateService(
       if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
         return { hash: null, failed: true };
       }
-      const hash = computeSkillFolderHash(target);
+      const hash = await computeSkillFolderHash(target);
       upstreamHashCache.set(key, hash);
       return { hash, failed: false };
     } catch {
@@ -407,6 +430,27 @@ export function createSkillsUpdateService(
     } finally {
       if (directory) fs.rmSync(directory, { recursive: true, force: true });
     }
+  }
+
+  /**
+   * 统一上游 hash（批 2.2）：所有源类型都经浅克隆 + ccski 单源 folder-hash。
+   * GitHub 源先做 Trees API 探针——403/429/解析失败时如实 unavailable（限流保护，
+   * 不烧克隆）；探针通过仍需克隆才能得到可与 1.7.1 lock 对比的 64-hex hash
+   * （tree SHA 与 folder hash 是两个算法域，永不相等，见文件头架构决策）。
+   */
+  async function fetchUpstreamHash(
+    provenance: SkillProvenance,
+  ): Promise<{ hash: string | null; unavailable: boolean; failed: boolean }> {
+    if (provenance.github) {
+      const probeResult = await fetchGithubTreeSha(
+        provenance.source,
+        provenance.ref,
+        provenance.skillPath,
+      );
+      if (probeResult.unavailable) return { hash: null, unavailable: true, failed: false };
+    }
+    const cloned = await computeClonedHash(provenance.source, provenance.ref, provenance.skillPath);
+    return { hash: cloned.hash, unavailable: false, failed: cloned.failed };
   }
 
   /** 读并合并全局 + 项目 lock；文件缺失 / 不兼容 → null（不抛错）。 */
@@ -423,6 +467,185 @@ export function createSkillsUpdateService(
       ? parseProjectSkillLock(safeParseJsonValue(projectContent))
       : null;
     return { globalLock, projectLock };
+  }
+
+  /**
+   * 内核重装单技能（批 2.2）：scan pinned source → 租约内 staging →
+   * updateEntity /（ENTITY_NOT_FOUND 时）ensureEntity+projectEntity → 磁盘复核。
+   * 成功收据携带 staged 源的新算法 hash（与实体内容逐位一致）；staged 目录恒清理。
+   */
+  async function reinstallThroughKernel(
+    target: WorkspaceProviderTarget,
+    skill: SkillMetadata,
+    provenance: SkillProvenance,
+  ): Promise<{ kind: "ok"; newHash: string } | { kind: "error"; message: string }> {
+    const scan = await repository.scan(provenance.source, provenance.ref);
+    const remoteSkill = scan.skills.find(
+      (candidate) =>
+        candidate.name === skill.name ||
+        (provenance.skillPath !== undefined &&
+          candidate.relativePath ===
+            provenance.skillPath.replace(/\\/g, "/").replace(/\/SKILL\.md$/i, "")),
+    );
+    if (!remoteSkill || !remoteSkill.installable) {
+      return { kind: "error", message: `Remote skill not found in source: ${provenance.source}` };
+    }
+    return repository.withSession(scan.sessionId, async (sessionDirectory) => {
+      const sourceDir = path.resolve(sessionDirectory, remoteSkill.relativePath);
+      const staged = stageSkillSource(sourceDir);
+      try {
+        const outcome = await reinstallFromStagedSource(target, skill, provenance, staged);
+        if (outcome.kind === "error") return outcome;
+        const newHash = await computeSkillFolderHash(staged);
+        return { kind: "ok" as const, newHash };
+      } finally {
+        fs.rmSync(staged, { recursive: true, force: true });
+      }
+    });
+  }
+
+  /** staging 之后的内核重装主体（无清理责任；typed error 一律转有限词表 message）。 */
+  async function reinstallFromStagedSource(
+    target: WorkspaceProviderTarget,
+    skill: SkillMetadata,
+    provenance: SkillProvenance,
+    staged: string,
+  ): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+    let scope;
+    try {
+      scope = workspaces.resolveWritable(target);
+    } catch (error) {
+      return {
+        kind: "error",
+        message: error instanceof Error ? error.message : "The update target is not writable.",
+      };
+    }
+    const workspaceDirectory = scope.workspaceDirectory;
+    if (!workspaceDirectory) {
+      return {
+        kind: "error",
+        message: "Global Workspace providers are not writable installation targets.",
+      };
+    }
+    const providerRoot = scope.directory;
+    const entryPath = path.join(providerRoot, skill.directoryName);
+    const entryStats = (() => {
+      try {
+        return fs.lstatSync(entryPath);
+      } catch {
+        return null;
+      }
+    })();
+    const base = {
+      scope: "project" as const,
+      workspaceDir: workspaceDirectory,
+      source: {
+        dir: staged,
+        source: provenance.source,
+        sourceType: provenance.sourceType ?? (provenance.github ? "github" : "git"),
+        sourceUrl: provenance.source,
+        skillPath: provenance.skillPath,
+      },
+    };
+
+    const projectToProvider = async (): Promise<string | null> => {
+      const projected = await kernel.projectEntity({
+        scope: "project",
+        workspaceDir: workspaceDirectory,
+        name: skill.name,
+        roots: [providerRoot],
+      });
+      if (projected.kind === "error") return kernelFailureMessage(projected.code);
+      const rootResult = projected.results[0];
+      if (!rootResult || rootResult.status === "failed") {
+        return kernelFailureMessage(rootResult?.errorCode);
+      }
+      return null;
+    };
+
+    const removeLegacyEntry = (): string | null => {
+      if (entryStats === null) return null;
+      try {
+        if (entryStats.isSymbolicLink()) fs.unlinkSync(entryPath);
+        else fs.rmSync(entryPath, { recursive: true, force: true });
+        return null;
+      } catch (error) {
+        return `The legacy skill directory could not be replaced: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      }
+    };
+
+    const updated = await kernel.updateEntity({ ...base, name: skill.name });
+    if (updated.kind === "error" && updated.code === "ENTITY_NOT_FOUND") {
+      // legacy skills-CLI 物化目录（从未入实体库）：迁实体 + 投影。provider root
+      // 上的 legacy 目录（含实体本地形态 = 实体路径本身）按已批准的重装语义移除
+      // ——ENTITY_NOT_FOUND 已证 state 无实体记录，无 ccski 投影可破。
+      const removeFailure = removeLegacyEntry();
+      if (removeFailure !== null) return { kind: "error", message: removeFailure };
+      let ensured = await kernel.ensureEntity(base);
+      if (
+        ensured.kind === "error" &&
+        ensured.code === "NAME_EXISTS" &&
+        ensured.existing !== undefined
+      ) {
+        ensured = await kernel.ensureEntity({
+          ...base,
+          replace: { expectedRevision: ensured.existing.expectedRevision },
+        });
+      }
+      if (ensured.kind === "error") {
+        return { kind: "error", message: kernelFailureMessage(ensured.code) };
+      }
+      const projectionFailure = await projectToProvider();
+      if (projectionFailure !== null) return { kind: "error", message: projectionFailure };
+    } else if (updated.kind === "error") {
+      return { kind: "error", message: kernelFailureMessage(updated.code) };
+    } else if (entryStats !== null && !entryStats.isSymbolicLink()) {
+      // 实体已在但 provider root 上是未入账的真实目录（legacy 副本）：重装语义收敛
+      // 为投影。entity-local 形态（realpath 在实体库内 = 实体路径本身）保留不动。
+      const entityRootDir = path.join(workspaceDirectory, ".agents", "skills");
+      const real = fs.realpathSync(entryPath);
+      const relative = path.relative(entityRootDir, real);
+      const insideEntityRoot =
+        relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+      if (!insideEntityRoot) {
+        const removeFailure = removeLegacyEntry();
+        if (removeFailure !== null) return { kind: "error", message: removeFailure };
+        const projectionFailure = await projectToProvider();
+        if (projectionFailure !== null) return { kind: "error", message: projectionFailure };
+      }
+    } else if (entryStats === null) {
+      // 实体已在（updateEntity ok）但本 provider 尚无条目 → 补投影。
+      const projectionFailure = await projectToProvider();
+      if (projectionFailure !== null) return { kind: "error", message: projectionFailure };
+    }
+
+    // 磁盘事实复核（不伪装成功）：条目在场 + SKILL.md frontmatter 与身份一致。
+    try {
+      fs.lstatSync(entryPath);
+    } catch {
+      return {
+        kind: "error",
+        message: "The reinstall did not materialize the skill at its destination.",
+      };
+    }
+    let documentName = "";
+    try {
+      documentName = matterDocumentName(path.join(entryPath, "SKILL.md"));
+    } catch {
+      return {
+        kind: "error",
+        message: "The reinstalled skill directory does not contain a parseable SKILL.md.",
+      };
+    }
+    if (documentName !== skill.name) {
+      return {
+        kind: "error",
+        message: "The reinstalled skill identity does not match the approved skill.",
+      };
+    }
+    return { kind: "ok" };
   }
 
   return {
@@ -470,27 +693,11 @@ export function createSkillsUpdateService(
         // 内存覆盖层优先（apply 成功后立即反映）。
         const overridden = hashOverlay.get(skill.name) ?? hashOverlay.get(skill.directoryName);
         const currentHash = overridden ?? provenance.currentHash;
-        let upstream: string | null = null;
-        let unavailable = false;
-        let failed = false;
-        if (provenance.github) {
-          const result = await fetchGithubTreeSha(
-            provenance.source,
-            provenance.ref,
-            provenance.skillPath,
-          );
-          upstream = result.sha;
-          unavailable = result.unavailable;
-        } else {
-          const result = await computeClonedHash(
-            provenance.source,
-            provenance.ref,
-            provenance.skillPath,
-          );
-          upstream = result.hash;
-          failed = result.failed;
-        }
-        if (unavailable) {
+        // hash 代际裁决（批 2.2）：40-hex 旧算法条目无新算法语义，视为 stale——
+        // 状态恒为 updated（待一次重装收敛），不进入等值比较。
+        const generationStale = isLegacyLockHash(currentHash);
+        const upstream = await fetchUpstreamHash(provenance);
+        if (upstream.unavailable) {
           results.push({
             skillId: skill.id,
             name: skill.name,
@@ -502,7 +709,7 @@ export function createSkillsUpdateService(
           });
           continue;
         }
-        if (failed || upstream === null) {
+        if (upstream.failed || upstream.hash === null) {
           results.push({
             skillId: skill.id,
             name: skill.name,
@@ -514,23 +721,23 @@ export function createSkillsUpdateService(
           });
           continue;
         }
-        if (upstream === currentHash) {
+        if (generationStale || upstream.hash !== currentHash) {
           results.push({
             skillId: skill.id,
             name: skill.name,
             currentHash,
-            upstreamHash: upstream,
+            upstreamHash: upstream.hash,
             source: provenance.source,
-            status: "already-current",
+            status: "updated",
           });
         } else {
           results.push({
             skillId: skill.id,
             name: skill.name,
             currentHash,
-            upstreamHash: upstream,
+            upstreamHash: upstream.hash,
             source: provenance.source,
-            status: "updated",
+            status: "already-current",
           });
         }
       }
@@ -538,8 +745,12 @@ export function createSkillsUpdateService(
     },
 
     /**
-     * 对批准的过时技能重装，复用 repository-service 的 pinned clone + install 流水线。
-     * 成功后在内存覆盖层刷新 hash；失败透传 DomainError，不写半装文件。
+     * 对批准的过时技能重装（批 2.2：直连 ccski 内核实体 API）。
+     * updateEntity 稳路径换新（link 投影按路径语义自然解析）；ENTITY_NOT_FOUND
+     * （legacy skills-CLI 物化目录，从未入实体库）回退 ensureEntity+projectEntity。
+     * 成功后在内存覆盖层刷新 64-hex 新算法 hash 并携带 lockSyncPending（npm lock
+     * 唯一写者是 skills CLI，宿主不写）；内核 typed error / 复核失败如实 failed，
+     * 不刷新覆盖层、不伪装成功。
      */
     async applyUpdates(
       target: WorkspaceProviderTarget,
@@ -583,37 +794,26 @@ export function createSkillsUpdateService(
           });
           continue;
         }
-        // 执行前再次对比：若已与上游一致则跳过（spec scenario）。
+        // 执行前再次对比：40-hex 旧代际条目 stale 收敛（不等值短路）；新代际与
+        // 上游一致则跳过（spec scenario）。
         const overridden = hashOverlay.get(skill.name) ?? hashOverlay.get(skill.directoryName);
         const currentHash = overridden ?? provenance.currentHash;
+        const generationStale = isLegacyLockHash(currentHash);
         let upstream: string | null = null;
         let alreadyCurrent = false;
         try {
-          if (provenance.github) {
-            const treeResult = await fetchGithubTreeSha(
-              provenance.source,
-              provenance.ref,
-              provenance.skillPath,
+          const upstreamResult = await fetchUpstreamHash(provenance);
+          if (upstreamResult.unavailable) {
+            throw new DomainError(
+              "UNAVAILABLE",
+              "Upstream is unreachable; cannot verify or apply the update.",
             );
-            upstream = treeResult.sha;
-            if (treeResult.unavailable) {
-              throw new DomainError(
-                "UNAVAILABLE",
-                "Upstream is unreachable; cannot verify or apply the update.",
-              );
-            }
-          } else {
-            const cloneResult = await computeClonedHash(
-              provenance.source,
-              provenance.ref,
-              provenance.skillPath,
-            );
-            upstream = cloneResult.hash;
-            if (cloneResult.failed || upstream === null) {
-              throw new DomainError("UNAVAILABLE", "Could not compute the upstream skill hash.");
-            }
           }
-          if (upstream === currentHash) {
+          if (upstreamResult.failed || upstreamResult.hash === null) {
+            throw new DomainError("UNAVAILABLE", "Could not compute the upstream skill hash.");
+          }
+          upstream = upstreamResult.hash;
+          if (!generationStale && upstream === currentHash) {
             alreadyCurrent = true;
           }
         } catch (error) {
@@ -630,38 +830,34 @@ export function createSkillsUpdateService(
           continue;
         }
 
-        // 复用 repository install 流水线：scan pinned source → install 到原 target。
+        // 内核重装：scan pinned source → 租约内 staging → updateEntity（或回退
+        // ensureEntity+projectEntity）→ 磁盘事实复核。
         try {
-          const scan = await repository.scan(provenance.source, provenance.ref);
-          const remoteSkill = scan.skills.find(
-            (candidate) =>
-              candidate.name === skill.name ||
-              (provenance.skillPath &&
-                candidate.relativePath ===
-                  provenance.skillPath.replace(/\\/g, "/").replace(/\/SKILL\.md$/i, "")),
-          );
-          if (!remoteSkill) {
-            throw new DomainError(
-              "NOT_FOUND",
-              `Remote skill not found in source: ${provenance.source}`,
-            );
+          const outcome = await reinstallThroughKernel(target, skill, provenance);
+          if (outcome.kind === "error") {
+            results.push({
+              skillId: skill.id,
+              name: skill.name,
+              status: "failed",
+              error: outcome.message,
+            });
+            continue;
           }
-          await repository.install({
-            sessionId: scan.sessionId,
-            skillIds: [remoteSkill.id],
-            targets: [{ workspaceId: target.workspaceId, providerId: target.providerId }],
-            force: true,
-          });
-          // 安装成功后在内存覆盖层刷新 hash；同时失效 probe + upstream 缓存。
-          if (upstream) {
-            hashOverlay.set(skill.name, upstream);
-            hashOverlay.set(skill.directoryName, upstream);
-          }
+          // 覆盖层刷新为重装内容的新算法 hash（= staged 源的 folder hash，与实体
+          // 内容逐位一致）——两代来源（github/local）统一收敛到 64-hex。
+          hashOverlay.set(skill.name, outcome.newHash);
+          hashOverlay.set(skill.directoryName, outcome.newHash);
           probe.invalidate([skill.path]);
           upstreamHashCache.delete(
             upstreamCacheKey(provenance.source, provenance.ref, provenance.skillPath),
           );
-          results.push({ skillId: skill.id, name: skill.name, status: "updated" });
+          skills.invalidateDiscovery(target);
+          results.push({
+            skillId: skill.id,
+            name: skill.name,
+            status: "updated",
+            lockSyncPending: true,
+          });
         } catch (error) {
           results.push({
             skillId: skill.id,
@@ -685,6 +881,13 @@ export function createSkillsUpdateService(
 
 /** skills-update-service 实例接口。 */
 export type SkillsUpdateService = ReturnType<typeof createSkillsUpdateService>;
+
+/** 读一个 SKILL.md 的 frontmatter name（外部输入 safeParse；坏文档抛错）。 */
+function matterDocumentName(document: string): string {
+  const parsed = SkillFrontmatterSchema.safeParse(matter(fs.readFileSync(document, "utf8")).data);
+  if (!parsed.success) throw new Error("invalid frontmatter");
+  return parsed.data.name;
+}
 
 /** 仅做 JSON.parse，不收窄；语法错误返回 null。 */
 function safeParseJsonValue(source: string): unknown {

@@ -54,6 +54,18 @@ export const SkillMetadataSchema = z.object({
    * daemon `skills.list` 投影时设置；老 daemon 缺省为 `false`。
    */
   updatable: z.boolean().optional(),
+  /**
+   * 顶层条目形态（ccski-3-host-migration 批 2.3，对齐 ccski 3.0 发现层增量字段；
+   * 可选）：`directory` = 真实目录；`symlink` = 顶层符号链接（store-link 投影或
+   * 外部链接）。老 daemon 缺省视为 `directory`。
+   */
+  entryKind: z.enum(["directory", "symlink"]).optional(),
+  /**
+   * ccski 管辖标注（批 2.3；可选）：`ccski` = 发现层 state 认证为 store-link
+   * 实体/投影（启停走内核 `toggleEntityProjection`）；`external` / `unknown` =
+   * 外部链接或未入账条目（保留宿主文件改名启停路径）。
+   */
+  ownership: z.enum(["ccski", "external", "unknown"]).optional(),
 });
 /** 技能列表项。 */
 export type SkillMetadata = z.infer<typeof SkillMetadataSchema>;

@@ -110,9 +110,19 @@ Unified Proposals  = agent.proposals.* 唯一审批面（intelligence-proposal-p
 Appearance Prefs   = DevicePrefs（theme/sidebarCollapsed）的 appearance store 消费：
                       .dark 类挂 documentElement + system 跟随 matchMedia；
                       AppSidebar 展开（标签）/折叠（图标）双态；General 设置分区
-Repository         = clone + pin commit + scan + preview + install
+Repository         = clone + pin commit + scan + preview + install（ccski 3.0 两阶段内核：
+                      ensureEntity 实体入库 Imported Workspace 的 .agents/skills 实体库 +
+                      projectEntity symlink 投影到 Provider root；typed error 映射宿主有限
+                      词表，installedSkillId 复核链双形态保留——link 投影 realpath 必须落在
+                      同一 Workspace 实体库内，物化/实体本地 realpath 即自身）
 Source             = Discover feed 的 curated 或 user Git 源（sources.json）
-Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply）
+Skills Update      = 对比 skills-CLI lock hash 与上游并重装（只读 check / 写入 apply；
+                      ccski 3.0 批 2.2：apply 直连内核 updateEntity，legacy 物化目录回退
+                      ensureEntity+projectEntity 迁移；hash 单源 import 自 ccski
+                      （npm:skills 1.7.1 逐位一致）；40-hex 旧算法 lock 条目视为 stale
+                      触发一次重装收敛；上游对比统一浅克隆 + folder-hash，GitHub Trees
+                      API 只作限流探针；成功条目诚实携带 lockSyncPending——npm lock 分层
+                      单写者，宿主只在内存覆盖层刷新）
 @ Reference        = composer `@` 芯片引用：UI 只发 opaque 引用（file 绝对路径 /
                       session id），daemon 展开为 [reference: …] 文本块（file 走
                       agent-files 守卫链；session 走转录有界摘要）；绘制为 textarea
@@ -486,7 +496,8 @@ repo_<opaque-session> -- owns --> clone directory + rsk_<opaque-id> map
       workspaceId + canonical root + selected name + direct-child path
                               |
                               v
-        ccski unknown output -> Zod runtime parse -> one entry
+        ccski 3.0 kernel two-phase: ensureEntity + projectEntity
+     (typed result; errors map to the host's finite vocabulary)
                               |
                               v
            entry exactly matches selected name,
@@ -496,6 +507,7 @@ repo_<opaque-session> -- owns --> clone directory + rsk_<opaque-id> map
             rediscover through injected SkillService
        canonical non-symlink directory + lstat regular SKILL.md
       + matching frontmatter name + resolve identity + validate
+     (link 投影双形态：realpath 落在同一 Workspace 实体库内即通过)
                               |
                               v
               workspaceId + local SkillId per verified write
@@ -647,7 +659,7 @@ RPC JSON ----------------------> shared Zod schema -------------------> router
 workspaces.json ---------------> JSON parse + v2 safeParse -----------> registry state
                                     | incompatible -------------------> empty current state
 package JSON ------------------> JSON parse + current safeParse ------> runtime `unknown` / build rejection
-ccski / Git / installer result -> current safeParse ------------------> discard entry / typed domain result
+ccski kernel typed result / Git -> finite-code mapping ------------> typed domain result (内核防线不替代宿主复核链)
 existing SKILL.md -------------> gray-matter + current safeParse -----> typed invalid-document rejection
 workspace import path ---------> realpath + directory ----------------> registry
 workspaceId / providerId / skillId -> server registry + catalog ------> scoped root
@@ -682,7 +694,7 @@ IPC bytes ---------------------> frame size + schema + protocol ------> CLI comm
 4. 文件 mutation 必须由 server-owned Workspace.Provider root 派生，不能信任调用方组合的路径。
 5. Creator/Repository 仅可请求 Imported Workspace.Provider；创建目标必须是 Provider root direct child，编辑、删除、预览必须通过 containment check。
 6. 文档写入使用同目录临时文件加 rename；并发编辑由 revision 拒绝，不做 last-write-wins。
-7. Repository preview/install 必须绑定同一个 commit 和 session；session 淘汰立即拒绝新操作，但不得删除已接受安装仍在使用的 clone。每个 selected skill x selected Workspace.Provider 必须绑定预期 root、名称和直属路径；installer output 必须先 runtime parse，逐字段匹配后，还需通过 canonical path、非符号链接的普通 `SKILL.md`、frontmatter name、`SkillService.resolve` 与 validate 的重新发现链。安装汇总携带提交时的 targets；部分失败必须保留已完成项，只有完整验证的 `installed` / `overwritten` 项能签发本地 Skill ID。
+7. Repository preview/install 必须绑定同一个 commit 和 session；session 淘汰立即拒绝新操作，但不得删除已接受安装仍在使用的 clone。每个 selected skill x selected Workspace.Provider 必须绑定预期 root、名称和直属路径；ccski 3.0 内核 typed result（ensureEntity/projectEntity/updateEntity/toggleEntityProjection）必须映射宿主有限词表，不得裸透传内核 message；逐项落盘后还需通过 canonical path（link 投影 = realpath 落在同一 Workspace 实体库 `.agents/skills` 内；物化/实体本地 = realpath 即自身 + Provider root 直属）、lstat 普通 `SKILL.md`、frontmatter name、`SkillService.resolve` 与 validate 的重新发现链——内核防线不替代宿主防线，两层都要。安装汇总携带提交时的 targets；部分失败必须保留已完成项，只有完整验证的 `installed` / `overwritten` 项能签发本地 Skill ID。
 8. 启用/禁用发生冲突时返回 conflict，不以破坏性 force 掩盖目标状态。
 9. Workspace Registry mutation 必须先原子持久化完整 next state，成功后才替换内存真相；动态计数不得写回持久态。
 10. daemon stop coordinator 与 signal listeners 必须先于 tray mount 发布；stop 先关闭 transport admission，再关停 domain，迟到的 native handles 不得重新挂载；非协作连接在 grace deadline 后强制回收，所有 stop 来源共享完成态与退出意图。

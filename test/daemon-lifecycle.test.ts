@@ -65,16 +65,20 @@ describe("daemon shutdown orchestration", () => {
   });
 
   it("releases its process signal listeners after a non-exiting stop", async () => {
-    const sigintBefore = process.listenerCount("SIGINT");
-    const sigtermBefore = process.listenerCount("SIGTERM");
+    // ccski-3-host-migration 批 2 注记：改用监听器「身份集合」断言替代 +1 计数——
+    // probe 预热（perf-firstscreen B5）每次 boot spawn 的 npx 尚在途时，execa 的
+    // signal-exit 会瞬时注册外部 SIGINT 监听器（与 daemon 无关），+1 计数在慢
+    // npx 环境恒假阳性。原意图（daemon 释放自己的监听器）由集合差集更强地保留。
+    const sigintBefore = new Set(process.listeners("SIGINT"));
+    const sigtermBefore = new Set(process.listeners("SIGTERM"));
     handles = await startDaemon(() => {});
-    expect(process.listenerCount("SIGINT")).toBe(sigintBefore + 1);
-    expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
+    expect(process.listeners("SIGINT").filter((l) => !sigintBefore.has(l))).toHaveLength(1);
+    expect(process.listeners("SIGTERM").filter((l) => !sigtermBefore.has(l))).toHaveLength(1);
 
     await handles.stop();
 
-    expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
-    expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);
+    expect(process.listeners("SIGINT").filter((l) => !sigintBefore.has(l))).toHaveLength(0);
+    expect(process.listeners("SIGTERM").filter((l) => !sigtermBefore.has(l))).toHaveLength(0);
   });
 
   it.each(["IPC", "SIGTERM"] as const)(
@@ -118,6 +122,8 @@ describe("daemon shutdown orchestration", () => {
         cliVersion: "test",
         exitProcess,
         webuiDir,
+        // 同 startDaemon：关闭 probe 预热，避免 npx signal-exit 外部监听器污染计数。
+        probeWarmup: false,
         trayMounter: async () => {
           signalMountStarted();
           await mountReleased;
@@ -167,6 +173,9 @@ async function startDaemon(exitProcess: (code: number) => void): Promise<DaemonH
     exitProcess,
     webuiDir,
     withTray: false,
+    // 关闭 probe 预热（npx spawn 的 signal-exit 外部监听器与被测面无关；见
+    // bootDaemon 的 probeWarmup 注记）。
+    probeWarmup: false,
   });
   if (!started) throw new Error("Expected the lifecycle test daemon to own its IPC endpoint.");
   return started;

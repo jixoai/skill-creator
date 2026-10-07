@@ -5,20 +5,33 @@
  * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  * Architecture decisions [2026-07-14]: preview/install share one pinned clone;
  * expected failures are actionable without exposing credential-bearing Git output.
+ * Architecture decisions [2026-10-07]（ccski-3-host-migration 批 2.1）: install 走
+ * ccski 3.0 store-link 内核两阶段（ensureEntity 实体入库 + projectEntity symlink
+ * 投影）；内核 typed error 映射宿主有限词表，installedSkillId 复核链（§5.7）保留——
+ * 内核防线不替代宿主防线，两层都要。
  *
  * Orthogonal intents:
  *   [1] Clone, pin, and terminally dispose daemon-owned repository sessions.
  *   [2] Discover and validate installable SKILL.md entries.
- *   [3] Install only pinned opaque IDs and sign verified local Skill identities.
+ *   [3] Install only pinned opaque IDs through the kernel two-phase flow and sign
+ *       verified local Skill identities (ExpectedInstallTarget 绑定 + direct-child +
+ *       实体库 containment + regular SKILL.md + frontmatter/resolve/validate)。
  */
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { installSkills } from "ccski";
+import {
+  ensureEntity as ccskiEnsureEntity,
+  projectEntity as ccskiProjectEntity,
+  type EnsureEntityOptions,
+  type EnsureEntityResult,
+  type ProjectEntityOptions,
+  type ProjectEntityResult,
+} from "ccski";
 import { execa } from "execa";
 import matter from "gray-matter";
-import { z, ZodError } from "zod";
+import { ZodError } from "zod";
 import { SkillDirectoryNameSchema, SkillFrontmatterSchema } from "../shared/contracts/creator.js";
 import {
   PinnedCommitSchema,
@@ -45,30 +58,6 @@ import type { WorkspaceRegistry } from "./workspace-registry/index.js";
 const CLONE_TIMEOUT_MS = 60_000;
 const MAX_SESSIONS = 6;
 
-const InstallerResultEntrySchema = z.object({
-  skill: z.string(),
-  destination: z.string(),
-  path: z.string(),
-  status: z.enum(["installed", "skipped", "overwritten", "failed"]),
-  error: z.string().optional(),
-});
-const InstallerSummarySchema = z.object({
-  results: z.array(InstallerResultEntrySchema),
-  installed: z.number().int().nonnegative(),
-  skipped: z.number().int().nonnegative(),
-  overwritten: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-});
-const InstallerPreviewSchema = z.object({
-  dryRun: z.literal(true),
-  skills: z.array(z.object({ name: z.string(), description: z.string() })),
-  destinations: z.array(z.object({ path: z.string(), exists: z.boolean() })),
-  totalInstalls: z.number().int().nonnegative(),
-});
-type InstallerResultEntry = z.infer<typeof InstallerResultEntrySchema>;
-type InstallerSummary = z.infer<typeof InstallerSummarySchema>;
-type InstallerPreview = z.infer<typeof InstallerPreviewSchema>;
-
 interface RepositorySession {
   scan: RemoteRepoScan;
   directory: string;
@@ -86,15 +75,20 @@ export type RepositoryCloner = (
   cancelSignal: AbortSignal,
 ) => Promise<{ directory: string; commit: string }>;
 
-/** ccski install adapter retained behind the Repository module boundary. */
-export type RepositoryInstaller = (
-  options: Parameters<typeof installSkills>[0],
-) => Promise<unknown>;
+/**
+ * ccski store-link 内核两阶段适配 seam（ccski-3-host-migration 批 2.1）：
+ * install = ensureEntity（实体入库）→ projectEntity（symlink 投影到 Provider root）。
+ * 内核 typed result 不是异常流；宿主防线（§5.7 复核链）不因内核防线而撤除。
+ */
+export interface RepositoryKernel {
+  ensureEntity: (options: EnsureEntityOptions) => Promise<EnsureEntityResult>;
+  projectEntity: (options: ProjectEntityOptions) => Promise<ProjectEntityResult>;
+}
 
 /** Repository service dependencies that may be replaced at the module boundary. */
 export interface RepositoryServiceOptions {
   clone?: RepositoryCloner;
-  installSkills?: RepositoryInstaller;
+  kernel?: RepositoryKernel;
 }
 
 /** Daemon-owned Repository scan, preview, install, and teardown capability. */
@@ -102,6 +96,16 @@ export interface RepositoryService {
   scan(source: string, ref?: string): Promise<RemoteRepoScan>;
   preview(sessionId: RepositorySessionId, skillId: RemoteSkillId): Promise<RemoteSkillPreview>;
   install(input: RepositoryInstallInput): Promise<InstallResult>;
+  /**
+   * pinned clone 租约访问（daemon 内部消费面，不入 RPC）：skills-update 的 apply
+   * 重装直连 ccski 内核实体 API（批 2.2），在租约内读 scan session 的快照目录作为
+   * 源——租约保证期间淘汰只 retire 不删盘，release 后才允许清理（与 install 同一
+   * 生命周期法则）；会话失效与 install 同一守卫（UNAVAILABLE = 需重扫）。
+   */
+  withSession<T>(
+    sessionId: RepositorySessionId,
+    run: (directory: string) => Promise<T>,
+  ): Promise<T>;
   dispose(): Promise<void>;
 }
 
@@ -115,7 +119,10 @@ export function createRepositoryService(
   const activeTasks = new Set<Promise<unknown>>();
   const scanControllers = new Set<AbortController>();
   const clone = options.clone ?? cloneRepository;
-  const installer = options.installSkills ?? installSkills;
+  const kernel: RepositoryKernel = options.kernel ?? {
+    ensureEntity: ccskiEnsureEntity,
+    projectEntity: ccskiProjectEntity,
+  };
   let closing = false;
   let disposePromise: Promise<void> | null = null;
 
@@ -157,7 +164,16 @@ export function createRepositoryService(
         ),
       ),
     install: (input: RepositoryInstallInput) =>
-      runTask(() => install(sessions, workspaces, skills, installer, input)),
+      runTask(() => install(sessions, workspaces, skills, kernel, input)),
+    withSession: <T>(sessionId: RepositorySessionId, run: (directory: string) => Promise<T>) =>
+      runTask(async () => {
+        const session = acquireSession(sessions, RepositorySessionIdSchema.parse(sessionId));
+        try {
+          return await run(session.directory);
+        } finally {
+          releaseSession(session);
+        }
+      }),
     dispose: (): Promise<void> => {
       if (disposePromise) return disposePromise;
       closing = true;
@@ -424,28 +440,32 @@ function emptySummary(targets: WorkspaceProviderTarget[]): InstallSummary {
 
 interface ExpectedInstallTarget {
   target: WorkspaceProviderTarget;
-  workspaceRoot: string;
+  /** server 解析出的 Provider skills 根（投影 root）。 */
+  providerRoot: string;
+  /** Imported Workspace 根（ccski project scope 的 workspaceDir；实体库父目录）。 */
+  workspaceDirectory: string;
   skill: RemoteSkill;
   expectedPath: string;
 }
 
 function createExpectedInstallTarget(
   target: WorkspaceProviderTarget,
-  workspaceRoot: string,
+  providerRoot: string,
+  workspaceDirectory: string,
   skill: RemoteSkill,
 ): ExpectedInstallTarget {
-  const expectedPath = path.resolve(workspaceRoot, skill.name);
-  if (path.dirname(expectedPath) !== workspaceRoot) {
+  const expectedPath = path.resolve(providerRoot, skill.name);
+  if (path.dirname(expectedPath) !== providerRoot) {
     throw new Error("Remote skill name must resolve to a direct Workspace child.");
   }
-  return { target, workspaceRoot, skill, expectedPath };
+  return { target, providerRoot, workspaceDirectory, skill, expectedPath };
 }
 
 function expectedInstallEntryBase(target: ExpectedInstallTarget) {
   return {
     target: target.target,
     skill: target.skill.name,
-    destination: target.workspaceRoot,
+    destination: target.providerRoot,
     path: target.expectedPath,
   };
 }
@@ -459,28 +479,158 @@ function appendInstallEntry(target: InstallSummary, entry: InstallResultEntry): 
   target[entry.status] += 1;
 }
 
-function assertExpectedInstallerEntry(
-  target: ExpectedInstallTarget,
-  entry: InstallerResultEntry,
-): void {
-  if (entry.skill !== target.skill.name) {
-    throw new Error("Installer returned a result for a different remote skill.");
+/**
+ * 内核 typed error → 宿主有限词表文案（批 2.1：不裸透传内核 message）。
+ * 码 token 来自 PUBLIC_RESULT_CODES 冻结词表，可安全入文；解释文本宿主自持。
+ */
+const KERNEL_FAILURE_MESSAGES: Record<string, string> = {
+  NAME_COLLISION: "A different skill already owns the destination folder name in the skill store.",
+  GUARD_ENTITY: "The skill changed while the install was running; scan again and retry.",
+  SOURCE_NOT_FOUND: "The pinned repository snapshot no longer contains the skill.",
+  SOURCE_SYMLINK: "The pinned repository snapshot resolved to a symbolic link.",
+  SOURCE_NOT_DIRECTORY: "The pinned repository snapshot entry is not a directory.",
+  SOURCE_INVALID: "The pinned repository snapshot has no parseable SKILL.md.",
+  ENTITY_PATH_OCCUPIED: "The skill store has a conflicting entry at the entity path.",
+  ENTITY_SWAP_FAILED: "The skill store could not swap the entity content safely.",
+  STATE_RECOVERY_REQUIRED: "The skill store state is degraded; run ccski state repair.",
+  STATE_GENERATION_CONFLICT: "The skill store state changed concurrently; retry the install.",
+  TARGET_DENIED: "The provider skills directory denied the write.",
+  PROJECTION_PATH_OCCUPIED:
+    "The destination is occupied by an entry the installer does not own; remove it or install with force.",
+  PROJECTION_DISABLED: "The destination projection is disabled; enable it before reinstalling.",
+  MODE_CONFLICT: "The destination projection has a different recorded mode.",
+  ROOT_SYMLINK: "The provider skills directory resolves through a symbolic link.",
+  ROOT_NOT_DIRECTORY: "The provider skills path is not a directory.",
+  SYMLINK_FAILED: "The skill could not be projected into the provider directory.",
+  COPY_FAILED: "The skill could not be copied into the provider directory.",
+  ENTITY_NOT_FOUND: "The skill entity vanished from the skill store; retry the install.",
+  ENTITY_MISSING: "The recorded skill entity directory is missing from the skill store.",
+  INVALID_ROOTS: "The projection roots could not be resolved.",
+  IO: "The installer reported a filesystem failure.",
+};
+
+export function kernelFailureMessage(code: string | undefined): string {
+  if (code && KERNEL_FAILURE_MESSAGES[code] !== undefined) {
+    return `${KERNEL_FAILURE_MESSAGES[code]} (ccski code: ${code})`;
   }
-  if (
-    !path.isAbsolute(entry.destination) ||
-    canonicalDirectory(entry.destination) !== target.workspaceRoot
-  ) {
-    throw new Error("Installer returned a result for a different Workspace.");
+  return "The installer reported an unexpected failure.";
+}
+
+/**
+ * 内核源准备（批 2.1）：pinned clone 内的技能目录 → 干净真实目录 staging。
+ * `.git` / `node_modules` 不进实体（folder-hash 语义本就跳过二者；拷入只留垃圾，
+ * 且 repo 根技能（relativePath "."）会把整个 clone 历史带进 workspace 实体库）。
+ * skills-update 的 apply 重装共用同一准备（单源语义）。
+ */
+export function stageSkillSource(sourceDir: string): string {
+  const staged = fs.mkdtempSync(path.join(os.tmpdir(), "skill-creator-kernel-source-"));
+  fs.cpSync(sourceDir, staged, {
+    recursive: true,
+    force: true,
+    filter: (candidate: string) => {
+      const base = path.basename(candidate);
+      return base !== ".git" && base !== "node_modules";
+    },
+  });
+  return staged;
+}
+
+/** ccski 实体库根（Imported Workspace 的 project scope 实体根）。 */
+function entityRootDirectory(workspaceDirectory: string): string {
+  return path.join(workspaceDirectory, ".agents", "skills");
+}
+
+/** 投影路径上的现存条目是否为本 workspace 实体库的链接（ccski 管辖形态）。 */
+function isEntityProjectionLink(
+  entryPath: string,
+  workspaceDirectory: string,
+  name: string,
+): boolean {
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(entryPath);
+  } catch {
+    return false;
   }
-  if (
-    !path.isAbsolute(entry.path) ||
-    path.basename(entry.path) !== target.skill.name ||
-    canonicalDirectory(path.dirname(entry.path)) !== target.workspaceRoot
-  ) {
-    throw new Error("Installer returned an unexpected skill path.");
+  if (!stats.isSymbolicLink()) return false;
+  try {
+    return fs.realpathSync(entryPath) === path.join(entityRootDirectory(workspaceDirectory), name);
+  } catch {
+    return false;
   }
 }
 
+/**
+ * force 清障（批 2.1）：目标被非 ccski 管辖条目占据时按 force 语义移除。
+ * 只动 Provider root 的直属子条目：普通目录 rmSync；异向链接只摘链不碰目标。
+ * ccski 管辖链接与实体本地形态（provider root === 实体根）从不清障。
+ */
+function clearForeignOccupant(expected: ExpectedInstallTarget): {
+  cleared: boolean;
+  error?: string;
+} {
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(expected.expectedPath);
+  } catch {
+    return { cleared: false };
+  }
+  if (
+    isEntityProjectionLink(expected.expectedPath, expected.workspaceDirectory, expected.skill.name)
+  ) {
+    return { cleared: false };
+  }
+  // 实体本地形态（provider root === 实体根）：条目就是实体本体，清障即毁库——
+  // 该形态下投影概念退化（projectEntity 返回 entity-local 收据），从不清障。
+  if (!stats.isSymbolicLink()) {
+    try {
+      if (
+        assertPathInsideReturnsInside(
+          entityRootDirectory(expected.workspaceDirectory),
+          expected.expectedPath,
+        )
+      ) {
+        return { cleared: false };
+      }
+    } catch {
+      // 判定失败按不可清障处理（后续 projectEntity 的 typed 占用拒绝兜底）。
+      return { cleared: false };
+    }
+  }
+  try {
+    if (stats.isSymbolicLink()) {
+      fs.unlinkSync(expected.expectedPath);
+    } else {
+      fs.rmSync(expected.expectedPath, { recursive: true, force: true });
+    }
+    return { cleared: true };
+  } catch (error) {
+    return {
+      cleared: false,
+      error: `The occupied destination could not be cleared: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
+/** assertPathInside 的非抛出变体（清障判定用；判定异常返回 false 走保守路径）。 */
+function assertPathInsideReturnsInside(root: string, candidate: string): boolean {
+  try {
+    assertPathInside(root, candidate);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * installedSkillId 复核链（AGENTS.md §5.7；ccski-3-host-migration 批 2.1 双形态版）：
+ * ExpectedInstallTarget 绑定 → 投影路径 direct-child → 链接投影 realpath 落在
+ * 同一 Imported Workspace 实体库内（或物化副本/实体本地 realpath 即自身）→ regular
+ * SKILL.md → frontmatter name 匹配 → SkillService.resolve/validate 重新发现 →
+ * 签发本地 SkillId。ccski 内核防线不替代宿主防线，两层都要。
+ */
 async function installedSkillId(
   target: ExpectedInstallTarget,
   skills: SkillService,
@@ -489,13 +639,36 @@ async function installedSkillId(
   // 之前必须丢弃同 target 的在途 discovery，否则复用安装前的旧快照会把新
   // 装的技能判成 NOT_FOUND。skills-update 复用同一链路，同样受益。
   skills.invalidateDiscovery(target.target);
-  const canonicalPath = canonicalDirectory(target.expectedPath);
-  if (canonicalPath !== target.expectedPath) {
-    throw new Error("Installed skill path must not resolve through a symbolic link.");
+  const expectedPath = target.expectedPath;
+  if (path.dirname(expectedPath) !== target.providerRoot) {
+    throw new Error("Installed skill path must be a direct child of the Workspace Provider.");
   }
-  assertPathInside(target.workspaceRoot, canonicalPath);
-  if (path.dirname(canonicalPath) !== target.workspaceRoot) {
-    throw new Error("Installed skill path must be a direct child of the Workspace.");
+  let entryStats: fs.Stats;
+  try {
+    entryStats = fs.lstatSync(expectedPath);
+  } catch {
+    throw new Error("The installed skill is not present at the expected destination.");
+  }
+  let canonicalPath: string;
+  if (entryStats.isSymbolicLink()) {
+    // link 投影（内核默认形态）：realpath 必须落在同一 Imported Workspace 的
+    // 实体库内——这是 link 模式下的 containment 不变量（旧「realpath 即自身」
+    // 断言只对物化形态成立）。
+    canonicalPath = fs.realpathSync(expectedPath);
+    assertPathInside(entityRootDirectory(target.workspaceDirectory), canonicalPath);
+  } else if (entryStats.isDirectory()) {
+    canonicalPath = fs.realpathSync(expectedPath);
+    if (canonicalPath !== expectedPath) {
+      throw new Error("Installed skill path must not resolve through a symbolic link.");
+    }
+    assertPathInside(target.providerRoot, canonicalPath);
+  } else {
+    throw new Error(
+      "The installed destination entry is neither a directory nor a projection link.",
+    );
+  }
+  if (!fs.statSync(canonicalPath).isDirectory()) {
+    throw new Error("The installed skill does not resolve to a directory.");
   }
   const skillFile = path.join(canonicalPath, "SKILL.md");
   let skillFileStats: fs.Stats;
@@ -537,87 +710,88 @@ async function installedSkillId(
   return discovered.id;
 }
 
-async function projectInstallEntry(
-  target: ExpectedInstallTarget,
-  entry: InstallerResultEntry,
-  skills: SkillService,
-): Promise<InstallResultEntry> {
-  assertExpectedInstallerEntry(target, entry);
-  const base = expectedInstallEntryBase(target);
-  if (entry.status === "installed" || entry.status === "overwritten") {
-    return {
-      ...base,
-      status: entry.status,
-      skillId: await installedSkillId(target, skills),
-    };
-  }
-  return {
-    ...base,
-    status: entry.status,
-    ...(entry.error === undefined ? {} : { error: entry.error }),
-  };
-}
-
-async function appendSummary(
-  target: InstallSummary,
-  source: unknown,
-  expected: ExpectedInstallTarget,
-  skills: SkillService,
-): Promise<void> {
-  const parsed = InstallerSummarySchema.safeParse(source);
-  if (!parsed.success) {
-    appendInstallEntry(
-      target,
-      failedInstallEntry(expected, "Installer returned an invalid result."),
-    );
-    return;
-  }
-  const summary: InstallerSummary = parsed.data;
-  if (summary.results.length !== 1) {
-    appendInstallEntry(
-      target,
-      failedInstallEntry(
-        expected,
-        `Installer returned ${summary.results.length} results for one selected skill.`,
-      ),
-    );
-    return;
-  }
-  const [entry] = summary.results;
-  if (!entry) {
-    appendInstallEntry(target, failedInstallEntry(expected, "Installer returned no result."));
-    return;
-  }
-  try {
-    appendInstallEntry(target, await projectInstallEntry(expected, entry, skills));
-  } catch (error) {
-    appendInstallEntry(target, failedInstallEntry(expected, formatInstallFailure(error)));
-  }
-}
-
 function formatInstallFailure(error: unknown): string {
   return error instanceof Error ? error.message : "The installer returned an invalid result.";
 }
 
-function appendPreview(
-  target: InstallPreview,
-  source: Pick<InstallerPreview, "skills" | "destinations" | "totalInstalls">,
-  installTarget: WorkspaceProviderTarget,
-): void {
-  target.skills.push(...source.skills);
-  const destinationPaths = new Set(
-    target.destinations.map(
-      (destination) =>
-        `${destination.target.workspaceId}:${destination.target.providerId}:${destination.path}`,
-    ),
-  );
-  for (const destination of source.destinations) {
-    const key = `${installTarget.workspaceId}:${installTarget.providerId}:${destination.path}`;
-    if (destinationPaths.has(key)) continue;
-    destinationPaths.add(key);
-    target.destinations.push({ ...destination, target: installTarget });
+/** 单技能 × 单目标的内核两阶段安装结果（收据判别用）。 */
+interface KernelPhases {
+  entity: "created" | "exists" | "replaced";
+  projection: "projected" | "unchanged";
+}
+
+/**
+ * 内核两阶段安装（批 2.1）：ensureEntity（源 = pinned clone 的技能目录 staging →
+ * 实体入库 scope skills store）→ projectEntity（symlink 投影到 Provider root）。
+ * force 语义：NAME_EXISTS 时按 error.existing.expectedRevision 显式 replace；
+ * 目标被非 ccski 条目占据时先清障（§5.7 不变量由 installedSkillId 复核链收口）。
+ */
+async function installThroughKernel(
+  kernel: RepositoryKernel,
+  expected: ExpectedInstallTarget,
+  sessionDirectory: string,
+  scanSource: string,
+  scanCommit: string,
+  force: boolean,
+): Promise<{ kind: "ok"; phases: KernelPhases } | { kind: "skip" | "failed"; message: string }> {
+  const sourceDir = path.resolve(sessionDirectory, expected.skill.relativePath);
+  const sourceIdentity = `${scanSource}#${scanCommit}:${expected.skill.relativePath}`;
+  const staged = stageSkillSource(sourceDir);
+  try {
+    const base = {
+      scope: "project" as const,
+      workspaceDir: expected.workspaceDirectory,
+      source: {
+        dir: staged,
+        source: sourceIdentity,
+        sourceType: "git",
+        sourceUrl: scanSource,
+        skillPath: expected.skill.relativePath,
+      },
+    };
+    let ensured = await kernel.ensureEntity(base);
+    if (ensured.kind === "error" && ensured.code === "NAME_EXISTS" && force && ensured.existing) {
+      ensured = await kernel.ensureEntity({
+        ...base,
+        replace: { expectedRevision: ensured.existing.expectedRevision },
+      });
+    }
+    if (ensured.kind === "error") {
+      if (ensured.code === "NAME_EXISTS") {
+        return {
+          kind: "skip",
+          message:
+            "The skill is already installed from a different source; install with force to replace it.",
+        };
+      }
+      return { kind: "failed", message: kernelFailureMessage(ensured.code) };
+    }
+    const projected = await kernel.projectEntity({
+      scope: "project",
+      workspaceDir: expected.workspaceDirectory,
+      name: expected.skill.name,
+      roots: [expected.providerRoot],
+    });
+    if (projected.kind === "error") {
+      return { kind: "failed", message: kernelFailureMessage(projected.code) };
+    }
+    const rootResult = projected.results[0];
+    if (!rootResult || rootResult.status === "failed") {
+      return {
+        kind: "failed",
+        message: kernelFailureMessage(rootResult?.errorCode),
+      };
+    }
+    return {
+      kind: "ok",
+      phases: {
+        entity: ensured.status,
+        projection: rootResult.status === "projected" ? "projected" : "unchanged",
+      },
+    };
+  } finally {
+    fs.rmSync(staged, { recursive: true, force: true });
   }
-  target.totalInstalls += source.totalInstalls;
 }
 
 /** Preview or install selected skills from one pinned session into selected Workspace Providers. */
@@ -625,7 +799,7 @@ async function install(
   sessions: RepositorySessions,
   workspaces: WorkspaceRegistry,
   skills: SkillService,
-  installer: RepositoryInstaller,
+  kernel: RepositoryKernel,
   input: RepositoryInstallInput,
 ): Promise<InstallResult> {
   const session = acquireSession(sessions, input.sessionId);
@@ -645,6 +819,12 @@ async function install(
     });
     const targets = input.targets.map((target) => {
       const scope = workspaces.resolveWritable(target);
+      if (!scope.workspaceDirectory) {
+        throw new DomainError(
+          "UNAVAILABLE",
+          `Provider skills directory is not writable: ${scope.workspaceLabel}`,
+        );
+      }
       try {
         fs.mkdirSync(scope.directory, { recursive: true });
       } catch (error) {
@@ -654,7 +834,11 @@ async function install(
           { cause: error },
         );
       }
-      return { target, destination: scope.directory };
+      return {
+        target,
+        providerRoot: scope.directory,
+        workspaceDirectory: scope.workspaceDirectory,
+      };
     });
 
     if (input.dryRun) {
@@ -664,20 +848,19 @@ async function install(
         destinations: [],
         totalInstalls: 0,
       };
+      const destinationKeys = new Set<string>();
       for (const target of targets) {
         for (const skill of selected) {
-          const result = await installer({
-            source: session.directory,
-            path: skill.relativePath,
-            outDir: [target.destination],
-            all: true,
-            force: input.force,
-            yes: true,
-            dryRun: true,
+          installPreview.skills.push({ name: skill.name, description: skill.description });
+          installPreview.totalInstalls += 1;
+          const key = `${target.target.workspaceId}:${target.target.providerId}:${target.providerRoot}`;
+          if (destinationKeys.has(key)) continue;
+          destinationKeys.add(key);
+          installPreview.destinations.push({
+            target: target.target,
+            path: canonicalDirectory(target.providerRoot),
+            exists: true,
           });
-          const parsedPreview = InstallerPreviewSchema.safeParse(result);
-          if (!parsedPreview.success) continue;
-          appendPreview(installPreview, parsedPreview.data, target.target);
         }
       }
       return installPreview;
@@ -686,24 +869,63 @@ async function install(
     const summary = emptySummary(input.targets);
     for (const target of targets) {
       for (const skill of selected) {
-        const expected = createExpectedInstallTarget(target.target, target.destination, skill);
+        const expected = createExpectedInstallTarget(
+          target.target,
+          target.providerRoot,
+          target.workspaceDirectory,
+          skill,
+        );
         try {
-          const result = await installer({
-            source: session.directory,
-            path: skill.relativePath,
-            outDir: [target.destination],
-            all: true,
-            force: input.force,
-            yes: true,
-          });
-          if (InstallerPreviewSchema.safeParse(result).success) {
+          const occupied = fs.existsSync(expected.expectedPath);
+          if (occupied && !input.force) {
             appendInstallEntry(
               summary,
-              failedInstallEntry(expected, "Installer returned an unexpected dry-run result."),
+              failedInstallSkippedEntry(
+                expected,
+                "The destination already has an entry; install with force to replace it.",
+              ),
             );
             continue;
           }
-          await appendSummary(summary, result, expected, skills);
+          if (occupied && input.force) {
+            const cleared = clearForeignOccupant(expected);
+            if (cleared.error !== undefined) {
+              appendInstallEntry(summary, failedInstallEntry(expected, cleared.error));
+              continue;
+            }
+          }
+          const outcome = await installThroughKernel(
+            kernel,
+            expected,
+            session.directory,
+            session.scan.source,
+            session.scan.commit,
+            input.force === true,
+          );
+          if (outcome.kind !== "ok") {
+            appendInstallEntry(
+              summary,
+              outcome.kind === "skip"
+                ? failedInstallSkippedEntry(expected, outcome.message)
+                : failedInstallEntry(expected, outcome.message),
+            );
+            continue;
+          }
+          const skillId = await installedSkillId(expected, skills);
+          const status: InstallResultEntry["status"] =
+            input.force && occupied
+              ? "overwritten"
+              : outcome.phases.entity === "replaced"
+                ? "overwritten"
+                : outcome.phases.projection === "projected" || outcome.phases.entity === "created"
+                  ? "installed"
+                  : "skipped";
+          appendInstallEntry(summary, {
+            ...expectedInstallEntryBase(expected),
+            ...(status === "installed" || status === "overwritten"
+              ? { status, skillId }
+              : { status }),
+          });
         } catch (error) {
           appendInstallEntry(summary, failedInstallEntry(expected, formatInstallFailure(error)));
         }
@@ -713,6 +935,14 @@ async function install(
   } finally {
     releaseSession(session);
   }
+}
+
+/** skip 语义的条目（不签发 skillId；计数入 skipped 不入 failed）。 */
+function failedInstallSkippedEntry(
+  target: ExpectedInstallTarget,
+  message: string,
+): InstallResultEntry {
+  return { ...expectedInstallEntryBase(target), status: "skipped", error: message };
 }
 
 /** Dispose all temporary repository snapshots; used during shutdown and tests. */

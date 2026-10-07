@@ -158,6 +158,10 @@ describe("Workspace Registry", () => {
       customProvider: openClawProviderId,
       scanDefaultDirs: false,
       all: true,
+      // ccski 3.0 ownership 视图（ccski-3-host-migration 批 2.3）：Imported scope 把
+      // workspace 根作为 userDir 注入（scanDefaultDirs:false 下只影响 state 读取面
+      // `<ws>/.agents/.ccski-state.json`，不扫描默认 roots）。
+      userDir: fs.realpathSync(firstPath),
     });
     expect(() => registry.resolveWritable(target(GLOBAL_WORKSPACE_ID))).toThrow(
       "Global Workspace providers are not writable installation targets.",

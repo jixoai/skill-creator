@@ -10,7 +10,8 @@
  * Orthogonal intents:
  *   [1] Discover and identify skills through a daemon-owned Workspace Registry.
  *   [2] Read enabled and disabled skill documents reliably.
- *   [3] Toggle and validate resolved skill IDs without caller paths.
+ *   [3] Toggle and validate resolved skill IDs without caller paths（批 2.3 双路由：
+ *       ccski 管辖 → toggleEntityProjection 摘链/重建；其余 → 文件改名不变）.
  *   [4] Project skills-CLI provenance (installedVia / updatable) from the probe map.
  *   [5] Delegate bounded file tree/read to skill-files (skills-tabs-redesign 批 3
  *       Δ2：每次调用经 discovery 重解析身份后进入 skill-files 有界实现——安全
@@ -20,7 +21,14 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { validateSkill as validateCcskiSkill, type ListOptions, type ValidateOptions } from "ccski";
+import {
+  toggleEntityProjection as ccskiToggleEntityProjection,
+  validateSkill as validateCcskiSkill,
+  type EntityToggleOptions,
+  type EntityToggleResult,
+  type ListOptions,
+  type ValidateOptions,
+} from "ccski";
 import { listSkillsWithSymlinkedEntries } from "./ccski-symlink-entries.js";
 import { z } from "zod";
 import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
@@ -38,6 +46,7 @@ import {
   SkillMetadataSchema,
 } from "../shared/contracts/skills.js";
 import { safeParseExternal } from "../shared/external-input.js";
+import { homeDir } from "../shared/paths.js";
 import { DomainError } from "./domain-error.js";
 import { listSkillFiles, readSkillFile } from "./skill-files.js";
 import {
@@ -48,6 +57,7 @@ import {
 } from "./path-safety.js";
 import type { SkillsCliProbe, SkillsCliProbeMap } from "./skills-cli-probe.js";
 import type { WorkspaceRegistry } from "./workspace-registry/index.js";
+import type { WorkspaceProviderScope } from "./workspace-registry/index.js";
 
 function metadataId(skillPath: string): SkillId {
   return SkillIdSchema.parse(opaquePathId("sk", canonicalDirectory(skillPath)));
@@ -66,6 +76,10 @@ const CcskiSkillMetadataSchema = z.object({
   hasScripts: z.boolean(),
   hasAssets: z.boolean(),
   pluginInfo: PluginInfoSchema.optional(),
+  // ccski 3.0 发现层增量字段（ccski-3-host-migration 批 2.3）：顶层形态 + ownership
+  // 认证。toggle 据此双路由（ccski 管辖 → 内核摘链/重建；其余 → 宿主文件改名）。
+  entryKind: z.enum(["directory", "symlink"]).optional(),
+  ownership: z.enum(["ccski", "external", "unknown"]).optional(),
 });
 
 const CcskiValidateResultSchema = z.object({
@@ -80,10 +94,15 @@ export type SkillDiscoverer = (options: ListOptions) => Promise<ReadonlyArray<un
 /** Third-party validation boundary; results are untrusted until projected locally. */
 export type SkillValidator = (options: ValidateOptions) => Promise<unknown>;
 
+/** ccski 实体投影启停内核 seam（批 2.3）；typed result 不属于异常流。 */
+export type EntityProjectionToggler = (options: EntityToggleOptions) => Promise<EntityToggleResult>;
+
 /** Replace external ccski adapters at the service boundary. */
 export interface SkillServiceOptions {
   discoverSkills?: SkillDiscoverer;
   validateSkill?: SkillValidator;
+  /** ccski `toggleEntityProjection` 适配器；默认走真实内核（批 2.3）。 */
+  entityToggle?: EntityProjectionToggler;
   /** 可选 skills-CLI 探测器；注入后 `skills.list` 投影 installedVia / updatable。 */
   skillsCliProbe?: SkillsCliProbe;
 }
@@ -133,6 +152,8 @@ function projectMetadata(
       pluginInfo: skill.pluginInfo ?? null,
       installedVia: provenance.installedVia,
       updatable: provenance.updatable,
+      ...(skill.entryKind !== undefined ? { entryKind: skill.entryKind } : {}),
+      ...(skill.ownership !== undefined ? { ownership: skill.ownership } : {}),
     });
   } catch {
     return null;
@@ -148,6 +169,7 @@ export function createSkillService(
   // symlink 目录条目；注入桩语义不变）。
   const discoverSkills = options.discoverSkills ?? listSkillsWithSymlinkedEntries;
   const validateSkill = options.validateSkill ?? validateCcskiSkill;
+  const entityToggle = options.entityToggle ?? ccskiToggleEntityProjection;
   const skillsCliProbe = options.skillsCliProbe;
 
   // 同 target discovery 在途合并（perf-firstscreen B-6）：进 provider 后同一
@@ -201,10 +223,11 @@ export function createSkillService(
     toggle: (target: WorkspaceProviderTarget, skillIds: SkillId[], mode: "enable" | "disable") =>
       toggle(
         cachedList,
-        workspaces.resolve(target, true).directory,
+        workspaces.resolve(target, true),
         target,
         skillIds,
         mode,
+        entityToggle,
       ).finally(() => invalidateTarget(target)),
     validate: (target: WorkspaceProviderTarget, skillId: SkillId) =>
       validate(cachedList, validateSkill, workspaces, target, skillId),
@@ -289,16 +312,70 @@ async function info(
   };
 }
 
-/** Enable or disable selected skills without overwriting file conflicts. */
+/**
+ * Enable or disable selected skills without overwriting file conflicts.
+ * 双路由（ccski-3-host-migration 批 2.3）：发现层 `ownership === "ccski"` 的技能走
+ * 内核 `toggleEntityProjection`（link 摘链/重建的物理禁用语义；materialized 副本
+ * 走内核 ccski-legacy 约定）；其余（external/unknown 链接、普通目录技能）保留宿主
+ * 文件改名路径（SKILL.md ↔ .SKILL.md）不变。内核 typed error 映射有限词表，enable
+ * 遇目标冲突返回 conflict 不覆盖。
+ */
 async function toggle(
   loadList: SkillListLoader,
-  providerRoot: string,
+  scope: WorkspaceProviderScope,
   target: WorkspaceProviderTarget,
   skillIds: SkillId[],
   mode: "enable" | "disable",
+  entityToggle: EntityProjectionToggler,
 ): Promise<ToggleSummary> {
+  const providerRoot = scope.directory;
   const discovered = new Map((await loadList(target, true)).map((skill) => [skill.id, skill]));
   const results: ToggleSummary["results"] = [];
+
+  /** ccski 管辖路由结果（调用方合并 skillId/name）。 */
+  type ProjectionToggleOutcome = {
+    status: ToggleSummary["results"][number]["status"];
+    error?: string;
+  };
+
+  /** ccski 管辖路由：scope/roots 映射（Imported = project+workspaceDir；Global = global+userDir）。 */
+  const toggleCcskiProjection = async (name: string): Promise<ProjectionToggleOutcome> => {
+    const kernelOptions: EntityToggleOptions = {
+      scope: scope.workspaceKind === "global" ? "global" : "project",
+      ...(scope.workspaceKind === "global"
+        ? { userDir: scope.options.userDir ?? homeDir() }
+        : scope.workspaceDirectory === undefined
+          ? {}
+          : { workspaceDir: scope.workspaceDirectory }),
+      name,
+      root: providerRoot,
+      action: mode,
+    };
+    const result = await entityToggle(kernelOptions);
+    if (result.kind === "ok") {
+      return result.status === "toggled"
+        ? { status: mode === "disable" ? "disabled" : "enabled" }
+        : { status: "skipped" };
+    }
+    // typed error → 有限词表（不裸透传内核 message）。
+    if (result.code === "ENTITY_REVISED") {
+      return {
+        status: "conflict",
+        error:
+          "The skill was updated after this projection was disabled; update it before enabling. (ccski code: ENTITY_REVISED)",
+      };
+    }
+    if (result.code === "GUARD_PROJECTION" || result.code === "FOREIGN_OWNERSHIP") {
+      return {
+        status: "conflict",
+        error: `The projection destination is occupied or not ccski-owned; refusing to ${mode} over it. (ccski code: ${result.code})`,
+      };
+    }
+    return {
+      status: "failed",
+      error: `The ccski projection could not be ${mode}d. (ccski code: ${result.code})`,
+    };
+  };
 
   // symlink 条目守卫（self-skill-symlink 复核 P1-3）：skill.path 已被 realpath
   // 归并到链接目标内部（条目名可能随别名漂移，不能按 directoryName 探测），
@@ -324,6 +401,11 @@ async function toggle(
     const skill = discovered.get(skillId);
     if (!skill) {
       results.push({ skillId, name: skillId, status: "failed", error: "Skill not found." });
+      continue;
+    }
+    if (skill.ownership === "ccski") {
+      const outcome = await toggleCcskiProjection(skill.name);
+      results.push({ skillId, name: skill.name, ...outcome });
       continue;
     }
     if (isLinkedSkill(skill.path)) {

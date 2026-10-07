@@ -27,8 +27,9 @@ import { deterministicSkillsCliProbe } from "./helpers/deterministic-probe.js";
 import {
   createRepositoryService,
   toContractRelativePath,
-  type RepositoryInstaller,
+  type RepositoryKernel,
 } from "../src/daemon/repository-service.js";
+import type { EnsureEntityResult, ProjectEntityResult } from "ccski";
 import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import {
@@ -112,6 +113,77 @@ function target(workspace: ImportedWorkspace): WorkspaceProviderTarget {
   return { workspaceId: workspace.id, providerId: openClawProviderId };
 }
 
+/** 内核 ok 收据（typed 语义；测试 fake 直用）。 */
+function kernelOk(
+  status: "created" | "exists" | "replaced",
+  projection: "projected" | "unchanged",
+): { ensure: EnsureEntityResult; project: ProjectEntityResult } {
+  return {
+    ensure: {
+      kind: "ok",
+      status,
+      entity: {
+        scope: "project",
+        logicalName: "",
+        folderName: "",
+        path: "",
+        revision: "r".repeat(64),
+        provenance: { source: "", installedAt: "", updatedAt: "" },
+        createdAt: "",
+        updatedAt: "",
+      },
+      generation: 1,
+      lockSyncPending: true,
+      warnings: [],
+    },
+    project: {
+      kind: "ok",
+      entity: {
+        scope: "project",
+        logicalName: "",
+        folderName: "",
+        path: "",
+        revision: "r".repeat(64),
+        provenance: { source: "", installedAt: "", updatedAt: "" },
+        createdAt: "",
+        updatedAt: "",
+      },
+      results: [
+        {
+          root: "",
+          rootId: "",
+          path: "",
+          status: projection,
+          mode: "link",
+          targetKind: "projection",
+        },
+      ],
+      projected: projection === "projected" ? 1 : 0,
+      unchanged: projection === "unchanged" ? 1 : 0,
+      failed: 0,
+      generation: 1,
+    },
+  };
+}
+
+/** 按名字把 staged 源物化进目标 root 的内核 fake（typed ok；hook 在写盘后运行）。 */
+function materializingKernel(
+  destinationRoot: string,
+  hook?: (name: string) => void,
+): RepositoryKernel {
+  return {
+    ensureEntity: async (options) => {
+      const name = path.basename(options.source.skillPath ?? "");
+      if (name) {
+        fs.cpSync(options.source.dir, path.join(destinationRoot, name), { recursive: true });
+        hook?.(name);
+      }
+      return kernelOk("created", "projected").ensure;
+    },
+    projectEntity: async () => kernelOk("created", "projected").project,
+  };
+}
+
 describe("repository service", () => {
   it("pins scan, preview, dry-run, and single-skill install to the scanned commit", async () => {
     writeSkill(
@@ -172,10 +244,18 @@ describe("repository service", () => {
       installed: 1,
       failed: 0,
     });
+    // 两阶段物理事实（ccski-3-host-migration 批 2.1）：Provider root 下是 symlink
+    // 投影，实体入库在 Imported Workspace 的 .agents/skills 实体库内。
+    const projectionPath = path.join(destinationPath, "reviewed");
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(true);
+    const entityPath = path.join(destination.path, ".agents", "skills", "reviewed");
+    expect(fs.realpathSync(projectionPath)).toBe(fs.realpathSync(entityPath));
+    expect(fs.lstatSync(path.join(entityPath, "SKILL.md")).isFile()).toBe(true);
     const localSkill = (await domain.skills.list(target(destination), true)).find(
       (skill) => skill.directoryName === "reviewed",
     );
     if (!localSkill) throw new Error("Expected Workspace discovery to expose the installed skill.");
+    expect(localSkill).toMatchObject({ ownership: "ccski", entryKind: "symlink" });
     expect(installed.kind).toBe("result");
     if (installed.kind !== "result") throw new Error("Expected an actual install result.");
     expect(installed.results[0]).toMatchObject({
@@ -262,37 +342,76 @@ describe("repository service", () => {
     ]);
   });
 
-  it("treats an incompatible installer dry-run result as an empty preview", async () => {
-    writeSkill("previewed", "previewed", "Preview this skill.", "# Previewed\n");
-    commit("add preview fixture");
+  it("maps a kernel NAME_COLLISION typed error to an identity-free per-skill failure", async () => {
+    writeSkill("collided", "collided", "Collide in the store.", "# Collided\n");
+    commit("add collision fixture");
     const destination = importDestination();
-    const installer: RepositoryInstaller = async () => ({
-      results: [],
-      installed: 0,
-      skipped: 0,
-      overwritten: 0,
-      failed: 0,
-    });
-    const service = createRepositoryService(domain.workspaces, domain.skills, {
-      installSkills: installer,
-    });
+    const kernel: RepositoryKernel = {
+      ensureEntity: async () => ({
+        kind: "error",
+        code: "NAME_COLLISION",
+        message: "RAW KERNEL INTERNAL DETAIL must not leak",
+      }),
+      projectEntity: async () => kernelOk("created", "projected").project,
+    };
+    const service = createRepositoryService(domain.workspaces, domain.skills, { kernel });
 
     try {
       const scan = await service.scan(repository);
-      const [selected] = scan.skills;
-      if (!selected) throw new Error("Expected the preview fixture.");
+      const selected = scan.skills.find((skill) => skill.name === "collided");
+      if (!selected) throw new Error("Expected the collision fixture.");
 
-      await expect(
-        service.install({
-          sessionId: scan.sessionId,
-          skillIds: [selected.id],
-          targets: [target(destination)],
-          dryRun: true,
-        }),
-      ).resolves.toEqual({ kind: "preview", skills: [], destinations: [], totalInstalls: 0 });
+      const result = await service.install({
+        sessionId: scan.sessionId,
+        skillIds: [selected.id],
+        targets: [target(destination)],
+      });
+      if (result.kind !== "result") throw new Error("Expected an actual install result.");
+      expect(result).toMatchObject({ installed: 0, failed: 1 });
+      const entry = result.results[0];
+      if (!entry) throw new Error("Expected one result entry.");
+      expect(entry.status).toBe("failed");
+      expect(entry.error).toContain("ccski code: NAME_COLLISION");
+      // 不裸透传内核 message。
+      expect(entry.error).not.toContain("RAW KERNEL INTERNAL DETAIL");
+      expect(entry).not.toHaveProperty("skillId");
     } finally {
       await service.dispose();
     }
+  });
+
+  it("force clears a foreign occupant before projecting the link", async () => {
+    writeSkill("foreign", "foreign", "Replace a foreign directory.", "# Foreign\n");
+    commit("add foreign fixture");
+    const destination = importDestination();
+    const destinationPath = directoryPath(destination);
+    // 目标被一个非 ccski 管辖的普通目录占据（legacy 物化残留）。
+    writeSkillDocument(path.join(destinationPath, "foreign"), "foreign", "Old copy.", "# Old\n");
+    const scan = await domain.repository.scan(repository);
+    const selected = scan.skills.find((skill) => skill.name === "foreign");
+    if (!selected) throw new Error("Expected the foreign fixture.");
+
+    const nonForce = await domain.repository.install({
+      sessionId: scan.sessionId,
+      skillIds: [selected.id],
+      targets: [target(destination)],
+    });
+    if (nonForce.kind !== "result") throw new Error("Expected an actual install result.");
+    expect(nonForce.results[0]).toMatchObject({ status: "skipped" });
+    expect(nonForce.results[0]).not.toHaveProperty("skillId");
+
+    const forced = await domain.repository.install({
+      sessionId: scan.sessionId,
+      skillIds: [selected.id],
+      targets: [target(destination)],
+      force: true,
+    });
+    expect(forced).toMatchObject({ kind: "result", overwritten: 1, failed: 0 });
+    // 清障后落盘的是 link 投影，内容来自 pinned commit。
+    expect(fs.lstatSync(path.join(destinationPath, "foreign")).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(destinationPath, "foreign", "SKILL.md"), "utf8")).toContain(
+      "Replace a foreign directory.",
+    );
   });
 
   it("preserves the workspace-scoped local identity when overwriting a skill", async () => {
@@ -333,37 +452,30 @@ describe("repository service", () => {
     });
   });
 
-  it("keeps skipped and failed entries identity-free and derives counts from their statuses", async () => {
+  it("keeps NAME_EXISTS (different source) entries skipped and identity-free", async () => {
     writeSkill("skip-me", "skip-me", "Skip this skill.", "# Skip\n");
-    writeSkill("fail-me", "fail-me", "Fail this skill.", "# Fail\n");
-    commit("add non-successful install fixtures");
+    commit("add skip fixture");
     const workspaceDirectory = path.join(sandbox, "status-destination");
     const destinationPath = path.join(workspaceDirectory, "skills");
     fs.mkdirSync(destinationPath, { recursive: true });
     const workspaces = createWorkspaceRegistry();
     const destination = workspaces.import(workspaceDirectory, "Status destination");
-    const installer: RepositoryInstaller = async (options) => {
-      const skill = path.basename(options.path ?? "unknown");
-      const status: "skipped" | "failed" = skill === "skip-me" ? "skipped" : "failed";
-      return {
-        results: [
-          {
-            skill,
-            destination: destinationPath,
-            path: path.join(destinationPath, skill),
-            status,
-            ...(status === "failed" ? { error: "Simulated installer failure." } : {}),
-          },
-        ],
-        installed: 9,
-        skipped: 9,
-        overwritten: 9,
-        failed: 9,
-      };
+    const kernel: RepositoryKernel = {
+      ensureEntity: async () => ({
+        kind: "error",
+        code: "NAME_EXISTS",
+        message: "kernel detail",
+        existing: {
+          logicalName: "skip-me",
+          folderName: "skip-me",
+          source: "other://source",
+          revision: "r".repeat(64),
+          expectedRevision: "r".repeat(64),
+        },
+      }),
+      projectEntity: async () => kernelOk("exists", "unchanged").project,
     };
-    const service = createRepositoryService(workspaces, createSkillService(workspaces), {
-      installSkills: installer,
-    });
+    const service = createRepositoryService(workspaces, createSkillService(workspaces), { kernel });
 
     try {
       const scan = await service.scan(repository);
@@ -379,53 +491,38 @@ describe("repository service", () => {
         installed: 0,
         skipped: 1,
         overwritten: 0,
-        failed: 1,
+        failed: 0,
       });
       if (result.kind !== "result") throw new Error("Expected an actual install result.");
-      expect(result.results.map((entry) => entry.status).sort()).toEqual(["failed", "skipped"]);
-      for (const entry of result.results) expect(entry).not.toHaveProperty("skillId");
+      expect(result.results[0]).toMatchObject({
+        status: "skipped",
+        error: expect.stringContaining("different source"),
+      });
+      expect(result.results[0]).not.toHaveProperty("skillId");
     } finally {
       await service.dispose();
     }
   });
 
-  it("converts a successful installer result outside its Workspace into a safe failure", async () => {
-    writeSkill("escaped", "escaped", "Do not trust its result path.", "# Escaped\n");
-    commit("add escaped install fixture");
+  it("fails safely when the kernel reports success but nothing landed on disk", async () => {
+    writeSkill("ghost", "ghost", "Kernel ok without disk writes.", "# Ghost\n");
+    commit("add ghost fixture");
     const workspaceDirectory = path.join(sandbox, "bounded-destination");
     const destinationPath = path.join(workspaceDirectory, "skills");
-    const escapedPath = path.join(sandbox, "outside-workspace", "escaped");
     fs.mkdirSync(destinationPath, { recursive: true });
-    fs.mkdirSync(escapedPath, { recursive: true });
-    fs.writeFileSync(
-      path.join(escapedPath, "SKILL.md"),
-      '---\nname: "escaped"\ndescription: "Outside the Workspace."\n---\n# Escaped\n',
-      "utf8",
-    );
     const workspaces = createWorkspaceRegistry();
     const destination = workspaces.import(workspaceDirectory, "Bounded destination");
-    const installer: RepositoryInstaller = async () => ({
-      results: [
-        {
-          skill: "escaped",
-          destination: destinationPath,
-          path: escapedPath,
-          status: "installed",
-        },
-      ],
-      installed: 1,
-      skipped: 0,
-      overwritten: 0,
-      failed: 0,
-    });
     const service = createRepositoryService(workspaces, createSkillService(workspaces), {
-      installSkills: installer,
+      kernel: {
+        ensureEntity: async () => kernelOk("created", "projected").ensure,
+        projectEntity: async () => kernelOk("created", "projected").project,
+      },
     });
 
     try {
       const scan = await service.scan(repository);
       const selected = scan.skills[0];
-      if (!selected) throw new Error("Expected the escaped skill in the scan result.");
+      if (!selected) throw new Error("Expected the ghost skill in the scan result.");
       const result = await service.install({
         sessionId: scan.sessionId,
         skillIds: [selected.id],
@@ -434,44 +531,40 @@ describe("repository service", () => {
       if (result.kind !== "result") throw new Error("Expected an actual install result.");
       expect(result).toMatchObject({ installed: 0, failed: 1 });
       expect(result.results[0]).toMatchObject({
-        skill: "escaped",
-        destination: fs.realpathSync(destinationPath),
-        path: path.join(fs.realpathSync(destinationPath), "escaped"),
+        skill: "ghost",
         status: "failed",
+        error: expect.stringContaining("not present at the expected destination"),
       });
       expect(result.results[0]).not.toHaveProperty("skillId");
       expect(fs.readdirSync(destinationPath)).toEqual([]);
-      expect(fs.existsSync(path.join(escapedPath, "SKILL.md"))).toBe(true);
     } finally {
       await service.dispose();
     }
   });
 
-  it("does not sign a sibling skill identity for a selected remote skill", async () => {
+  it("does not sign an identity whose on-disk frontmatter does not match the selection", async () => {
     writeSkill("alpha", "alpha", "Install alpha.", "# Alpha\n");
     commit("add alpha skill");
     const workspaceDirectory = path.join(sandbox, "sibling-destination");
     const destinationPath = path.join(workspaceDirectory, "skills");
-    const siblingPath = path.join(destinationPath, "beta");
-    writeSkillDocument(siblingPath, "beta", "A pre-existing sibling.", "# Beta\n");
+    fs.mkdirSync(destinationPath, { recursive: true });
     const workspaces = createWorkspaceRegistry();
     const destination = workspaces.import(workspaceDirectory, "Sibling destination");
     const skills = createSkillService(workspaces);
-    const installer: RepositoryInstaller = async () => ({
-      results: [
-        {
-          skill: "alpha",
-          destination: destinationPath,
-          path: siblingPath,
-          status: "installed",
-        },
-      ],
-      installed: 1,
-      skipped: 0,
-      overwritten: 0,
-      failed: 0,
+    // 内核 fake 落盘了错误名字的内容（sibling 冒名）。
+    const service = createRepositoryService(workspaces, skills, {
+      kernel: materializingKernel(destinationPath, (name) => {
+        if (name === "alpha") {
+          fs.rmSync(path.join(destinationPath, "alpha"), { recursive: true, force: true });
+          writeSkillDocument(
+            path.join(destinationPath, "alpha"),
+            "beta",
+            "A pre-existing sibling.",
+            "# Beta\n",
+          );
+        }
+      }),
     });
-    const service = createRepositoryService(workspaces, skills, { installSkills: installer });
 
     try {
       const scan = await service.scan(repository);
@@ -486,13 +579,10 @@ describe("repository service", () => {
       expect(result).toMatchObject({ installed: 0, failed: 1 });
       expect(result.results[0]).toMatchObject({
         skill: "alpha",
-        path: path.join(fs.realpathSync(destinationPath), "alpha"),
         status: "failed",
+        error: expect.stringContaining("frontmatter name does not match"),
       });
       expect(result.results[0]).not.toHaveProperty("skillId");
-      expect((await skills.list(target(destination))).map((skill) => skill.directoryName)).toEqual([
-        "beta",
-      ]);
     } finally {
       await service.dispose();
     }
@@ -508,35 +598,18 @@ describe("repository service", () => {
     const workspaces = createWorkspaceRegistry();
     const destination = workspaces.import(workspaceDirectory, "Validation destination");
     const skills = createSkillService(workspaces);
-    const installer: RepositoryInstaller = async (options) => {
-      const name = path.basename(options.path ?? "");
-      const installedPath = path.join(destinationPath, name);
-      if (name === "alpha") {
-        writeSkillDocument(installedPath, "alpha", "Install alpha.", "# Alpha\n");
-      } else {
-        fs.mkdirSync(installedPath, { recursive: true });
+    const service = createRepositoryService(workspaces, skills, {
+      kernel: materializingKernel(destinationPath, (name) => {
+        if (name !== "beta") return;
+        fs.rmSync(path.join(destinationPath, "beta"), { recursive: true, force: true });
+        fs.mkdirSync(path.join(destinationPath, "beta"), { recursive: true });
         fs.writeFileSync(
-          path.join(installedPath, "SKILL.md"),
+          path.join(destinationPath, "beta", "SKILL.md"),
           "---\nname: beta\n---\n# Missing description\n",
           "utf8",
         );
-      }
-      return {
-        results: [
-          {
-            skill: name,
-            destination: destinationPath,
-            path: installedPath,
-            status: "installed" as const,
-          },
-        ],
-        installed: 1,
-        skipped: 0,
-        overwritten: 0,
-        failed: 0,
-      };
-    };
-    const service = createRepositoryService(workspaces, skills, { installSkills: installer });
+      }),
+    });
 
     try {
       const scan = await service.scan(repository);
@@ -567,37 +640,21 @@ describe("repository service", () => {
     }
   });
 
-  it("retains earlier installation results when a later installer call throws", async () => {
+  it("retains earlier installation results when a later kernel call throws", async () => {
     writeSkill("alpha", "alpha", "Install alpha.", "# Alpha\n");
     writeSkill("beta", "beta", "Install beta.", "# Beta\n");
-    commit("add installer failure fixtures");
+    commit("add kernel failure fixtures");
     const workspaceDirectory = path.join(sandbox, "throwing-destination");
     const destinationPath = path.join(workspaceDirectory, "skills");
     fs.mkdirSync(destinationPath, { recursive: true });
     const workspaces = createWorkspaceRegistry();
     const destination = workspaces.import(workspaceDirectory, "Throwing destination");
     const skills = createSkillService(workspaces);
-    const installer: RepositoryInstaller = async (options) => {
-      const name = path.basename(options.path ?? "");
-      if (name === "beta") throw new Error("Simulated installer failure.");
-      const installedPath = path.join(destinationPath, name);
-      writeSkillDocument(installedPath, name, `Install ${name}.`, `# ${name}\n`);
-      return {
-        results: [
-          {
-            skill: name,
-            destination: destinationPath,
-            path: installedPath,
-            status: "installed" as const,
-          },
-        ],
-        installed: 1,
-        skipped: 0,
-        overwritten: 0,
-        failed: 0,
-      };
-    };
-    const service = createRepositoryService(workspaces, skills, { installSkills: installer });
+    const service = createRepositoryService(workspaces, skills, {
+      kernel: materializingKernel(destinationPath, (name) => {
+        if (name === "beta") throw new Error("Simulated kernel failure.");
+      }),
+    });
 
     try {
       const scan = await service.scan(repository);
@@ -613,67 +670,58 @@ describe("repository service", () => {
       expect(result).toMatchObject({ installed: 1, failed: 1 });
       expect(result.results.find((entry) => entry.status === "failed")).toMatchObject({
         skill: "beta",
-        error: "Simulated installer failure.",
+        error: "Simulated kernel failure.",
       });
     } finally {
       await service.dispose();
     }
   });
 
-  it("converts an installer entry with an invalid runtime status into a per-skill failure", async () => {
-    writeSkill("alpha", "alpha", "Install alpha.", "# Alpha\n");
-    writeSkill("beta", "beta", "Install beta.", "# Beta\n");
-    commit("add malformed installer result fixtures");
-    const workspaceDirectory = path.join(sandbox, "malformed-result-destination");
+  it("maps a per-root projection failure (TARGET_DENIED) into a per-skill failure", async () => {
+    writeSkill("denied", "denied", "Projection root denies writes.", "# Denied\n");
+    commit("add denied fixture");
+    const workspaceDirectory = path.join(sandbox, "denied-destination");
     const destinationPath = path.join(workspaceDirectory, "skills");
     fs.mkdirSync(destinationPath, { recursive: true });
     const workspaces = createWorkspaceRegistry();
-    const destination = workspaces.import(workspaceDirectory, "Malformed result destination");
-    const skills = createSkillService(workspaces);
-    const installer: RepositoryInstaller = async (options) => {
-      const name = path.basename(options.path ?? "");
-      const installedPath = path.join(destinationPath, name);
-      writeSkillDocument(installedPath, name, `Install ${name}.`, `# ${name}\n`);
-      const entry = {
-        skill: name,
-        destination: destinationPath,
-        path: installedPath,
-        status: "installed" as const,
-      };
-      if (name === "beta") {
-        Object.defineProperty(entry, "status", {
-          configurable: true,
-          enumerable: true,
-          value: "unexpected",
-          writable: true,
-        });
-      }
-      return {
-        results: [entry],
-        installed: 1,
-        skipped: 0,
-        overwritten: 0,
-        failed: 0,
-      };
-    };
-    const service = createRepositoryService(workspaces, skills, { installSkills: installer });
+    const destination = workspaces.import(workspaceDirectory, "Denied destination");
+    const service = createRepositoryService(workspaces, createSkillService(workspaces), {
+      kernel: {
+        ensureEntity: async () => kernelOk("created", "projected").ensure,
+        projectEntity: async () =>
+          ({
+            ...kernelOk("created", "unchanged").project,
+            results: [
+              {
+                root: destinationPath,
+                rootId: "",
+                path: path.join(destinationPath, "denied"),
+                status: "failed",
+                errorCode: "TARGET_DENIED",
+                error: "kernel detail",
+              },
+            ],
+            failed: 1,
+          }) satisfies ProjectEntityResult,
+      },
+    });
 
     try {
       const scan = await service.scan(repository);
-      const alpha = scan.skills.find((skill) => skill.name === "alpha");
-      const beta = scan.skills.find((skill) => skill.name === "beta");
-      if (!alpha || !beta) throw new Error("Expected both fixtures in the scan result.");
+      const selected = scan.skills[0];
+      if (!selected) throw new Error("Expected the denied fixture.");
       const result = await service.install({
         sessionId: scan.sessionId,
-        skillIds: [alpha.id, beta.id],
+        skillIds: [selected.id],
         targets: [target(destination)],
       });
       if (result.kind !== "result") throw new Error("Expected an actual install result.");
-      expect(result).toMatchObject({ installed: 1, failed: 1 });
-      expect(result.results.find((entry) => entry.status === "failed")).toMatchObject({
-        skill: "beta",
-        error: "Installer returned an invalid result.",
+      expect(result).toMatchObject({ installed: 0, failed: 1 });
+      expect(result.results[0]).toMatchObject({
+        status: "failed",
+        error: expect.stringContaining("ccski code: TARGET_DENIED"),
       });
+      expect(result.results[0]?.error).not.toContain("kernel detail");
     } finally {
       await service.dispose();
     }
@@ -690,32 +738,19 @@ describe("repository service", () => {
       const workspaces = createWorkspaceRegistry();
       const destination = workspaces.import(workspaceDirectory, "Linked skill destination");
       const skills = createSkillService(workspaces);
-      const installer: RepositoryInstaller = async (options) => {
-        const name = path.basename(options.path ?? "");
-        const installedPath = path.join(destinationPath, name);
-        fs.mkdirSync(installedPath, { recursive: true });
-        fs.writeFileSync(
-          path.join(installedPath, "source.md"),
-          `---\nname: ${JSON.stringify(name)}\ndescription: "Linked file."\n---\n# Linked\n`,
-          "utf8",
-        );
-        fs.symlinkSync("source.md", path.join(installedPath, "SKILL.md"));
-        return {
-          results: [
-            {
-              skill: name,
-              destination: destinationPath,
-              path: installedPath,
-              status: "installed" as const,
-            },
-          ],
-          installed: 1,
-          skipped: 0,
-          overwritten: 0,
-          failed: 0,
-        };
-      };
-      const service = createRepositoryService(workspaces, skills, { installSkills: installer });
+      const service = createRepositoryService(workspaces, skills, {
+        kernel: materializingKernel(destinationPath, (name) => {
+          const installedPath = path.join(destinationPath, name);
+          fs.rmSync(installedPath, { recursive: true, force: true });
+          fs.mkdirSync(installedPath, { recursive: true });
+          fs.writeFileSync(
+            path.join(installedPath, "source.md"),
+            `---\nname: ${JSON.stringify(name)}\ndescription: "Linked file."\n---\n# Linked\n`,
+            "utf8",
+          );
+          fs.symlinkSync("source.md", path.join(installedPath, "SKILL.md"));
+        }),
+      });
 
       try {
         const scan = await service.scan(repository);

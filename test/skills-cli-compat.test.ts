@@ -368,16 +368,16 @@ describe("parseGithubSource", () => {
 });
 
 describe("computeSkillFolderHash", () => {
-  it("produces a stable SHA-256 that changes when content changes", () => {
+  it("produces a stable SHA-256 that changes when content changes", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "s"), "s", "d", "# One\n");
-    const hash1 = computeSkillFolderHash(dir);
+    const hash1 = await computeSkillFolderHash(dir);
     expect(hash1).toMatch(/^[a-f0-9]{64}$/);
     fs.writeFileSync(
       path.join(dir, "SKILL.md"),
       '---\nname: "s"\ndescription: "d"\n---\n# Two\n',
       "utf8",
     );
-    const hash2 = computeSkillFolderHash(dir);
+    const hash2 = await computeSkillFolderHash(dir);
     expect(hash2).not.toBe(hash1);
   });
 });
@@ -437,8 +437,11 @@ describe("skills-CLI update-check", () => {
     return { workspaces, skills, probe, repository, service, canonical };
   }
 
-  it("reports updated when the GitHub tree SHA differs from the lock hash", async () => {
+  it("reports updated for a GitHub source when the cloned folder hash differs (ccski 3.0 批 2.2)", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
+    const cloneDir = path.join(sandbox, "clone-src");
+    writeSkillDocument(path.join(cloneDir, "skills", "demo-skill"), "demo-skill", "d", "# New\n");
+    const upstreamHash = await computeSkillFolderHash(path.join(cloneDir, "skills", "demo-skill"));
     const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
@@ -449,7 +452,7 @@ describe("skills-CLI update-check", () => {
             sourceType: "github",
             sourceUrl: "https://github.com/owner/repo",
             skillPath: "skills/demo-skill",
-            skillFolderHash: "OLDTREE",
+            skillFolderHash: "0".repeat(64),
             installedAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
@@ -458,23 +461,26 @@ describe("skills-CLI update-check", () => {
       fetch: async () => ({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify(fakeGithubTree("skills/demo-skill", "NEWTREE")),
+        text: async () => JSON.stringify(fakeGithubTree("skills/demo-skill", "nevertree")),
       }),
+      clone: async () => ({ directory: cloneDir }),
     });
     const discovered = await skills.list(codexTarget);
     const result = await service.checkUpdates(codexTarget, discovered);
-    expect(result.results).toEqual([
-      expect.objectContaining({
-        status: "updated",
-        currentHash: "OLDTREE",
-        upstreamHash: "NEWTREE",
-        source: "https://github.com/owner/repo",
-      }),
-    ]);
+    // 上游对比 = 浅克隆 + ccski 单源 folder-hash（64-hex）；tree SHA 只是探针。
+    expect(result.results[0]).toMatchObject({
+      status: "updated",
+      currentHash: "0".repeat(64),
+      upstreamHash,
+      source: "https://github.com/owner/repo",
+    });
   });
 
-  it("reports already-current when the tree SHA equals the lock hash", async () => {
-    const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
+  it("reports already-current for a GitHub source when the cloned folder hash equals the lock hash", async () => {
+    const cloneDir = path.join(sandbox, "clone-src");
+    writeSkillDocument(path.join(cloneDir, "skills", "demo-skill"), "demo-skill", "d", "# Same\n");
+    const upstreamHash = await computeSkillFolderHash(path.join(cloneDir, "skills", "demo-skill"));
+    const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill", "d", "# Same\n");
     const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
@@ -485,7 +491,7 @@ describe("skills-CLI update-check", () => {
             sourceType: "github",
             sourceUrl: "https://github.com/owner/repo",
             skillPath: "skills/demo-skill",
-            skillFolderHash: "SAMETREE",
+            skillFolderHash: upstreamHash,
             installedAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
@@ -494,12 +500,48 @@ describe("skills-CLI update-check", () => {
       fetch: async () => ({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify(fakeGithubTree("skills/demo-skill", "SAMETREE")),
+        text: async () => JSON.stringify(fakeGithubTree("skills/demo-skill", "sametree")),
       }),
+      clone: async () => ({ directory: cloneDir }),
     });
     const discovered = await skills.list(codexTarget);
     const result = await service.checkUpdates(codexTarget, discovered);
     expect(result.results[0]?.status).toBe("already-current");
+  });
+
+  it("treats a 40-hex legacy lock entry as stale even when upstream is unchanged (hash 代际裁决)", async () => {
+    // 旧算法条目（tree-SHA 时代，40-hex）：即使上游内容一致也判 stale 触发一次
+    // 重装收敛——两代算法无等值语义。
+    const cloneDir = path.join(sandbox, "clone-src");
+    writeSkillDocument(path.join(cloneDir, "skills", "demo-skill"), "demo-skill", "d", "# Same\n");
+    const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill", "d", "# Same\n");
+    const upstreamHash = await computeSkillFolderHash(path.join(cloneDir, "skills", "demo-skill"));
+    const legacyHash = "a".repeat(40);
+    const { service, skills } = await buildUpdateService({
+      skillDirectory: dir,
+      globalLock: JSON.stringify({
+        version: 3,
+        skills: {
+          "demo-skill": {
+            source: "file:///legacy-source",
+            sourceType: "local",
+            sourceUrl: "file:///legacy-source",
+            skillPath: "skills/demo-skill",
+            skillFolderHash: legacyHash,
+            installedAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      clone: async () => ({ directory: cloneDir }),
+    });
+    const discovered = await skills.list(codexTarget);
+    const result = await service.checkUpdates(codexTarget, discovered);
+    expect(result.results[0]).toMatchObject({
+      status: "updated",
+      currentHash: legacyHash,
+      upstreamHash,
+    });
   });
 
   it("reports unavailable when GitHub API returns 403 rate limit", async () => {
@@ -559,7 +601,7 @@ describe("skills-CLI update-check", () => {
     // 克隆到一个临时目录，内容与本地不同。
     const cloneDir = path.join(sandbox, "clone-src");
     writeSkillDocument(path.join(cloneDir, "demo-skill"), "demo-skill", "d", "# Different\n");
-    const upstreamHash = computeSkillFolderHash(path.join(cloneDir, "demo-skill"));
+    const upstreamHash = await computeSkillFolderHash(path.join(cloneDir, "demo-skill"));
     const { service, skills } = await buildUpdateService({
       skillDirectory: dir,
       globalLock: JSON.stringify({
@@ -731,7 +773,7 @@ describe("skills-CLI apply-update", () => {
     await repository.dispose();
   });
 
-  it("reinstalls via the repository pipeline and refreshes the in-memory hash overlay", async () => {
+  it("reinstalls through the kernel entity API and refreshes the in-memory hash overlay", async () => {
     // 上游 git 仓库里放一个新版本的技能。
     const repo = buildGitRepo();
     writeSkillDocument(
@@ -797,10 +839,188 @@ describe("skills-CLI apply-update", () => {
       providerId: target.providerId,
       skillIds: [skillId],
     });
-    expect(result.results[0]?.status).toBe("updated");
-    // 内存覆盖层应已写入新 hash（来自克隆计算）。
+    expect(result.results[0]).toMatchObject({ status: "updated", lockSyncPending: true });
+    // legacy 物化目录迁移为实体 + link 投影（批 2.2 两阶段）。
+    const projected = path.join(workspaceRoot, "skills", "demo-skill");
+    expect(fs.lstatSync(projected).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(projected, "SKILL.md"), "utf8")).toContain("Upstream skill.");
+    const entityDir = path.join(workspaceRoot, ".agents", "skills", "demo-skill");
+    expect(fs.lstatSync(entityDir).isDirectory()).toBe(true);
+    // 内存覆盖层应已写入新 hash（来自克隆计算，64-hex 新代际）。
     const overlay = service._hashOverlayForTest();
     expect(overlay.get("demo-skill")).toMatch(/^[a-f0-9]{64}$/);
+    await repository.dispose();
+  });
+
+  it("converges a 40-hex legacy lock entry through one kernel reinstall (hash 代际裁决)", async () => {
+    // 上游内容与本地完全一致，但 lock 记录是 40-hex 旧算法条目——不短路为
+    // already-current，触发一次重装收敛，覆盖层落 64-hex 新代际。
+    const repo = buildGitRepo("git-legacy");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream skill.",
+      "# Upstream\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "init");
+
+    const workspaceRoot = path.join(sandbox, "ws-legacy");
+    const localSkillDir = path.join(workspaceRoot, "skills", "demo-skill");
+    fs.cpSync(path.join(repo, "skills", "demo-skill"), localSkillDir, { recursive: true });
+    const canonical = fs.realpathSync(localSkillDir);
+
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "legacy");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openclawProviderId,
+    };
+    const probe = createSkillsCliProbe({
+      // probe 路径按运行时 realpath 解析：apply 收敛后目录变为 link 投影，
+      // realpath 跟随到实体路径（覆盖层刷新后 recheck 需要新 probe 命中）。
+      run: async () => ({
+        stdout: JSON.stringify([
+          {
+            name: "demo-skill",
+            path: fs.realpathSync(path.join(workspaceRoot, "skills", "demo-skill")),
+            scope: "project",
+          },
+        ]),
+      }),
+    });
+    await probe.probe();
+    const skills = createSkillService(workspaces, {
+      skillsCliProbe: probe,
+      discoverSkills: async () => {
+        const live = fs.realpathSync(path.join(workspaceRoot, "skills", "demo-skill"));
+        return [discoveredSkill(live)];
+      },
+    });
+    const repository = createRepositoryService(workspaces, skills);
+    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+      readGlobalLock: () =>
+        JSON.stringify({
+          version: 3,
+          skills: {
+            "demo-skill": {
+              source: repo,
+              sourceType: "local",
+              sourceUrl: repo,
+              skillPath: "skills/demo-skill",
+              skillFolderHash: "b".repeat(40),
+              installedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        }),
+      readProjectLock: () => null,
+    });
+
+    const discovered = await skills.list(target);
+    const skillId = discovered[0]?.id as SkillId;
+    const result = await service.applyUpdates(target, [skillId], {
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillIds: [skillId],
+    });
+    expect(result.results[0]).toMatchObject({ status: "updated", lockSyncPending: true });
+    const overlay = service._hashOverlayForTest();
+    expect(overlay.get("demo-skill")).toMatch(/^[a-f0-9]{64}$/);
+    // 收敛后重查：覆盖层新代际 hash 与上游一致 → already-current（不再循环 stale）。
+    // probe 整表失效后先重热（list 的 updatable 投影走 peek，冷 probe 投影 false）。
+    probe.invalidate();
+    await probe.probe();
+    const recheck = await service.checkUpdates(target, await skills.list(target));
+    expect(recheck.results[0]?.status).toBe("already-current");
+    await repository.dispose();
+  });
+
+  it("does not fake success when the kernel reinstall fails (负例：不伪装成功)", async () => {
+    const repo = buildGitRepo("git-failing");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream skill.",
+      "# Upstream\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "init");
+
+    const workspaceRoot = path.join(sandbox, "ws-failing");
+    const localSkillDir = writeSkillDocument(
+      path.join(workspaceRoot, "skills", "demo-skill"),
+      "demo-skill",
+      "Local skill.",
+      "# Local\n",
+    );
+    const canonical = fs.realpathSync(localSkillDir);
+
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "failing");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openclawProviderId,
+    };
+    const probe = createSkillsCliProbe({
+      run: async () => ({
+        stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
+      }),
+    });
+    await probe.probe();
+    const skills = createSkillService(workspaces, {
+      skillsCliProbe: probe,
+      discoverSkills: discovererFor([{ directory: canonical }]),
+    });
+    const repository = createRepositoryService(workspaces, skills);
+    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+      kernel: {
+        updateEntity: async () => ({
+          kind: "error",
+          code: "GUARD_ENTITY",
+          message: "RAW KERNEL INTERNAL DETAIL must not leak",
+        }),
+        ensureEntity: async () => {
+          throw new Error("must not be reached after a typed updateEntity error");
+        },
+        projectEntity: async () => {
+          throw new Error("must not be reached after a typed updateEntity error");
+        },
+      },
+      readGlobalLock: () =>
+        JSON.stringify({
+          version: 3,
+          skills: {
+            "demo-skill": {
+              source: repo,
+              sourceType: "local",
+              sourceUrl: repo,
+              skillPath: "skills/demo-skill",
+              skillFolderHash: "OLDHASH",
+              installedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        }),
+      readProjectLock: () => null,
+    });
+
+    const discovered = await skills.list(target);
+    const skillId = discovered[0]?.id as SkillId;
+    const result = await service.applyUpdates(target, [skillId], {
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillIds: [skillId],
+    });
+    const entry = result.results[0];
+    expect(entry).toMatchObject({ status: "failed" });
+    expect(entry?.error).toContain("ccski code: GUARD_ENTITY");
+    expect(entry?.error).not.toContain("RAW KERNEL INTERNAL DETAIL");
+    expect(entry).not.toHaveProperty("lockSyncPending");
+    // 覆盖层未刷新（不伪装成功）。
+    expect(service._hashOverlayForTest().size).toBe(0);
+    // 本地旧内容原样保留。
+    expect(fs.readFileSync(path.join(canonical, "SKILL.md"), "utf8")).toContain("Local skill.");
     await repository.dispose();
   });
 
@@ -822,7 +1042,7 @@ describe("skills-CLI apply-update", () => {
       recursive: true,
     });
     const canonical = fs.realpathSync(localSkillDir);
-    const upstreamHash = computeSkillFolderHash(canonical);
+    const upstreamHash = await computeSkillFolderHash(canonical);
 
     const workspaces = createWorkspaceRegistry();
     const workspace = workspaces.import(workspaceRoot, "demo-skill");
