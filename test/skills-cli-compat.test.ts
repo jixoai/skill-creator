@@ -1748,6 +1748,114 @@ describe("skills-CLI apply-update", () => {
     ).toBe(true);
     await repository.dispose();
   });
+
+  it("converges an unregistered materialized copy through the REAL kernel when the projection table is healthy (P0-C 终审第三轮集成收口)", async () => {
+    // 终审第三轮 7.8/10 唯一阻塞项的宿主收口：内核健康态现显式返回
+    // degradedProjectionState:false（c314236），本测试不再 mock updateEntity——
+    // 真实内核全程参与：实体 v1 真实换新为 v2、投影表健康真实出 false、
+    // 未登记物化副本经正向证明分支收敛为 link 投影。staging 走 repository
+    // session 的 pinned clone（真克隆 repo@HEAD），故 v2 直接打进 git 历史。
+    const repo = buildGitRepo("git-real-kernel");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream skill.",
+      "# Upstream\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "init");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream v2.",
+      "# Upstream v2\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "v2");
+
+    const workspaceRoot = path.join(sandbox, "ws-real-kernel");
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    const source = writeSkillDocument(path.join(sandbox, "real-src"), "demo-skill");
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "real-kernel");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openclawProviderId,
+    };
+    const scope = workspaces.resolve(target, true);
+    const canonicalWorkspace = scope.workspaceDirectory ?? workspaceRoot;
+    const providerRoot = scope.directory;
+    fs.mkdirSync(providerRoot, { recursive: true });
+    const ensured = await ensureEntity({
+      scope: "project",
+      workspaceDir: canonicalWorkspace,
+      source: { dir: source },
+    });
+    if (ensured.kind !== "ok") throw new Error(`ensureEntity failed: ${JSON.stringify(ensured)}`);
+    const legacyDir = writeSkillDocument(
+      path.join(providerRoot, "demo-skill"),
+      "demo-skill",
+      "Legacy copy.",
+      "# Legacy\n",
+    );
+    const canonical = fs.realpathSync(legacyDir);
+
+    const probe = createSkillsCliProbe({
+      run: async () => ({
+        stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
+      }),
+    });
+    await probe.probe();
+    const skills = createSkillService(workspaces, {
+      skillsCliProbe: probe,
+      discoverSkills: discovererFor([{ directory: canonical }]),
+    });
+    const repository = createRepositoryService(workspaces, skills);
+    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+      readGlobalLock: () =>
+        JSON.stringify({
+          version: 3,
+          skills: {
+            "demo-skill": {
+              source: repo,
+              sourceType: "local",
+              sourceUrl: repo,
+              skillPath: "skills/demo-skill",
+              skillFolderHash: "OLDHASH",
+              installedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        }),
+      readProjectLock: () => null,
+    });
+
+    const discovered = await skills.list(target);
+    const skillId = discovered[0]?.id as SkillId;
+    const result = await service.applyUpdates(target, [skillId], {
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillIds: [skillId],
+    });
+    expect(result.results[0]).toMatchObject({ status: "updated", lockSyncPending: true });
+    const projected = path.join(providerRoot, "demo-skill");
+    expect(fs.lstatSync(projected).isSymbolicLink()).toBe(true);
+    const entityDir = path.join(canonicalWorkspace, ".agents", "skills", "demo-skill");
+    expect(fs.realpathSync(projected)).toBe(fs.realpathSync(entityDir));
+    // 真实换新落地：投影内容 = v2（经实体），不是 ensure 时的 v1，也不是 legacy 文案。
+    const projectedBody = fs.readFileSync(path.join(projected, "SKILL.md"), "utf8");
+    expect(projectedBody).toContain("Upstream v2.");
+    expect(projectedBody).not.toContain("Legacy copy.");
+    const state = JSON.parse(
+      fs.readFileSync(path.join(canonicalWorkspace, ".agents", ".ccski-state.json"), "utf8"),
+    ) as { projections: Record<string, { folderName?: string; mode?: string }> };
+    expect(
+      Object.values(state.projections).some(
+        (record) => record.folderName === "demo-skill" && record.mode === "link",
+      ),
+    ).toBe(true);
+    await repository.dispose();
+  });
 });
 
 describe("skills-CLI default branch resolution (P1-5)", () => {
