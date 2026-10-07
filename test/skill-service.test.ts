@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureEntity, projectEntity } from "ccski";
+import { readStateDisabledRows } from "../src/daemon/ccski-state-disabled.js";
 import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import {
@@ -473,5 +474,148 @@ describe("skill service discovery invalidation (codex perf-review P1-1 core)", (
     release();
     await Promise.all([stale, fresh]);
     expect(seen.length).toBe(2); // 两次独立扫描，无跨请求复用
+  });
+});
+
+describe("state-backed disabled supplementation path binding (宿主修复批 6 P1-4)", () => {
+  const openClawProviderId = ProviderIdSchema.parse("openclaw");
+
+  /** 伪造 state 信封 + 实体库 fixture；返回可改写的信封对象与路径锚点。 */
+  function forgedStateFixture(options: { entityPath?: string; projectionPath?: string }) {
+    const workspaceRoot = path.join(sandbox, "ws-forged");
+    const stateBase = path.join(workspaceRoot, ".agents");
+    const providerRoot = path.join(workspaceRoot, "skills");
+    const entityLibrary = path.join(stateBase, "skills");
+    const folder = "forged-skill";
+    // 实体库内合法目录（默认实体路径锚点）。
+    const entityDir = path.join(entityLibrary, folder);
+    fs.mkdirSync(entityDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(entityDir, "SKILL.md"),
+      `---\nname: "forged-skill"\ndescription: "Real entity."\n---\n# forged\n`,
+      "utf8",
+    );
+    const envelope = {
+      schemaVersion: 1,
+      generation: 1,
+      entities: {
+        [folder]: {
+          kind: "entity",
+          scope: "project",
+          logicalName: "forged-skill",
+          folderName: folder,
+          path: options.entityPath ?? entityDir,
+          revision: "0".repeat(64),
+        },
+      },
+      projections: {
+        root0: {
+          kind: "projection",
+          scope: "project",
+          rootId: "root0",
+          rootPath: providerRoot,
+          folderName: folder,
+          logicalName: "forged-skill",
+          path: options.projectionPath ?? path.join(providerRoot, folder),
+          mode: "link",
+          entityRevision: "0".repeat(64),
+          disabled: true,
+          ownership: "ccski",
+        },
+      },
+    };
+    fs.mkdirSync(stateBase, { recursive: true });
+    fs.writeFileSync(path.join(stateBase, ".ccski-state.json"), JSON.stringify(envelope), "utf8");
+    return { stateBase, providerRoot, entityLibrary, entityDir, folder, envelope };
+  }
+
+  it("drops the row when a forged entity record points outside the entity library", async () => {
+    // 伪造合法信封把实体路径指到 workspace 外 → 不得产出 disabled 补充行
+    // （否则 skills.list 出伪造行、skills.info 读任意 SKILL.md）。
+    const outside = path.join(sandbox, "outside-entity");
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(
+      path.join(outside, "SKILL.md"),
+      `---\nname: "forged-skill"\ndescription: "Outside."\n---\n# outside\n`,
+      "utf8",
+    );
+    const fixture = forgedStateFixture({ entityPath: outside });
+    const rows = readStateDisabledRows({
+      providerRoot: fixture.providerRoot,
+      stateBase: fixture.stateBase,
+      providerId: openClawProviderId,
+      seenCanonicalPaths: new Set(),
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it("drops the row when the entity directory is an in-library symlink to an outside directory", async () => {
+    // 词法合法（<stateBase>/skills/<folderName>）但 realpath 逃逸 → 拒绝。
+    const fixture = forgedStateFixture({});
+    const outside = path.join(sandbox, "symlink-target");
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(
+      path.join(outside, "SKILL.md"),
+      `---\nname: "forged-skill"\ndescription: "Linked out."\n---\n# out\n`,
+      "utf8",
+    );
+    fs.rmSync(fixture.entityDir, { recursive: true, force: true });
+    fs.symlinkSync(outside, fixture.entityDir);
+    const rows = readStateDisabledRows({
+      providerRoot: fixture.providerRoot,
+      stateBase: fixture.stateBase,
+      providerId: openClawProviderId,
+      seenCanonicalPaths: new Set(),
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it("drops the row when the entity SKILL.md is a symbolic link to an outside file", async () => {
+    const fixture = forgedStateFixture({});
+    const outsideDoc = path.join(sandbox, "outside-SKILL.md");
+    fs.writeFileSync(
+      outsideDoc,
+      `---\nname: "forged-skill"\ndescription: "Linked doc."\n---\n# out\n`,
+      "utf8",
+    );
+    fs.rmSync(path.join(fixture.entityDir, "SKILL.md"));
+    fs.symlinkSync(outsideDoc, path.join(fixture.entityDir, "SKILL.md"));
+    const rows = readStateDisabledRows({
+      providerRoot: fixture.providerRoot,
+      stateBase: fixture.stateBase,
+      providerId: openClawProviderId,
+      seenCanonicalPaths: new Set(),
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it("drops the row when the recorded projection path is not the registered root's direct child", async () => {
+    const fixture = forgedStateFixture({
+      projectionPath: path.join(sandbox, "elsewhere-projection"),
+    });
+    const rows = readStateDisabledRows({
+      providerRoot: fixture.providerRoot,
+      stateBase: fixture.stateBase,
+      providerId: openClawProviderId,
+      seenCanonicalPaths: new Set(),
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it("keeps supplementing a bound record (对照：合法信封仍产出行)", async () => {
+    const fixture = forgedStateFixture({});
+    const rows = readStateDisabledRows({
+      providerRoot: fixture.providerRoot,
+      stateBase: fixture.stateBase,
+      providerId: openClawProviderId,
+      seenCanonicalPaths: new Set(),
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      name: "forged-skill",
+      disabled: true,
+      ownership: "ccski",
+      path: fs.realpathSync(fixture.entityDir),
+    });
   });
 });

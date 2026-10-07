@@ -32,7 +32,12 @@ import {
   type EntityRemoveResult,
 } from "ccski";
 import { z } from "zod";
-import { readCcskiState } from "./ccski-state-disabled.js";
+import {
+  ccskiEntityLibraryRoot,
+  ccskiEntityPathBound,
+  ccskiProjectionPathBound,
+  readCcskiState,
+} from "./ccski-state-disabled.js";
 import { DomainError } from "./domain-error.js";
 import { safeParseExternal } from "../shared/external-input.js";
 
@@ -52,6 +57,8 @@ const ProjectionRecordMirrorSchema = z.object({
   /** 投影根 resolve 归一路径。 */
   rootPath: z.string().min(1),
   folderName: z.string().min(1),
+  /** 投影绝对路径（P1-4：绑定 `<rootPath>/<folderName>`，伪造信封拒绝）。 */
+  path: z.string().min(1),
   mode: z.enum(["link", "materialized"]),
 });
 
@@ -155,7 +162,14 @@ export function createCcskiEntityRemover(
 
     const entity = Object.values(state.entities)
       .map((value) => safeParseExternal(EntityRecordMirrorSchema, value))
-      .find((record) => record !== null && record.logicalName === input.skillName);
+      .find(
+        (record) =>
+          record !== null &&
+          record.logicalName === input.skillName &&
+          // 路径绑定（P1-4，与 disabled 补充面同源）：伪造实体路径不得驱动删除
+          // 路由（词法 + realpath 双 containment，绑定失败 = 记录不可信不匹配）。
+          ccskiEntityPathBound(stateBase, record.folderName, record.path),
+      );
     if (!entity) {
       throw conservativeRefusal(
         `does not track a skill named "${input.skillName}" in this workspace`,
@@ -165,10 +179,13 @@ export function createCcskiEntityRemover(
     const projections = Object.values(state.projections)
       .map((value) => safeParseExternal(ProjectionRecordMirrorSchema, value))
       .filter((record): record is z.infer<typeof ProjectionRecordMirrorSchema> => record !== null)
-      .filter((record) => record.folderName === entity.folderName);
+      .filter((record) => record.folderName === entity.folderName)
+      .filter((record) =>
+        ccskiProjectionPathBound(record.rootPath, record.folderName, record.path),
+      );
 
     const providerRoot = path.resolve(input.providerRoot);
-    const entityRoot = path.join(stateBase, "skills");
+    const entityRoot = ccskiEntityLibraryRoot(stateBase);
     const scope = {
       scope: "project" as const,
       workspaceDir: input.workspaceDirectory,

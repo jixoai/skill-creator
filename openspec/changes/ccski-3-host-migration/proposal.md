@@ -18,4 +18,5 @@ ccski `store-link-kernel`（3.0.0，发版门全过、未 publish）已完成 st
 
 - src/daemon/{repository-service,skills-update-service,skill-service,ccski-symlink-entries(删),workspace-registry/*}、webui 启停文案、package.json 依赖。
 - 非目标：MCP/CLI 面的 canonical 投影同步（后续批）；ccski Windows 实机验证（ccski 仓平台门）；npm lock 写入（分层单写者恒定）。
+- 后续注记（Codex 终审质量项，不在本批动代码）：skills-update-service 的职责聚合度偏高（lock 读取 + 上游 hash + 内核重装 + 覆盖层四类关注点同文件），后续 change 应评估按「上游探测 / 内核重装编排」物理拆分。
 - 验收：store-link-kernel tasks 批 6 第 2/3 项勾选（host 无漂移复跑收据）+ 本仓五件套门禁 + dev 沙箱走查（安装/更新/启停/移除全链真实交互）。

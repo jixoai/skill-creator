@@ -12,6 +12,12 @@
  *   旧 tree-SHA 等值比较对两代条目都失效——见 import-audit.md 批 2 注记）。
  * - apply 重装直连内核：updateEntity（实体稳路径换新，link 投影按路径语义自然解析；
  *   ENTITY_NOT_FOUND 回退 ensureEntity+projectEntity，legacy 物化目录先迁移再投影）。
+ *   逐投影收据裁决（宿主修复批 6，P0-1）：顶层 ok ≠ 每 root 成功——物化投影被
+ *   用户改过时内核收据 GUARD_PROJECTION failed 且保留被改副本，宿主对该 root
+ *   如实失败、绝不走 legacy 清理；legacy 收敛仅在收据缺席（该 root 未注册）时执行。
+ * - GitHub 无 ref 探针跟随真实默认分支（宿主修复批 6，P1-5）：git ls-remote
+ *   --symref 解析（不占 API 限额、与克隆同通道），解析失败按探针不可达处理，
+ *   不假设 main——默认分支非 main 的仓库不再被误判 unavailable。
  * - lockSyncPending 诚实化：npm lock 唯一写者是 skills CLI（分层单写者），宿主只在
  *   内存覆盖层刷新 hash，apply 成功条目如实携带 lockSyncPending:true。
  * 正交意图：
@@ -107,6 +113,50 @@ export type UpdateCloner = (
   source: string,
   ref: string | undefined,
 ) => Promise<{ directory: string }>;
+
+/** 默认分支解析适配器（P1-5）；测试可注入 mock。失败/不可达 → null。 */
+export type DefaultBranchResolver = (source: string) => Promise<string | null>;
+
+/**
+ * updateEntity 逐投影收据 failed 码 → 宿主有限词表（P0-1；不透传内核 detail）。
+ * 码 token 来自 EntityUpdateItemCode 冻结词表（PINNED/PROJECTION_DISABLED 实际
+ * 只出现在 skipped 收据上，防御性覆盖）。
+ */
+const UPDATE_PROJECTION_FAILURE_MESSAGES: Record<string, string> = {
+  GUARD_PROJECTION:
+    "The provider entry was modified after installation; the update kept the modified copy. Review the entry and retry the update after reconciling it.",
+  PINNED: "The provider entry is pinned; the update skipped rematerializing it.",
+  PROJECTION_DISABLED: "The provider entry is disabled; the update skipped rematerializing it.",
+  TARGET_DENIED: "The provider skills directory denied the rematerialization.",
+  COPY_FAILED: "The updated content could not be copied to the provider entry.",
+  IO: "The skill store reported a filesystem failure while updating the provider entry.",
+};
+
+function updateProjectionFailureMessage(code: string | undefined): string {
+  const text =
+    code !== undefined && UPDATE_PROJECTION_FAILURE_MESSAGES[code] !== undefined
+      ? UPDATE_PROJECTION_FAILURE_MESSAGES[code]
+      : "The skill store reported an unexpected failure while updating the provider entry.";
+  return code !== undefined ? `${text} (ccski code: ${code})` : text;
+}
+
+/**
+ * 默认实现（P1-5）：`git ls-remote --symref <source> HEAD` 第一行形如
+ * `ref: refs/heads/<branch>\tHEAD`——不经 GitHub API（不占限额）、与克隆同通道
+ * （克隆可达则它可达）。解析失败 → null（调用方按探针不可达处理）。
+ * 导出供测试以本地 git 沙箱验证真实解析。
+ */
+export async function defaultResolveDefaultBranch(source: string): Promise<string | null> {
+  try {
+    const result = await execa("git", ["ls-remote", "--symref", "--", source, "HEAD"], {
+      timeout: 30_000,
+    });
+    const match = result.stdout.match(/^ref: refs\/heads\/(\S+)/m);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** 把任一值收窄为 GitHub tree 条目数组；结构不兼容返回 null。 */
 function parseGithubTree(value: unknown): Array<{ path: string; sha: string }> | null {
@@ -312,6 +362,8 @@ export interface SkillsUpdateServiceOptions {
   fetch?: FetchLike;
   /** 克隆适配器；默认走 execa git clone。 */
   clone?: UpdateCloner;
+  /** 默认分支解析适配器（P1-5）；默认走 execa git ls-remote --symref。 */
+  resolveDefaultBranch?: DefaultBranchResolver;
   /** ccski 内核实体 API seam；默认走真实内核（批 2.2）。 */
   kernel?: SkillsUpdateKernel;
   /** 全局 lock 内容读取；默认读 `globalSkillLockPath()`。 */
@@ -348,6 +400,7 @@ export function createSkillsUpdateService(
 ) {
   const doFetch = options.fetch ?? defaultFetch;
   const doClone = options.clone ?? defaultClone;
+  const doResolveDefaultBranch = options.resolveDefaultBranch ?? defaultResolveDefaultBranch;
   const kernel: SkillsUpdateKernel = options.kernel ?? {
     updateEntity: ccskiUpdateEntity,
     ensureEntity: ccskiEnsureEntity,
@@ -358,13 +411,29 @@ export function createSkillsUpdateService(
   const resolveCwd = options.resolveCwd ?? (() => process.cwd());
   // daemon 生命周期内的 upstream hash 缓存（D6）。
   const upstreamHashCache = new Map<string, string>();
+  // daemon 生命周期内的仓库默认分支缓存（P1-5）：source → default branch。
+  const defaultBranchCache = new Map<string, string>();
   // apply 成功后的内存覆盖层：技能名 → 新 hash。优先于 lock 文件中的旧值。
   const hashOverlay = new Map<string, string>();
+
+  /**
+   * 解析 GitHub 仓库的真实默认分支（P1-5）：lock 无 ref 时不得假设 main——
+   * 默认分支非 main 的仓库 Trees API 会 404，探针误判 unavailable 且克隆被挡。
+   * daemon 生命周期内缓存；解析失败 → null（探针按不可达处理，不猜分支）。
+   */
+  async function resolveGithubDefaultBranch(source: string): Promise<string | null> {
+    const cached = defaultBranchCache.get(source);
+    if (cached !== undefined) return cached;
+    const branch = await doResolveDefaultBranch(source);
+    if (branch !== null) defaultBranchCache.set(source, branch);
+    return branch;
+  }
 
   /**
    * 取 GitHub tree SHA：仅作可达性/限流探针（批 2.2：tree SHA 与 folder hash 是
    * 两个算法域，不再是对比值，也不进 upstream hash 缓存——缓存只存单源
    * folder-hash，防止跨算法域污染等值比较）。
+   * 无 ref 时跟随仓库真实默认分支（P1-5：先经 ls-remote 解析，解析不到不猜）。
    */
   async function fetchGithubTreeSha(
     source: string,
@@ -373,8 +442,9 @@ export function createSkillsUpdateService(
   ): Promise<{ sha: string | null; unavailable: boolean }> {
     const parsed = parseGithubSource(source);
     if (!parsed) return { sha: null, unavailable: true };
-    const refOrMain = ref ?? "main";
-    const url = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/git/trees/${refOrMain}?recursive=1`;
+    const refOrBranch = ref ?? (await resolveGithubDefaultBranch(source));
+    if (!refOrBranch) return { sha: null, unavailable: true };
+    const url = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/git/trees/${refOrBranch}?recursive=1`;
     const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
       "User-Agent": "skill-creator",
@@ -601,24 +671,42 @@ export function createSkillsUpdateService(
       if (projectionFailure !== null) return { kind: "error", message: projectionFailure };
     } else if (updated.kind === "error") {
       return { kind: "error", message: kernelFailureMessage(updated.code) };
-    } else if (entryStats !== null && !entryStats.isSymbolicLink()) {
-      // 实体已在但 provider root 上是未入账的真实目录（legacy 副本）：重装语义收敛
-      // 为投影。entity-local 形态（realpath 在实体库内 = 实体路径本身）保留不动。
-      const entityRootDir = path.join(workspaceDirectory, ".agents", "skills");
-      const real = fs.realpathSync(entryPath);
-      const relative = path.relative(entityRootDir, real);
-      const insideEntityRoot =
-        relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
-      if (!insideEntityRoot) {
-        const removeFailure = removeLegacyEntry();
-        if (removeFailure !== null) return { kind: "error", message: removeFailure };
-        const projectionFailure = await projectToProvider();
-        if (projectionFailure !== null) return { kind: "error", message: projectionFailure };
+    } else {
+      // 逐投影收据裁决（宿主修复批 6，P0-1）：顶层 ok 不等于本 provider 的投影
+      // 已换新——物化投影被用户改过时内核收据 GUARD_PROJECTION failed 并保留
+      // 被改副本，宿主必须如实失败，绝不对该 root 做 legacy 清理（那会删掉用户
+      // 修改并让投影与 state 记录脱节）。
+      const receipt = updated.projections.find(
+        (projection) => path.resolve(projection.rootPath) === providerRoot,
+      );
+      if (receipt && receipt.status === "failed") {
+        return { kind: "error", message: updateProjectionFailureMessage(receipt.code) };
       }
-    } else if (entryStats === null) {
-      // 实体已在（updateEntity ok）但本 provider 尚无条目 → 补投影。
-      const projectionFailure = await projectToProvider();
-      if (projectionFailure !== null) return { kind: "error", message: projectionFailure };
+      if (!receipt) {
+        if (entryStats !== null && !entryStats.isSymbolicLink()) {
+          // 收据缺席 = 该 root 未注册（真 legacy 副本）：重装语义收敛为投影。
+          // entity-local 形态（realpath 在实体库内 = 实体路径本身）保留不动。
+          const entityRootDir = path.join(workspaceDirectory, ".agents", "skills");
+          const real = fs.realpathSync(entryPath);
+          const relative = path.relative(entityRootDir, real);
+          const insideEntityRoot =
+            relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+          if (!insideEntityRoot) {
+            const removeFailure = removeLegacyEntry();
+            if (removeFailure !== null) return { kind: "error", message: removeFailure };
+            const projectionFailure = await projectToProvider();
+            if (projectionFailure !== null) {
+              return { kind: "error", message: projectionFailure };
+            }
+          }
+        } else if (entryStats === null) {
+          // 实体已在（updateEntity ok）但本 provider 尚无条目 → 补投影。
+          const projectionFailure = await projectToProvider();
+          if (projectionFailure !== null) return { kind: "error", message: projectionFailure };
+        }
+      }
+      // 收据在场且非 failed：内核已按其语义处置该 root（link 零重建 / 物化重物化
+      // / pinned 与 disabled 的 typed skip），宿主不再做任何文件系统操作。
     }
 
     // 磁盘事实复核（不伪装成功）：条目在场 + SKILL.md frontmatter 与身份一致。

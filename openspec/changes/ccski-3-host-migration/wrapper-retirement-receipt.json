@@ -1,0 +1,146 @@
+{
+  "ccskiVersion": "3.0.0",
+  "wrapperRef": "fe52b62^",
+  "shapes": [
+    {
+      "shape": "all:true",
+      "wrapperRows": [
+        {
+          "name": "disabled-link",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "true",
+          "canonicalPath": "/private<fixture>/lib/disabled-link",
+          "directoryName": "disabled-link"
+        },
+        {
+          "name": "linked-skill",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "false",
+          "canonicalPath": "/private<fixture>/lib/linked-skill",
+          "directoryName": "linked-skill"
+        },
+        {
+          "name": "real-disabled",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "true",
+          "canonicalPath": "/private<fixture>/provider-root/real-disabled",
+          "directoryName": "real-disabled"
+        },
+        {
+          "name": "real-enabled",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "false",
+          "canonicalPath": "/private<fixture>/provider-root/real-enabled",
+          "directoryName": "real-enabled"
+        }
+      ],
+      "directRows": [
+        {
+          "name": "disabled-link",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "true",
+          "canonicalPath": "/private<fixture>/lib/disabled-link",
+          "directoryName": "disabled-link"
+        },
+        {
+          "name": "linked-skill",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "false",
+          "canonicalPath": "/private<fixture>/lib/linked-skill",
+          "directoryName": "linked-skill"
+        },
+        {
+          "name": "real-disabled",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "true",
+          "canonicalPath": "/private<fixture>/provider-root/real-disabled",
+          "directoryName": "real-disabled"
+        },
+        {
+          "name": "real-enabled",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "false",
+          "canonicalPath": "/private<fixture>/provider-root/real-enabled",
+          "directoryName": "real-enabled"
+        }
+      ],
+      "drift": [],
+      "missingInDirect": [],
+      "missingInWrapper": []
+    },
+    {
+      "shape": "all:false",
+      "wrapperRows": [
+        {
+          "name": "linked-skill",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "false",
+          "canonicalPath": "/private<fixture>/lib/linked-skill",
+          "directoryName": "linked-skill"
+        },
+        {
+          "name": "real-enabled",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "false",
+          "canonicalPath": "/private<fixture>/provider-root/real-enabled",
+          "directoryName": "real-enabled"
+        }
+      ],
+      "directRows": [
+        {
+          "name": "linked-skill",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "false",
+          "canonicalPath": "/private<fixture>/lib/linked-skill",
+          "directoryName": "linked-skill"
+        },
+        {
+          "name": "real-enabled",
+          "provider": "cline",
+          "location": "user",
+          "sourceKind": "custom",
+          "sourcePriority": "500",
+          "disabled": "false",
+          "canonicalPath": "/private<fixture>/provider-root/real-enabled",
+          "directoryName": "real-enabled"
+        }
+      ],
+      "drift": [],
+      "missingInDirect": [],
+      "missingInWrapper": []
+    }
+  ]
+}

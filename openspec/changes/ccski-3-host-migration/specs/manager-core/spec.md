@@ -28,12 +28,12 @@
 
 ### Requirement: skills 更新以内核单源 hash 与代际收敛
 
-`skills.update` 的 hash 对比 MUST 消费内核导出的 `computeSkillFolderHash` 单源（宿主不得维护第二实现）；apply MUST 走内核实体 update（2.x 重装路径退役）。存量 lock 的 40-hex 旧算法条目 MUST 视为 stale 触发一次重装收敛（收敛后 recheck 为 already-current，不伪装成功）；lock 或 GitHub API 不可用 MUST 投影为 skipped/unavailable（不抛基础设施错误、不伪装成功）；apply 成功条目 MUST 诚实携带 `lockSyncPending: true`（npm lock 唯一写者是 skills CLI 的分层单写者恒定，宿主只在内存覆盖层刷新 hash）。
+`skills.update` 的 hash 对比 MUST 消费内核导出的 `computeSkillFolderHash` 单源（宿主不得维护第二实现）；apply MUST 走内核实体 update（2.x 重装路径退役）。存量 lock 的 40-hex 旧算法条目 MUST 视为 stale 触发重装收敛——收敛的 hash 覆盖层是 daemon 内存态（npm lock 唯一写者是 skills CLI，宿主不落盘），因此收敛语义为「daemon 生命周期内一次」：同一 daemon 内 apply 后 recheck 为 already-current，不伪装成功；daemon 重启后若 lock 仍持 40-hex 旧值，该项再次判 stale 重新收敛。lock 或 GitHub API 不可用 MUST 投影为 skipped/unavailable（不抛基础设施错误、不伪装成功）；apply 成功条目 MUST 诚实携带 `lockSyncPending: true`（分层单写者恒定，宿主只在内存覆盖层刷新 hash）。
 
 #### Scenario: 40-hex 代际收敛
 
 - **WHEN** 存量 lock 条目的 computedHash 为 40-hex 旧算法值且上游可用
-- **THEN** check 将该项判为过时，apply 重装一次以新算法 hash 收敛；再次 check 报 already-current
+- **THEN** check 将该项判为过时，apply 重装一次以新算法 hash 收敛；同一 daemon 生命周期内再次 check 报 already-current（覆盖层为内存态，重启后若 lock 仍为 40-hex 则再次收敛）
 
 #### Scenario: 不可用诚实投影
 

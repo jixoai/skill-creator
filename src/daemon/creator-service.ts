@@ -27,10 +27,12 @@ import type { SkillId } from "../shared/contracts/skills.js";
 import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
 import { safeParseExternal } from "../shared/external-input.js";
 import { createCcskiEntityRemover, type CcskiEntityRemoveKernel } from "./ccski-entity-remove.js";
+import { ccskiEntityLibraryRoot } from "./ccski-state-disabled.js";
 import { DomainError } from "./domain-error.js";
 import { assertPathInside, atomicWriteUtf8, contentRevision, directChild } from "./path-safety.js";
 import type { SkillService } from "./skill-service.js";
 import type { WorkspaceRegistry } from "./workspace-registry/index.js";
+import type { WorkspaceProviderScope } from "./workspace-registry/index.js";
 
 function parseDocument(
   target: WorkspaceProviderTarget,
@@ -110,7 +112,7 @@ async function load(
   target: WorkspaceProviderTarget,
   skillId: SkillId,
 ): Promise<SkillDocument> {
-  const workspaceRoot = writableDirectory(workspaces, target);
+  const workspaceRoot = writableScope(workspaces, target).directory;
   const skill = await skills.resolve(target, skillId);
   assertPathInside(workspaceRoot, skill.path);
   const file = skills.skillFile(skill);
@@ -126,7 +128,7 @@ async function save(
   revisionLogLimit: number,
 ): Promise<SaveSkillResult> {
   const target = { workspaceId: input.workspaceId, providerId: input.providerId };
-  const workspaceRoot = writableDirectory(workspaces, target);
+  const workspaceRoot = writableScope(workspaces, target).directory;
   let created = false;
   let skillDirectory: string;
   let targetFile: string;
@@ -248,6 +250,10 @@ function computeUnifiedDiff(oldText: string, newText: string): string {
  * 路径/守卫权威在内核，provider-root containment 不适用于 canonical 实体路径）；
  * 其余（external/unknown/普通目录）保留宿主直删路径不变。宿主 revision 契约
  * （SKILL.md 内容 sha256 对 expectedRevision）是第一层，内核 guard 是第二层。
+ * 实体根 face 防线（宿主修复批 6，P0-2）：provider root 即实体库根时，无论
+ * ownership 标注如何都不得直删——state 缺失/损坏时发现层把实体本地目录标
+ * unknown（ccski discovery 降级语义），直删会留下其它 provider 的悬空投影与
+ * stale state 记录，保守拒绝并指路 state repair。
  */
 async function remove(
   workspaces: WorkspaceRegistry,
@@ -257,11 +263,11 @@ async function remove(
   expectedRevision: string,
   removeCcskiEntity: ReturnType<typeof createCcskiEntityRemover>,
 ): Promise<void> {
-  const workspaceRoot = writableDirectory(workspaces, target);
+  const scope = writableScope(workspaces, target);
+  const workspaceRoot = scope.directory;
   const skill = await skills.resolve(target, skillId);
   if (skill.ownership === "ccski") {
     assertRevisionCurrent(skills, skill, expectedRevision);
-    const scope = workspaces.resolveWritable(target);
     if (scope.workspaceDirectory === undefined) {
       throw new DomainError(
         "UNAVAILABLE",
@@ -274,11 +280,29 @@ async function remove(
       skillName: skill.name,
     });
   } else {
+    refuseEntityLibraryFaceDeletion(scope);
     assertPathInside(workspaceRoot, skill.path);
     assertRevisionCurrent(skills, skill, expectedRevision);
     fs.rmSync(skill.path, { recursive: true, force: false });
   }
   skills.invalidateDiscovery(target);
+}
+
+/**
+ * 实体根 face 判定（P0-2）：provider root 经 resolve 后等于该 workspace 的
+ * `<workspaceDirectory>/.agents/skills` 实体库根（与删除路由 ccskiEntityLibraryRoot
+ * 同源）。此 face 上的条目由共享实体支撑其它 provider 投影，直删必留悬空链；
+ * 非 ccski ownership 只能说明 state 降级（unknown）或外部占位（external），
+ * 二者都无权绕过投影先行的删除协议。
+ */
+function refuseEntityLibraryFaceDeletion(scope: WorkspaceProviderScope): void {
+  if (scope.workspaceDirectory === undefined) return;
+  const entityLibrary = ccskiEntityLibraryRoot(path.join(scope.workspaceDirectory, ".agents"));
+  if (path.resolve(scope.directory) !== entityLibrary) return;
+  throw new DomainError(
+    "INVALID_OPERATION",
+    `This entry lives in the ccski skill entity library (${entityLibrary}) and may be shared by provider projections, but its ownership could not be confirmed against the skill store state (missing or degraded). Deleting it directly would orphan those projections. Run ccski state repair, then retry the deletion.`,
+  );
 }
 
 /** 宿主 revision 契约：身份文件内容 sha256 必须仍等于 expectedRevision。 */
@@ -293,7 +317,11 @@ function assertRevisionCurrent(
   }
 }
 
-function writableDirectory(workspaces: WorkspaceRegistry, target: WorkspaceProviderTarget): string {
+/** resolveWritable + provider root mkdir（写前确保目录在场）；remove 需要 scope 全量。 */
+function writableScope(
+  workspaces: WorkspaceRegistry,
+  target: WorkspaceProviderTarget,
+): WorkspaceProviderScope {
   const scope = workspaces.resolveWritable(target);
   try {
     fs.mkdirSync(scope.directory, { recursive: true });
@@ -304,5 +332,5 @@ function writableDirectory(workspaces: WorkspaceRegistry, target: WorkspaceProvi
       { cause: error },
     );
   }
-  return scope.directory;
+  return scope;
 }

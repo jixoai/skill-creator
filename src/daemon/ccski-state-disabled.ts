@@ -16,6 +16,11 @@
  *       丢弃（与发现层丢弃口径一致）。
  *   [3] 重复防护：投影路径在文件系已存在（state 记录过时/被外部条目占位）或
  *       实体 canonical path 已在文件系发现面 = 文件系胜出，不补。
+ *   [4] 路径绑定（宿主修复批 6，P1-4）：state 是用户可写的外部输入——伪造合法
+ *       信封不得把实体/投影路径指到实体库/注册根之外。实体路径绑定
+ *       `<stateBase>/skills/<folderName>`、投影路径绑定 `<rootPath>/<folderName>`，
+ *       词法 + realpath 双 containment；绑定失败 = 该记录不可信，消费面按各自
+ *       语义丢弃/保守拒绝（绑定校验导出供 ccski-entity-remove 同源复用）。
  * 妥协声明：schema 镜像是宿主消费所需的最小字段集（kernel 记录的其余字段被
  * z.object 剥离）；kernel schema 破坏性演进时 safeParse 自然降级为零补充，
  * 不迁移不重建（§8）。
@@ -61,7 +66,7 @@ export function readCcskiState(stateBase: string): CcskiStateRead {
   try {
     text = fs.readFileSync(statePath, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") return { kind: "absent" };
+    if (isErrnoException(error) && error.code === "ENOENT") return { kind: "absent" };
     throw error;
   }
   let parsed: unknown;
@@ -73,6 +78,58 @@ export function readCcskiState(stateBase: string): CcskiStateRead {
   const envelope = safeParseExternal(StateEnvelopeSchema, parsed);
   if (!envelope) return { kind: "incompatible" };
   return { kind: "ok", entities: envelope.entities, projections: envelope.projections };
+}
+
+/**
+ * 运行时类型守卫（宿主修复批 6，终审质量项①）：fs 抛出的错误形状不可静态断言
+ * （外部输入纪律），用结构探测收敛为 NodeJS.ErrnoException。
+ */
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code: unknown }).code === "string"
+  );
+}
+
+/** stateBase 对应的实体库根（词法基准；disabled 补充面与删除路由共用）。 */
+export function ccskiEntityLibraryRoot(stateBase: string): string {
+  return path.join(path.resolve(stateBase), "skills");
+}
+
+/**
+ * 实体记录路径绑定校验（P1-4）：词法上必须等于 `<stateBase>/skills/<folderName>`，
+ * 且 realpath 落在实体库根内（防「实体库内 symlink 指向外部」的绕过）。目录
+ * 不存在或任一 realpath 失败 = 无法证实绑定 = 拒绝。
+ */
+export function ccskiEntityPathBound(
+  stateBase: string,
+  folderName: string,
+  entityPath: string,
+): boolean {
+  const lexicalRoot = ccskiEntityLibraryRoot(stateBase);
+  if (path.resolve(entityPath) !== path.join(lexicalRoot, folderName)) return false;
+  try {
+    const realEntity = fs.realpathSync(path.resolve(entityPath));
+    const realLibrary = fs.realpathSync(lexicalRoot);
+    const relative = path.relative(realLibrary, realEntity);
+    return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 投影记录路径绑定校验（P1-4）：词法上必须等于 `<rootPath>/<folderName>`
+ * （注册根的直接子级）。rootPath 本身由消费面对 providerRoot/注册根另行匹配。
+ */
+export function ccskiProjectionPathBound(
+  rootPath: string,
+  folderName: string,
+  projectionPath: string,
+): boolean {
+  return path.resolve(projectionPath) === path.join(path.resolve(rootPath), folderName);
 }
 
 /** 禁用 link 投影记录的最小消费面（kernel ProjectionRecord 的字段子集）。 */
@@ -125,19 +182,32 @@ export function readStateDisabledRows(input: StateDisabledInput): SkillMetadata[
     const record = safeParseExternal(DisabledLinkProjectionSchema, recordValue);
     if (!record) continue;
     if (path.resolve(record.rootPath) !== path.resolve(input.providerRoot)) continue;
+    // 路径绑定（P1-4）：投影路径必须是注册根直接子级，伪造信封拒绝。
+    if (!ccskiProjectionPathBound(record.rootPath, record.folderName, record.path)) continue;
     // 重复防护：投影路径已有文件系条目 = 记录过时或被外部占位，文件系胜出。
     if (fs.existsSync(record.path)) continue;
     const entityValue = state.entities[record.folderName];
     const entity =
       entityValue === undefined ? null : safeParseExternal(EntityRecordSchema, entityValue);
     if (!entity) continue;
+    // 路径绑定（P1-4）：实体路径必须落在实体库内，伪造信封拒绝（否则
+    // skills.list/info 可被驱使读取任意 SKILL.md）。
+    if (!ccskiEntityPathBound(input.stateBase, entity.folderName, entity.path)) continue;
     try {
       // 实体内容源：canonical 身份 + SKILL.md frontmatter（enabled 形态恒在——
       // link 模式禁用永不换名）。
       const canonicalEntity = canonicalDirectory(entity.path);
       if (input.seenCanonicalPaths.has(canonicalEntity)) continue;
       const document = path.join(canonicalEntity, "SKILL.md");
-      if (!fs.existsSync(document) || !fs.statSync(document).isFile()) continue;
+      // 身份文件防线（P1-4）：lstat 不跟随符号链接——实体库内指向外部的
+      // SKILL.md 链接不是可信内容源。
+      let documentStat: fs.Stats;
+      try {
+        documentStat = fs.lstatSync(document);
+      } catch {
+        continue;
+      }
+      if (!documentStat.isFile()) continue;
       const parsedSkill = parseSkillFile(document);
       let stat: fs.Stats;
       try {

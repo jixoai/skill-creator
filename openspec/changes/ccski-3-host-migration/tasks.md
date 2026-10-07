@@ -36,3 +36,16 @@
 
 - [x] 五件套全绿 + dev 沙箱全链走查（安装/更新/启停/移除/发现含 symlink 实数据） — walkthrough-evidence.md（W1-W8 三元组；全链通过 + 三项走查发现 F-1/F-2/F-3 如实记录） — 门禁数字见 host-receipts-summary.md（test 2393/2393 ×2、typecheck/webui check/build/fmt[任务文件]/diff-check/pack 全 exit 0；已知 watcher 抖动未出现）
 - [ ] store-link-kernel 批 6 第 2/3 项回勾（host 无漂移收据）+ 本 change archive 裁决 — 两仓 openspec — host 收据已备齐（host-receipts-summary.md），跨仓回勾与 archive 由 MainAgent 执行
+
+## 批 6 · 宿主修复（Codex 终审 4/10 否决项）
+
+> 五批提交后的终审否决项修复：P0-1 更新绕过物化投影守卫删用户修改、
+> P0-2 state 降级后实体根删除回落直删、P1-4 state 镜像伪造路径越界读、
+> P1-5 GitHub 默认分支硬编码 main、P1-6 退役收据不可独立复核 + 三项质量项。
+
+- [x] P0-1：apply 逐投影收据裁决——updateEntity 顶层 ok 不再触发 legacy 清理；该 root 收据 failed（GUARD_PROJECTION 家族）= 如实失败保留被改副本，legacy 收敛仅在收据缺席（root 未注册）时执行 — skills-update-service — 回归测试（真实内核 GUARD_PROJECTION 物理：用户修改保留 + state 仍 materialized + 覆盖层不刷；mock 边界：failed 收据后 ensureEntity/projectEntity 不可达）
+- [x] P0-2：实体根 face（provider root === `<ws>/.agents/skills` 实体库根，与删除路由同源 helper）上的删除无论 ownership 标注不得直删——非 ccski（state 降级标 unknown）保守拒绝 INVALID_OPERATION 指路 state repair — creator-service（writableDirectory → writableScope 取全量 scope）— 集成测试（损坏/缺失 state：实体与全部投影原样、无悬空链；普通 provider root 直删不回归）
+- [x] P1-4：state 镜像路径绑定校验下沉共享层（ccski-state-disabled 导出 ccskiEntityLibraryRoot/ccskiEntityPathBound/ccskiProjectionPathBound）——实体路径词法 + realpath 双 containment 绑定 `<stateBase>/skills/<folderName>`、投影路径绑定 `<rootPath>/<folderName>`、SKILL.md lstat 拒符号链接；disabled 补充面与 ccski-entity-remove 删除路由双消费同源 — ccski-state-disabled + ccski-entity-remove — fixture 断言（外部实体目录/库内逃逸 symlink/符号链接 SKILL.md/伪造投影路径全拒绝 + 合法记录对照仍补行；删除路由伪造实体 path 保守拒绝、伪造投影 path 视为 face 缺席）
+- [x] P1-5：GitHub 无 ref 探针先解析真实默认分支（git ls-remote --symref，不占 API 限额、daemon 生命周期缓存；解析失败按探针不可达，不猜 main）— skills-update-service（新增 resolveDefaultBranch 注入面）— 测试（非 main 默认分支探针 URL 断言 / 有 ref 不解析 / 解析失败 unavailable 且零探针请求 / 本地 git 沙箱真实 symref 解析）
+- [x] P1-6：退役收据可独立复跑——scripts/ccski-wrapper-receipt.sh.ts 生成器入库（wrapper 半边经 git show fe52b62^ 恢复动态 import，与当前 ccski 直连同 fixture 双形状复跑）；结构化原始收据 JSON + md 逐字段值表（行键出表格单元格杜绝 `\|` 拆列；fixture 路径归一化，复跑 diff 为空）— scripts/ + wrapper-retirement-receipt.{json,md} — 复跑确定性实测（双次 diff 为空，drift = 0）
+- [x] 质量项：readCcskiState 非 ENOENT 判定改运行时类型守卫（isErrnoException）；40-hex 收敛语义如实化为「daemon 生命周期内一次」（manager-core delta Requirement + Scenario 措辞，覆盖层为内存态、重启后 lock 仍 40-hex 则再收敛）；skills-update-service 职责聚合注记进 proposal 后续注记（不动代码）

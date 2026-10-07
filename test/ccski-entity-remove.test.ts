@@ -433,4 +433,128 @@ describe("creator remove dual routing (ccski-3-host-migration 批 5)", () => {
     ).rejects.toMatchObject({ code: "INVALID_OPERATION" });
     expect(fs.existsSync(setup.entityDir)).toBe(true);
   });
+
+  it("never falls back to a direct delete on the entity-library face when the state is degraded (P0-2 回归：损坏 state)", async () => {
+    // 终审 P0-2 现场：state 损坏 → 发现层把实体本地目录标 unknown → 旧 else
+    // 分支 rmSync 直删实体 → 另一 provider 投影悬空 + stale state。修复后实体根
+    // face 上的非 ccski 删除一律保守拒绝并指路 state repair。
+    const fixture = await kernelFixture({ name: "guardless-skill", projectTo: ["claude-code"] });
+    fs.writeFileSync(fixture.statePath, "{ not json", "utf8");
+    const degraded = (await fixture.skills.list(fixture.targets.amp, true)).find(
+      (row) => row.name === "guardless-skill",
+    );
+    if (!degraded) throw new Error("Expected the entity through the amp (entity-root) face.");
+    // 降级语义钉住：损坏 state 下发现层标 unknown（正是旧直删分支的入口条件）。
+    expect(degraded.ownership).toBe("unknown");
+    const document = await fixture.skills.info(fixture.targets.amp, degraded.id);
+
+    await expect(
+      fixture.creator.remove(fixture.targets.amp, degraded.id, document.revision),
+    ).rejects.toMatchObject({
+      code: "INVALID_OPERATION",
+      message: expect.stringContaining("ccski state repair"),
+    });
+
+    // 实体与全部投影保持原样（零磁盘副作用）。
+    expect(fs.existsSync(fixture.entityDir)).toBe(true);
+    const projection = path.join(fixture.providerRoots["claude-code"], "guardless-skill");
+    expect(fs.lstatSync(projection).isSymbolicLink()).toBe(true);
+    // 投影不悬空（realpath 仍解析到实体）。
+    expect(fs.realpathSync(projection)).toBe(fs.realpathSync(fixture.entityDir));
+  });
+
+  it("never falls back to a direct delete on the entity-library face when the state file is missing (P0-2 回归：缺失 state)", async () => {
+    const fixture = await kernelFixture({ name: "lost-state-skill", projectTo: ["claude-code"] });
+    fs.rmSync(fixture.statePath);
+    const degraded = (await fixture.skills.list(fixture.targets.amp, true)).find(
+      (row) => row.name === "lost-state-skill",
+    );
+    if (!degraded) throw new Error("Expected the entity through the amp (entity-root) face.");
+    expect(degraded.ownership).toBe("unknown");
+    const document = await fixture.skills.info(fixture.targets.amp, degraded.id);
+
+    await expect(
+      fixture.creator.remove(fixture.targets.amp, degraded.id, document.revision),
+    ).rejects.toMatchObject({ code: "INVALID_OPERATION" });
+
+    expect(fs.existsSync(fixture.entityDir)).toBe(true);
+    expect(fs.existsSync(path.join(fixture.providerRoots["claude-code"], "lost-state-skill"))).toBe(
+      true,
+    );
+  });
+
+  it("still direct-deletes plain directories on ordinary provider roots under a degraded state (P0-2 防线不外溢)", async () => {
+    // 防线只针对实体库根 face：普通 provider root 上的 legacy 目录在 state 损坏
+    // 时仍走既有直删（该目录无投影协议要守）。
+    const fixture = await kernelFixture({ name: "bystander-skill", projectTo: [] });
+    fs.writeFileSync(fixture.statePath, "{ not json", "utf8");
+    const plainDir = path.join(fixture.providerRoots.openclaw, "plain-bystander");
+    fs.mkdirSync(plainDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(plainDir, "SKILL.md"),
+      '---\nname: "plain-bystander"\ndescription: "Plain."\n---\n# plain\n',
+      "utf8",
+    );
+    const skill = (await fixture.skills.list(fixture.targets.openclaw, true)).find(
+      (row) => row.name === "plain-bystander",
+    );
+    if (!skill) throw new Error("Expected the plain directory skill.");
+    const document = await fixture.skills.info(fixture.targets.openclaw, skill.id);
+
+    await fixture.creator.remove(fixture.targets.openclaw, skill.id, document.revision);
+
+    expect(fs.existsSync(plainDir)).toBe(false);
+  });
+
+  it("refuses the deletion when a forged state envelope points the entity record outside the entity library (P1-4 删除路由)", async () => {
+    const fixture = await kernelFixture({ name: "forged-skill", projectTo: ["openclaw"] });
+    // 伪造合法信封：实体记录 path 指向 workspace 外的目录。
+    const outside = path.join(sandbox, "outside-forged");
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(
+      path.join(outside, "SKILL.md"),
+      '---\nname: "forged-skill"\ndescription: "Forged."\n---\n# forged\n',
+      "utf8",
+    );
+    const raw = JSON.parse(fs.readFileSync(fixture.statePath, "utf8")) as {
+      entities: Record<string, unknown>;
+    };
+    const record = raw.entities["forged-skill"] as { path: string };
+    record.path = outside;
+    fs.writeFileSync(fixture.statePath, JSON.stringify(raw));
+
+    await expect(
+      removeCcskiEntity({
+        workspaceDirectory: fixture.canonicalWorkspace,
+        providerRoot: fixture.providerRoots.openclaw,
+        skillName: "forged-skill",
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_OPERATION" });
+    // 实体与投影原样未动。
+    expect(fs.existsSync(fixture.entityDir)).toBe(true);
+    expect(fs.existsSync(path.join(fixture.providerRoots.openclaw, "forged-skill"))).toBe(true);
+  });
+
+  it("treats a projection record with an unbound path as absent from the face (P1-4 删除路由)", async () => {
+    const fixture = await kernelFixture({ name: "offpath-skill", projectTo: ["openclaw"] });
+    // 伪造投影记录 path：不等于 rootPath/folderName（词法越界）。
+    const raw = JSON.parse(fs.readFileSync(fixture.statePath, "utf8")) as {
+      projections: Record<string, unknown>;
+    };
+    for (const value of Object.values(raw.projections)) {
+      const record = value as { folderName?: string; path?: string };
+      if (record.folderName === "offpath-skill") record.path = path.join(sandbox, "elsewhere");
+    }
+    fs.writeFileSync(fixture.statePath, JSON.stringify(raw));
+
+    await expect(
+      removeCcskiEntity({
+        workspaceDirectory: fixture.canonicalWorkspace,
+        providerRoot: fixture.providerRoots.openclaw,
+        skillName: "offpath-skill",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(fs.existsSync(fixture.entityDir)).toBe(true);
+    expect(fs.existsSync(path.join(fixture.providerRoots.openclaw, "offpath-skill"))).toBe(true);
+  });
 });

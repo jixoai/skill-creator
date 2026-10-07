@@ -36,10 +36,13 @@ import {
 import {
   computeSkillFolderHash,
   createSkillsUpdateService,
+  defaultResolveDefaultBranch,
   parseGithubSource,
+  type DefaultBranchResolver,
   type FetchLike,
   type UpdateCloner,
 } from "../src/daemon/skills-update-service.js";
+import { ensureEntity, projectEntity } from "ccski";
 import { createRepositoryService } from "../src/daemon/repository-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import {
@@ -396,47 +399,49 @@ function fakeGithubTree(skillPath: string, sha: string): unknown {
   };
 }
 
-describe("skills-CLI update-check", () => {
-  /**
-   * 构造一个完整的 update-service + skills/probe/repo 桩，方便各场景复用。
-   * `globalLock` / `projectLock` 直接以字符串注入；fetch / clone 可覆盖。
-   */
-  async function buildUpdateService(args: {
-    skillDirectory: string;
-    skillName?: string;
-    globalLock?: string | null;
-    projectLock?: string | null;
-    fetch?: FetchLike;
-    clone?: UpdateCloner;
-    runner?: SkillsCliRunner;
-  }) {
-    const canonical = fs.realpathSync(args.skillDirectory);
-    const workspaces = createWorkspaceRegistry();
-    const probe = createSkillsCliProbe({
-      run:
-        args.runner ??
-        (async () => ({
-          stdout: JSON.stringify([
-            { name: args.skillName ?? "demo-skill", path: canonical, scope: "global" },
-          ]),
-        })),
-    });
-    // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
-    await probe.probe();
-    const skills = createSkillService(workspaces, {
-      skillsCliProbe: probe,
-      discoverSkills: discovererFor([{ directory: canonical, name: args.skillName }]),
-    });
-    const repository = createRepositoryService(workspaces, skills);
-    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
-      fetch: args.fetch,
-      clone: args.clone,
-      readGlobalLock: () => args.globalLock ?? null,
-      readProjectLock: () => args.projectLock ?? null,
-    });
-    return { workspaces, skills, probe, repository, service, canonical };
-  }
+/**
+ * 构造一个完整的 update-service + skills/probe/repo 桩，方便各场景复用。
+ * `globalLock` / `projectLock` 直接以字符串注入；fetch / clone / 默认分支解析可覆盖。
+ */
+async function buildUpdateService(args: {
+  skillDirectory: string;
+  skillName?: string;
+  globalLock?: string | null;
+  projectLock?: string | null;
+  fetch?: FetchLike;
+  clone?: UpdateCloner;
+  resolveDefaultBranch?: DefaultBranchResolver;
+  runner?: SkillsCliRunner;
+}) {
+  const canonical = fs.realpathSync(args.skillDirectory);
+  const workspaces = createWorkspaceRegistry();
+  const probe = createSkillsCliProbe({
+    run:
+      args.runner ??
+      (async () => ({
+        stdout: JSON.stringify([
+          { name: args.skillName ?? "demo-skill", path: canonical, scope: "global" },
+        ]),
+      })),
+  });
+  // 新契约（perf B-5）：list 不阻塞等待 probe；测试先预热再断言 provenance。
+  await probe.probe();
+  const skills = createSkillService(workspaces, {
+    skillsCliProbe: probe,
+    discoverSkills: discovererFor([{ directory: canonical, name: args.skillName }]),
+  });
+  const repository = createRepositoryService(workspaces, skills);
+  const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+    fetch: args.fetch,
+    clone: args.clone,
+    resolveDefaultBranch: args.resolveDefaultBranch,
+    readGlobalLock: () => args.globalLock ?? null,
+    readProjectLock: () => args.projectLock ?? null,
+  });
+  return { workspaces, skills, probe, repository, service, canonical };
+}
 
+describe("skills-CLI update-check", () => {
   it("reports updated for a GitHub source when the cloned folder hash differs (ccski 3.0 批 2.2)", async () => {
     const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
     const cloneDir = path.join(sandbox, "clone-src");
@@ -464,6 +469,7 @@ describe("skills-CLI update-check", () => {
         text: async () => JSON.stringify(fakeGithubTree("skills/demo-skill", "nevertree")),
       }),
       clone: async () => ({ directory: cloneDir }),
+      resolveDefaultBranch: async () => "main",
     });
     const discovered = await skills.list(codexTarget);
     const result = await service.checkUpdates(codexTarget, discovered);
@@ -503,6 +509,7 @@ describe("skills-CLI update-check", () => {
         text: async () => JSON.stringify(fakeGithubTree("skills/demo-skill", "sametree")),
       }),
       clone: async () => ({ directory: cloneDir }),
+      resolveDefaultBranch: async () => "main",
     });
     const discovered = await skills.list(codexTarget);
     const result = await service.checkUpdates(codexTarget, discovered);
@@ -563,6 +570,7 @@ describe("skills-CLI update-check", () => {
         },
       }),
       fetch: async () => ({ ok: false, status: 403, text: async () => "rate limited" }),
+      resolveDefaultBranch: async () => "main",
     });
     const discovered = await skills.list(codexTarget);
     const result = await service.checkUpdates(codexTarget, discovered);
@@ -590,6 +598,7 @@ describe("skills-CLI update-check", () => {
       fetch: async () => {
         throw new Error("ENOTFOUND");
       },
+      resolveDefaultBranch: async () => "main",
     });
     const discovered = await skills.list(codexTarget);
     const result = await service.checkUpdates(codexTarget, discovered);
@@ -1161,5 +1170,360 @@ describe("skills-CLI apply-update", () => {
     expect(result.results[0]?.status).toBe("failed");
     expect(result.results[0]?.error).toMatch(/compute|upstream|not found|install/i);
     await repository.dispose();
+  });
+
+  it("keeps the user-modified materialized projection when the kernel receipt is GUARD_PROJECTION (P0-1 回归)", async () => {
+    // 终审 P0-1 现场：内核顶层 updateEntity ok、该 root 收据 GUARD_PROJECTION
+    // failed（用户改过物化副本，内核保留被改副本）；宿主旧逻辑只看顶层 kind，
+    // 对物化目录走 legacy 清理 rmSync → 用户修改丢失 + 投影消失 + state 仍
+    // materialized。修复后逐投影收据裁决：如实 failed、磁盘原样。
+    const repo = buildGitRepo("git-guard");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream skill.",
+      "# Upstream\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "init");
+
+    const workspaceRoot = path.join(sandbox, "ws-guard");
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    const source = writeSkillDocument(path.join(sandbox, "guard-src"), "demo-skill");
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "guard");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openclawProviderId,
+    };
+    const scope = workspaces.resolve(target, true);
+    const canonicalWorkspace = scope.workspaceDirectory ?? workspaceRoot;
+    const providerRoot = scope.directory;
+    fs.mkdirSync(providerRoot, { recursive: true });
+
+    // 实体 + 物化投影（真实内核）。
+    const ensured = await ensureEntity({
+      scope: "project",
+      workspaceDir: canonicalWorkspace,
+      source: { dir: source },
+    });
+    if (ensured.kind !== "ok") throw new Error(`ensureEntity failed: ${JSON.stringify(ensured)}`);
+    const projected = await projectEntity({
+      scope: "project",
+      workspaceDir: canonicalWorkspace,
+      name: "demo-skill",
+      roots: [providerRoot],
+      mode: "materialized",
+      reason: "user-request",
+    });
+    if (projected.kind !== "ok")
+      throw new Error(`projectEntity failed: ${JSON.stringify(projected)}`);
+
+    // 用户修改物化副本（触发内核 GUARD_PROJECTION 收据）。
+    const materializedDir = path.join(providerRoot, "demo-skill");
+    fs.writeFileSync(
+      path.join(materializedDir, "SKILL.md"),
+      '---\nname: "demo-skill"\ndescription: "USER EDIT"\n---\n# USER EDIT\n',
+      "utf8",
+    );
+    const canonical = fs.realpathSync(materializedDir);
+
+    const probe = createSkillsCliProbe({
+      run: async () => ({
+        stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
+      }),
+    });
+    await probe.probe();
+    const skills = createSkillService(workspaces, {
+      skillsCliProbe: probe,
+      discoverSkills: discovererFor([{ directory: canonical }]),
+    });
+    const repository = createRepositoryService(workspaces, skills);
+    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+      readGlobalLock: () =>
+        JSON.stringify({
+          version: 3,
+          skills: {
+            "demo-skill": {
+              source: repo,
+              sourceType: "local",
+              sourceUrl: repo,
+              skillPath: "skills/demo-skill",
+              skillFolderHash: "OLDHASH",
+              installedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        }),
+      readProjectLock: () => null,
+    });
+
+    const discovered = await skills.list(target);
+    const skillId = discovered[0]?.id as SkillId;
+    const result = await service.applyUpdates(target, [skillId], {
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillIds: [skillId],
+    });
+    const entry = result.results[0];
+    expect(entry).toMatchObject({ status: "failed" });
+    expect(entry?.error).toContain("ccski code: GUARD_PROJECTION");
+    expect(entry?.error).toContain("kept the modified copy");
+    expect(entry).not.toHaveProperty("lockSyncPending");
+    // 物化投影与用户修改原样保留（内核语义：GUARD_PROJECTION 不动被改副本）。
+    expect(fs.lstatSync(materializedDir).isDirectory()).toBe(true);
+    expect(fs.readFileSync(path.join(materializedDir, "SKILL.md"), "utf8")).toContain("USER EDIT");
+    // state 仍记 materialized（宿主不做任何投影形态改写）。
+    const state = JSON.parse(
+      fs.readFileSync(path.join(canonicalWorkspace, ".agents", ".ccski-state.json"), "utf8"),
+    ) as { projections: Record<string, { folderName?: string; mode?: string }> };
+    const record = Object.values(state.projections).find(
+      (candidate) => candidate.folderName === "demo-skill",
+    );
+    expect(record?.mode).toBe("materialized");
+    // 覆盖层未刷新（失败不伪装成功）。
+    expect(service._hashOverlayForTest().size).toBe(0);
+    await repository.dispose();
+  });
+
+  it("stops all follow-up kernel calls for the root when the update receipt is failed (P0-1 mock 边界)", async () => {
+    const repo = buildGitRepo("git-guard-mock");
+    writeSkillDocument(
+      path.join(repo, "skills", "demo-skill"),
+      "demo-skill",
+      "Upstream skill.",
+      "# Upstream\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "init");
+
+    const workspaceRoot = path.join(sandbox, "ws-guard-mock");
+    const localSkillDir = writeSkillDocument(
+      path.join(workspaceRoot, "skills", "demo-skill"),
+      "demo-skill",
+      "Local skill.",
+      "# Local\n",
+    );
+    const canonical = fs.realpathSync(localSkillDir);
+
+    const workspaces = createWorkspaceRegistry();
+    const workspace = workspaces.import(workspaceRoot, "guard-mock");
+    const target: WorkspaceProviderTarget = {
+      workspaceId: workspace.id,
+      providerId: openclawProviderId,
+    };
+    const probe = createSkillsCliProbe({
+      run: async () => ({
+        stdout: JSON.stringify([{ name: "demo-skill", path: canonical, scope: "project" }]),
+      }),
+    });
+    await probe.probe();
+    const skills = createSkillService(workspaces, {
+      skillsCliProbe: probe,
+      discoverSkills: discovererFor([{ directory: canonical }]),
+    });
+    const repository = createRepositoryService(workspaces, skills);
+    const service = createSkillsUpdateService(workspaces, skills, probe, repository, {
+      kernel: {
+        updateEntity: async () => ({
+          kind: "ok" as const,
+          status: "updated" as const,
+          entity: { folderName: "demo-skill" },
+          projections: [
+            {
+              rootId: "root",
+              rootPath: fs.realpathSync(path.join(workspaceRoot, "skills")),
+              path: path.join(workspaceRoot, "skills", "demo-skill"),
+              mode: "materialized" as const,
+              disabled: false,
+              status: "failed" as const,
+              code: "GUARD_PROJECTION" as const,
+              detail: "RAW KERNEL INTERNAL DETAIL must not leak",
+            },
+          ],
+          updated: 0,
+          unchanged: 0,
+          skipped: 0,
+          failed: 1,
+          generation: 1,
+          lockSyncPending: true,
+          warnings: [],
+        }),
+        ensureEntity: async () => {
+          throw new Error("must not be reached after a failed update receipt");
+        },
+        projectEntity: async () => {
+          throw new Error("must not be reached after a failed update receipt");
+        },
+      },
+      readGlobalLock: () =>
+        JSON.stringify({
+          version: 3,
+          skills: {
+            "demo-skill": {
+              source: repo,
+              sourceType: "local",
+              sourceUrl: repo,
+              skillPath: "skills/demo-skill",
+              skillFolderHash: "OLDHASH",
+              installedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          },
+        }),
+      readProjectLock: () => null,
+    });
+
+    const discovered = await skills.list(target);
+    const skillId = discovered[0]?.id as SkillId;
+    const result = await service.applyUpdates(target, [skillId], {
+      workspaceId: target.workspaceId,
+      providerId: target.providerId,
+      skillIds: [skillId],
+    });
+    const entry = result.results[0];
+    expect(entry).toMatchObject({ status: "failed" });
+    expect(entry?.error).toContain("ccski code: GUARD_PROJECTION");
+    expect(entry?.error).not.toContain("RAW KERNEL INTERNAL DETAIL");
+    // 本地（此处视为物化副本的）目录不被 legacy 清理触碰。
+    expect(fs.existsSync(canonical)).toBe(true);
+    expect(fs.readFileSync(path.join(canonical, "SKILL.md"), "utf8")).toContain("Local skill.");
+    await repository.dispose();
+  });
+});
+
+describe("skills-CLI default branch resolution (P1-5)", () => {
+  it("probes the Trees API with the repository's real default branch when the lock has no ref", async () => {
+    const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
+    const cloneDir = path.join(sandbox, "clone-trunk");
+    writeSkillDocument(path.join(cloneDir, "skills", "demo-skill"), "demo-skill", "d", "# Trunk\n");
+    const probedUrls: string[] = [];
+    const { service, skills } = await buildUpdateService({
+      skillDirectory: dir,
+      globalLock: JSON.stringify({
+        version: 3,
+        skills: {
+          "demo-skill": {
+            // 无 ref：默认分支非 main 的仓库不得被硬编码 main 挡在探针上。
+            source: "owner/repo",
+            sourceType: "github",
+            sourceUrl: "https://github.com/owner/repo",
+            skillPath: "skills/demo-skill",
+            skillFolderHash: "0".repeat(64),
+            installedAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      fetch: async (url) => {
+        probedUrls.push(url);
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(fakeGithubTree("skills/demo-skill", "trunktreesha")),
+        };
+      },
+      clone: async () => ({ directory: cloneDir }),
+      resolveDefaultBranch: async () => "trunk",
+    });
+    const discovered = await skills.list(codexTarget);
+    const result = await service.checkUpdates(codexTarget, discovered);
+    expect(probedUrls).toHaveLength(1);
+    expect(probedUrls[0]).toContain("/git/trees/trunk?recursive=1");
+    expect(result.results[0]?.status).toBe("updated");
+  });
+
+  it("falls back to the recorded ref without resolving the default branch", async () => {
+    const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
+    const probedUrls: string[] = [];
+    let resolverCalls = 0;
+    const { service, skills } = await buildUpdateService({
+      skillDirectory: dir,
+      globalLock: JSON.stringify({
+        version: 3,
+        skills: {
+          "demo-skill": {
+            source: "owner/repo",
+            sourceType: "github",
+            sourceUrl: "https://github.com/owner/repo",
+            ref: "v2",
+            skillPath: "skills/demo-skill",
+            skillFolderHash: "0".repeat(64),
+            installedAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      fetch: async (url) => {
+        probedUrls.push(url);
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(fakeGithubTree("skills/demo-skill", "tagsha")),
+        };
+      },
+      clone: async () => {
+        throw new Error("clone not needed for the probe assertion");
+      },
+      resolveDefaultBranch: async () => {
+        resolverCalls += 1;
+        return "trunk";
+      },
+    });
+    const discovered = await skills.list(codexTarget);
+    await service.checkUpdates(codexTarget, discovered);
+    expect(probedUrls[0]).toContain("/git/trees/v2?recursive=1");
+    expect(resolverCalls).toBe(0);
+  });
+
+  it("treats an unresolvable default branch as an unavailable probe (no main fallback)", async () => {
+    const dir = writeSkillDocument(path.join(sandbox, "demo-skill"), "demo-skill");
+    const probedUrls: string[] = [];
+    const { service, skills } = await buildUpdateService({
+      skillDirectory: dir,
+      globalLock: JSON.stringify({
+        version: 3,
+        skills: {
+          "demo-skill": {
+            source: "owner/repo",
+            sourceType: "github",
+            sourceUrl: "https://github.com/owner/repo",
+            skillPath: "skills/demo-skill",
+            skillFolderHash: "0".repeat(64),
+            installedAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      fetch: async (url) => {
+        probedUrls.push(url);
+        return { ok: true, status: 200, text: async () => "{}" };
+      },
+      clone: async () => {
+        throw new Error("clone must not run when the probe is unavailable");
+      },
+      resolveDefaultBranch: async () => null,
+    });
+    const discovered = await skills.list(codexTarget);
+    const result = await service.checkUpdates(codexTarget, discovered);
+    // 解析失败 → 探针不可达 → unavailable；绝不退回硬编码 main。
+    expect(result.results[0]?.status).toBe("unavailable");
+    expect(probedUrls).toHaveLength(0);
+  });
+
+  it("parses the real symref output of git ls-remote against a local sandbox repository", async () => {
+    // 本地 git 沙箱伺服（非 main 默认分支）：验证 defaultResolveDefaultBranch 的
+    // 真实解析（execa → git ls-remote --symref HEAD）。
+    const repo = path.join(sandbox, "trunk-repo");
+    fs.mkdirSync(repo, { recursive: true });
+    execFileSync("git", ["init", "--quiet", "--initial-branch=trunk", "."], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: repo });
+    writeSkillDocument(path.join(repo, "skills", "demo-skill"), "demo-skill");
+    execFileSync("git", ["add", "."], { cwd: repo });
+    execFileSync("git", ["commit", "--quiet", "-m", "init"], { cwd: repo });
+    await expect(defaultResolveDefaultBranch(repo)).resolves.toBe("trunk");
+    // 不可达源 → null（不猜分支）。
+    await expect(defaultResolveDefaultBranch("/nonexistent/repo")).resolves.toBeNull();
   });
 });
