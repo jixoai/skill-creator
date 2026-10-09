@@ -67,9 +67,12 @@ Skill Creator（当前代码：ChromeTabs Shell，四个 App；DSH composition �
 |   `-- provider tab --------- Workspace.Provider 技能列表 + 详情
 |       `-- ~/ 或 ws_* ------- Global/Imported Workspace roots
 |
-|-- /creator ----------------- Creator App：在 Imported Workspace.Provider
-|                              创建/编辑技能 + change log（单列编辑器；Agent
-|                              会话由 DSH host 承载，内嵌 ACP 面板已移除）
+|-- /creator ----------------- Creator App（creator-skill-store：创建与应用分离）：
+|                              new 模式落 origin store（`<homeDir>/creator-skills`
+|                              唯一根源，无 ws/provider 归属，任何上下文可建）；
+|                              store 面应用/同步/卸载/删除根源；已安装技能编辑仍
+|                              provider-scoped（edit 路由 + change log；单列编辑器；
+|                              Agent 会话由 DSH host 承载，内嵌 ACP 面板已移除）
 |
 |-- /workspace --------------- Workspace 管理页（2026-10-05 Owner 八条：IMPORTED
 |                              概念退出用户面——label/真实路径/provider·技能数/
@@ -90,10 +93,14 @@ Global Workspace (~)       = catalog 解析的 Agent 全局 roots 聚合
 Imported Workspace         = daemon 已 canonicalize 并注册的目录
 Provider                   = 一个 Workspace 内的 Agent skills root
 Workspace Provider Target  = { workspaceId, providerId }
-Creator            = create + revision-checked edit/delete + change log；File 子视图
-                      正文 = CodeMirror 6 懒加载（textarea 底座回退）；Test 子视图
-                      （creator-test-session）：probe 模板 seed → Agent 面板试跑
-                      （不自动发送；seed 元数据随惰性建会话落转录 meta）
+Creator            = 创建与应用分离（creator-skill-store）：new 模式唯一落 origin
+                      store `<homeDir>/creator-skills`（revision/change log 契约沿用；
+                      auto-apply 默认 `~/.agents/skills` entity-local）；应用/同步/
+                      卸载经 ccski 内核（apply/sync/uninstall typed 逐收据；卸载与
+                      delete-origin 正交）；已安装技能编辑 provider-scoped 不变——
+                      File 子视图正文 = CodeMirror 6 懒加载（textarea 底座回退）；
+                      Test 子视图（creator-test-session）：probe 模板 seed → Agent
+                      面板试跑（不自动发送；seed 元数据随惰性建会话落转录 meta）
 Skill Evaluation   = server-owned 测试与评估语料（evaluation-corpus）：
                       appDir()/evaluation/<ws>/<p>/<skill>/{cases,results}.json；
                       五断言（contains/not-contains/finding-kind/finding-triggered/
@@ -228,7 +235,7 @@ ACP Bridge         = internal legacy：generic ACP session 已从产品入口移
 核心约束：
 
 1. 每个技能读取或 mutation 都显式绑定 Workspace Provider Target。
-2. Global Workspace 可发现、查看、校验与启停 Provider 中现有技能；Creator 与 Repository 的写入目标只能是 Imported Workspace.Provider，不能是 `~`。
+2. Global Workspace 可发现、查看、校验与启停 Provider 中现有技能。Creator 的创建面 = origin store（`<homeDir>/creator-skills`，无 ws/provider 归属，任何上下文可建，创建面永不直写 provider root/实体库根）；store 技能到 agent 目录的应用/同步/卸载一律经 ccski 内核投影（typed 逐收据）；已安装技能的编辑与 Repository 的写入目标仍只能是 Imported Workspace.Provider，不能是 `~`。
 3. Repository 的 preview 与 install 必须来自同一个 pinned clone session。
 4. WebUI 不拼接 mutation 输出路径；server 解析 opaque ID 到真实根目录。
 5. UI 服务于人的直觉与操作密度，允许场景聚合，但不能绕过协议和文件系统边界。

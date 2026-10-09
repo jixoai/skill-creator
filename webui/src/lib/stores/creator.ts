@@ -1,13 +1,22 @@
 /**
  * 原始需求 [2026-07-14]：「我们还需要有一个 创造、编辑 技能的路由(/creator)。二者是有机互联的」。
+ * 修订 [2026-10-09]（creator-skill-store 批 2）：new 模式创建与 store 编辑直连
+ * creatorStore.*（auto-apply 收据/revision 契约原样透传，webui 不落第二份类型）。
  * 正交意图：
  * 1. 封装 Creator 的保存与加载命令。
  * 2. 以文档 revision 约束删除操作。
+ * 3. 封装 origin store 的创建/读取/保存命令（typed result，业务失败不吞）。
  */
 import type {
+  CreatorStoreCreateInput,
+  CreatorStoreCreateResult,
+  CreatorStoreDocument,
+  CreatorStoreSaveInput,
+  CreatorStoreSaveResult,
   SaveSkillInput,
   SaveSkillResult,
   SkillDocument,
+  SkillDirectoryName,
   SkillId,
   WorkspaceProviderTarget,
 } from "../types";
@@ -43,4 +52,28 @@ export async function removeSkill(input: {
     skillId: input.skillId,
     expectedRevision: input.expectedRevision,
   });
+}
+
+/**
+ * origin store 新建（唯一创建入口；auto-apply 收据随结果返回——成功/失败由调用
+ * 方如实呈现，本包装不吞 typed result）。
+ */
+export async function createStoreSkill(
+  input: CreatorStoreCreateInput,
+): Promise<CreatorStoreCreateResult> {
+  return requireRpc().creatorStore.create(input);
+}
+
+/** 读一份 store 文档（store 编辑页 body/revision 面；缺席由 daemon typed 拒绝）。 */
+export async function loadStoreSkillDoc(
+  directoryName: SkillDirectoryName,
+): Promise<CreatorStoreDocument> {
+  return requireRpc().creatorStore.load({ directoryName });
+}
+
+/** store 编辑保存（revision-safe；CONFLICT 由调用方按 revision 契约呈现）。 */
+export async function saveStoreSkill(
+  input: CreatorStoreSaveInput,
+): Promise<CreatorStoreSaveResult> {
+  return requireRpc().creatorStore.save(input);
 }

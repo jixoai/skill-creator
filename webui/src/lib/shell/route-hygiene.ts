@@ -97,7 +97,8 @@ function redirectLegacyPath(pathname: string, search: string): string | null {
     );
   }
   if (parts[0] === "creator" && parts[1] === "new" && parts.length === 4) {
-    return build(`/w/${encodePathPart(parts[2]!)}/creator/new/${encodePathPart(parts[3]!)}`, {
+    // creator-skill-store 批 2：new 无 provider 身份（store 直建）——legacy 段丢弃。
+    return build(`/w/${encodePathPart(parts[2]!)}/creator/new`, {
       template: query.get("template"),
     });
   }

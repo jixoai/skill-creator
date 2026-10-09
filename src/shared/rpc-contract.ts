@@ -94,7 +94,9 @@ import {
   CreatorStoreApplyResultSchema,
   CreatorStoreCreateInputSchema,
   CreatorStoreCreateResultSchema,
+  CreatorStoreDocumentSchema,
   CreatorStoreListResultSchema,
+  CreatorStoreLoadInputSchema,
   CreatorStoreRemoveInputSchema,
   CreatorStoreRemoveResultSchema,
   CreatorStoreSaveInputSchema,
@@ -534,6 +536,8 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
   creatorStore: {
     /** 枚举 store 技能（不兼容条目跳过计数）。 */
     list: oc.input(z.object({})).output(CreatorStoreListResultSchema),
+    /** 读一份 store 文档（store 编辑页 body/revision 面；缺席 = typed NOT_FOUND）。 */
+    load: oc.input(CreatorStoreLoadInputSchema).output(CreatorStoreDocumentSchema),
     /** store 新建（默认 auto-apply 到 `~/.agents/skills` entity-local）。 */
     create: oc.input(CreatorStoreCreateInputSchema).output(CreatorStoreCreateResultSchema),
     /** store 编辑（revision-safe）。 */

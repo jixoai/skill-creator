@@ -91,20 +91,42 @@ describe("Page manifests", () => {
     });
   });
 
-  it("matches Creator home, new, and edit routes with workspace prefix params", () => {
+  it("matches Creator home, store-direct new, store face, and edit routes", () => {
     expectActivity(creatorApp, `/w/${WS}/creator`, "", "creator.home");
+    // creator-skill-store 批 2：new 无 provider 身份（store 直建）；
+    // Global ~ 同形（store 无 ws 归属，任何上下文可建）。
+    expectActivity(creatorApp, `/w/${WS}/creator/new`, "?template=basic", "creator.new");
+    expectActivity(creatorApp, `/w/~/creator/new`, "", "creator.new");
+    // store 列面 + store 编辑（身份 = directoryName）。
+    expectActivity(creatorApp, `/w/${WS}/creator/store`, "", "creator.store");
     expectActivity(
       creatorApp,
-      `/w/${WS}/creator/new/claude-code`,
-      "?template=basic",
-      "creator.workspace",
+      `/w/${WS}/creator/store/my-skill`,
+      "?subview=preview",
+      "creator.store.skill",
     );
+    // provider-scoped edit 原样。
     expectActivity(
       creatorApp,
       `/w/${WS}/creator/edit/claude-code/${SKILL}`,
       "?subview=preview",
       "creator.workspace.skill",
     );
+  });
+
+  it("rejects the retired provider-suffixed new form across all Creator activities", () => {
+    // creator-skill-store 批 2：`new/:providerId` 不再是合法 new 形态——任何
+    // Activity 都不得 matched（渲染前由 hygiene 重定向清理）。
+    for (const activity of creatorApp.manifest.activities) {
+      expect(
+        matchRouteTree(
+          activity.root as never,
+          `/w/${WS}/creator/new/claude-code`,
+          "",
+          activity.pattern,
+        ).kind,
+      ).not.toBe("matched");
+    }
   });
 
   it("rejects retired Creator subviews while accepting the frozen four (creator-agent-chat 1.5)", () => {

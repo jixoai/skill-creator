@@ -719,10 +719,7 @@ export const zhBase: Record<keyof typeof enBase, string> = {
   "creatorHome.templateNone": "不用模板——空白开始",
   "creatorHome.startDraft": "让 agent 起草",
   "creatorHome.startDraftTitle": "生成结构化首条 prompt；按 Enter 发送前不会发出任何内容。",
-  "creatorHome.globalTitle": "在导入的 workspace 中创作技能",
-  "creatorHome.globalBody": "Global workspace 对创作只读。请切换到导入的 workspace 开始创作会话。",
-  "creatorHome.globalSwitchHint": "从顶栏的工作区标签切换过去，即可开始创作。",
-  "creatorHome.globalNone": "还没有导入的 workspace——请先从 Workspaces 标签页导入目录。",
+  // creator-skill-store 批 2：Global 空态四键退役（创建落 store，任何上下文可建）。
 
   /** ---------- Creator 会话面（护栏轨 + 话术建议 + 草稿卡；creator-agent-chat 1.2/1.3） ---------- */
   "creatorChat.stageRailAria": "创作循环阶段",

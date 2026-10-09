@@ -55,9 +55,10 @@ describe("legacy shell URL migrations", () => {
       "/w/ws_0123456789abcdef01234567/creator/edit/claude-code/sk_0123456789abcdef01234567?subview=preview&template=basic",
     ],
     [
+      // creator-skill-store 批 2：new 无 provider 身份（store 直建）——legacy 段丢弃。
       "/creator/new/ws_0123456789abcdef01234567/claude-code",
       "?template=basic",
-      "/w/ws_0123456789abcdef01234567/creator/new/claude-code?template=basic",
+      "/w/ws_0123456789abcdef01234567/creator/new?template=basic",
     ],
     ["/wiki", "", "/w/~/wiki"],
     ["/wiki/%7E", "", "/w/~/wiki"],

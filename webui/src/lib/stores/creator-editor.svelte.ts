@@ -1,5 +1,8 @@
 /**
  * 用户原始需求 [2026-07-27]：「Creator 编辑 tab 左右分栏……右侧子视图」。
+ * 修订 [2026-10-09]（creator-skill-store 批 2）：store 文档 hydrate 面——store
+ * 编辑（mode="store"）与 provider 编辑同 context 同 revision 契约，身份键 =
+ * store directoryName（草稿缓存/hydration 双闸同构）。
  * 正交意图：
  *   [1] 把 Creator 编辑会话的草稿状态以 Svelte context 暴露给子视图，使 File 子视图写入
  *       与 Preview 子视图渲染共享同一份可响应草稿。
@@ -8,11 +11,17 @@
  * 字段在保存时由 File 子视图透传，不进入草稿表单。纯数据形状与构造器在 creator-draft.ts。
  */
 import { getContext, hasContext, setContext } from "svelte";
-import type { SkillDocument, WorkspaceProviderTarget } from "../types";
+import type { CreatorStoreDocument, SkillDocument, WorkspaceProviderTarget } from "../types";
 import type { CreatorDraft } from "./creator-draft";
 
 export type { CreatorDraft } from "./creator-draft";
-export { draftToFrontmatter, editDraft, emptyDraft, placeholderDraft } from "./creator-draft";
+export {
+  draftToFrontmatter,
+  editDraft,
+  emptyDraft,
+  placeholderDraft,
+  storeDraft,
+} from "./creator-draft";
 
 /** Creator 编辑会话上下文值（持有一个响应式 draft 与一组 mutator）。 */
 export interface CreatorEditorContext {
@@ -20,6 +29,8 @@ export interface CreatorEditorContext {
   readonly draft: CreatorDraft;
   /** 用加载的 SkillDocument 重置草稿（edit 模式）。 */
   hydrateFromDocument(document: SkillDocument): void;
+  /** 用加载的 CreatorStoreDocument 重置草稿（store 编辑模式）。 */
+  hydrateFromStoreDocument(document: CreatorStoreDocument): void;
   /** 保存成功后更新 revision（避免下次保存触发 CONFLICT）。 */
   advanceRevision(revision: string): void;
 }
@@ -55,6 +66,21 @@ export function provideCreatorEditor(initial: CreatorDraft): CreatorEditorContex
     advanceRevision(revision) {
       draft.revision = revision;
     },
+    hydrateFromStoreDocument(document) {
+      // store 编辑：与 provider 编辑同闸切身份语义（Test/Save 的 revision 门槛
+      // 依赖 mode + revision 非 null）；directoryName 是固定身份不随文档变。
+      draft.mode = "store";
+      draft.skillId = null;
+      draft.name = String(document.frontmatter.name ?? "");
+      draft.description = String(document.frontmatter.description ?? "");
+      draft.body = document.body;
+      draft.revision = document.revision;
+      draft.directoryName = document.directoryName;
+      const { name: _name, description: _desc, ...rest } = document.frontmatter;
+      void _name;
+      void _desc;
+      draft.extraFrontmatter = rest;
+    },
   };
   setContext(CREATOR_EDITOR_KEY, context);
   return context;
@@ -83,6 +109,24 @@ export function creatorDraftKey(
 ): string | null {
   if (!target) return null;
   return `${mode}:${target.workspaceId}/${target.providerId}${skillId === null ? "" : `/${skillId}`}`;
+}
+
+/** store 编辑草稿身份键（creator-skill-store 批 2）：身份 = store directoryName。 */
+export function creatorStoreDraftKey(directoryName: string): string {
+  return `store:${directoryName}`;
+}
+
+/**
+ * 按草稿自身的 mode 派生缓存键（卸载快照用）：
+ * - edit：provider 身份；Global 占位 target 不缓存（Global 从无 provider 编辑）。
+ * - new：占位 target（store 创建无 ws/provider 身份，全上下文共享一个新草稿槽）。
+ * - store：directoryName 身份。
+ */
+export function draftCacheKey(draft: CreatorDraft): string | null {
+  if (draft.mode === "store") return creatorStoreDraftKey(draft.directoryName);
+  if (draft.mode === "new") return creatorDraftKey(draft.target, "new", null);
+  if (draft.target.workspaceId === "~") return null;
+  return creatorDraftKey(draft.target, "edit", draft.skillId);
 }
 
 const cachedDrafts = new Map<string, CreatorDraft>();

@@ -103,6 +103,13 @@ export const CreatorStoreListResultSchema = z.object({
 /** creator store 技能列表。 */
 export type CreatorStoreListResult = z.infer<typeof CreatorStoreListResultSchema>;
 
+/** creatorStore.load 输入（store 编辑页的文档读取面；身份 = directoryName）。 */
+export const CreatorStoreLoadInputSchema = z.object({
+  directoryName: SkillDirectoryNameSchema,
+});
+/** creator store 文档读取输入。 */
+export type CreatorStoreLoadInput = z.infer<typeof CreatorStoreLoadInputSchema>;
+
 /** creatorStore.status 输入。 */
 export const CreatorStoreStatusInputSchema = z.object({
   directoryName: SkillDirectoryNameSchema,

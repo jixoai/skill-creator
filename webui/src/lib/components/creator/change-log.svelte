@@ -104,6 +104,14 @@
     >
       {t("creatorLog.saveFirst")}
     </div>
+  {:else if draft.mode === "store"}
+    <!-- creator-skill-store 批 2：store 文档无 provider 身份，revision 历史面
+         （provider-scoped RPC）不适用——如实惰态，不发 RPC。 -->
+    <div
+      class="flex flex-1 items-center justify-center px-8 text-center text-xs text-muted-foreground"
+    >
+      {t("creatorLog.storeUnavailable")}
+    </div>
   {:else if loading}
     <div class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
       <IconLoader class="h-4 w-4 animate-spin" />

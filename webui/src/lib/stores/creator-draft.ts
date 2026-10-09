@@ -1,5 +1,8 @@
 /**
  * 用户原始需求 [2026-07-27]：「Creator 编辑 tab 左右分栏……草稿存组件级 $state。」
+ * 修订 [2026-10-09]（creator-skill-store 批 2）：new 模式全部落 origin store——
+ * 草稿身份去 provider 化；store 编辑（mode="store"）以 directoryName 为身份，
+ * load/save 走 creatorStore.*（revision 契约同币）。
  * 正交意图：
  *   [1] Creator 草稿的纯数据形状与构造器（不依赖 svelte 运行时，可单测）。
  *   [2] 草稿 → SkillFrontmatter 的投影（必填字段覆盖、未知字段透传）。
@@ -14,11 +17,15 @@ import type { SkillId } from "../types";
 
 /** Creator 编辑会话草稿。 */
 export interface CreatorDraft {
-  /** 编辑模式：edit 为已存在技能，new 为新建。 */
-  mode: "edit" | "new";
-  /** Workspace Provider 目标（agent cwd 与 RPC target）。 */
+  /**
+   * 编辑模式：edit = 已安装技能（provider-scoped）；new = store 新建（无身份）；
+   * store = origin store 内技能的编辑（身份 = directoryName，target 恒为占位、
+   * 不被 provider RPC 消费）。
+   */
+  mode: "edit" | "new" | "store";
+  /** Workspace Provider 目标（edit 模式的 RPC target；new/store 为占位）。 */
   target: WorkspaceProviderTarget;
-  /** 已存在技能的不透明 id；new 模式为 null。 */
+  /** 已存在技能的不透明 id；new/store 模式为 null（store 文档的 skillId 不参与编辑键）。 */
   skillId: SkillId | null;
   /** 草稿 name（frontmatter 必填）。 */
   name: string;
@@ -26,19 +33,25 @@ export interface CreatorDraft {
   description: string;
   /** 草稿 markdown 正文（已剥离 frontmatter）。 */
   body: string;
-  /** 已加载文档的 revision（edit 模式保存时作为 expectedRevision）；new 模式为 null。 */
+  /** 已加载文档的 revision（edit/store 保存时作为 expectedRevision）；new 模式为 null。 */
   revision: string | null;
   /** 透传的未知 frontmatter 字段（保存时回写）。 */
   extraFrontmatter: Record<string, unknown>;
-  /** 新建模式下的目录名草稿。 */
+  /** 新建模式下的目录名草稿；store 模式下为身份（不可编辑）。 */
   directoryName: string;
 }
 
-/** 构造一个空白草稿（new 模式）。 */
-export function emptyDraft(target: WorkspaceProviderTarget, directoryName = ""): CreatorDraft {
+/**
+ * 构造一个空白草稿（new 模式）。target 传 null（store 直建——无 provider 身份，
+ * 内部落占位）或既有测试注入的显式 target（占位语义等价，仅键派生差异）。
+ */
+export function emptyDraft(
+  target: WorkspaceProviderTarget | null = null,
+  directoryName = "",
+): CreatorDraft {
   return {
     mode: "new",
-    target,
+    target: target ?? PLACEHOLDER_TARGET,
     skillId: null,
     name: "",
     description: "",
@@ -49,7 +62,7 @@ export function emptyDraft(target: WorkspaceProviderTarget, directoryName = ""):
   };
 }
 
-/** 一个合法但无意义的默认 Workspace Provider 目标（占位草稿用）。 */
+/** 一个合法但无意义的默认 Workspace Provider 目标（占位草稿用；new/store 不消费它）。 */
 const PLACEHOLDER_TARGET: WorkspaceProviderTarget = {
   workspaceId: WorkspaceIdSchema.parse("~"),
   providerId: ProviderIdSchema.parse("user"),
@@ -85,6 +98,24 @@ export function editDraft(target: WorkspaceProviderTarget, skillId: SkillId): Cr
     revision: null,
     extraFrontmatter: {},
     directoryName: "",
+  };
+}
+
+/**
+ * 构造一个 store 编辑草稿占位（creator-skill-store 批 2）：身份 = store
+ * directoryName；实际文档由 creatorStore.load 后 hydrate 填充。
+ */
+export function storeDraft(directoryName: string): CreatorDraft {
+  return {
+    mode: "store",
+    target: PLACEHOLDER_TARGET,
+    skillId: null,
+    name: "",
+    description: "",
+    body: "",
+    revision: null,
+    extraFrontmatter: {},
+    directoryName,
   };
 }
 

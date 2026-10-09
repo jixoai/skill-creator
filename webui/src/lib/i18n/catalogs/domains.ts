@@ -9,6 +9,7 @@
  */
 import { agentExtensionEn, agentExtensionZh } from "./domains/agent-extension.js";
 import { creatorExtraEn, creatorExtraZh } from "./domains/creator-extra.js";
+import { creatorStoreEn, creatorStoreZh } from "./domains/creator-store.js";
 import { errorHintsEn, errorHintsZh } from "./domains/error-hints.js";
 import { settingsEn, settingsZh } from "./domains/settings.js";
 import { shellExtraEn, shellExtraZh } from "./domains/shell-extra.js";
@@ -21,6 +22,8 @@ export {
   agentExtensionZh,
   creatorExtraEn,
   creatorExtraZh,
+  creatorStoreEn,
+  creatorStoreZh,
   errorHintsEn,
   errorHintsZh,
   settingsEn,

@@ -750,12 +750,7 @@ export const enBase = {
   "creatorHome.startDraft": "Let the agent draft it",
   "creatorHome.startDraftTitle":
     "Seeds a structured first prompt; nothing is sent until you press Enter.",
-  "creatorHome.globalTitle": "Create skills in an imported workspace",
-  "creatorHome.globalBody":
-    "The Global workspace is read-only for creation. Switch to an imported workspace to start a creation session.",
-  "creatorHome.globalSwitchHint": "Switch to your workspace from the tab strip at the top.",
-  "creatorHome.globalNone":
-    "No imported workspaces yet — import a directory from the Workspaces tab first.",
+  // creator-skill-store 批 2：Global 空态四键退役（创建落 store，任何上下文可建）。
 
   /** ---------- Creator 会话面（护栏轨 + 话术建议 + 草稿卡；creator-agent-chat 1.2/1.3） ---------- */
   "creatorChat.stageRailAria": "Creation loop stages",

@@ -60,7 +60,7 @@ create(store) ──auto-apply──> ensureEntity(global) + project([~/.agents/
 ## D4 RPC 与 UI 面
 
 - RPC：`creatorStore.list / create / save / remove / apply / sync / status /
-  uninstall`（oRPC；mutation 均有 typed result）。creator.save 的 new 模式改经
+uninstall`（oRPC；mutation 均有 typed result）。creator.save 的 new 模式改经
   store（webui 唯一创建入口）；edit 模式（已安装技能）契约不动。
 - 路由：`/w/:wsId/creator/new`（providerId 退出 new 模式参数——manifest zod 与
   路由表同步；edit 路由原样）。CreatorHome 引导创建对 Global 不再哑（store 无

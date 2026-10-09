@@ -11,6 +11,26 @@ export type {
   SkillDocument,
   SkillFrontmatter,
 } from "$shared/contracts/creator.js";
+/** Creator origin store 面（creator-skill-store）使用的共享类型。 */
+export type {
+  CreatorStoreApplication,
+  CreatorStoreApplyResult,
+  CreatorStoreApplyResultEntry,
+  CreatorStoreCreateInput,
+  CreatorStoreCreateResult,
+  CreatorStoreDocument,
+  CreatorStoreListResult,
+  CreatorStoreRemoveResult,
+  CreatorStoreSaveInput,
+  CreatorStoreSaveResult,
+  CreatorStoreSkill,
+  CreatorStoreStatusResult,
+  CreatorStoreSyncResult,
+  CreatorStoreSyncResultEntry,
+  CreatorStoreUninstallResult,
+  CreatorStoreUninstallResultEntry,
+} from "$shared/contracts/creator-store.js";
+export type { SkillDirectoryName } from "$shared/contracts/creator-store.js";
 /** Repository 页面使用的共享扫描与安装类型。 */
 export type {
   InstallResult,

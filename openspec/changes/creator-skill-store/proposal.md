@@ -41,8 +41,8 @@ agent skills 目录（包括 .agents/skills .codex/skills 等）。所以架构�
 ## Impact
 
 - daemon：新 creator-store-service（list/create/save/remove/apply/sync/status）
-  + creator-service new 模式目标改 store + workspace-registry 无闸变化
-  （resolveWritable 不再被创建面消费）。
+  - creator-service new 模式目标改 store + workspace-registry 无闸变化
+    （resolveWritable 不再被创建面消费）。
 - contracts：CreatorStoreSkill / ApplySkillResult 等增量；rpc-contract 增量。
 - webui：Creator new 模式 store 化（路由 new 不再要求 providerId）、应用选择面、
   已应用/过期状态；skills 页 store 技能角标（后续批）。

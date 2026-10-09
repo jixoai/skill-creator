@@ -154,14 +154,13 @@ describe("creator deep-link recovery (WS5 walkthrough B)", () => {
   it("saveSkill stays a rejected promise while disconnected", async () => {
     let pending: Promise<unknown> | null = null;
     expect(() => {
+      // creator-skill-store 批 2：create 无 provider 身份（store 直建）。
       pending = saveSkill({
         mode: "create",
-        workspaceId: WS,
-        providerId: PROVIDER,
         directoryName: "x",
         frontmatter: { name: "n", description: "d" },
         body: "",
-      } as Parameters<typeof saveSkill>[0]);
+      });
       pending?.catch(() => {});
     }).not.toThrow();
     await expect(pending).rejects.toThrow("The Skill Creator daemon is not connected.");
@@ -292,7 +291,8 @@ describe("creator pageheader breadcrumb (workspace-page-polish P1-4)", () => {
 
 describe("creator new-form pristine errors (workspace-page-polish 2.2 P1-3)", () => {
   function mountNewForm() {
-    shellRouteState.params = { mode: "new", wsId: WS, providerId: PROVIDER };
+    // creator-skill-store 批 2：new 路由无 provider 身份（store 直建）。
+    shellRouteState.params = { wsId: WS };
     shellRouteState.search = { subview: "file" };
     const rpc = makeRpcMock();
     connectMockClient(rpc as unknown as Record<string, unknown>);

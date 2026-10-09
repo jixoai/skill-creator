@@ -86,6 +86,14 @@
     >
       {t("creatorValidation.saveFirst")}
     </div>
+  {:else if draft.mode === "store"}
+    <!-- creator-skill-store 批 2：skills.validate 是 provider-scoped 面，store 文档
+         不适用——如实惰态（保存结果自带 validation 反馈），不发 RPC。 -->
+    <div
+      class="flex flex-1 items-center justify-center px-8 text-center text-xs text-muted-foreground"
+    >
+      {t("creatorValidation.storeUnavailable")}
+    </div>
   {:else if loading && result === null}
     <div class="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
       <IconLoader class="h-4 w-4 animate-spin" />

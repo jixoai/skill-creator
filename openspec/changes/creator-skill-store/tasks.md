@@ -10,10 +10,11 @@
 
 ## 批 2 · webui：store 化创建 + 应用面
 
-- [ ] new 路由 store 化（providerId 退出 new 参数；CreatorHome 引导创建对 Global 激活） — manifest + CreatorHome/CreatorWorkspace — dom 测试
-- [ ] FileBrowser new 模式接 store 保存（directoryName 输入沿用；保存后跳/示应用结果） — file-browser.svelte — dom 测试
-- [ ] 应用选择面（roots 多选，默认 ~/.agents/skills；复用 install targets UI 模式）+ status 角标（已应用 N 处/已过期）+ uninstall/delete-origin 入口 — 新组件 + CreatorHome — dom 测试 + i18n en/zh
-- [ ] AGENTS.md §2/约束 2 + i18n.zh.md 同步 — 文档 — 无
+- [x] new 路由 store 化（providerId 退出 new 参数；CreatorHome 引导创建对 Global 激活） — manifest + CreatorHome/CreatorWorkspace — route-match/route-hygiene/deeplink 回归 + store 编辑/创建 dom 测试（旧 `new/:providerId` 形态跨 Activity 拒绝钉）
+- [x] FileBrowser new 模式接 store 保存（directoryName 输入沿用；保存后跳/示应用结果） — file-browser.svelte — dom 测试（create 调 creatorStore.create；auto-apply 收据 toast 含已应用位置；跳 `/w/:wsId/creator/store/:directoryName`）
+- [x] 应用选择面（roots 多选，默认 ~/.agents/skills；复用 install targets UI 模式）+ status 角标（已应用 N 处/已过期）+ uninstall/delete-origin 入口 — CreatorStore.svelte + creator-store-targets/store 包装 — dom 测试（角标三态/默认勾选/确认闸列剩余应用面）+ i18n en/zh（creator-store 域 40+ 键成对）
+- [x] AGENTS.md §2/约束 2 + i18n.zh.md 同步 — 文档 — 创建与应用分离真相（创建面 = store；应用面 = 内核投影；Repository 仍 Imported-only）
+- [x] 批 2 增补（Owner 拍板 2026-10-09）：creatorStore.load 读面（批 1 八过程无文档 load——list/status 均不带 body，store 编辑页无法回读正文；增量最小：契约 schema + service 暴露 readStoreDocument + router 一行，不触应用链） — src/shared/contracts/creator-store.ts + creator-store-service.ts + rpc-router.ts — 契约测试（create↔load 往返同 revision + 缺席 NOT_FOUND typed，11/11）
 
 ## 批 3 · 门禁与走查
 

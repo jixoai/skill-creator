@@ -161,6 +161,7 @@ export function createRpcRouter(deps: RpcRouterDeps) {
     // creator-skill-store 批 1：origin store 面（typed result，逐收据不抛业务错）。
     creatorStore: {
       list: rpc.creatorStore.list.handler(() => domain.creatorStore.list()),
+      load: rpc.creatorStore.load.handler(({ input }) => domain.creatorStore.load(input)),
       create: rpc.creatorStore.create.handler(({ input }) => domain.creatorStore.create(input)),
       save: rpc.creatorStore.save.handler(({ input }) => domain.creatorStore.save(input)),
       remove: rpc.creatorStore.remove.handler(({ input }) => domain.creatorStore.remove(input)),

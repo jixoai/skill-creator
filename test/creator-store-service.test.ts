@@ -84,6 +84,25 @@ async function createSkill(directoryName: string, description = "A store skill."
 }
 
 describe("creator store service", () => {
+  it("loads a created store document round-trip and typed-rejects missing skills", async () => {
+    const created = await createSkill("load-round-trip");
+
+    // 批 2 webui 消费面：store 编辑页按 directoryName 读文档（body/revision 同币）。
+    const document = domain.creatorStore.load({ directoryName: "load-round-trip" });
+    expect(document.directoryName).toBe("load-round-trip");
+    expect(document.frontmatter).toMatchObject({
+      name: "load-round-trip",
+      description: "A store skill.",
+    });
+    expect(document.body).toBe("# load-round-trip\n\nInitial body.\n");
+    expect(document.revision).toBe(created.document.revision);
+
+    // 缺席 = typed NOT_FOUND（不静默空文档）。
+    expect(() => domain.creatorStore.load({ directoryName: "missing-skill" })).toThrowError(
+      /not found/i,
+    );
+  });
+
   it("creates into the store and auto-applies the global canonical root entity-locally", async () => {
     const created = await createSkill("my-skill");
 

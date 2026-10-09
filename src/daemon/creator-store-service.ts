@@ -494,6 +494,11 @@ export function createCreatorStoreService(
   };
 
   return {
+    /** 读一份 store 文档（store 编辑页的读取面；批 2 webui 消费，body/revision 同币）。 */
+    load(input: { directoryName: string }): CreatorStoreDocument {
+      return readStoreDocument(requireStoreSkillDirectory(input.directoryName));
+    },
+
     /** 枚举 store 技能（不兼容条目跳过计数；无状态字段——状态走 status）。 */
     list(): CreatorStoreListResult {
       const root = creatorStoreRoot();

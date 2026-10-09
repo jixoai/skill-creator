@@ -2,8 +2,10 @@
   用户原始需求 [2026-07-27]：「右侧『文件』子视图：SKILL.md 编辑器」。
   正交意图：
   1. edit 模式：调用 creator.load 拉取 SkillDocument 并 hydrate 草稿；草稿存共享 editor context（$state）。
-  2. new 模式：目录名输入框 + 模板预填草稿；保存走 creator.save(mode=create)。
-  3. 保存：creator.save(mode=update) revision-safe；CONFLICT 提示 reload。
+  2. new 模式：目录名输入框 + 模板预填草稿；保存走 creatorStore.create（origin
+     store 唯一根源 + auto-apply 收据如实呈现；成功后跳 store 编辑路由）。
+  3. store 模式：creatorStore.load/save 的 store 文档编辑（revision 契约同币）。
+  4. 保存：revision-safe（update=creator.save / store=creatorStore.save）；CONFLICT 提示 reload。
   视图状态：草稿 → 共享 creator-editor context（$state）；正文 → daemon RPC。
   2026-09-30 creator-editor-polish：正文编辑器升级 CodeMirror 6（markdown-editor
   懒加载组件）；new 模式校验改 validateNewDraft 字段级错误 + Save 禁用联动。
@@ -12,6 +14,9 @@
   修订 [2026-10-04]（workspace-page-polish 2.2 处置批）：P1-3 pristine 红错延后
   （错误只在 touched/提交尝试后呈现；目录名规则文案降为常态 muted helper）；
   P2-10 加载态改 frontmatter 表单同构骨架（Delete 的 revision 闸门既有语义保持）。
+  修订 [2026-10-09]（creator-skill-store 批 2）：new 保存接 creatorStore.create
+  （auto-apply 结果 toast 含已应用位置，失败不吞）；store 编辑 load/save 走
+  creatorStore.*；delete-origin 收口到 store 列面（本视图 edit 语义不变）。
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -19,6 +24,7 @@
     useCreatorEditor,
     draftToFrontmatter,
     creatorDraftKey,
+    creatorStoreDraftKey,
     dropCachedCreatorDraft,
     isDraftHydrated,
     markDraftHydrated,
@@ -26,7 +32,16 @@
   } from "$lib/stores/creator-editor.svelte";
   import { hasNewDraftErrors, validateNewDraft } from "$lib/stores/creator-draft";
   import MarkdownEditor from "$lib/components/creator/markdown-editor.svelte";
-  import { connectionState, loadSkillDoc, removeSkill, saveSkill } from "$lib/store.svelte";
+  import { useParams } from "$lib/shell";
+  import {
+    connectionState,
+    createStoreSkill,
+    loadSkillDoc,
+    loadStoreSkillDoc,
+    removeSkill,
+    saveSkill,
+    saveStoreSkill,
+  } from "$lib/store.svelte";
   import { showToast } from "$lib/toast.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import { goto } from "$app/navigation";
@@ -41,9 +56,15 @@
   import IconRotate from "@lucide/svelte/icons/rotate-cw";
   import IconTrash from "@lucide/svelte/icons/trash-2";
   import { SkillDirectoryNameSchema } from "$shared/contracts/creator.js";
+  import type { WorkspaceId } from "$lib/types";
 
   const editor = useCreatorEditor();
   const draft = editor.draft;
+
+  // create 成功后跳 store 编辑路由需要当前 ws 路由段（store 无 ws 归属，路由按
+  // 当前上下文承载）。
+  const getParams = useParams<{ wsId: WorkspaceId }>();
+  const routeWsId = $derived(getParams?.()?.wsId);
 
   const loadRequests = createRequestGenerationGate(getConnectionGeneration);
   let loading = $state(false);
@@ -54,10 +75,17 @@
   // 3.1c：同一身份只自动 hydrate 一次——子视图往返 / 断线重连 / island 重开（缓存
   // 草稿恢复）不重置 baseline；显式 Reload/Retry 走 resetDraftHydration 后重拉。
   $effect(() => {
-    if (draft.mode !== "edit" || draft.skillId === null) return;
-    const key = creatorDraftKey(draft.target, "edit", draft.skillId);
-    if (key !== null && isDraftHydrated(key)) return;
-    void loadDocument(draft.target, draft.skillId);
+    if (draft.mode === "edit" && draft.skillId !== null) {
+      const key = creatorDraftKey(draft.target, "edit", draft.skillId);
+      if (key !== null && isDraftHydrated(key)) return;
+      void loadDocument(draft.target, draft.skillId);
+      return;
+    }
+    if (draft.mode === "store") {
+      const key = creatorStoreDraftKey(draft.directoryName);
+      if (isDraftHydrated(key)) return;
+      void loadStoreDocument(draft.directoryName);
+    }
   });
 
   // 挂载竞态补救（走查 r6#2）：硬刷新时首轮 load 可能因 WS 未就绪失败（error
@@ -69,18 +97,18 @@
     const was = untrack(() => lastConnectionStatus);
     lastConnectionStatus = status;
     if (was === "connected" || status !== "connected") return;
-    const retrySkillId = untrack(() => draft.skillId);
-    if (
-      untrack(() => loadError) === null ||
-      untrack(() => draft.mode) !== "edit" ||
-      retrySkillId === null
-    ) {
-      return;
+    const retryMode = untrack(() => draft.mode);
+    if (untrack(() => loadError) === null) return;
+    if (retryMode === "edit") {
+      const retrySkillId = untrack(() => draft.skillId);
+      if (retrySkillId === null) return;
+      void loadDocument(
+        untrack(() => draft.target),
+        retrySkillId,
+      );
+    } else if (retryMode === "store") {
+      void loadStoreDocument(untrack(() => draft.directoryName));
     }
-    void loadDocument(
-      untrack(() => draft.target),
-      retrySkillId,
-    );
   });
 
   async function loadDocument(
@@ -104,16 +132,40 @@
     }
   }
 
-  /** 重载当前 edit 模式技能文档（conflict 恢复 / 手动 Retry；null-safe 包装）。 */
+  // store 文档加载（creator-skill-store 批 2）：与 edit 同闸同骨架；缺席 = typed
+  // NOT_FOUND 落 loadError 面。
+  async function loadStoreDocument(directoryName: string): Promise<void> {
+    const parsed = SkillDirectoryNameSchema.safeParse(directoryName);
+    if (!parsed.success) return;
+    const request = loadRequests.issue();
+    loading = true;
+    loadError = null;
+    try {
+      const document = await loadStoreSkillDoc(parsed.data);
+      if (!request.isCurrent()) return;
+      editor.hydrateFromStoreDocument(document);
+      markDraftHydrated(creatorStoreDraftKey(parsed.data));
+    } catch (error) {
+      if (!request.isCurrent()) return;
+      loadError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (request.isLatest()) loading = false;
+    }
+  }
+
+  /** 重载当前已载文档（conflict 恢复 / 手动 Retry；null-safe 包装，edit|store 两态）。 */
   function reloadCurrent(): void {
     if (draft.mode === "edit" && draft.skillId) {
       const key = creatorDraftKey(draft.target, "edit", draft.skillId);
       if (key !== null) resetDraftHydration(key);
       void loadDocument(draft.target, draft.skillId);
+    } else if (draft.mode === "store") {
+      resetDraftHydration(creatorStoreDraftKey(draft.directoryName));
+      void loadStoreDocument(draft.directoryName);
     }
   }
 
-  // new 模式字段级校验（creator-editor-polish）；edit 模式恒通过。
+  // new 模式字段级校验（creator-editor-polish）；edit/store 模式恒通过。
   const newDraftErrors = $derived(validateNewDraft(draft));
   const directoryNameValid = $derived(
     draft.mode !== "new" || newDraftErrors.directoryName === null,
@@ -138,8 +190,9 @@
     !saving &&
       draft.name.trim().length > 0 &&
       draft.description.trim().length > 0 &&
-      (draft.mode === "edit" || !hasNewDraftErrors(newDraftErrors)) &&
-      (draft.revision !== null) === (draft.mode === "edit"),
+      (draft.mode !== "new" || !hasNewDraftErrors(newDraftErrors)) &&
+      // edit/store 保存需要已载 revision；new 恒无 revision。
+      (draft.revision !== null) === (draft.mode !== "new"),
   );
 
   async function handleSave(): Promise<void> {
@@ -165,7 +218,28 @@
       }
       return;
     }
-    // new 模式
+    if (draft.mode === "store") {
+      // store 编辑：revision-safe 保存（CONFLICT 呈现与 edit 同语义）。
+      if (draft.revision === null) return;
+      saving = true;
+      try {
+        const result = await saveStoreSkill({
+          directoryName: SkillDirectoryNameSchema.parse(draft.directoryName),
+          expectedRevision: draft.revision,
+          frontmatter: draftToFrontmatter(draft),
+          body: draft.body,
+        });
+        editor.advanceRevision(result.document.revision);
+        showToast(t("creatorEditor.toastSaved"));
+      } catch (error) {
+        handleSaveError(error);
+      } finally {
+        saving = false;
+      }
+      return;
+    }
+    // new 模式（store 直建）：创建即 auto-apply（默认 ~/.agents/skills
+    // entity-local）——收据如实呈现，失败不吞；成功后跳 store 编辑路由。
     submittedAttempt = true;
     const parsed = SkillDirectoryNameSchema.safeParse(draft.directoryName);
     if (!parsed.success) {
@@ -174,17 +248,25 @@
     }
     saving = true;
     try {
-      const result = await saveSkill({
-        mode: "create",
+      const result = await createStoreSkill({
         directoryName: parsed.data,
         frontmatter: draftToFrontmatter(draft),
         body: draft.body,
       });
-      // creator-skill-store 批 1：new 模式创建落 origin store（无 workspace
-      // provider 身份）；结果携带 store 文档与 auto-apply 收据。批 2 接 store
-      // 编辑路由/应用面正形——此处仅最小保持编译通过（成功 toast；不转 edit）。
-      if (result.created) {
+      const appliedEntry = result.autoApply.results.find((entry) => entry.status !== "failed");
+      const failedEntry = result.autoApply.results.find((entry) => entry.status === "failed");
+      if (failedEntry !== undefined) {
+        // typed 呈现不吞：auto-apply 失败逐条可见（收据 error 为 daemon 有限词表）。
+        showToast(t("creatorEditor.toastCreateApplyFailed", { error: failedEntry.error ?? "" }));
+      } else if (appliedEntry !== undefined) {
+        showToast(t("creatorEditor.toastCreatedApplied", { root: appliedEntry.root }));
+      } else {
         showToast(t("creatorEditor.toastCreated"));
+      }
+      if (routeWsId !== undefined) {
+        await goto(
+          `/w/${encodeURIComponent(routeWsId)}/creator/store/${encodeURIComponent(parsed.data)}`,
+        );
       }
     } catch (error) {
       handleSaveError(error);
@@ -210,6 +292,8 @@
   }
 
   // ---- 删除（edit 模式；revision-safe + confirm + busy 锁） ----
+  // store 技能的删除根源（delete-origin）在 store 列面（确认闸列出剩余应用面），
+  // 本视图不承载。
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
@@ -256,7 +340,7 @@
       {draft.mode === "new" ? t("creatorEditor.newFileTitle") : t("creatorEditor.fileTitle")}
     </span>
     <div class="ml-auto flex items-center gap-1.5">
-      {#if draft.mode === "edit" && draft.skillId}
+      {#if (draft.mode === "edit" && draft.skillId) || draft.mode === "store"}
         <Button
           variant="outline"
           size="sm"
@@ -316,7 +400,7 @@
   {:else if loadError}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
       <p class="text-xs text-destructive">{loadError}</p>
-      {#if draft.mode === "edit" && draft.skillId}
+      {#if (draft.mode === "edit" && draft.skillId) || draft.mode === "store"}
         <Button variant="outline" size="sm" onclick={reloadCurrent}>
           {t("common.retry")}
         </Button>
