@@ -4,7 +4,7 @@
 
 ### Requirement: 技能创建的唯一根源是 creator store
 
-Creator 的 new 模式 MUST 将技能写入 `<homeDir()>/creator-skills/<directoryName>/`
+Creator 的 new 模式 MUST 将技能写入 `<appDir()>/creator-skills/<directoryName>/`（生产 `~/.skill-creator/creator-skills`）
 （origin store）：frontmatter 校验、revision（SKILL.md sha256）、change log 与
 原子写契约沿用既有文档机制，仅目标根改指 store。创建面 MUST NOT 向任何
 provider root 或 ccski 实体库根直写技能目录——agent 目录中的创建物只能经内核

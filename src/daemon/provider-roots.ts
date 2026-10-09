@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { providerCatalogEntry, type ProviderCatalogEntry } from "../shared/provider-catalog.js";
+import { homeDir } from "../shared/paths.js";
 import type { ProviderId } from "../shared/contracts/workspaces.js";
 import { DomainError } from "./domain-error.js";
 
@@ -21,8 +22,10 @@ export function requireProvider(providerId: ProviderId): ProviderCatalogEntry {
 /**
  * Resolve one global Agent skills root following the community catalog's environment overrides.
  * `home` 允许注入宿主 homeDir()（creator-skill-store 批 1：global 应用的投影根必须
- * 与内核 global scopeBase（userDir = 宿主 homeDir）同源——否则 home override 隔离
- * 态下投影根会解析到真实 home）；缺省仍为 os.homedir()，既有调用面行为不变。
+ * 与内核 global scopeBase（userDir = 宿主 homeDir）同源。缺省 os.homedir()：
+ * global agent roots 是「用户家」语义（测试套以 HOME 隔离、SKILL_CREATOR_HOME
+ * 只隔离应用状态——双 home 是故意设计）；dev 隔离由启动器统一设 HOME 承担
+ * （scripts/dev.sh.ts 批 3 修正），不在本函数合并两个语义。
  */
 export function globalProviderRoot(
   provider: ProviderCatalogEntry,

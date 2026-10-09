@@ -6,7 +6,7 @@
  * .agents/skills 目录，这属于我们可以自动化做到事情。」
  * 正交意图：
  *   [1] origin store 文档面（list/create/save/remove）：唯一根源
- *       `<homeDir()>/creator-skills/<directoryName>/`；目录名安全 + frontmatter
+ *       `<appDir()>/creator-skills/<directoryName>/`（Owner 原文 ~/.skill-creator/creator-skills）；目录名安全 + frontmatter
  *       safeParse 收窄（不兼容条目跳过计数）+ revision 契约（SKILL.md sha256）+
  *       原子写——文档机制复用 creator-service 的共享函数，不复制实现。
  *   [2] 内核应用面（apply/sync/uninstall/status）：ccski 两阶段
@@ -56,7 +56,7 @@ import { composeSkillDocument, parseSkillDocumentParts } from "./creator-service
 import { DomainError } from "./domain-error.js";
 import { globalProviderRoot, requireProvider } from "./provider-roots.js";
 import { atomicWriteUtf8, contentRevision, directChild, opaquePathId } from "./path-safety.js";
-import { homeDir } from "../shared/paths.js";
+import { homeDir, appDir } from "../shared/paths.js";
 import { safeParseExternal } from "../shared/external-input.js";
 import {
   SkillDirectoryNameSchema,
@@ -221,9 +221,11 @@ const STATE_DEGRADED_MESSAGE =
   "The projection records are degraded; whether an entry is registered cannot be proven. " +
   "Run ccski state repair, then retry the sync.";
 
-/** creator store 根目录（唯一根源；homeDir 经宿主解析，测试可 override）。 */
+/** creator store 根目录（唯一根源 = appDir()/creator-skills；随 homeDir override 同源隔离）。 */
 export function creatorStoreRoot(): string {
-  return path.join(homeDir(), "creator-skills");
+  // Owner 原文「~/.skill-creator/creator-skills」：store 落 appDir()（生产 =
+  // ~/.skill-creator；dev/测试随 homeDir override 同源隔离），不污染家目录根。
+  return path.join(appDir(), "creator-skills");
 }
 
 /** global scope 的默认应用 root（= 内核 global 实体库根；entity-local 收据命中）。 */
@@ -525,7 +527,7 @@ export function createCreatorStoreService(
             description: document.frontmatter.description,
             directoryName: document.directoryName,
             revision: document.revision,
-            updatedAt: fs.statSync(path.join(directory, "SKILL.md")).mtimeMs,
+            updatedAt: Math.trunc(fs.statSync(path.join(directory, "SKILL.md")).mtimeMs),
           });
         } catch {
           skipped += 1;
@@ -852,7 +854,7 @@ export function createCreatorStoreService(
           description: document.frontmatter.description,
           directoryName: document.directoryName,
           revision: document.revision,
-          updatedAt: fs.statSync(path.join(directory, "SKILL.md")).mtimeMs,
+          updatedAt: Math.trunc(fs.statSync(path.join(directory, "SKILL.md")).mtimeMs),
           appliedRoots: projected,
           outdated: projected.some((application) => application.entityRevision !== storeHash),
         },

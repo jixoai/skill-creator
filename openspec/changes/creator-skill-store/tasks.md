@@ -18,5 +18,5 @@
 
 ## 批 3 · 门禁与走查
 
-- [ ] 五件套 + strict + build — 全仓 — 无
-- [ ] dev 沙箱全链走查：Global Creator 创建→自动 entity-local 落 ~/.agents/skills→应用 .codex/skills（symlink）→编辑 store→sync→uninstall→delete origin；console 零新增错误；环境恢复 — walkthrough 证据进 change 目录 — 无
+- [x] 五件套 + strict + build — 全仓 — 无（全量 2448/2448+4 skip 网关既有；typecheck 0；webui check 0/0；build 0；fmt 任务文件过；strict valid）
+- [x] dev 沙箱全链走查 W1-W7 全过（walkthrough-evidence.md：Global 创建/store 落 appDir 形态/auto-apply entity-local/多 root symlink/Outdated→Sync 收敛/uninstall GC+store 原样/delete origin 确认闸；console 零错误标记；生产 daemon 恢复）；走查抓两真 bug 当场修（updatedAt 浮点击穿输出契约/globalProviderRoot 默认 os.homedir 绕过 override——dev 隔离漏洞）+ store 路径基点对齐 Owner 原文（appDir()/creator-skills） — walkthrough 证据进 change 目录 — 无

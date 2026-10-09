@@ -27,7 +27,7 @@ Creator（编辑/revision/change log）      ccski 3.0 内核（应用/投影）
 
 ## D2 store 形态与身份
 
-- 路径：`<homeDir()>/creator-skills/<directoryName>/SKILL.md`（+附属文件随目录）。
+- 路径：`<appDir()>/creator-skills/<directoryName>/SKILL.md`（生产 = `~/.skill-creator/creator-skills`，Owner 原文；随 homeDir override 同源隔离）。
 - directoryName 沿用 SkillDirectoryNameSchema（lowercase 安全名）；逻辑名 =
   frontmatter name（重名冲突 = store 内目录名唯一性拒绝，typed NAME_EXISTS 语义
   对齐内核词表映射面）。

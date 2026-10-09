@@ -65,7 +65,7 @@ function createClient(
 describe("RPC domain-error boundary", () => {
   it("exposes a Creator revision conflict as a defined CONFLICT error", async () => {
     const client = createClient();
-    // creator-skill-store 批 1：new 模式落 origin store（<home>/creator-skills），
+    // creator-skill-store 批 1：new 模式落 origin store（<home>/.skill-creator/creator-skills），
     // revision 冲突经 creatorStore.save（store 身份）呈现。
     const created = await client.creator.save({
       mode: "create",
@@ -78,7 +78,7 @@ describe("RPC domain-error boundary", () => {
     });
     if (!created.created) throw new Error("Expected a store creation result.");
     fs.appendFileSync(
-      path.join(sandbox, "state", "creator-skills", "revision-safe", "SKILL.md"),
+      path.join(sandbox, "state", ".skill-creator", "creator-skills", "revision-safe", "SKILL.md"),
       "\nExternal edit.\n",
       "utf8",
     );

@@ -19,6 +19,12 @@ async function main(): Promise<void> {
   const devHome = resolveDevHome();
   setHomeOverride(devHome);
   process.env.SKILL_CREATOR_HOME = devHome;
+  // dev 隔离补全（creator-skill-store 批 3 走查实证）：global agent roots 走
+  // os.homedir()（用户家语义，双 home 设计——见 provider-roots 注释），只隔离
+  // SKILL_CREATOR_HOME 时 dev daemon 的 Global 投影面/应用面会指向真实家目录。
+  // HOME/USERPROFILE 一并指向 dev home，子进程（npx/git 等）同享沙箱。
+  process.env.HOME = devHome;
+  if (process.platform === "win32") process.env.USERPROFILE = devHome;
 
   // [2][3] 读 vite 插件注入的 env。
   const port = readOptionalPort(process.env.SKILL_CREATOR_DEV_DAEMON_PORT);
