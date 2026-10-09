@@ -84,8 +84,6 @@ export const skillsWorkspaceEn = {
   "skillsWorkspace.tabs.skills": "Skills",
   "skillsWorkspace.tabs.agents": "Agents",
   "skillsWorkspace.tabs.repos": "Discover repos",
-  "skillsWorkspace.tabs.skillsCount": "{count, plural, one {# skill} other {# skills}}",
-  "skillsWorkspace.tabs.providersCount": "{count, plural, one {# provider} other {# providers}}",
 
   // ---- Canonical skills list + SkillDetail route (skills-tabs-redesign batch 2) ----
   "skillsWorkspace.skillsScreen.groupsCopies":
@@ -185,8 +183,6 @@ export const skillsWorkspaceZh: Record<keyof typeof skillsWorkspaceEn, string> =
   "skillsWorkspace.tabs.skills": "Skills",
   "skillsWorkspace.tabs.agents": "Agents",
   "skillsWorkspace.tabs.repos": "发现仓库",
-  "skillsWorkspace.tabs.skillsCount": "{count} 个技能",
-  "skillsWorkspace.tabs.providersCount": "{count} 个 provider",
 
   // ---- Canonical skills list + SkillDetail route (skills-tabs-redesign batch 2) ----
   "skillsWorkspace.skillsScreen.groupsCopies": "{groups} 个技能组 · {copies} 个安装副本",

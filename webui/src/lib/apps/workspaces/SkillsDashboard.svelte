@@ -9,18 +9,17 @@
   2. ?tab= 深链：参数名 tab 与 skills|agents|repos 取值语义（批 1 修订：screen→tab
      直切，无别名——AGENTS §8 无兼容策略，旧 URL 迁移归发布层；manifest zod
      enum 值域不变）；Tab 切换写 URL（skills 为缺省省略参数）。
-  3. 页题行：workspace label + 统计小字（skills.listWorkspace providers 摘要的
-     真实计数，数据缺席不显数）；Tab 徽标（findings/新增数）无现成 store 数据源
-     ——本批一律留空不造假。
-  4. 画布契约：grid 布局 panel 独占整幅画布（禁绝对定位）；.screen 弹性填满
-     panel（固定高语义由 flex 约束承担，不随内容长高）+ 内滚分层（screen-body
-     overscroll contain）；窄屏同一 TabsHeader 单行形态（三 tab 不换行不挤压）。
+  3. 无页题层（2026-10-09 Owner 裁决）：「Global Workspace N skills · N
+     providers」独立层去除——workspace 身份在侧栏导航，计数由各屏自身 header
+     承载（skills 屏 showingOf/totalCount 即同源数据），不再单独占一行。
+  4. 画布契约（同裁决「Tabs/TabContent 铺满面板」）：tabs 行与 panel 内容均
+     全幅无边距；.screen 不加圆角/描边包裹（去卡片层），弹性填满 panel（固定高
+     语义由 flex 约束承担）+ 内滚分层（screen-body overscroll contain）；窄屏
+     同一 TabsHeader 单行形态（三 tab 不换行不挤压）。
 -->
 <script lang="ts">
   import { useParams, useSearch, goById } from "$lib/shell";
   import { t } from "$lib/i18n";
-  import { workspaceState } from "$lib/store.svelte";
-  import { dashboardCanonicalState } from "$lib/stores/dashboard-canonical.svelte";
   import { WorkspaceIdSchema, type WorkspaceId } from "$shared/contracts/workspaces.js";
   import SkillsScreen from "./screens/skills-screen.svelte";
   import AgentsScreen from "./screens/agents-screen.svelte";
@@ -47,22 +46,6 @@
   const wsId = $derived.by(() => {
     const parsed = WorkspaceIdSchema.safeParse(rawWsId);
     return parsed.success ? (parsed.data as WorkspaceId) : null;
-  });
-
-  /** 页题行 h1：workspace 身份（缺席时以 opaque id 兜底，不渲染假名）。 */
-  const workspaceLabel = $derived(
-    workspaceState.workspaces.find((workspace) => workspace.id === wsId)?.label ?? wsId,
-  );
-
-  /** 页题行统计小字：providers 摘要聚合的真实计数；摘要未载不显数（不造假）。
-   *  批 2 起数据源 = skills.listCanonical 的 providers 摘要（skills 屏数据面）。 */
-  const stats = $derived.by(() => {
-    const providers = dashboardCanonicalState.providers;
-    if (providers.length === 0) return null;
-    return {
-      skills: providers.reduce((total, provider) => total + (provider.skillCount ?? 0), 0),
-      providers: providers.length,
-    };
   });
 
   const tabs = $derived([
@@ -111,18 +94,6 @@
 
 {#if wsId}
   <div class="dashboard-shell flex h-full min-h-0 w-full min-w-0 flex-col">
-    <!-- 页题行：workspace 身份 + 压缩统计小字（fuse2 pagehead 语义）。 -->
-    <header class="dashboard-pagehead shrink-0">
-      <h1 class="dashboard-title truncate">{workspaceLabel}</h1>
-      {#if stats}
-        <p class="dashboard-stats" data-testid="dashboard-stats">
-          <span>{t("skillsWorkspace.tabs.skillsCount", { count: stats.skills })}</span>
-          <span aria-hidden="true">·</span>
-          <span>{t("skillsWorkspace.tabs.providersCount", { count: stats.providers })}</span>
-        </p>
-      {/if}
-    </header>
-
     <!-- TabsHeader：三一等 tab（grid 均分，激活 = 底线）；tablist 键盘 roving。
          svelte-ignore a11y_interactive_supports_focus —— APG tabs 模式：tablist
          自身不是 tab stop，焦点经 roving tabindex 由 role=tab 子按钮管理。 -->
@@ -193,34 +164,12 @@
     container-name: dashboard;
   }
 
-  /* 页题行（fuse2 pagehead）：workspace 身份 + 统计小字（tabular-nums）。 */
-  .dashboard-pagehead {
-    min-width: 0;
-    padding: 12px 16px 0;
-  }
-  .dashboard-title {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    line-height: 1.3;
-  }
-  .dashboard-stats {
-    margin: 2px 0 0;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px 7px;
-    font-size: 11.5px;
-    color: var(--muted-foreground, #71717a);
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* TabsHeader：三一等 tab（grid 均分），激活 = 底线；切 tab 无过渡（瞬时）。 */
+  /* TabsHeader：三一等 tab（grid 均分），激活 = 底线；切 tab 无过渡（瞬时）。
+     全幅无边距（2026-10-09 Owner 裁决：tabs 与内容一起铺满面板）。 */
   .dashboard-tabs {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    margin: 6px 16px 10px;
+    margin: 0;
     border-bottom: 1px solid var(--border, #e5e7eb);
   }
   .dashboard-tab {
@@ -258,7 +207,7 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     min-width: 0;
-    padding: 0 16px 16px;
+    padding: 0;
   }
   .dashboard-panel {
     grid-area: 1 / 1;
@@ -280,8 +229,6 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    border-radius: 0.5rem;
-    border: 1px solid var(--border, #e5e7eb);
     background: var(--background, #fff);
     min-width: 0;
   }

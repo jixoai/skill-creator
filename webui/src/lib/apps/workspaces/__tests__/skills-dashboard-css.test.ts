@@ -91,11 +91,17 @@ describe("TabsHeader chrome CSS 契约（skills-tabs-redesign 批 1）", () => {
     expect(css).toMatch(/overscroll-behavior:\s*contain/);
   });
 
-  it("pagehead renders stats as small secondary text (data-gated, no fake numbers)", () => {
-    // 页题行统计小字（pulse 压缩退役）：小号次级文本 + tabular-nums；渲染闸在
-    // DOM 测试钉（providers 摘要缺席不渲染），此处钉字号/降调机制。
-    expect(css).toMatch(/\.dashboard-stats\s*\{[\s\S]*?font-size:\s*11\.5px/);
-    expect(css).toMatch(/\.dashboard-stats\s*\{[\s\S]*?font-variant-numeric:\s*tabular-nums/);
+  it("tabs and tab content fill the panel edge to edge (2026-10-09 Owner ruling)", () => {
+    // 无页题层 + 无卡片包裹：tabs 行零外边距、panels 零 padding、.screen 无
+    // 圆角/描边——「层」退役，内容直接铺满面板。
+    expect(css).toMatch(/\.dashboard-tabs\s*\{[\s\S]*?margin:\s*0\s*;/);
+    expect(css).toMatch(/\.dashboard-panels\s*\{[\s\S]*?padding:\s*0\s*;/);
+    expect(css).not.toMatch(/\.dashboard-panels[\s\S]*?border-radius/);
+    const screenBlock = css.match(/:global\(\.screen\)\s*\{[\s\S]*?\}/);
+    expect(screenBlock).not.toBeNull();
+    expect(screenBlock?.[0]).not.toMatch(/border-radius/);
+    expect(screenBlock?.[0]).not.toMatch(/border:\s*1px/);
+    expect(css).not.toMatch(/\.dashboard-pagehead/);
   });
 });
 

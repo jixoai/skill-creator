@@ -433,27 +433,16 @@ describe("SkillsDashboard TabsHeader chrome（批 1）", () => {
     expect(log.navigate).toHaveLength(navigationsBeforeHome);
   });
 
-  it("shows pagehead stats from the providers summary and hides them without data", async () => {
+  it("renders no pagehead layer above the tabs (2026-10-09 Owner ruling)", async () => {
+    // 「Global Workspace N skills · N providers」独立层去除：workspace 身份在
+    // 侧栏，计数由各屏自身 header 承载——dashboard 首元素必须是 tablist。
     threeGroupLog();
     const root = mountDashboard();
     await settle();
-
-    // providers 摘要：claude-code 2 + zcode 2 → 真实计数小字。
-    const statsEl = root.querySelector('[data-testid="dashboard-stats"]');
-    expect(statsEl).not.toBeNull();
-    expect(textOf(statsEl as HTMLElement)).toBe("4 skills · 2 providers");
-
-    // 数据缺席（providers 摘要为空）不渲染数字（不造假）。
-    const emptyOutput = canonicalOutput([
-      groupFixture("alpha", [{ id: SK_A, providerId: CLAUDE }]),
-    ]);
-    (emptyOutput as { providers: unknown[] }).providers = [];
-    const emptyLog = makeRpcLog();
-    activeLog = emptyLog;
-    installRpc(emptyLog, emptyOutput);
-    const emptyRoot = mountDashboard();
-    await settle();
-    expect(emptyRoot.querySelector('[data-testid="dashboard-stats"]')).toBeNull();
+    expect(root.querySelector('[data-testid="dashboard-stats"]')).toBeNull();
+    expect(root.querySelector(".dashboard-pagehead")).toBeNull();
+    const shell = root.querySelector(".dashboard-shell");
+    expect(shell?.firstElementChild?.classList.contains("dashboard-tabs")).toBe(true);
   });
 
   it("keeps all three panels mounted so tab switching is instant (no remount)", async () => {
