@@ -1,12 +1,14 @@
 /**
  * 用户原始需求 [2026-10-09]（creator-skill-store 批 1）：「我们得有一个专门管理我们
- * 创建出来的这些 skills，比如 ~/.skill-creator/creator-skills，然后再通过 ccski-sdk
+ * 创建出来的这些 skills（裁决演进：~/.skill-creator/creator-skills → 2026-10-09
+ * 终版 ~/.agents/creator-skills——Owner：「统一使用 .agents 目录会更加规范，
+ * 考虑到 Project 情况下别人如何存储这些 skills」），然后再通过 ccski-sdk
  * 将这些 skill 安装到本地 agent skills 目录（包括 .agents/skills .codex/skills 等）。
  * 所以架构上是两个分开的……它始终会有一个唯一的根源目录。比方说……直接把技能放在
  * .agents/skills 目录，这属于我们可以自动化做到事情。」
  * 正交意图：
  *   [1] origin store 文档面（list/create/save/remove）：唯一根源
- *       `<appDir()>/creator-skills/<directoryName>/`（Owner 原文 ~/.skill-creator/creator-skills）；目录名安全 + frontmatter
+ *       `<homeDir()>/.agents/creator-skills/<directoryName>/`（生产 ~/.agents/creator-skills；.agents 家族与开放标准 skills 目录同居，Project 场景可同构 <ws>/.agents/creator-skills 推广）；目录名安全 + frontmatter
  *       safeParse 收窄（不兼容条目跳过计数）+ revision 契约（SKILL.md sha256）+
  *       原子写——文档机制复用 creator-service 的共享函数，不复制实现。
  *   [2] 内核应用面（apply/sync/uninstall/status）：ccski 两阶段
@@ -221,11 +223,13 @@ const STATE_DEGRADED_MESSAGE =
   "The projection records are degraded; whether an entry is registered cannot be proven. " +
   "Run ccski state repair, then retry the sync.";
 
-/** creator store 根目录（唯一根源 = appDir()/creator-skills；随 homeDir override 同源隔离）。 */
+/** creator store 根目录（唯一根源 = <homeDir>/.agents/creator-skills；随 homeDir override 同源隔离）。 */
 export function creatorStoreRoot(): string {
-  // Owner 原文「~/.skill-creator/creator-skills」：store 落 appDir()（生产 =
-  // ~/.skill-creator；dev/测试随 homeDir override 同源隔离），不污染家目录根。
-  return path.join(appDir(), "creator-skills");
+  // Owner 终版裁决 [2026-10-09]「~/.agents/creator-skills：统一 .agents 目录，
+  // 考虑 Project 情况下别人如何存储」：实体库 ~/.agents/skills 的兄弟目录，
+  // 不入实体根（内核/发现面零干扰）；Project 推广形态 <ws>/.agents/creator-skills
+  // 另立后续裁决。dev/测试随 homeDir override 同源隔离。
+  return path.join(homeDir(), ".agents", "creator-skills");
 }
 
 /** global scope 的默认应用 root（= 内核 global 实体库根；entity-local 收据命中）。 */

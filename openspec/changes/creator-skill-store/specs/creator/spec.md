@@ -4,7 +4,7 @@
 
 ### Requirement: 技能创建的唯一根源是 creator store
 
-Creator 的 new 模式 MUST 将技能写入 `<appDir()>/creator-skills/<directoryName>/`（生产 `~/.skill-creator/creator-skills`）
+Creator 的 new 模式 MUST 将技能写入 `<homeDir()>/.agents/creator-skills/<directoryName>/`（生产 `~/.agents/creator-skills`）
 （origin store）：frontmatter 校验、revision（SKILL.md sha256）、change log 与
 原子写契约沿用既有文档机制，仅目标根改指 store。创建面 MUST NOT 向任何
 provider root 或 ccski 实体库根直写技能目录——agent 目录中的创建物只能经内核
@@ -14,7 +14,7 @@ provider root 或 ccski 实体库根直写技能目录——agent 目录中的�
 #### Scenario: 创建落 store 并自动应用
 
 - **WHEN** 在 Global workspace 的 Creator 页创建技能 `my-skill`（auto-apply 默认开启）
-- **THEN** store 出现 `<homeDir>/creator-skills/my-skill/SKILL.md`；内核
+- **THEN** store 出现 `<homeDir>/.agents/creator-skills/my-skill/SKILL.md`；内核
   `~/.agents/skills/my-skill` 实体入库（entity-local 收据，无 symlink 无复制）；
   provider root 与实体库根上没有任何宿主直写痕迹
 

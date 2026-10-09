@@ -6,7 +6,7 @@
  * Architecture decision [2026-07-14]: verify containment, frontmatter round-trip,
  * revision conflicts, and bounded deletion at the Creator service boundary.
  * Architecture decision [2026-10-09]（creator-skill-store 批 1）：new 模式唯一
- * 归宿 = origin store（`<home>/.skill-creator/creator-skills`）+ auto-apply entity-local；edit
+ * 归宿 = origin store（`<home>/.agents/creator-skills`）+ auto-apply entity-local；edit
  * 模式（已安装技能）契约不动；程序化 provider 创建走 createInWorkspace。
  *
  * Orthogonal intents:
@@ -126,8 +126,8 @@ describe("creator service", () => {
     });
     if (!created.created) throw new Error("Expected a store creation result.");
 
-    // store 是唯一根源：SKILL.md 落 <home>/.skill-creator/creator-skills/<name>/。
-    const storeFile = path.join(home, ".skill-creator", "creator-skills", "release-guide", "SKILL.md");
+    // store 是唯一根源：SKILL.md 落 <home>/.agents/creator-skills/<name>/。
+    const storeFile = path.join(home, ".agents", "creator-skills", "release-guide", "SKILL.md");
     expect(fs.existsSync(storeFile)).toBe(true);
     expect(created.document.frontmatter).toMatchObject({
       name: "release-guide",
@@ -226,7 +226,7 @@ describe("creator service", () => {
       body: "# Incident\n\nUse the initial runbook.\n",
     });
     if (!created.created) throw new Error("Expected a store creation result.");
-    const file = path.join(home, ".skill-creator", "creator-skills", "incident-guide", "SKILL.md");
+    const file = path.join(home, ".agents", "creator-skills", "incident-guide", "SKILL.md");
     const concurrentContent = [
       "---",
       "name: incident-guide",

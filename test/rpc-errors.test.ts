@@ -78,7 +78,7 @@ describe("RPC domain-error boundary", () => {
     });
     if (!created.created) throw new Error("Expected a store creation result.");
     fs.appendFileSync(
-      path.join(sandbox, "state", ".skill-creator", "creator-skills", "revision-safe", "SKILL.md"),
+      path.join(sandbox, "state", ".agents", "creator-skills", "revision-safe", "SKILL.md"),
       "\nExternal edit.\n",
       "utf8",
     );

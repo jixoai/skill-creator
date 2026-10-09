@@ -16,7 +16,7 @@ agent skills 目录（包括 .agents/skills .codex/skills 等）。所以架构�
 
 ## What Changes
 
-- **Origin store（唯一根源）**：`<appDir()>/creator-skills/<directoryName>/`（生产 `~/.skill-creator/creator-skills`，Owner 原文）
+- **Origin store（唯一根源）**：`<homeDir()>/.agents/creator-skills/<directoryName>/`（生产 `~/.agents/creator-skills`，Owner 终版裁决：统一 .agents 目录、考虑 Project 场景）
   （SKILL.md + 附属文件）。Creator 的 new 模式全部落 store——frontmatter/正文/
   revision 契约/change log/原子写机制原样复用，仅目标根改指 store。不再向任何
   provider root 直写创建（Imported 与 Global 一致收口）。

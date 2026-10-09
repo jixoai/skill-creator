@@ -57,7 +57,7 @@ function importWorkspace(name: string): ImportedWorkspace {
 }
 
 const storeSkillFile = (directoryName: string): string =>
-  path.join(home, ".skill-creator", "creator-skills", directoryName, "SKILL.md");
+  path.join(home, ".agents", "creator-skills", directoryName, "SKILL.md");
 
 const globalEntityDirectory = (directoryName: string): string =>
   path.join(home, ".agents", "skills", directoryName);
@@ -118,7 +118,7 @@ describe("creator store service", () => {
     const entity = state.entities["my-skill"]!;
     expect(entity.provenance).toMatchObject({
       sourceType: "creator-store",
-      source: path.join(home, ".skill-creator", "creator-skills", "my-skill"),
+      source: path.join(home, ".agents", "creator-skills", "my-skill"),
     });
 
     // auto-apply 收据如实并入（entity-local + created）。
@@ -369,7 +369,7 @@ describe("creator store service", () => {
     expect(result.remainingApplications).toHaveLength(1);
     expect(result.remainingApplications[0]?.scope).toBe("global");
     expect(result.remainingApplications[0]?.roots).toContain(path.join(home, ".codex", "skills"));
-    expect(fs.existsSync(path.join(home, ".skill-creator", "creator-skills", "origin-skill"))).toBe(false);
+    expect(fs.existsSync(path.join(home, ".agents", "creator-skills", "origin-skill"))).toBe(false);
     // 应用面（实体 + 投影）原样——删除根源不等于卸载。
     expect(fs.existsSync(globalEntityDirectory("origin-skill"))).toBe(true);
     expect(fs.existsSync(codexProjection("origin-skill"))).toBe(true);
@@ -399,21 +399,21 @@ describe("creator store service", () => {
   it("skips incompatible store entries while listing compatible ones", async () => {
     await createSkill("good-skill");
     // 不安全目录名（schema 拒绝）。
-    fs.mkdirSync(path.join(home, ".skill-creator", "creator-skills", "not_a_skill"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".agents", "creator-skills", "not_a_skill"), { recursive: true });
     fs.writeFileSync(
-      path.join(home, ".skill-creator", "creator-skills", "not_a_skill", "SKILL.md"),
+      path.join(home, ".agents", "creator-skills", "not_a_skill", "SKILL.md"),
       "---\nname: not-a-skill\ndescription: x\n---\nbody\n",
       "utf8",
     );
     // 目录名安全但 frontmatter 不兼容。
-    fs.mkdirSync(path.join(home, ".skill-creator", "creator-skills", "bad-frontmatter"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".agents", "creator-skills", "bad-frontmatter"), { recursive: true });
     fs.writeFileSync(
-      path.join(home, ".skill-creator", "creator-skills", "bad-frontmatter", "SKILL.md"),
+      path.join(home, ".agents", "creator-skills", "bad-frontmatter", "SKILL.md"),
       "---\nname: 42\n---\nbody\n",
       "utf8",
     );
     // 无 SKILL.md 的目录。
-    fs.mkdirSync(path.join(home, ".skill-creator", "creator-skills", "empty-entry"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".agents", "creator-skills", "empty-entry"), { recursive: true });
 
     const listed = domain.creatorStore.list();
 

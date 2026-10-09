@@ -5,7 +5,7 @@
 ```text
 Creator（编辑/revision/change log）      ccski 3.0 内核（应用/投影）
         |                                        |
-  <homeDir>/creator-skills/<name>/        ensureEntity(scope, source=store/<name>)
+  <homeDir>/.agents/creator-skills/<name>/   ensureEntity(scope, source=store/<name>)
   = 唯一根源（origin）                      + projectEntity(roots=[...])
         |                                        |
    store 编辑（唯一编辑面）                 ~/.agents/skills/<name>   实体（global）
@@ -13,7 +13,7 @@ Creator（编辑/revision/change log）      ccski 3.0 内核（应用/投影）
                                            ~/.codex/skills/<name> 等  symlink 投影
 ```
 
-- **为什么不把实体库当根源**：Owner 明确 origin 在 ~/.skill-creator/creator-skills
+- **为什么不把实体库当根源**：Owner 明确 origin 初裁在 ~/.skill-creator/creator-skills（终版 ~/.agents/creator-skills）
   （与 agent-facing 目录分离）；且实体库归内核单写者所有，Creator 直写会制造
   未入账实体形态目录（既有保守删除防线会拒删 = 跨面残留）。store 与实体是
   「源码 vs 安装物」关系（npm 心智）：编辑永远在 store，应用/同步永远经内核。
@@ -27,7 +27,7 @@ Creator（编辑/revision/change log）      ccski 3.0 内核（应用/投影）
 
 ## D2 store 形态与身份
 
-- 路径：`<appDir()>/creator-skills/<directoryName>/SKILL.md`（生产 = `~/.skill-creator/creator-skills`，Owner 原文；随 homeDir override 同源隔离）。
+- 路径：`<homeDir()>/.agents/creator-skills/<directoryName>/SKILL.md`（生产 `~/.agents/creator-skills`，Owner 2026-10-09 终版裁决「统一 .agents 目录，考虑 Project 场景」；随 homeDir override 同源隔离）。
 - directoryName 沿用 SkillDirectoryNameSchema（lowercase 安全名）；逻辑名 =
   frontmatter name（重名冲突 = store 内目录名唯一性拒绝，typed NAME_EXISTS 语义
   对齐内核词表映射面）。

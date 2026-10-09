@@ -17,6 +17,10 @@
 | W7 | Delete origin → 确认闸（Cancel/Delete origin） | store 目录删除；列面空态 | ✓ |
 | — | console | body 全文无 error/failed 标记 | ✓ |
 
+> 路径终版注记 [2026-10-09]：走查时 store 位于 `<home>/.skill-creator/creator-skills`
+> （批 3 修正形态）；Owner 终版裁决改 `<homeDir>/.agents/creator-skills`（统一
+> .agents 目录，考虑 Project 场景推广）——下文 W1 断言中的路径按历史记录保留。
+
 ## 走查抓到并当场修复的两只真 bug
 
 1. **`updatedAt` 浮点 mtime 击穿输出契约**：`fs.statSync().mtimeMs` 未取整，
