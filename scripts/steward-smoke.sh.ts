@@ -138,8 +138,7 @@ try {
   );
 
   const workspace = daemon.domain.workspaces.import(workspaceDir, "smoke-ws");
-  await daemon.domain.creator.save({
-    mode: "create",
+  await daemon.domain.creator.createInWorkspace({
     workspaceId: workspace.id,
     providerId,
     directoryName: "smoke-skill",

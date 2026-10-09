@@ -339,8 +339,7 @@ export function createSkillIntelligenceService(skills: SkillService, creator: Cr
         const source = draft.payload.source;
         try {
           for (const target of draft.payload.targets) {
-            await creator.save({
-              mode: "create",
+            await creator.createInWorkspace({
               workspaceId: source.workspaceId,
               providerId: source.providerId,
               directoryName: target.directoryName,
@@ -371,8 +370,7 @@ export function createSkillIntelligenceService(skills: SkillService, creator: Cr
         // merge：先创建目标草稿，再逐个 revision-safe 删除源；部分失败保留已完成项。
         let created = false;
         try {
-          await creator.save({
-            mode: "create",
+          await creator.createInWorkspace({
             workspaceId: draft.payload.sources[0]!.workspaceId,
             providerId: draft.payload.sources[0]!.providerId,
             directoryName: draft.payload.target.directoryName,

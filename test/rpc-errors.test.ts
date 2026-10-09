@@ -21,6 +21,7 @@ import { DomainError } from "../src/daemon/domain-error.js";
 import { createRpcRouter } from "../src/daemon/rpc-router.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import { GLOBAL_WORKSPACE_ID, ProviderIdSchema } from "../src/shared/contracts/workspaces.js";
+import { SkillIdSchema } from "../src/shared/contracts/skills.js";
 import { setHomeOverride } from "../src/shared/paths.js";
 
 const previousHome = process.env.SKILL_CREATOR_HOME;
@@ -64,18 +65,10 @@ function createClient(
 describe("RPC domain-error boundary", () => {
   it("exposes a Creator revision conflict as a defined CONFLICT error", async () => {
     const client = createClient();
-    const workspaceDirectory = path.join(sandbox, "workspace");
-    fs.mkdirSync(workspaceDirectory, { recursive: true });
-    const { workspace } = await client.workspace.add({
-      path: workspaceDirectory,
-      label: "Revision workspace",
-    });
-    if (workspace.kind !== "directory") throw new Error("Expected an imported workspace.");
-
+    // creator-skill-store 批 1：new 模式落 origin store（<home>/creator-skills），
+    // revision 冲突经 creatorStore.save（store 身份）呈现。
     const created = await client.creator.save({
       mode: "create",
-      workspaceId: workspace.id,
-      providerId: openClawProviderId,
       directoryName: "revision-safe",
       frontmatter: {
         name: "revision-safe",
@@ -83,18 +76,16 @@ describe("RPC domain-error boundary", () => {
       },
       body: "# Revision safe\n",
     });
+    if (!created.created) throw new Error("Expected a store creation result.");
     fs.appendFileSync(
-      path.join(workspaceDirectory, "skills", "revision-safe", "SKILL.md"),
+      path.join(sandbox, "state", "creator-skills", "revision-safe", "SKILL.md"),
       "\nExternal edit.\n",
       "utf8",
     );
 
     try {
-      await client.creator.save({
-        mode: "update",
-        workspaceId: workspace.id,
-        providerId: openClawProviderId,
-        skillId: created.document.skillId,
+      await client.creatorStore.save({
+        directoryName: "revision-safe",
         expectedRevision: created.document.revision,
         frontmatter: created.document.frontmatter,
         body: "# Stale update\n",
@@ -180,13 +171,12 @@ describe("RPC domain-error boundary", () => {
     fs.writeFileSync(workspaceDirectory, "not a directory", "utf8");
 
     try {
-      await client.creator.save({
-        mode: "create",
+      // creator-skill-store 批 1：创建面已 store 化（不消费 workspace 身份），
+      // 不可用 workspace 的 UNAVAILABLE 映射经 provider-scoped 读面钉住。
+      await client.creator.load({
         workspaceId: workspace.id,
         providerId: openClawProviderId,
-        directoryName: "blocked",
-        frontmatter: { name: "blocked", description: "Must not write through a file." },
-        body: "# Blocked\n",
+        skillId: SkillIdSchema.parse("sk_000000000000000000000000"),
       });
       expect.fail("Expected the replaced workspace to be unavailable.");
     } catch (error) {

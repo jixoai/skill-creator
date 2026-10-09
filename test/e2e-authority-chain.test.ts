@@ -42,8 +42,7 @@ beforeEach(() => {
   const imported = domain.workspaces.import(workspaceDir, "e2e-ws");
   workspaceId = imported.id;
   // fixture 走 creator.save（provider 目录结构由 daemon 派生；WebUI 不拼路径）。
-  beforeEachFixture = domain.creator.save({
-    mode: "create",
+  beforeEachFixture = domain.creator.createInWorkspace({
     workspaceId,
     providerId: "openclaw",
     directoryName: "demo-skill",

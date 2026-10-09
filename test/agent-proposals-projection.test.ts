@@ -165,9 +165,8 @@ beforeEach(() => {
     ["wire-second", "second fixture for alignment tests"],
     ["wire-third", "third fixture for set-misalignment tests"],
   ] as const) {
-    domain.creator.save({
-      mode: "create",
-      workspaceId: imported.id,
+    domain.creator.createInWorkspace({
+            workspaceId: imported.id,
       providerId: "openclaw",
       directoryName: directory,
       frontmatter: { name: directory, description },

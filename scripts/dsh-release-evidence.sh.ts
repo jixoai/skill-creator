@@ -270,8 +270,7 @@ if (degradedHold) {
   // —— Manager 原有操作 filesystem diff（同一 daemon domain = RPC 路由的真相源）——
   const before = snapshot(workspaceDir);
   const workspace = boot.domain.workspaces.import(workspaceDir, "release-evidence-ws");
-  await boot.domain.creator.save({
-    mode: "create",
+  await boot.domain.creator.createInWorkspace({
     workspaceId: workspace.id,
     providerId,
     directoryName: "release-evidence-skill",

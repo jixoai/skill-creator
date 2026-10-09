@@ -124,8 +124,7 @@ try {
     ["audit-logs", "Audit log exports."],
   ];
   for (const [name, description] of seed) {
-    await daemon.domain.creator.save({
-      mode: "create",
+    await daemon.domain.creator.createInWorkspace({
       workspaceId: workspace.id,
       providerId,
       directoryName: name,

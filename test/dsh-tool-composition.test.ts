@@ -74,9 +74,8 @@ describe("manager tools into official transcript (task 2.2)", () => {
       const directory = path.join(sandbox, "ws");
       fs.mkdirSync(directory, { recursive: true });
       const workspace = domain.workspaces.import(directory, "ws");
-      await domain.creator.save({
-        mode: "create",
-        workspaceId: workspace.id,
+      await domain.creator.createInWorkspace({
+                workspaceId: workspace.id,
         providerId,
         directoryName: "probe-skill",
         frontmatter: { name: "probe-skill", description: "probe skill." },

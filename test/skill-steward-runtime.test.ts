@@ -364,8 +364,7 @@ describe("context snapshot builder (task 2.3a)", () => {
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws");
     for (const [name, description] of skills) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId: ProviderIdSchema.parse(providerId),
         directoryName: name,
@@ -526,8 +525,7 @@ describe("approval + apply transactions (tasks 2.3b/2.3c/2.3d)", () => {
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws");
     for (const name of skills) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId,
         directoryName: name,
@@ -950,8 +948,7 @@ describe("skill steward pipeline end-to-end (task 2.3f)", () => {
       ["alpha-deploy", "Bash, Read"],
       ["beta-deploy", "Bash, Read"],
     ] as const) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId,
         directoryName: name,
@@ -999,8 +996,7 @@ describe("skill steward pipeline end-to-end (task 2.3f)", () => {
     const directory = path.join(sandbox, "ws2");
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws2");
-    await domain.creator.save({
-      mode: "create",
+    await domain.creator.createInWorkspace({
       workspaceId: workspace.id,
       providerId,
       directoryName: "solo-skill",
@@ -1146,8 +1142,7 @@ describe("resource mapping source identity at apply time (Codex R2 P1-2)", () =>
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws");
     for (const name of skills) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId,
         directoryName: name,
@@ -1312,8 +1307,7 @@ describe("apply-side resource defenses (Codex R3 P1-2/P2-2)", () => {
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws");
     for (const name of ["merge-left", "merge-right"]) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId,
         directoryName: name,
@@ -1465,8 +1459,7 @@ describe("apply-side R4 defenses (Codex R4 P1-1/P1-2/P2-3)", () => {
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws");
     for (const name of ["merge-left", "merge-right"]) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId,
         directoryName: name,
@@ -1659,8 +1652,7 @@ describe("move durability and path races (Codex R5 P1-1/P1-2)", () => {
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws");
     for (const name of ["merge-left", "merge-right"]) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId,
         directoryName: name,
@@ -1889,8 +1881,7 @@ describe("journal and backup authority (Codex R6 P1-2/P1-3)", () => {
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws");
     for (const name of ["merge-left", "merge-right"]) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId,
         directoryName: name,
@@ -2141,8 +2132,7 @@ describe("journal truth and replay authority (Codex R8 P1-1..P1-5)", () => {
     fs.mkdirSync(directory, { recursive: true });
     const workspace = domain.workspaces.import(directory, "ws");
     for (const name of ["merge-left", "merge-right"]) {
-      await domain.creator.save({
-        mode: "create",
+      await domain.creator.createInWorkspace({
         workspaceId: workspace.id,
         providerId,
         directoryName: name,

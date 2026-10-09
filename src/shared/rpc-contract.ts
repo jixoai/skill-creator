@@ -89,6 +89,23 @@ import {
   CreatorRevisionsInputSchema,
   CreatorRevisionsResultSchema,
 } from "./contracts/creator.js";
+import {
+  CreatorStoreApplyInputSchema,
+  CreatorStoreApplyResultSchema,
+  CreatorStoreCreateInputSchema,
+  CreatorStoreCreateResultSchema,
+  CreatorStoreListResultSchema,
+  CreatorStoreRemoveInputSchema,
+  CreatorStoreRemoveResultSchema,
+  CreatorStoreSaveInputSchema,
+  CreatorStoreSaveResultSchema,
+  CreatorStoreStatusInputSchema,
+  CreatorStoreStatusResultSchema,
+  CreatorStoreSyncInputSchema,
+  CreatorStoreSyncResultSchema,
+  CreatorStoreUninstallInputSchema,
+  CreatorStoreUninstallResultSchema,
+} from "./contracts/creator-store.js";
 import { DaemonStatusSchema } from "./contracts/daemon.js";
 import { RpcErrorDefinitions } from "./contracts/errors.js";
 import {
@@ -500,7 +517,7 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
       .output(z.object({ supported: z.boolean(), path: z.string().nullable() })),
   },
   creator: {
-    /** Create or revision-check and update a skill. */
+    /** Create or revision-check and update a skill (create = origin store + auto-apply). */
     save: oc.input(SaveSkillInputSchema).output(SaveSkillResultSchema),
     /** Load an editable skill document. */
     load: oc.input(SkillsInfoInputSchema).output(SkillDocumentSchema),
@@ -508,6 +525,29 @@ export const rpcContract = oc.errors(RpcErrorDefinitions).router({
     remove: oc.input(CreatorRemoveInputSchema).output(z.object({ removed: z.literal(true) })),
     /** Read revision history for one skill (change 5: change log sub-view). */
     revisions: oc.input(CreatorRevisionsInputSchema).output(CreatorRevisionsResultSchema),
+  },
+  /**
+   * creator origin store（creator-skill-store 批 1）：唯一根源
+   * `<homeDir>/creator-skills` 的技能面 + ccski 内核应用/同步/卸载链。
+   * mutation 均 typed result（逐 target/root/scope 收据），业务失败不抛错。
+   */
+  creatorStore: {
+    /** 枚举 store 技能（不兼容条目跳过计数）。 */
+    list: oc.input(z.object({})).output(CreatorStoreListResultSchema),
+    /** store 新建（默认 auto-apply 到 `~/.agents/skills` entity-local）。 */
+    create: oc.input(CreatorStoreCreateInputSchema).output(CreatorStoreCreateResultSchema),
+    /** store 编辑（revision-safe）。 */
+    save: oc.input(CreatorStoreSaveInputSchema).output(CreatorStoreSaveResultSchema),
+    /** 删除根源（剩余应用面如实列出，不阻止删除）。 */
+    remove: oc.input(CreatorStoreRemoveInputSchema).output(CreatorStoreRemoveResultSchema),
+    /** 应用到显式 Workspace Provider targets（ccski 两阶段）。 */
+    apply: oc.input(CreatorStoreApplyInputSchema).output(CreatorStoreApplyResultSchema),
+    /** 同步全部已登记应用面（updateEntity source=store）。 */
+    sync: oc.input(CreatorStoreSyncInputSchema).output(CreatorStoreSyncResultSchema),
+    /** 卸载（removeEntityProjections 末投影 GC / deleteEntity）。 */
+    uninstall: oc.input(CreatorStoreUninstallInputSchema).output(CreatorStoreUninstallResultSchema),
+    /** 状态（已应用 roots + store/entity hash 过期判定）。 */
+    status: oc.input(CreatorStoreStatusInputSchema).output(CreatorStoreStatusResultSchema),
   },
   repository: {
     /** Clone, pin, and scan a repository source. */

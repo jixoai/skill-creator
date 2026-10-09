@@ -298,8 +298,7 @@ export async function applyProposalTransaction(
         // ---- 创建目标（direct-child，安全名由契约保证）。 ----
         const createdRevisions = new Map<string, string>();
         for (const target of targets) {
-          const created = await deps.creator.save({
-            mode: "create",
+          const created = await deps.creator.createInWorkspace({
             workspaceId: snapshot.target.workspaceId,
             providerId: snapshot.target.providerId,
             directoryName: target.directoryName,

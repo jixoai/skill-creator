@@ -76,8 +76,7 @@ async function createSkill(
   description: string,
   allowedTools: string,
 ): Promise<void> {
-  await domain.creator.save({
-    mode: "create",
+  await domain.creator.createInWorkspace({
     workspaceId: workspace.id,
     providerId,
     directoryName,

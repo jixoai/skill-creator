@@ -16,6 +16,7 @@
 import { createAcpBridgeService, type AcpBridgeService } from "./acp-bridge-service.js";
 import { createAgentFilesService, type AgentFilesService } from "./agent-files.js";
 import { createCreatorService, type CreatorService } from "./creator-service.js";
+import { createCreatorStoreService, type CreatorStoreService } from "./creator-store-service.js";
 import { createRepositoryService, type RepositoryService } from "./repository-service.js";
 import { createSourceRegistry, type SourceRegistry } from "./source-registry.js";
 import { createSkillsCliProbe, type SkillsCliProbe } from "./skills-cli-probe.js";
@@ -82,6 +83,8 @@ export interface DaemonDomain {
   workspaces: WorkspaceRegistry;
   skills: SkillService;
   creator: CreatorService;
+  /** creator origin store（唯一根源 + ccski 应用/同步/卸载内核链）。 */
+  creatorStore: CreatorStoreService;
   repository: RepositoryService;
   /** 用户自定义 Git 源注册表；持久化在 daemon 侧 `sources.json`。 */
   sourceRegistry: SourceRegistry;
@@ -227,7 +230,10 @@ export function createDaemonDomain(
     },
   });
   const repository = createRepositoryService(workspaces, skills);
-  const creator = createCreatorService(workspaces, skills);
+  // creator-skill-store 批 1：store 先于 creator 装配（creator 的 new 模式唯一
+  // 归宿是 store；apply 后按 target 失效 discovery 在途合并）。
+  const creatorStore = createCreatorStoreService(workspaces, { skills });
+  const creator = createCreatorService(workspaces, skills, { store: creatorStore });
   const skillIntelligence = createSkillIntelligenceService(skills, creator);
   const searchConfigOpener = options.searchConfigOpener ?? platformOpenFile;
   const dialog = options.dialog ?? createDialogService();
@@ -254,6 +260,7 @@ export function createDaemonDomain(
     workspaces,
     skills,
     creator,
+    creatorStore,
     repository,
     sourceRegistry: createSourceRegistry(),
     skillsCliProbe,

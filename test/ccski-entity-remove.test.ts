@@ -22,6 +22,7 @@ import {
   removeCcskiEntity,
 } from "../src/daemon/ccski-entity-remove.js";
 import { createCreatorService } from "../src/daemon/creator-service.js";
+import { createCreatorStoreService } from "../src/daemon/creator-store-service.js";
 import { createSkillService } from "../src/daemon/skill-service.js";
 import { createWorkspaceRegistry } from "../src/daemon/workspace-registry/index.js";
 import {
@@ -108,7 +109,9 @@ async function kernelFixture(options: {
       throw new Error(`projectEntity failed: ${JSON.stringify(projected)}`);
   }
   const skills = createSkillService(workspaces);
-  const creator = createCreatorService(workspaces, skills);
+  const creator = createCreatorService(workspaces, skills, {
+    store: createCreatorStoreService(workspaces),
+  });
   return {
     workspace,
     workspaces,
@@ -276,7 +279,9 @@ describe("creator remove dual routing (ccski-3-host-migration 批 5)", () => {
     const workspace = workspaces.import(workspaceRoot, "plain");
     const target = { workspaceId: workspace.id, providerId: openClawProviderId };
     const skills = createSkillService(workspaces);
-    const creator = createCreatorService(workspaces, skills);
+    const creator = createCreatorService(workspaces, skills, {
+      store: createCreatorStoreService(workspaces),
+    });
     const skill = (await skills.list(target, true)).find((row) => row.name === "plain-skill");
     if (!skill) throw new Error("Expected the plain directory skill.");
     expect(skill.ownership === undefined || skill.ownership === "unknown").toBe(true);
@@ -323,6 +328,7 @@ describe("creator remove dual routing (ccski-3-host-migration 批 5)", () => {
     if (!skill) throw new Error("Expected the entity through the amp face.");
     const document = await setup.skills.info(setup.targets.amp, skill.id);
     const creator = createCreatorService(setup.workspaces, setup.skills, {
+      store: createCreatorStoreService(setup.workspaces),
       entityRemoveKernel: {
         removeEntityProjections: async () => {
           throw new Error("unexpected removeEntityProjections call");
@@ -356,6 +362,7 @@ describe("creator remove dual routing (ccski-3-host-migration 批 5)", () => {
     if (!skill) throw new Error("Expected the projected skill.");
     const document = await setup.skills.info(setup.targets.openclaw, skill.id);
     const creator = createCreatorService(setup.workspaces, setup.skills, {
+      store: createCreatorStoreService(setup.workspaces),
       entityRemoveKernel: {
         removeEntityProjections: async () => ({
           kind: "ok" as const,
@@ -582,6 +589,7 @@ describe("creator remove dual routing (ccski-3-host-migration 批 5)", () => {
     expect(observedRevision).toMatch(/^[0-9a-f]{16,}$/);
 
     const creator = createCreatorService(fixture.workspaces, fixture.skills, {
+      store: createCreatorStoreService(fixture.workspaces),
       entityRemoveKernel: {
         // 模拟内核末投影 GC 退役 CAS：调用时点并发更新已换新 state 实体
         // revision；expectedEntityRevision（观察时点旧值）≠ 当前 state → GUARD_ENTITY。

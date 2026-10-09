@@ -18,13 +18,11 @@
   import {
     useCreatorEditor,
     draftToFrontmatter,
-    cacheCreatorDraft,
     creatorDraftKey,
     dropCachedCreatorDraft,
     isDraftHydrated,
     markDraftHydrated,
     resetDraftHydration,
-    snapshotCreatorDraft,
   } from "$lib/stores/creator-editor.svelte";
   import { hasNewDraftErrors, validateNewDraft } from "$lib/stores/creator-draft";
   import MarkdownEditor from "$lib/components/creator/markdown-editor.svelte";
@@ -32,7 +30,6 @@
   import { showToast } from "$lib/toast.svelte";
   import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import { goto } from "$app/navigation";
-  import { goById } from "$lib/shell";
   import { createRequestGenerationGate } from "$lib/stores/request-generation";
   import { getConnectionGeneration } from "$lib/store.svelte";
   import { ORPCError } from "@orpc/client";
@@ -179,35 +176,16 @@
     try {
       const result = await saveSkill({
         mode: "create",
-        workspaceId: draft.target.workspaceId,
-        providerId: draft.target.providerId,
         directoryName: parsed.data,
         frontmatter: draftToFrontmatter(draft),
         body: draft.body,
       });
-      // 新建成功后切换到 edit 语义（后续保存走 update）。
-      editor.hydrateFromDocument(result.document);
-      // WS4 复走查 N1：显式写入跨卸载缓存 + 水合标记——旧实例的卸载清理与新
-      // 实例的恢复读取顺序不保证，仅靠 cleanup 交接会竞态出「缓存未命中 +
-      // 已标记 hydrate」的永久空白编辑器。
-      const createdKey = creatorDraftKey(draft.target, "edit", result.document.skillId);
-      if (createdKey !== null) {
-        cacheCreatorDraft(createdKey, snapshotCreatorDraft(draft));
-        markDraftHydrated(createdKey);
+      // creator-skill-store 批 1：new 模式创建落 origin store（无 workspace
+      // provider 身份）；结果携带 store 文档与 auto-apply 收据。批 2 接 store
+      // 编辑路由/应用面正形——此处仅最小保持编译通过（成功 toast；不转 edit）。
+      if (result.created) {
+        showToast(t("creatorEditor.toastCreated"));
       }
-      showToast(t("creatorEditor.toastCreated"));
-      // WS4 走查 B2：就地转编辑态路由（标题/draftKey 与 Test tab 门槛随身份
-      // 对齐；草稿经卸载缓存以 edit 身份恢复，不重拉不丢内容）。
-      goById(
-        "creator.workspace.skill",
-        {
-          mode: "edit",
-          wsId: draft.target.workspaceId,
-          providerId: draft.target.providerId,
-          skillId: result.document.skillId,
-        },
-        { subview: "file" },
-      );
     } catch (error) {
       handleSaveError(error);
     } finally {

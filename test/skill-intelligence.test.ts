@@ -67,8 +67,7 @@ async function createSkill(
   frontmatter: Record<string, unknown>,
   body: string,
 ): Promise<SkillSelection> {
-  const saved = await domain.creator.save({
-    mode: "create",
+  const saved = await domain.creator.createInWorkspace({
     workspaceId: workspace.id,
     providerId,
     directoryName,

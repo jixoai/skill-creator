@@ -2,11 +2,11 @@
 
 ## 批 1 · daemon：store 服务 + 内核应用链
 
-- [ ] creator-store-service：list/create/save/remove（revision 契约沿用；store 枚举 safeParse 收窄） — src/daemon/creator-store-service.ts（新） — 契约测试
-- [ ] apply/sync/uninstall/status：ensureEntity/projectEntity/updateEntity/removeEntityProjections 直连 + typed 有限映射 + auto-apply（默认 roots=[~/.agents/skills]） — 同上 — 契约测试（含 GUARD_PROJECTION 保留物化副本、末投影 GC 全清）
-- [ ] contracts + rpc-contract：CreatorStoreSkill/ApplySkillResult 等增量 — src/shared/ — typecheck + 契约测试
-- [ ] creator-service new 模式目标改 store（providerId 退出 new 身份；edit 不动） — src/daemon/creator-service.ts — 回归测试
-- [ ] 负面钉死：创建面永不直写 provider root/实体库根（resolveWritable 不再被 new 消费） — 测试断言 — 无
+- [x] creator-store-service：list/create/save/remove（revision 契约沿用；store 枚举 safeParse 收窄） — src/daemon/creator-store-service.ts（新） — 契约测试（10/10）
+- [x] apply/sync/uninstall/status：ensureEntity/projectEntity/updateEntity/removeEntityProjections 直连 + typed 有限映射 + auto-apply（默认 roots=[~/.agents/skills]） — 同上 — 契约测试（entity-local 收据/多 root symlink/sync 收敛+degraded fail-closed/末投影 GC+store 原样/零投影 deleteEntity/GUARD_PROJECTION 保护）
+- [x] contracts + rpc-contract：CreatorStoreSkill/ApplySkillResult 等增量 — src/shared/ — typecheck 0 + 契约测试
+- [x] creator-service new 模式目标改 store（providerId 退出 new 身份；edit 不动；程序化旧语义收窄为内部 createInWorkspace——steward/intelligence/scripts 调用点全迁移） — src/daemon/creator-service.ts — 回归 130/130（含 agent-proposals/dsh-tool fixture 迁移，MainAgent 补刀）
+- [x] 负面钉死：创建面永不直写 provider root/实体库根（resolveWritable 不再被 new 消费） — 测试断言（never resolves a writable provider scope from the creation face）
 
 ## 批 2 · webui：store 化创建 + 应用面
 

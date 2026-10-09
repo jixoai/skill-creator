@@ -18,10 +18,17 @@ export function requireProvider(providerId: ProviderId): ProviderCatalogEntry {
   return provider;
 }
 
-/** Resolve one global Agent skills root following the community catalog's environment overrides. */
-export function globalProviderRoot(provider: ProviderCatalogEntry): string | null {
+/**
+ * Resolve one global Agent skills root following the community catalog's environment overrides.
+ * `home` 允许注入宿主 homeDir()（creator-skill-store 批 1：global 应用的投影根必须
+ * 与内核 global scopeBase（userDir = 宿主 homeDir）同源——否则 home override 隔离
+ * 态下投影根会解析到真实 home）；缺省仍为 os.homedir()，既有调用面行为不变。
+ */
+export function globalProviderRoot(
+  provider: ProviderCatalogEntry,
+  home = os.homedir(),
+): string | null {
   if (provider.globalPath === null) return null;
-  const home = os.homedir();
   const override = globalHomeOverride(provider.id);
   if (override) return path.join(override, "skills");
   if (provider.id === "openclaw") return openClawRoot(home);

@@ -5,10 +5,18 @@
  * User input [2026-07-21]: "任何外部输入都应该遵循这个规则：各种配置文件、数据库结构、网络返回等"
  * Architecture decisions [2026-07-22]: bind every document to one Workspace
  * Provider root while preserving unknown frontmatter and revision conflicts.
+ * Architecture decisions [2026-10-09]（creator-skill-store 批 1）：Creator 的
+ * new 模式全部落 origin store（`<homeDir>/creator-skills`）——创建面不再消费
+ * resolveWritable/providerId 身份，应用经 ccski 内核（见 creator-store-service）。
+ * createInWorkspace 是 daemon 内部供程序化 workspace 创建的旧语义保留面
+ * （steward split/merge、skill-intelligence 草稿审批；非 RPC/MCP 面，其迁移到
+ * store+apply 属后续裁决）；edit 模式（已安装技能）契约零变化。
  *
  * Orthogonal intents:
- *   [1] Create only safe direct-child skill directories.
- *   [2] Round-trip passthrough YAML frontmatter with gray-matter.
+ *   [1] Create safe store documents (delegated to the store service) and keep the
+ *       provider-scoped programmatic creation path for internal pipelines.
+ *   [2] Round-trip passthrough YAML frontmatter with gray-matter（共享文档函数，
+ *       store 服务复用不复制）。
  *   [3] Reject stale updates/deletes and atomically write valid documents.
  *   [4] Route deletion by ownership (ccski-3-host-migration 批 5)：ccski 管辖 →
  *       内核投影先行 remove + 末投影全清（ccski-entity-remove）；其余 → 直删。
@@ -22,9 +30,17 @@ import {
   type SaveSkillInput,
   type SaveSkillResult,
   type SkillDocument,
+  type SkillFrontmatter,
 } from "../shared/contracts/creator.js";
+import type { CreatorStoreService } from "./creator-store-service.js";
 import type { SkillId } from "../shared/contracts/skills.js";
-import type { WorkspaceProviderTarget } from "../shared/contracts/workspaces.js";
+import type { ValidateResult } from "../shared/contracts/skills.js";
+import type {
+  ProviderId,
+  WorkspaceId,
+  WorkspaceProviderTarget,
+} from "../shared/contracts/workspaces.js";
+import { GLOBAL_WORKSPACE_ID } from "../shared/contracts/workspaces.js";
 import { safeParseExternal } from "../shared/external-input.js";
 import {
   createCcskiEntityRemover,
@@ -44,21 +60,15 @@ function parseDocument(
   directoryName: string,
   raw: string,
 ): SkillDocument {
-  let parsed: ReturnType<typeof matter>;
-  try {
-    parsed = matter(raw);
-  } catch {
-    throw incompatibleDocument();
-  }
+  const parts = parseSkillDocumentParts(raw);
   const safeDirectoryName = safeParseExternal(SkillDirectoryNameSchema, directoryName);
-  const frontmatter = safeParseExternal(SkillFrontmatterSchema, parsed.data);
-  if (!safeDirectoryName || !frontmatter) throw incompatibleDocument();
+  if (!safeDirectoryName) throw incompatibleDocument();
   return {
     skillId,
     ...target,
     directoryName: safeDirectoryName,
-    frontmatter,
-    body: parsed.content,
+    frontmatter: parts.frontmatter,
+    body: parts.body,
     revision: contentRevision(raw),
   };
 }
@@ -70,16 +80,47 @@ function incompatibleDocument(): DomainError {
   );
 }
 
-/** Creator 可注入 seam（批 5：ccski 删除内核；默认真实内核）。 */
+/**
+ * 共享文档函数 [A]（creator-skill-store 批 1）：frontmatter + 正文 → 落盘字节
+ * （gray-matter round-trip；尾换行归一）。creator 与 creator-store 两个服务
+ * 单源复用，不复制实现。
+ */
+export function composeSkillDocument(frontmatter: SkillFrontmatter, body: string): string {
+  const content = matter.stringify(body, frontmatter);
+  return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+/**
+ * 共享文档函数 [B]：SKILL.md 原文 → {frontmatter, body}（外部输入 safeParse 收窄；
+ * 不兼容 = typed INVALID_OPERATION）。directoryName 校验由调用方按各自契约执行。
+ */
+export function parseSkillDocumentParts(raw: string): {
+  frontmatter: SkillFrontmatter;
+  body: string;
+} {
+  let parsed: ReturnType<typeof matter>;
+  try {
+    parsed = matter(raw);
+  } catch {
+    throw incompatibleDocument();
+  }
+  const frontmatter = safeParseExternal(SkillFrontmatterSchema, parsed.data);
+  if (!frontmatter) throw incompatibleDocument();
+  return { frontmatter, body: parsed.content };
+}
+
+/** Creator 可注入 seam（批 5：ccski 删除内核；批 1：creator store 服务）。 */
 export interface CreatorServiceOptions {
   entityRemoveKernel?: CcskiEntityRemoveKernel;
+  /** origin store 服务（new 模式的创建目标；必选——创建面唯一归宿是 store）。 */
+  store: CreatorStoreService;
 }
 
 /** Bind Creator operations to one Workspace Registry and skill module. */
 export function createCreatorService(
   workspaces: WorkspaceRegistry,
   skills: SkillService,
-  options: CreatorServiceOptions = {},
+  options: CreatorServiceOptions,
 ) {
   // revision 日志：按 skill canonical path 维护最近 N 条 {revision, timestamp, content} 快照。
   // daemon 内存态（不持久化到磁盘）；daemon 重启后历史清空，仅当前 revision 可见。
@@ -90,11 +131,58 @@ export function createCreatorService(
   const REVISION_LOG_LIMIT = 20;
   const removeCcskiEntity = createCcskiEntityRemover(options.entityRemoveKernel);
 
+  const appendRevisionLog = (key: string, revision: string, body: string): void => {
+    const log = revisionLog.get(key) ?? [];
+    log.push({ revision, timestamp: Date.now(), content: body });
+    while (log.length > REVISION_LOG_LIMIT) log.shift();
+    revisionLog.set(key, log);
+  };
+
   return {
+    save: (input: SaveSkillInput): Promise<SaveSkillResult> => {
+      if (input.mode === "create") {
+        // creator-skill-store 批 1：new 模式唯一归宿 = origin store（创建面零
+        // provider-root 直写；auto-apply 收据如实并入结果）。
+        return options.store
+          .create({
+            directoryName: input.directoryName,
+            frontmatter: input.frontmatter,
+            body: input.body,
+            ...(input.autoApply === false ? { autoApply: false } : {}),
+          })
+          .then((result): SaveSkillResult => {
+            appendRevisionLog(
+              `${GLOBAL_WORKSPACE_ID}/-/${result.document.skillId}`,
+              result.document.revision,
+              result.document.body,
+            );
+            return {
+              created: true,
+              document: result.document,
+              validation: result.validation,
+              autoApply: result.autoApply,
+            };
+          });
+      }
+      return saveUpdate(workspaces, skills, input, revisionLog, REVISION_LOG_LIMIT);
+    },
+    /**
+     * daemon 内部程序化创建面（旧语义保留）：在显式 Workspace.Provider root 落盘
+     * direct-child 技能目录。steward split/merge 与 skill-intelligence 草稿审批
+     * 消费（journal/回滚按 provider root 收敛）；非 RPC/MCP 面。迁移到 store+apply
+     * 的裁决属后续 change——本方法存在使该迁移不必绑进 creator-skill-store 批 1。
+     */
+    createInWorkspace: (input: ProviderCreateInput): Promise<ProviderCreateResult> =>
+      createProviderSkill(
+        workspaces,
+        skills,
+        { workspaceId: input.workspaceId, providerId: input.providerId },
+        input,
+        revisionLog,
+        REVISION_LOG_LIMIT,
+      ),
     load: (target: WorkspaceProviderTarget, skillId: SkillId) =>
       load(workspaces, skills, target, skillId),
-    save: (input: SaveSkillInput) =>
-      save(workspaces, skills, input, revisionLog, REVISION_LOG_LIMIT),
     remove: (target: WorkspaceProviderTarget, skillId: SkillId, expectedRevision: string) =>
       remove(workspaces, skills, target, skillId, expectedRevision, removeCcskiEntity),
     revisions: (input: {
@@ -108,6 +196,22 @@ export function createCreatorService(
 
 /** Creator operations bound to one daemon-owned Workspace Registry. */
 export type CreatorService = ReturnType<typeof createCreatorService>;
+
+/** 程序化 provider 创建输入（旧 create 分支形状；target 身份内联便于机械迁移）。 */
+export interface ProviderCreateInput {
+  workspaceId: WorkspaceId;
+  providerId: ProviderId;
+  directoryName: string;
+  frontmatter: SkillFrontmatter;
+  body: string;
+}
+
+/** 程序化 provider 创建结果（旧 SaveSkillResult 的 create 形状）。 */
+export interface ProviderCreateResult {
+  created: true;
+  document: SkillDocument;
+  validation: ValidateResult;
+}
 
 /** Load an editable skill document from one writable Workspace Provider. */
 async function load(
@@ -123,69 +227,84 @@ async function load(
   return parseDocument(target, skillId, skill.directoryName, fs.readFileSync(file, "utf8"));
 }
 
-/** Create a skill or revision-check and atomically update an existing skill. */
-async function save(
+/** Revision-check and atomically update an existing provider-scoped skill. */
+async function saveUpdate(
   workspaces: WorkspaceRegistry,
   skills: SkillService,
-  input: SaveSkillInput,
+  input: Extract<SaveSkillInput, { mode: "update" }>,
   revisionLog: Map<string, Array<{ revision: string; timestamp: number; content: string }>>,
   revisionLogLimit: number,
 ): Promise<SaveSkillResult> {
   const target = { workspaceId: input.workspaceId, providerId: input.providerId };
   const workspaceRoot = writableScope(workspaces, target).directory;
-  let created = false;
-  let skillDirectory: string;
-  let targetFile: string;
-
-  if (input.mode === "create") {
-    const directoryName = SkillDirectoryNameSchema.parse(input.directoryName);
-    skillDirectory = directChild(workspaceRoot, directoryName);
-    targetFile = path.join(skillDirectory, "SKILL.md");
-    if (fs.existsSync(skillDirectory) && fs.readdirSync(skillDirectory).length > 0) {
-      throw new DomainError("CONFLICT", `A non-empty directory already exists: ${directoryName}`);
-    }
-    created = true;
-  } else {
-    const skill = await skills.resolve(target, input.skillId);
-    skillDirectory = skill.path;
-    assertPathInside(workspaceRoot, skillDirectory);
-    targetFile = skills.skillFile(skill);
-    const current = fs.readFileSync(targetFile, "utf8");
-    if (contentRevision(current) !== input.expectedRevision) {
-      throw new DomainError(
-        "CONFLICT",
-        "This skill changed on disk. Reload it before saving your edits.",
-      );
-    }
+  const skill = await skills.resolve(target, input.skillId);
+  const skillDirectory = skill.path;
+  assertPathInside(workspaceRoot, skillDirectory);
+  const targetFile = skills.skillFile(skill);
+  const current = fs.readFileSync(targetFile, "utf8");
+  if (contentRevision(current) !== input.expectedRevision) {
+    throw new DomainError(
+      "CONFLICT",
+      "This skill changed on disk. Reload it before saving your edits.",
+    );
   }
 
   const frontmatter = SkillFrontmatterSchema.parse(input.frontmatter);
-  const content = matter.stringify(input.body, frontmatter);
-  atomicWriteUtf8(targetFile, content.endsWith("\n") ? content : `${content}\n`);
+  atomicWriteUtf8(targetFile, composeSkillDocument(frontmatter, input.body));
   // perf B-6 写后失效：rediscover 验证必须看到刚写入的文档，而不是 TTL 内的
   // 旧 discovery（否则新建技能被判「could not be rediscovered」）。
   skills.invalidateDiscovery(target);
 
-  const skillId =
-    input.mode === "create"
-      ? (await skills.list(target, true)).find(
-          (skill) => skill.path === fs.realpathSync(skillDirectory),
-        )?.id
-      : input.skillId;
-  if (!skillId) throw new Error("The saved skill could not be rediscovered by ccski.");
-
-  const document = await load(workspaces, skills, target, skillId);
-  const validation = await skills.validate(target, skillId);
+  const document = await load(workspaces, skills, target, input.skillId);
+  const validation = await skills.validate(target, input.skillId);
 
   // 记录 revision 到内存日志（供变更日志子视图查询）。
-  const logKey = `${input.workspaceId}/${input.providerId}/${skillId}`;
+  const logKey = `${input.workspaceId}/${input.providerId}/${input.skillId}`;
   const log = revisionLog.get(logKey) ?? [];
   log.push({ revision: document.revision, timestamp: Date.now(), content: document.body });
   // 仅保留最近 revisionLogLimit 条完整正文快照，更早的丢弃正文。
   while (log.length > revisionLogLimit) log.shift();
   revisionLog.set(logKey, log);
 
-  return { created, document, validation };
+  return { created: false, document, validation };
+}
+
+/** 程序化 provider 创建（旧 create 分支原语义：direct-child + 原子写 + 重发现）。 */
+async function createProviderSkill(
+  workspaces: WorkspaceRegistry,
+  skills: SkillService,
+  target: WorkspaceProviderTarget,
+  input: { directoryName: string; frontmatter: SkillFrontmatter; body: string },
+  revisionLog: Map<string, Array<{ revision: string; timestamp: number; content: string }>>,
+  revisionLogLimit: number,
+): Promise<ProviderCreateResult> {
+  const workspaceRoot = writableScope(workspaces, target).directory;
+  const directoryName = SkillDirectoryNameSchema.parse(input.directoryName);
+  const skillDirectory = directChild(workspaceRoot, directoryName);
+  const targetFile = path.join(skillDirectory, "SKILL.md");
+  if (fs.existsSync(skillDirectory) && fs.readdirSync(skillDirectory).length > 0) {
+    throw new DomainError("CONFLICT", `A non-empty directory already exists: ${directoryName}`);
+  }
+
+  const frontmatter = SkillFrontmatterSchema.parse(input.frontmatter);
+  atomicWriteUtf8(targetFile, composeSkillDocument(frontmatter, input.body));
+  skills.invalidateDiscovery(target);
+
+  const skillId = (await skills.list(target, true)).find(
+    (skill) => skill.path === fs.realpathSync(skillDirectory),
+  )?.id;
+  if (!skillId) throw new Error("The saved skill could not be rediscovered by ccski.");
+
+  const document = await load(workspaces, skills, target, skillId);
+  const validation = await skills.validate(target, skillId);
+
+  const logKey = `${target.workspaceId}/${target.providerId}/${skillId}`;
+  const log = revisionLog.get(logKey) ?? [];
+  log.push({ revision: document.revision, timestamp: Date.now(), content: document.body });
+  while (log.length > revisionLogLimit) log.shift();
+  revisionLog.set(logKey, log);
+
+  return { created: true, document, validation };
 }
 
 /**

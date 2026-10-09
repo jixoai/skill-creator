@@ -158,6 +158,19 @@ export function createRpcRouter(deps: RpcRouterDeps) {
       }),
       revisions: rpc.creator.revisions.handler(({ input }) => domain.creator.revisions(input)),
     },
+    // creator-skill-store 批 1：origin store 面（typed result，逐收据不抛业务错）。
+    creatorStore: {
+      list: rpc.creatorStore.list.handler(() => domain.creatorStore.list()),
+      create: rpc.creatorStore.create.handler(({ input }) => domain.creatorStore.create(input)),
+      save: rpc.creatorStore.save.handler(({ input }) => domain.creatorStore.save(input)),
+      remove: rpc.creatorStore.remove.handler(({ input }) => domain.creatorStore.remove(input)),
+      apply: rpc.creatorStore.apply.handler(({ input }) => domain.creatorStore.apply(input)),
+      sync: rpc.creatorStore.sync.handler(({ input }) => domain.creatorStore.sync(input)),
+      uninstall: rpc.creatorStore.uninstall.handler(({ input }) =>
+        domain.creatorStore.uninstall(input),
+      ),
+      status: rpc.creatorStore.status.handler(({ input }) => domain.creatorStore.status(input)),
+    },
     repository: {
       scan: rpc.repository.scan.handler(({ input }) =>
         domain.repository.scan(input.source, input.ref),
